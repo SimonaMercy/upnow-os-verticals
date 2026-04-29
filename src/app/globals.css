@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* === Brand === */
+  --color-primary:       #2e9f82;
+  --color-primary-dark:  #1a5a4a;
+  --color-primary-light: #d8f2e8;
+  --color-primary-50:    #f0faf6;
+
+  /* === Gold === */
+  --color-gold:          #d4a820;
+  --color-gold-light:    #f5d97a;
+
+  /* === Base / Background === */
+  --color-base:          #fafaf8;
+  --color-base-100:      #f4f3ef;
+  --color-base-200:      #e8e6e0;
+
+  /* === Neutral (Text) === */
+  --color-neutral-900:   #1a1916;
+  --color-neutral-700:   #3d3b35;
+  --color-neutral-500:   #6b6860;
+  --color-neutral-400:   #9b9890;
+
+  /* === Semantic === */
+  --color-error:         #d43f3f;
+  --color-warning:       #e8a020;
+
+  /* === Font === */
+  --font-sans: 'DM Sans', sans-serif;
+}
+
+:root {
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.14);
+  --radius:    0.75rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 18px;
+  background-color: #fafaf8;
+  color: #1a1916;
+}
+
+/* Card hover utility */
+.card-hover {
+  background: #ffffff;
+  box-shadow: var(--shadow-sm);
+  border-radius: 16px;
+  padding: 24px;
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+.card-hover:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Section padding */
+.section-padding {
+  padding-block: 80px;
+}
+@media (max-width: 768px) {
+  .section-padding { padding-block: 48px; }
+}
+
+/* Skeleton pulse */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 1; }
+}
+.skeleton-pulse {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  background-color: #e8e6e0;
+}
