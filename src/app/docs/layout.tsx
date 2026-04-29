@@ -1,16 +1,7 @@
-export const metadata = {
-  title: 'API Documentation — UpNow',
-  description: 'UpNow Marketplace REST API reference (OpenAPI / Swagger)',
-};
-
-export default function DocsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, padding: 0, fontFamily: 'sans-serif' }}>
+      <body style={{ margin: 0, padding: 0, fontFamily: "'DM Sans', sans-serif", overflow: 'hidden' }}>
         {children}
       </body>
     </html>

@@ -54,10 +54,11 @@ export function Navbar() {
     : '/auth/signin';
 
   const getDashboardPath = () => {
-    if (user?.role === 'service_provider') return '/dashboard/provider/services';
-    if (user?.role === 'technician') return '/dashboard/technician';
-    if (user?.role === 'manager') return '/manager/dashboard';
-    if (user?.role === 'landlord') return '/dashboard/landlord';
+    const role = user?.role as string | undefined;
+    if (role === 'service_provider' || role === 'service-provider') return '/dashboard/provider/services';
+    if (role === 'technician') return '/dashboard/technician';
+    if (role === 'manager') return '/manager/dashboard';
+    if (role === 'space_provider' || role === 'space-provider') return '/dashboard/landlord';
     return '/dashboard';
   };
 
@@ -66,8 +67,9 @@ export function Navbar() {
     router.push('/');
   };
 
-  // role check: support both old ('customer') and new ('tenant') role names
-  const isCustomerRole = user?.role === 'customer' || user?.role === 'tenant' as string;
+  // role check: support both 'customer' and 'tenant' role names
+  const role = user?.role as string | undefined;
+  const isCustomerRole = role === 'customer' || role === 'tenant';
 
   const initials = user?.fullName?.charAt(0)?.toUpperCase() ?? 'U';
 

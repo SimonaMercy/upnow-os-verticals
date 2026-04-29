@@ -95,7 +95,7 @@ export function Footer() {
                     color: 'rgba(255,255,255,0.70)',
                   }}
                 >
-                  <Icon size={16} />
+                  <Icon />
                 </Link>
               ))}
             </div>
