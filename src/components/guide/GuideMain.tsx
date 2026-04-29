@@ -320,6 +320,50 @@ function CodeBlock({ content }: { content: string }) {
   );
 }
 
+// ── diagram block ─────────────────────────────────────────────────
+function DiagramBlock({ src, title, description }: { src: string; title: string; description?: string }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ border: '1px solid #e8e6e0', borderRadius: 10, overflow: 'hidden', backgroundColor: '#ffffff' }}>
+        <div style={{
+          padding: '10px 16px',
+          borderBottom: '1px solid #f4f3ef',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: '#fafaf8',
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#3d3b35' }}>{title}</span>
+          <a
+            href={src}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              fontSize: 11,
+              color: '#2e9f82',
+              textDecoration: 'none',
+              fontWeight: 600,
+              border: '1px solid #d8f2e8',
+              borderRadius: 5,
+              padding: '3px 10px',
+              backgroundColor: '#f0faf6',
+            }}
+          >
+            Open full size ↗
+          </a>
+        </div>
+        <div style={{ overflowX: 'auto', padding: 12, backgroundColor: '#ffffff' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt={title} style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 6 }} />
+        </div>
+      </div>
+      {description && (
+        <p style={{ fontSize: 12, color: '#9b9890', marginTop: 6, lineHeight: 1.5 }}>{description}</p>
+      )}
+    </div>
+  );
+}
+
 // ── block renderer ────────────────────────────────────────────────
 function renderBlock(block: Block, idx: number): React.ReactNode {
   switch (block.type) {
@@ -341,6 +385,8 @@ function renderBlock(block: Block, idx: number): React.ReactNode {
       return <div key={idx} style={{ marginBottom: 12 }}><GridBlock items={block.items} /></div>;
     case 'code':
       return <div key={idx} style={{ marginBottom: 12 }}><CodeBlock content={block.content} /></div>;
+    case 'diagram':
+      return <DiagramBlock key={idx} src={block.src} title={block.title} description={block.description} />;
     case 'divider':
       return <hr key={idx} style={{ border: 'none', borderTop: '1px solid #e8e6e0', margin: '16px 0' }} />;
     default:

@@ -9,6 +9,7 @@ export type Block =
   | { type: 'table'; headers: string[]; rows: string[][] }
   | { type: 'grid'; items: GridItem[] }
   | { type: 'code'; content: string; lang?: string }
+  | { type: 'diagram'; src: string; title: string; description?: string; aspectRatio?: string }
   | { type: 'divider' };
 
 export interface Step {
@@ -867,6 +868,481 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
             type: 'note',
             variant: 'warning',
             md: 'Never commit `.env` files. All secrets must be injected at deploy time via your hosting provider\'s environment variable configuration.',
+          },
+        ],
+      },
+    ],
+  },
+
+  // ────────────────────────────────────────────────────────────────────────
+  {
+    id: 'listing-workflows',
+    label: 'Listing Workflows',
+    icon: '📝',
+    sections: [
+      {
+        id: 'add-property-wizard',
+        title: 'Add Property Wizard (13 Steps)',
+        description: 'Complete step-by-step guide for a Space Provider to list a new property on UpNow.',
+        tags: ['property', 'listing', 'wizard', 'space provider', 'publish', 'add property'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'The property listing wizard is a **13-step guided flow** divided into 5 parts. Space Providers access it from their dashboard → Portfolio section → "Add Property".',
+          },
+          {
+            type: 'note',
+            variant: 'tip',
+            md: 'Progress is **auto-saved as a draft** at every step. Providers can exit and resume at any time using "Save & exit". The progress bar at the top shows completion percentage.',
+          },
+          {
+            type: 'heading',
+            text: 'Part 1 — Basics (Steps 1–3)',
+            level: 2,
+          },
+          {
+            type: 'steps',
+            steps: [
+              {
+                label: 'Step 1 — Space Category',
+                description: 'Provider selects the top-level property category using large selection cards: Residential, Commercial, Industrial, Workspaces, or Venues. Selection determines all subsequent field options.',
+                actor: 'Provider',
+                note: '🏠 Residential · 🏢 Commercial · 🏭 Industrial · 💼 Workspaces · 🎭 Venues',
+              },
+              {
+                label: 'Step 2 — Space Type',
+                description: 'Provider picks the specific sub-type within their category. Residential: Apartment, Villa, Townhouse, Studio, Penthouse, Duplex/Loft. Commercial: Retail Shop, Showroom, Office (Fitted), Office (Shell & Core), Restaurant/F&B, Clinic. Industrial: Warehouse, Open Yard, Storage Unit, Cold Storage, Logistics. Workspaces: Coworking Desk, Private Office, Meeting Room, Day Office. Venues: Event Hall, Wedding Venue, Conference Hall, Private Dining, Outdoor Venue.',
+                actor: 'Provider',
+              },
+              {
+                label: 'Step 3 — Listing Structure',
+                description: 'Provider selects how the property will be listed: Entire Property (full building as one listing), Individual Units (each unit listed separately), or Mixed.',
+                actor: 'Provider',
+              },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Part 2 — Location (Steps 4–5)',
+            level: 2,
+          },
+          {
+            type: 'steps',
+            steps: [
+              {
+                label: 'Step 4 — Property Location',
+                description: 'Provider enters: Emirate (Dubai, Abu Dhabi, Sharjah, Ajman, RAK, Fujairah, UAQ), Area/Community (e.g. Dubai Marina, JLT, Downtown, Business Bay), Street/Building name, and drops a pin on an interactive map.',
+                actor: 'Provider',
+                note: 'GPS geolocation is optional. Providers can type the address and drag the map pin to the exact position.',
+              },
+              {
+                label: 'Step 5 — Building Details',
+                description: 'Building name, Premise/Plot numbers (tag-style input, multiple supported), Total floors, Total units in the building, Year built, and building-level facilities (Gym, Pool, Security, Parking, Visitor Parking, Children\'s Play Area).',
+                actor: 'Provider',
+              },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Part 3 — Space Details (Steps 6–7)',
+            level: 2,
+          },
+          {
+            type: 'steps',
+            steps: [
+              {
+                label: 'Step 6 — Layout & Capacity',
+                description: 'Counter-style inputs. Residential: Bedrooms (0–10), Bathrooms (1–10), Parking spots. Workspaces/Venues: Capacity (seats/guests). All categories: Floor number, Total area (sq ft), View type (Sea, City, Garden, Pool, Courtyard, None).',
+                actor: 'Provider',
+              },
+              {
+                label: 'Step 7 — Amenities',
+                description: 'Checkbox grid of amenities. Shown/hidden by category. Residential extras: Built-in wardrobe, Central A/C, Maid\'s room, Study room, Balcony, Storage room, Private garden. Commercial extras: Dedicated reception, Server room, Loading dock, Freight elevator. Universal: WiFi, Covered parking, Gym, Pool, Concierge, CCTV, Intercom, Fire suppression system.',
+                actor: 'Provider',
+              },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Part 4 — Presentation (Steps 8–10)',
+            level: 2,
+          },
+          {
+            type: 'steps',
+            steps: [
+              {
+                label: 'Step 8 — Photos & Media',
+                description: 'Upload zone (drag & drop or click). Minimum 4 photos required. First photo auto-tagged "Main" (cover image for search results). Formats: JPG, PNG, WebP. Max 10MB each. Reorder by drag.',
+                actor: 'Provider',
+                note: 'Photos are uploaded to object storage. URLs stored in unit_images table.',
+              },
+              {
+                label: 'Step 9 — Title',
+                description: 'Provider writes the listing title. Max 120 characters with live counter. AI-suggested title auto-generated from previous inputs (e.g. "3-Bedroom Apartment in Dubai Marina with Sea View"). Provider can edit freely.',
+                actor: 'Provider',
+              },
+              {
+                label: 'Step 10 — Description',
+                description: 'Full property description (max 2,000 chars). Below the textarea, provider selects highlight tags: Newly Renovated, Sea View, Prime Location, Pet-Friendly, Furnished, Unfurnished, Near Metro, Smart Home, Short-Term Available, etc.',
+                actor: 'Provider',
+              },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Part 5 — Leasing (Steps 11–13)',
+            level: 2,
+          },
+          {
+            type: 'steps',
+            steps: [
+              {
+                label: 'Step 11 — Pricing',
+                description: 'Annual rent (AED, required). Rent installment options: 1, 2, 4, 6, or 12 cheques (pill selector). Security deposit: auto-suggested at 5% of annual rent, editable. Service charges / maintenance fees: optional annual amount.',
+                actor: 'Provider',
+              },
+              {
+                label: 'Step 12 — Documents',
+                description: 'Upload ownership and compliance docs. Title Deed (required). DEWA/SEWA Connection Certificate (optional). NOC from Developer (if applicable). Floor Plan PDF (optional). Ejari Registration (if renewing an existing listing). Each has an upload button and shows uploaded filename when complete.',
+                actor: 'Provider',
+              },
+              {
+                label: 'Step 13 — Review & Publish',
+                description: 'Full read-only summary of all 12 prior steps in grouped review cards: Location, Space Details, Amenities, Photos (thumbnail grid), Title & Description, Pricing, Documents. Each group has an Edit button. When ready, "Publish Listing" button submits. Status: Draft → Active.',
+                actor: 'Provider',
+                note: 'Active listings immediately appear in the /spaces public catalog and are indexed for search.',
+              },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Unit Status Lifecycle',
+            level: 3,
+          },
+          {
+            type: 'lifecycle',
+            states: [
+              { label: 'Draft', color: 'gray', description: 'In-progress wizard, not yet visible publicly.' },
+              { label: 'Pending Review', color: 'amber', description: 'Submitted, awaiting Admin approval if moderation is enabled.' },
+              { label: 'Active', color: 'green', description: 'Published and visible in the /spaces catalog.' },
+              { label: 'Reserved', color: 'blue', description: 'Inquiry or offer in progress for this unit.' },
+              { label: 'Occupied', color: 'purple', description: 'Under an active lease — not available for new inquiries.' },
+              { label: 'Under Renewal', color: 'amber', description: 'Current tenant in renewal negotiation.' },
+              { label: 'Maintenance Hold', color: 'red', description: 'Temporarily unavailable — unit under maintenance.' },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'quick-listing-wizard',
+        title: 'Quick Listing Wizard (Property + Unit)',
+        description: 'Streamlined dual-flow wizard: Add a Property (4 steps) or a Unit (7 steps).',
+        tags: ['quick listing', 'property', 'unit', 'wizard', 'space provider'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'The Quick Listing Wizard provides a **faster path** for experienced providers already familiar with the platform. Available from Dashboard → Portfolio → "Quick Add".',
+          },
+          {
+            type: 'grid',
+            items: [
+              { icon: '🏗️', title: 'Add a Property', desc: 'Register a building. Set it up once, then add rentable units to it. 4-step flow.', badge: '4 steps', badgeColor: 'blue' },
+              { icon: '🔑', title: 'Add a Unit', desc: 'Add a rentable space to an existing property with full pricing and immediate publication. 7-step flow.', badge: '7 steps', badgeColor: 'green' },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Property Flow (Steps P1–P4)',
+            level: 3,
+          },
+          {
+            type: 'table',
+            headers: ['Step', 'Screen', 'Key Fields'],
+            rows: [
+              ['P-1', 'Property category', '5-card selector: Residential, Commercial, Industrial, Workspaces, Venues'],
+              ['P-2', 'Location & building details', 'Building name, Emirate, Area, Street, Map pin, Total units, Floors, Year built'],
+              ['P-3', 'Property photos', 'Upload ≥1 photo. First auto-tagged "Main"'],
+              ['P-4', 'Review & save', 'Read-only summary. Edit links per section. "Save Property" completes flow.'],
+            ],
+          },
+          {
+            type: 'note',
+            variant: 'success',
+            md: 'After saving, the provider is offered: **"View Dashboard"** or **"Add a Unit Now"** — the latter pre-selects the newly saved property in the unit flow.',
+          },
+          {
+            type: 'heading',
+            text: 'Unit Flow (Steps U1–U7)',
+            level: 3,
+          },
+          {
+            type: 'table',
+            headers: ['Step', 'Screen', 'Key Fields / Notes'],
+            rows: [
+              ['U-1', 'Select a property', 'Lists provider\'s existing properties. Must select one to proceed.'],
+              ['U-2', 'Unit type', 'Sub-types filtered by the selected property\'s category.'],
+              ['U-3', 'Unit details', 'Category-aware: Residential → Beds/Baths counters; Workspaces → Capacity. All: Title (required, 120 chars), Size (sqft), Floor.'],
+              ['U-4', 'Amenities & features', 'Category-specific chip checklist. All optional.'],
+              ['U-5', 'Pricing', 'Annual rent (required), installments (1/2/4/6/12), deposit (5% auto-suggested), service charges (optional).'],
+              ['U-6', 'Unit photos', '≥1 required. Drag-to-reorder. First tagged "Main".'],
+              ['U-7', 'Review & publish', 'Full read-only summary. Edit links. "Publish" → unit status Active.'],
+            ],
+          },
+        ],
+      },
+      {
+        id: 'service-listing-journey',
+        title: 'Service Booking — Two Tracks Explained',
+        description: 'How the service booking flow differs for Fixed Price vs Inspection-Based services.',
+        tags: ['service', 'booking', 'fixed price', 'inspection', 'quote', 'escrow', 'tracks'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'Every service on UpNow is configured for one of two booking tracks by the Service Provider. The track is shown clearly on the listing page so customers know what to expect.',
+          },
+          {
+            type: 'grid',
+            items: [
+              {
+                icon: '🏷️',
+                title: 'Fixed Price Track',
+                desc: 'Price shown upfront. Customer selects scope and slot, pays into escrow immediately. No site visit before work starts. Best for: Cleaning, Pest Control, Painting.',
+                badge: 'Instant',
+                badgeColor: 'blue',
+              },
+              {
+                icon: '🔍',
+                title: 'Inspection-Based Track',
+                desc: 'Technician visits first, assesses the job, submits an itemised quote. Customer approves before escrow payment. Best for: AC repair, Plumbing, Electrical, Major works.',
+                badge: 'Quote',
+                badgeColor: 'amber',
+              },
+            ],
+          },
+          {
+            type: 'table',
+            headers: ['Service', 'Track', 'Reason'],
+            rows: [
+              ['Home Cleaning', 'Fixed Price', 'Standardised scope — predictable effort.'],
+              ['Pest Control', 'Fixed Price', 'Fixed treatment types with guaranteed outcome.'],
+              ['Painting (per room)', 'Fixed Price', 'Unit pricing per room/sqft.'],
+              ['AC Repair / Service', 'Inspection-Based', 'Fault diagnosis required before quoting.'],
+              ['Plumbing Fault', 'Inspection-Based', 'Complexity varies — needs on-site assessment.'],
+              ['Electrical Work', 'Inspection-Based', 'Licensed engineer review required before work.'],
+              ['Major Renovation', 'Inspection-Based', 'Custom scope and variable materials.'],
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Fixed Price — Step by Step',
+            level: 3,
+          },
+          {
+            type: 'steps',
+            steps: [
+              { label: 'Browse & select service', description: 'Customer sees the price upfront on the catalog. Badge shows "Fixed" with starting rate (e.g. "From AED 120").', actor: 'Customer' },
+              { label: 'Service detail page', description: 'Reviews provider profile, ratings, what\'s included, and the pricing breakdown (per room, per session, or tiered).', actor: 'Customer' },
+              { label: 'Configure & choose slot', description: 'Selects scope options (rooms, add-ons, frequency). Picks date and time slot. Total price updates live.', actor: 'Customer' },
+              { label: 'Auth gate & checkout', description: 'Prompted to sign in if not authenticated. Reviews final price summary. Pays via platform payment gateway into escrow.', actor: 'Customer' },
+              { label: 'Booking created', description: 'Status → Pending. Provider and Customer receive confirmation. Booking reference issued.', actor: 'System' },
+              { label: 'Provider confirms & assigns', description: 'Provider reviews and confirms (→ Confirmed). Assigns a technician (→ Assigned). Technician notified by push/email.', actor: 'Provider' },
+              { label: 'Job execution', description: 'Technician updates status: En Route → In Progress → Completed. Uploads photos as proof of work.', actor: 'Technician' },
+              { label: 'Completion & escrow release', description: 'Customer confirms job done (or system auto-confirms after 24h). Escrow releases to Provider. Status → Paid.', actor: 'System / Customer' },
+            ],
+          },
+          {
+            type: 'heading',
+            text: 'Inspection-Based — Step by Step',
+            level: 3,
+          },
+          {
+            type: 'steps',
+            steps: [
+              { label: 'Browse & select service', description: 'Customer sees "Quote after inspection" on the catalog listing. No upfront price shown.', actor: 'Customer' },
+              { label: 'Service detail page', description: 'Reviews provider credentials. CTA button shows "Book Inspection" instead of "Book Now".', actor: 'Customer' },
+              { label: 'Schedule inspection', description: 'Auth gate. Customer picks a slot for the assessment visit. A small inspection fee is charged (refundable if job is awarded).', actor: 'Customer' },
+              { label: 'Inspection conducted', description: 'Technician visits site, assesses the problem/scope. Marks status "Assessment Complete". Uploads notes and photos.', actor: 'Technician' },
+              { label: 'Quote prepared & submitted', description: 'Provider reviews technician\'s assessment and builds an itemised quote: labour, materials, timeline, total (AED). Submitted to customer.', actor: 'Provider' },
+              { label: 'Customer reviews quote', description: 'Customer receives notification. Views itemised breakdown. Can: Accept (→ proceed), Reject (→ cancel), or Request Revision. Quote expires after 48h.', actor: 'Customer' },
+              { label: 'Quote accepted — payment', description: 'Customer accepts → pays full quoted amount into escrow. Inspection fee refunded automatically.', actor: 'Customer' },
+              { label: 'Work scheduled & executed', description: 'Provider schedules the actual work. Technician (same or different) executes the job. Uploads proof of work on completion.', actor: 'Provider / Technician' },
+              { label: 'Completion & escrow release', description: 'Customer confirms completion. Escrow released. Status → Paid. Customer invited to leave a review.', actor: 'System / Customer' },
+            ],
+          },
+          {
+            type: 'note',
+            variant: 'warning',
+            md: 'If a customer **rejects the quote**, the inspection fee is forfeited and the job is cancelled. If the Provider submits a revised quote, the 48h expiry timer resets from the moment the revision is delivered.',
+          },
+        ],
+      },
+    ],
+  },
+
+  // ────────────────────────────────────────────────────────────────────────
+  {
+    id: 'erd',
+    label: 'ERD Diagrams',
+    icon: '🗃️',
+    sections: [
+      {
+        id: 'erd-overview',
+        title: 'ERD Diagrams — Overview',
+        description: 'Entity Relationship Diagrams for the full database schema across all platform domains.',
+        tags: ['erd', 'database', 'schema', 'tables', 'relations', 'diagram'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'The platform database has **54+ tables** across 5 functional domains. Five diagrams are provided — one full-system view, one clean view, and three domain-scoped one-pagers.',
+          },
+          {
+            type: 'table',
+            headers: ['Diagram', 'Scope', 'Best Used For'],
+            rows: [
+              ['Clean ERD', 'Core primary entities only', 'First orientation — understanding key entities'],
+              ['Full ERD', 'All 54+ tables including pivots', 'Complete reference for developers'],
+              ['Rental (One Page)', 'Spaces / rental domain', 'Understanding Properties → Units → Leases flow'],
+              ['Services (One Page)', 'Services / jobs domain', 'Understanding Bookings → Jobs → Payments flow'],
+              ['Governance (One Page)', 'Users, Docs, Notifications, Admin', 'Cross-cutting concerns and platform ops'],
+            ],
+          },
+          {
+            type: 'note',
+            variant: 'tip',
+            md: 'Use **Ctrl/⌘ + scroll** to zoom diagrams. Click **"Open Full Size ↗"** on any diagram to view it in a new browser tab at full resolution.',
+          },
+        ],
+      },
+      {
+        id: 'erd-clean',
+        title: 'Clean ERD — Core Entities',
+        description: 'Simplified ERD showing only primary entities and their key relationships.',
+        tags: ['erd', 'core', 'clean', 'entities', 'diagram'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'The clean view shows **primary tables only** — no junction/pivot tables, no audit tables. Best starting point for a new developer to understand the data model.',
+          },
+          {
+            type: 'diagram',
+            src: '/erd/upnow_erd_clean.svg',
+            title: 'UpNow Core ERD — Clean View',
+            description: 'Primary entities and their direct FK relationships.',
+            aspectRatio: '4493 / 2604',
+          },
+        ],
+      },
+      {
+        id: 'erd-full',
+        title: 'Full Database ERD',
+        description: 'Complete ERD with all 54+ tables including junction, audit, and config tables.',
+        tags: ['erd', 'full', 'all tables', 'complete', 'diagram'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'The full ERD contains every table — primary entities, junction/pivot tables, audit/history tables, and platform configuration tables. Use the domain ERDs below to zoom into specific areas.',
+          },
+          {
+            type: 'diagram',
+            src: '/erd/upnow_erd_full.svg',
+            title: 'UpNow Full Database ERD',
+            description: 'All 54+ tables. Best viewed at full size.',
+            aspectRatio: '8658 / 2775',
+          },
+        ],
+      },
+      {
+        id: 'erd-rental',
+        title: 'Rental Domain ERD',
+        description: 'Schema for the Spaces marketplace: Properties, Units, Contracts, Tenants, Deposits, Renewals.',
+        tags: ['erd', 'rental', 'spaces', 'properties', 'units', 'contracts', 'deposits', 'diagram'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'Covers the entire **spaces rental lifecycle** — from a property being registered and units listed, through to a tenant signing a lease, paying rent instalments, and renewing.',
+          },
+          {
+            type: 'table',
+            headers: ['Entity Group', 'Key Tables'],
+            rows: [
+              ['Properties', 'properties, property_images, property_amenities, property_highlights'],
+              ['Units', 'units, unit_images, unit_amenities, unit_highlights'],
+              ['Leases', 'tenancy_contracts, contract_signatories, lease_documents'],
+              ['Tenants', 'tenants, tenant_kyc_documents'],
+              ['Financials', 'security_deposits, receivables, collection_actions, payout_records'],
+              ['Renewals', 'renewal_pipeline, renewal_offers, renewal_history'],
+              ['Vendors', 'vendors, vendor_contracts, amc_documents'],
+            ],
+          },
+          {
+            type: 'diagram',
+            src: '/erd/upnow_erd_rental_onepage.svg',
+            title: 'Rental Domain ERD',
+            description: 'Properties → Units → Contracts → Tenants → Deposits → Renewals → Vendors.',
+            aspectRatio: '4169 / 5000',
+          },
+        ],
+      },
+      {
+        id: 'erd-services',
+        title: 'Services Domain ERD',
+        description: 'Schema for the Services marketplace: Providers, Bookings, Technicians, Jobs, Payments.',
+        tags: ['erd', 'services', 'bookings', 'jobs', 'technicians', 'payments', 'diagram'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'Covers the **home & office services lifecycle** — from a customer placing a booking, through technician assignment and job execution, to escrow release and reviews.',
+          },
+          {
+            type: 'table',
+            headers: ['Entity Group', 'Key Tables'],
+            rows: [
+              ['Providers', 'service_providers, provider_zones, service_catalogs, custom_services'],
+              ['Technicians', 'technicians, technician_skills, technician_availability, technician_ratings'],
+              ['Bookings', 'bookings, booking_items, booking_statuses, booking_slot_options'],
+              ['Jobs', 'job_assignments, job_status_history, job_proofs, job_notes'],
+              ['Payments', 'booking_payments, escrow_transactions, payout_records, platform_fees_applied'],
+              ['Reviews', 'reviews, review_responses'],
+              ['Disputes', 'disputes, dispute_evidence, dispute_resolutions'],
+            ],
+          },
+          {
+            type: 'diagram',
+            src: '/erd/upnow_erd_services_onepage.svg',
+            title: 'Services Domain ERD',
+            description: 'Providers → Bookings → Technicians → Jobs → Payments → Reviews.',
+            aspectRatio: '2231 / 4358',
+          },
+        ],
+      },
+      {
+        id: 'erd-governance',
+        title: 'Governance Domain ERD',
+        description: 'Schema for platform operations: Users, Roles, Documents, Notifications, Disputes, Config.',
+        tags: ['erd', 'governance', 'users', 'roles', 'documents', 'notifications', 'admin', 'diagram'],
+        blocks: [
+          {
+            type: 'text',
+            md: 'Covers **cross-cutting platform concerns** — user identity and role management, the document system, notifications infrastructure, dispute resolution, and admin configuration tables.',
+          },
+          {
+            type: 'table',
+            headers: ['Entity Group', 'Key Tables'],
+            rows: [
+              ['Users & Auth', 'users, profiles, refresh_tokens, invite_tokens, password_resets'],
+              ['Documents', 'documents, document_templates, document_versions, document_access_logs'],
+              ['Notifications', 'notifications, notification_preferences, notification_templates'],
+              ['Disputes', 'disputes, dispute_evidence, dispute_messages, dispute_resolutions'],
+              ['Platform Config', 'platform_fees, service_categories, service_subcategories, platform_settings'],
+              ['Audit', 'audit_logs, status_change_history, login_events'],
+            ],
+          },
+          {
+            type: 'diagram',
+            src: '/erd/upnow_erd_governance_onepage.svg',
+            title: 'Governance Domain ERD',
+            description: 'Users, Documents, Notifications, Disputes, and Platform Configuration tables.',
+            aspectRatio: '2762 / 2361',
           },
         ],
       },
