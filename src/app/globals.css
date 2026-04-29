@@ -35,6 +35,33 @@
   --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.14);
   --radius:    0.75rem;
+
+  /* Alias vars — match the Vite project's CSS variable names exactly */
+  --primary:       #2e9f82;
+  --primary-dark:  #1a5a4a;
+  --primary-light: #d8f2e8;
+  --primary-50:    #f0faf6;
+  --gold:          #d4a820;
+  --gold-light:    #f5d97a;
+  --white:         #ffffff;
+  --base:          #fafaf8;
+  --base-100:      #f4f3ef;
+  --base-200:      #e8e6e0;
+  --neutral-900:   #1a1916;
+  --neutral-700:   #3d3b35;
+  --neutral-600:   #4f4c44;
+  --neutral-500:   #6b6860;
+  --neutral-400:   #9b9890;
+  --error:         #d43f3f;
+  --warning:       #e8a020;
+}
+
+/* Layout utilities */
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: 24px;
 }
 
 * {
