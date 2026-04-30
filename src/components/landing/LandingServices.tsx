@@ -1,79 +1,81 @@
-'use client';
-
 import Link from 'next/link';
 import { Wrench, Sparkles, HeartPulse, Droplets, Leaf, Hammer, ArrowRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 const CATEGORIES = [
-  { Icon: Wrench,    label: 'Home & Office Maintenance', href: '/services?category=home-office-maintenance', count: '85+' },
-  { Icon: Sparkles,  label: 'Cleaning & Hygiene',        href: '/services?category=cleaning-hygiene',         count: '40+' },
-  { Icon: HeartPulse,label: 'Lifestyle & Wellness',      href: '/services?category=lifestyle-wellness',        count: '30+' },
-  { Icon: Droplets,  label: 'Water, Pest & Environment', href: '/services?category=water-pest-environmental',  count: '25+' },
-  { Icon: Leaf,      label: 'Outdoor & Landscaping',     href: '/services?category=outdoor-landscaping',       count: '20+' },
-  { Icon: Hammer,    label: 'Renovation & Fit-out',      href: '/services?category=renovation',                count: '15+' },
+  { Icon: Wrench,     label: 'Home & Office Maintenance', href: '/services?category=home-office-maintenance', count: '85+', desc: 'AC, plumbing, electrical, painting & more' },
+  { Icon: Sparkles,   label: 'Cleaning & Hygiene',        href: '/services?category=cleaning-hygiene',         count: '40+', desc: 'Deep clean, regular, commercial & industrial' },
+  { Icon: HeartPulse, label: 'Lifestyle & Wellness',      href: '/services?category=lifestyle-wellness',        count: '30+', desc: 'Personal care, fitness, lifestyle concierge' },
+  { Icon: Droplets,   label: 'Water, Pest & Environment', href: '/services?category=water-pest-environmental',  count: '25+', desc: 'Pest control, water tank, disinfection' },
+  { Icon: Leaf,       label: 'Outdoor & Landscaping',     href: '/services?category=outdoor-landscaping',       count: '20+', desc: 'Garden maintenance, pool, outdoor cleaning' },
+  { Icon: Hammer,     label: 'Renovation & Fit-out',      href: '/services?category=renovation',                count: '15+', desc: 'Full fit-out, tiling, carpentry, flooring' },
 ];
 
 export function LandingServices() {
   return (
-    <section style={{ backgroundColor: '#0f0f0d', paddingBlock: 88 }}>
+    <section style={{ background: '#fafaf8', paddingBlock: 80 }}>
       <div className="container">
 
-        {/* Top row: headline + CTA */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 48, flexWrap: 'wrap', gap: 16 }}>
+        {/* Header row */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 40, flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <p style={{ fontSize: 12, fontWeight: 700, color: '#2e9f82', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 12, margin: '0 0 12px' }}>Services</p>
-            <h2 style={{ fontSize: 'clamp(28px, 3.5vw, 44px)', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.03em', margin: '0 0 10px', lineHeight: 1.1 }}>
-              Whatever your home needs,<br />
-              <span style={{ color: '#2e9f82' }}>we have someone for it.</span>
+            <p style={{ fontSize: 11, fontWeight: 700, color: '#2e9f82', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>Services</p>
+            <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#1a1916', letterSpacing: '-0.025em', margin: '0 0 8px', lineHeight: 1.1 }}>
+              Whatever your home needs,<br />we have someone for it.
             </h2>
-            <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.45)', margin: 0 }}>200+ verified services. Fixed price or inspection-based quote.</p>
+            <p style={{ fontSize: 15, color: '#6b6860', margin: 0 }}>200+ verified services across the UAE. Fixed price or inspection-based.</p>
           </div>
           <Link href="/services" style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            border: '1px solid rgba(46,159,130,0.35)', borderRadius: 12,
-            padding: '12px 22px', textDecoration: 'none',
-            color: '#2e9f82', fontSize: 14, fontWeight: 700,
-            whiteSpace: 'nowrap',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            border: '1px solid #d8f2e8', borderRadius: 12,
+            padding: '10px 18px', textDecoration: 'none',
+            color: '#2e9f82', fontSize: 13, fontWeight: 700,
+            background: '#f0faf6', whiteSpace: 'nowrap',
           }}>
-            Browse all services <ArrowRight size={14} />
+            Browse all services <ArrowRight size={13} aria-hidden />
           </Link>
         </div>
 
-        {/* Category list */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-          {CATEGORIES.map(({ Icon, label, href, count }, i) => (
-            <CategoryRow key={label} Icon={Icon} label={label} href={href} count={count} />
+        {/* Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+          {CATEGORIES.map(({ Icon, label, href, count, desc }) => (
+            <Link key={label} href={href} style={{
+              display: 'flex', alignItems: 'center', gap: 16,
+              background: '#ffffff', border: '1px solid #e8e6e0',
+              borderRadius: 16, padding: '18px 20px', textDecoration: 'none',
+              boxShadow: '0 2px 8px rgba(15,23,42,0.04)',
+              transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 10px 32px rgba(15,23,42,0.08)';
+              e.currentTarget.style.borderColor = '#d8f2e8';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(15,23,42,0.04)';
+              e.currentTarget.style.borderColor = '#e8e6e0';
+            }}
+            >
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: '#f0faf6', border: '1px solid #d8f2e8',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <Icon size={20} color="#2e9f82" strokeWidth={1.8} aria-hidden />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 14, fontWeight: 700, color: '#1a1916', margin: '0 0 3px' }}>{label}</p>
+                <p style={{ fontSize: 12, color: '#9b9890', margin: 0 }}>{desc}</p>
+              </div>
+              <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                <p style={{ fontSize: 14, fontWeight: 800, color: '#2e9f82', margin: 0 }}>{count}</p>
+                <ArrowRight size={14} color="#d8f2e8" aria-hidden />
+              </div>
+            </Link>
           ))}
         </div>
       </div>
     </section>
-  );
-}
-
-function CategoryRow({ Icon, label, href, count }: { Icon: LucideIcon; label: string; href: string; count: string }) {
-  return (
-    <Link
-      href={href}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 20,
-        padding: '22px 0',
-        borderBottom: '1px solid rgba(255,255,255,0.07)',
-        textDecoration: 'none',
-        transition: 'background 0.2s',
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.paddingLeft = '12px'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.paddingLeft = '0px'; }}
-    >
-      <div style={{
-        width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(46,159,130,0.12)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        transition: 'background 0.2s',
-      }}>
-        <Icon size={20} color="#2e9f82" strokeWidth={1.8} />
-      </div>
-      <span style={{ flex: 1, fontSize: 18, fontWeight: 700, color: '#ffffff', letterSpacing: '-0.01em' }}>{label}</span>
-      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.30)', fontWeight: 600 }}>{count} services</span>
-      <ArrowRight size={16} color="rgba(255,255,255,0.25)" strokeWidth={2} />
-    </Link>
   );
 }
