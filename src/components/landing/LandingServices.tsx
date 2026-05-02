@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import { Wrench, Sparkles, HeartPulse, Droplets, Leaf, Hammer, ArrowRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';

@@ -109,7 +109,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               ['Customer / Tenant', 'Books services and/or rents spaces', '/auth/signup', '/ (Homepage)'],
               ['Service Provider', 'Company offering maintenance/cleaning services', '/signup/service-provider', '/dashboard/provider/services'],
               ['Technician', 'Field worker dispatched by a Service Provider', 'Invited by Service Provider', '/dashboard/technician'],
-              ['Space Provider', 'Landlord / property owner listing rental spaces', '/signup/space-provider', '/dashboard/provider/spaces'],
+              ['Space Provider', 'Rental Provider / property owner listing rental spaces', '/signup/space-provider', '/dashboard/provider/spaces'],
               ['Manager (Asset Manager)', 'Operational manager assigned by a Space Provider', 'Invite-only → /accept-invite', '/dashboard/manager'],
               ['Admin', 'Platform team with full oversight', 'Internal only', '/dashboard/admin'],
             ],
@@ -461,10 +461,10 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
     icon: '🏢',
     sections: [
       {
-        id: 'landlord-overview',
+        id: 'rental-provider-overview',
         title: 'Space Provider Overview',
-        description: 'How a Space Provider (Landlord) manages properties and tenants.',
-        tags: ['landlord', 'space provider', 'properties', 'units', 'tenants'],
+        description: 'How a Space Provider (Rental Provider) manages properties and tenants.',
+        tags: ['rental_provider', 'space provider', 'properties', 'units', 'tenants'],
         blocks: [
           {
             type: 'text',

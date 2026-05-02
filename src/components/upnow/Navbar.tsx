@@ -58,7 +58,7 @@ export function Navbar() {
     if (role === 'service_provider' || role === 'service-provider') return '/dashboard/provider/services';
     if (role === 'technician') return '/dashboard/technician';
     if (role === 'manager') return '/manager/dashboard';
-    if (role === 'space_provider' || role === 'space-provider') return '/dashboard/landlord';
+    if (role === 'space_provider' || role === 'space-provider') return '/dashboard/rental-provider';
     return '/dashboard';
   };
 

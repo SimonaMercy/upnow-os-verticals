@@ -19,7 +19,7 @@ const TRACKS = {
     emoji: '🏠',
     steps: [
       { num: '01', title: 'Search your way',     desc: 'Filter by category, area, price, size and availability.' },
-      { num: '02', title: 'View & inquire',      desc: 'Book a viewing or message the landlord directly through the platform.' },
+      { num: '02', title: 'View & inquire',      desc: 'Book a viewing or message the rental provider directly through the platform.' },
       { num: '03', title: 'Sign & move in',      desc: 'Digital contract, payment, and handover — all in one place.' },
     ],
   },
