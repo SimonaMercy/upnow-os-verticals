@@ -8,28 +8,49 @@ import {
   useCallback,
   ReactNode,
 } from "react";
-import { apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
+// Mirrors backend `UserRole` enum (src/shared/enums.ts).
 export type UserRole =
-  | "customer"
-  | "service-provider"
-  | "space-provider"
+  | "tenant"
+  | "service_provider"
+  | "rental_provider"
   | "technician"
   | "manager"
-  | "admin";
+  | "admin"
+  | "super_admin";
 
 export interface AppUser {
-  id: string;
+  id: number;
   email: string;
-  fullName: string;
+  name: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
   role: UserRole;
+  status: string;
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  kycStatus: string;
+}
+
+export interface RegisterPayload {
+  email: string;
+  name: string;
+  password: string;
+  role?: "tenant" | "service_provider" | "rental_provider";
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
 }
 
 interface AuthContextValue {
   user: AppUser | null;
   isAuthenticated: boolean;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AppUser>;
+  register: (payload: RegisterPayload) => Promise<AppUser>;
+  refresh: () => Promise<AppUser | null>;
   signOut: () => void;
 }
 
@@ -37,50 +58,78 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuthenticated: false,
   loading: true,
-  login: async () => {},
+  login: async () => {
+    throw new Error("AuthProvider missing");
+  },
+  register: async () => {
+    throw new Error("AuthProvider missing");
+  },
+  refresh: async () => null,
   signOut: () => {},
 });
 
-interface LoginResponse {
+interface AuthResponse {
   access_token: string;
   user: AppUser;
 }
+
+const TOKEN_KEY = "upnow_token";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Re-hydrate from stored token on mount
-  useEffect(() => {
-    const token = localStorage.getItem("upnow_token");
-    const stored = localStorage.getItem("upnow_user");
-    if (token && stored) {
-      try {
-        setUser(JSON.parse(stored) as AppUser);
-      } catch {
-        localStorage.removeItem("upnow_token");
-        localStorage.removeItem("upnow_user");
-      }
+  const refresh = useCallback(async (): Promise<AppUser | null> => {
+    if (typeof window === "undefined") return null;
+    if (!localStorage.getItem(TOKEN_KEY)) {
+      setUser(null);
+      return null;
     }
-    setLoading(false);
+    try {
+      const me = await apiGet<AppUser>("/auth/me");
+      setUser(me);
+      return me;
+    } catch {
+      localStorage.removeItem(TOKEN_KEY);
+      setUser(null);
+      return null;
+    }
   }, []);
 
+  useEffect(() => {
+    refresh().finally(() => setLoading(false));
+  }, [refresh]);
+
   const login = useCallback(async (email: string, password: string) => {
-    const res = await apiPost<LoginResponse>("/auth/login", { email, password });
-    localStorage.setItem("upnow_token", res.access_token);
-    localStorage.setItem("upnow_user", JSON.stringify(res.user));
+    const res = await apiPost<AuthResponse>("/auth/login", { email, password });
+    localStorage.setItem(TOKEN_KEY, res.access_token);
     setUser(res.user);
+    return res.user;
+  }, []);
+
+  const register = useCallback(async (payload: RegisterPayload) => {
+    const res = await apiPost<AuthResponse>("/auth/register", payload);
+    localStorage.setItem(TOKEN_KEY, res.access_token);
+    setUser(res.user);
+    return res.user;
   }, []);
 
   const signOut = useCallback(() => {
-    localStorage.removeItem("upnow_token");
-    localStorage.removeItem("upnow_user");
+    localStorage.removeItem(TOKEN_KEY);
     setUser(null);
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, isAuthenticated: !!user, loading, login, signOut }}
+      value={{
+        user,
+        isAuthenticated: !!user,
+        loading,
+        login,
+        register,
+        refresh,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>

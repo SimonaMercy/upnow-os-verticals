@@ -15,9 +15,26 @@ function authHeaders(): Record<string, string> {
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const msg = await res.text().catch(() => res.statusText);
-    throw new Error(msg);
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      if (body) {
+        if (Array.isArray(body.message)) message = body.message.join(", ");
+        else if (typeof body.message === "string") message = body.message;
+        else if (typeof body.error === "string") message = body.error;
+      }
+    } catch {
+      try {
+        message = (await res.text()) || res.statusText;
+      } catch {
+        // keep statusText
+      }
+    }
+    const err = new Error(message) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 

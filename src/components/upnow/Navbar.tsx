@@ -71,7 +71,8 @@ export function Navbar() {
   const role = user?.role as string | undefined;
   const isCustomerRole = role === 'customer' || role === 'tenant';
 
-  const initials = user?.fullName?.charAt(0)?.toUpperCase() ?? 'U';
+  const displayName = user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+  const initials = displayName?.charAt(0)?.toUpperCase() ?? 'U';
 
   return (
     <>
@@ -147,7 +148,7 @@ export function Navbar() {
               ) : (
                 <>
                   <Link href={getDashboardPath()}>
-                    <Button variant="primary" size="sm">{user?.fullName?.split(' ')[0] || 'Dashboard'}</Button>
+                    <Button variant="primary" size="sm">{displayName?.split(' ')[0] || 'Dashboard'}</Button>
                   </Link>
                   <button
                     onClick={handleSignOut}
