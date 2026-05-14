@@ -12,13 +12,15 @@ import { apiGet, apiPost } from "@/lib/api";
 
 // Mirrors backend `UserRole` enum (src/shared/enums.ts).
 export type UserRole =
-  | "tenant"
+  | "customer"
   | "service_provider"
   | "rental_provider"
   | "technician"
   | "manager"
   | "admin"
   | "super_admin";
+
+export type SelfRegisterRole = "customer" | "rental_provider" | "service_provider";
 
 export interface AppUser {
   id: number;
@@ -36,20 +38,39 @@ export interface AppUser {
 
 export interface RegisterPayload {
   email: string;
-  name: string;
   password: string;
-  role?: "tenant" | "service_provider" | "rental_provider";
-  firstName?: string;
-  lastName?: string;
+  /** Optional phone number collected at sign-up; verified later from the portal. */
   phone?: string;
+  /** T-108 honeypot — must remain empty. Bots fill it; humans never see it. */
+  website?: string;
+}
+
+export interface AuthResponse {
+  /** Not present in client responses — the proxy stores it as an httpOnly cookie. */
+  access_token?: string;
+  user?: AppUser;
+  requiresVerification: boolean;
+  verificationStep?: "email" | "phone" | null;
+  maskedPhone?: string;
+  verified?: boolean;
 }
 
 interface AuthContextValue {
   user: AppUser | null;
   isAuthenticated: boolean;
   loading: boolean;
-  login: (email: string, password: string) => Promise<AppUser>;
-  register: (payload: RegisterPayload) => Promise<AppUser>;
+  /** True when the current account still needs to verify email. */
+  requiresVerification: boolean;
+  verificationStep: "email" | "phone" | null;
+  maskedPhone: string | null;
+  login: (email: string, password: string) => Promise<AuthResponse>;
+  register: (role: SelfRegisterRole, payload: RegisterPayload) => Promise<AuthResponse>;
+  verifyOtp: (code: string) => Promise<AuthResponse>;
+  requestOtp: () => Promise<{ sent: boolean; maskedPhone: string }>;
+  /** T-104 Step 1 — request reset OTP. Returns { sent: true, maskedPhone }. */
+  forgotPassword: (email: string) => Promise<{ sent: boolean; maskedPhone: string }>;
+  /** T-104 Step 2 — verify OTP + set new password. Returns { reset: true }. */
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<{ reset: boolean }>;
   refresh: () => Promise<AppUser | null>;
   signOut: () => void;
 }
@@ -58,65 +79,135 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuthenticated: false,
   loading: true,
-  login: async () => {
-    throw new Error("AuthProvider missing");
-  },
-  register: async () => {
-    throw new Error("AuthProvider missing");
-  },
+  requiresVerification: false,
+  verificationStep: null,
+  maskedPhone: null,
+  login: async () => { throw new Error("AuthProvider missing"); },
+  register: async () => { throw new Error("AuthProvider missing"); },
+  verifyOtp: async () => { throw new Error("AuthProvider missing"); },
+  requestOtp: async () => ({ sent: true, maskedPhone: '' }),
+  forgotPassword: async () => ({ sent: true, maskedPhone: "" }),
+  resetPassword: async () => ({ reset: true }),
   refresh: async () => null,
   signOut: () => {},
 });
 
-interface AuthResponse {
-  access_token: string;
-  user: AppUser;
+const ROLE_DASHBOARD: Record<UserRole, string> = {
+  customer: "/dashboard/customer",
+  rental_provider: "/rental-provider/dashboard",
+  service_provider: "/dashboard/service-provider",
+  manager: "/dashboard/manager",
+  technician: "/dashboard/technician",
+  admin: "/dashboard/admin",
+  super_admin: "/dashboard/admin",
+};
+
+export function dashboardPath(role: UserRole): string {
+  return ROLE_DASHBOARD[role] ?? "/dashboard";
 }
 
-const TOKEN_KEY = "upnow_token";
+export function verificationPath(step: "email" | "phone" | null | undefined): string {
+  return step === "phone" ? "/verify" : "/verify-email";
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
+  const [requiresVerification, setRequiresVerification] = useState(false);
+  const [verificationStep, setVerificationStep] = useState<"email" | "phone" | null>(null);
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const applyAuthResponse = useCallback((res: AuthResponse) => {
+    // Token is managed server-side as an httpOnly cookie by the /api proxy.
+    // Unverified flows may return no session; keep user null in that case.
+    setUser(res.requiresVerification ? null : (res.user ?? null));
+    setRequiresVerification(!!res.requiresVerification);
+    setVerificationStep(res.verificationStep ?? null);
+    setMaskedPhone(res.maskedPhone ?? null);
+  }, []);
 
   const refresh = useCallback(async (): Promise<AppUser | null> => {
     if (typeof window === "undefined") return null;
-    if (!localStorage.getItem(TOKEN_KEY)) {
-      setUser(null);
-      return null;
-    }
+    // No localStorage check — session lives in the httpOnly cookie.
+    // A 401 from /me means no valid session; the catch handles it.
     try {
       const me = await apiGet<AppUser>("/auth/me");
       setUser(me);
+      const needsEmail = !me.emailVerified;
+      setRequiresVerification(me.status === "pending_verification" || needsEmail);
+      setVerificationStep(needsEmail ? "email" : null);
       return me;
     } catch {
-      localStorage.removeItem(TOKEN_KEY);
       setUser(null);
+      setVerificationStep(null);
       return null;
     }
   }, []);
 
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
+    let active = true;
+
+    (async () => {
+      try {
+        await refresh();
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [refresh]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiPost<AuthResponse>("/auth/login", { email, password });
-    localStorage.setItem(TOKEN_KEY, res.access_token);
-    setUser(res.user);
-    return res.user;
+    applyAuthResponse(res);
+    return res;
+  }, [applyAuthResponse]);
+
+  const register = useCallback(
+    async (role: SelfRegisterRole, payload: RegisterPayload) => {
+      const path =
+        role === "customer"
+          ? "/auth/register/customer"
+          : role === "rental_provider"
+            ? "/auth/register/rental-provider"
+            : "/auth/register/service-provider";
+      const res = await apiPost<AuthResponse>(path, payload);
+      applyAuthResponse(res);
+      return res;
+    },
+    [applyAuthResponse],
+  );
+
+  const verifyOtp = useCallback(async (code: string) => {
+    const res = await apiPost<AuthResponse>("/auth/otp/verify", { code });
+    applyAuthResponse({ ...res, requiresVerification: false });
+    return res;
+  }, [applyAuthResponse]);
+
+  const requestOtp = useCallback(async () => {
+    return apiPost<{ sent: boolean; maskedPhone: string }>("/auth/otp/request", {});
   }, []);
 
-  const register = useCallback(async (payload: RegisterPayload) => {
-    const res = await apiPost<AuthResponse>("/auth/register", payload);
-    localStorage.setItem(TOKEN_KEY, res.access_token);
-    setUser(res.user);
-    return res.user;
+  const forgotPassword = useCallback(async (email: string) => {
+    return apiPost<{ sent: boolean; maskedPhone: string }>("/auth/forgot-password", { email });
+  }, []);
+
+  const resetPassword = useCallback(async (email: string, code: string, newPassword: string) => {
+    return apiPost<{ reset: boolean }>("/auth/reset-password", { email, code, newPassword });
   }, []);
 
   const signOut = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
+    // Ask the proxy to clear the httpOnly cookie.
+    apiPost("/auth/logout").catch(() => {});
     setUser(null);
+    setRequiresVerification(false);
+    setVerificationStep(null);
+    setMaskedPhone(null);
   }, []);
 
   return (
@@ -125,8 +216,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         loading,
+        requiresVerification,
+        verificationStep,
+        maskedPhone,
         login,
         register,
+        verifyOtp,
+        requestOtp,
+        forgotPassword,
+        resetPassword,
         refresh,
         signOut,
       }}

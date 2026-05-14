@@ -1,25 +1,58 @@
+/**
+ * Login page (/login)
+ *
+ * Email + password form. On success, AuthContext stores the session in an
+ * httpOnly cookie via the /api proxy — no JWT ever touches client JS.
+ *
+ * If the user is pending email verification, redirects to /verify-email.
+ * After successful login, redirects to the role-specific dashboard via
+ * dashboardPath(user.role) from AuthContext.
+ *
+ * ?redirect= query param preserves the originally requested URL so the user
+ * lands where they intended after logging in.
+ */
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, FormEvent } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState, FormEvent, Suspense } from "react";
+import { Eye, EyeOff } from "lucide-react";
+import { useAuth, dashboardPath, verificationPath } from "@/contexts/AuthContext";
+import {
+  AuthShell,
+  FormField,
+  Alert,
+  PrimaryButton,
+  inputClass,
+} from "@/components/auth/AuthShell";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const params = useSearchParams();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** Show a success banner when redirected from /forgot-password after reset */
+  const justReset = params.get("reset") === "1";
+  /** Show a success banner when email was confirmed but session had expired */
+  const emailVerified = params.get("emailVerified") === "1";
+  const redirect = params.get("redirect");
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      router.push("/v2");
+      const res = await login(email, password);
+      router.push(
+        res.requiresVerification
+          ? `${verificationPath(res.verificationStep)}?email=${encodeURIComponent(email.trim().toLowerCase())}`
+          : (redirect ?? dashboardPath(res.user?.role ?? "customer")),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -28,83 +61,91 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-neutral-50 p-6">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-neutral-200 p-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Sign in to UpNow</h1>
-        <p className="text-sm text-neutral-500 mt-1">
-          Welcome back — enter your credentials below.
-        </p>
-
-        <form onSubmit={onSubmit} className="mt-6 space-y-4">
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            autoComplete="email"
-            required
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            autoComplete="current-password"
-            required
-          />
-
-          {error && (
-            <div className="text-sm rounded-md bg-red-50 text-red-700 px-3 py-2">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full bg-neutral-900 hover:bg-neutral-800 disabled:bg-neutral-400 text-white font-medium py-2.5 rounded-lg transition"
-          >
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-
-        <p className="text-sm text-neutral-600 mt-6 text-center">
+    <AuthShell
+      title="Welcome back"
+      subtitle="One sign-in for tenants, rental providers, and service providers."
+      footer={
+        <p className="text-sm text-center" style={{ color: "var(--neutral-700)" }}>
           New to UpNow?{" "}
-          <Link href="/register" className="text-neutral-900 font-medium underline-offset-4 hover:underline">
-            Create an account
+          <Link
+            href="/#signup"
+            className="font-medium underline-offset-4 hover:underline"
+            style={{ color: "var(--primary)" }}
+          >
+            Choose your sign-up
           </Link>
         </p>
-      </div>
-    </main>
+      }
+    >
+      <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+        {justReset && (
+          <Alert kind="success">
+            Password updated successfully. Sign in with your new password.
+          </Alert>
+        )}
+        {emailVerified && (
+          <Alert kind="success">
+            Your email has been verified. Sign in to continue.
+          </Alert>
+        )}
+
+        <FormField label="Email address">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+            required
+            className={inputClass}
+          />
+        </FormField>
+
+        <FormField label="Password">
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+              className={inputClass}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((s) => !s)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              className="absolute top-1/2 -translate-y-1/2"
+              style={{ insetInlineEnd: 12, color: "var(--neutral-500)" }}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </FormField>
+
+        <div className="flex justify-end -mt-1">
+          <Link
+            href="/forgot-password"
+            className="text-sm font-medium underline-offset-4 hover:underline"
+            style={{ color: "var(--primary)" }}
+          >
+            Forgot password?
+          </Link>
+        </div>
+
+        {error && <Alert kind="error">{error}</Alert>}
+
+        <PrimaryButton loading={submitting}>Sign in</PrimaryButton>
+      </form>
+    </AuthShell>
   );
 }
 
-function Field({
-  label,
-  type,
-  value,
-  onChange,
-  autoComplete,
-  required,
-}: {
-  label: string;
-  type: string;
-  value: string;
-  onChange: (v: string) => void;
-  autoComplete?: string;
-  required?: boolean;
-}) {
+export default function LoginPage() {
   return (
-    <label className="block">
-      <span className="block text-sm font-medium text-neutral-700 mb-1">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        autoComplete={autoComplete}
-        required={required}
-        className="w-full border border-neutral-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900"
-      />
-    </label>
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

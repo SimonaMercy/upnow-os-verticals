@@ -8,14 +8,14 @@ import {
   Settings, HelpCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 
 const customerDropdownItems = [
-  { label: 'My Spaces',          icon: Building2,    href: '/dashboard?section=spaces' },
-  { label: 'My Services',        icon: Calendar,     href: '/dashboard?section=bookings' },
-  { label: 'Messages',           icon: MessageSquare,href: '/dashboard?section=messages' },
+  { label: 'My Spaces',          icon: Building2,    href: '/dashboard/customer/spaces' },
+  { label: 'My Services',        icon: Calendar,     href: '/dashboard/customer/bookings' },
+  { label: 'Messages',           icon: MessageSquare,href: '/dashboard/customer/messages' },
   { divider: true },
-  { label: 'Account Settings',   icon: Settings,     href: '/dashboard?section=profile' },
+  { label: 'Account Settings',   icon: Settings,     href: '/dashboard/customer/settings' },
   { label: 'Help Center',        icon: HelpCircle,   href: '/help-center' },
 ] as const;
 
@@ -43,33 +43,24 @@ export function Navbar() {
   const isServiceProviderContext = pathname?.startsWith('/providers/services') || pathname?.startsWith('/signup/service-provider');
   const isSpaceProviderContext = pathname?.startsWith('/providers/spaces') || pathname?.startsWith('/signup/space-provider');
 
+  // T-107 — Auth routes (Sign Up always lands on the role-choice landing
+  // section because the platform must NOT have a generic /register).
   const signUpPath = isServiceProviderContext
-    ? '/signup/service-provider'
+    ? '/register/service-provider'
     : isSpaceProviderContext
-      ? '/signup/space-provider'
-      : '/auth/signup';
+      ? '/register/rental-provider'
+      : '/#signup';
 
-  const signInPath = isServiceProviderContext || isSpaceProviderContext
-    ? '/portal/login'
-    : '/auth/signin';
-
-  const getDashboardPath = () => {
-    const role = user?.role as string | undefined;
-    if (role === 'service_provider' || role === 'service-provider') return '/dashboard/provider/services';
-    if (role === 'technician') return '/dashboard/technician';
-    if (role === 'manager') return '/manager/dashboard';
-    if (role === 'space_provider' || role === 'space-provider') return '/dashboard/rental-provider';
-    return '/dashboard';
-  };
+  const signInPath = '/login';
 
   const handleSignOut = () => {
     signOut();
     router.push('/');
   };
 
-  // role check: support both 'customer' and 'tenant' role names
+  // role check for customer dashboard link
   const role = user?.role as string | undefined;
-  const isCustomerRole = role === 'customer' || role === 'tenant';
+  const isCustomerRole = role === 'customer';
 
   const displayName = user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ');
   const initials = displayName?.charAt(0)?.toUpperCase() ?? 'U';
@@ -88,7 +79,7 @@ export function Navbar() {
           {/* Desktop links */}
           <div className="hidden md:flex items-center gap-8">
             <Link href="/services" className="font-[500] hover:text-primary transition-colors" style={{ color: 'var(--neutral-700)', fontSize: 16 }}>Services</Link>
-            <Link href="/spaces"   className="font-[500] hover:text-primary transition-colors" style={{ color: 'var(--neutral-700)', fontSize: 16 }}>Spaces</Link>
+            <Link href="/listings" className="font-[500] hover:text-primary transition-colors" style={{ color: 'var(--neutral-700)', fontSize: 16 }}>Spaces</Link>
             <Link href="/about"    className="font-[500] hover:text-primary transition-colors" style={{ color: 'var(--neutral-700)', fontSize: 16 }}>About Us</Link>
           </div>
 
@@ -147,7 +138,7 @@ export function Navbar() {
               </div>
               ) : (
                 <>
-                  <Link href={getDashboardPath()}>
+                  <Link href={user?.role ? dashboardPath(user.role) : '/dashboard'}>
                     <Button variant="primary" size="sm">{displayName?.split(' ')[0] || 'Dashboard'}</Button>
                   </Link>
                   <button
@@ -216,7 +207,7 @@ export function Navbar() {
             <div className="flex flex-col gap-3">
               {isAuthenticated ? (
                 <>
-                  <Link href={getDashboardPath()} onClick={() => setDrawerOpen(false)}>
+                  <Link href={user?.role ? dashboardPath(user.role) : '/dashboard'} onClick={() => setDrawerOpen(false)}>
                     <Button variant="primary" size="md" className="w-full">Dashboard</Button>
                   </Link>
                   <Button variant="secondary" size="md" className="w-full" onClick={() => { setDrawerOpen(false); handleSignOut(); }}>

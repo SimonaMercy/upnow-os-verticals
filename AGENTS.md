@@ -91,3 +91,61 @@ npm run lint     # eslint
 - Don't store JWTs in `localStorage` — use httpOnly cookies via route handlers.
 - Don't import server-only modules into client components.
 - Don't commit `.env.local` or anything from `.next/`.
+
+---
+
+## Implemented Architecture Decisions (session May 14, 2026)
+
+### Document Management — Single Source of Truth
+
+**Decision**: All customer document upload/management lives in ONE place only.
+
+| Surface | What it shows |
+|---|---|
+| `app/dashboard/(dashboard)/customer/spaces/page.tsx` → `RentalDocumentsCard` | **THE upload hub** — all required, landlord-requested, and free-form docs |
+| `app/dashboard/(dashboard)/customer/contracts/[id]/page.tsx` | **No documents** — Documents tab, drawer, sidebar nav entry and all upload state removed |
+
+**Do not re-add document upload UI to the contract detail page.** The contract page is read-only for documents.
+
+### RentalDocumentsCard (spaces/page.tsx — line ~849)
+
+Standalone component used in `ExpandedDetail` and `DirectExpandedDetail` (both with-contract and no-contract branches). Key internals:
+
+- **`handleUpload(req, file, existingDocId?)`** — upload for a known doc key (required or landlord-requested). Uses presigned URL → PUT → POST `/api/documents`.
+- **`handleFreeUpload()`** — free-form attach with custom label. `ownerType: 'tenant_profile'`, `ownerId: tenantProfileId`. Form state: `showAttach`, `attachLabel`, `attachFile`, `attaching`, `attachError`, `attachInputRef`.
+- **Priority sort rank**: 0=rejected required, 1=rejected landlord, 2=required missing, 3=landlord pending (no file), 4=optional missing, 5=uploaded pending review, 6=landlord uploaded pending, 7=approved required, 8=approved landlord.
+- **Summary banner** above doc list: amber pills for missing required, red pills for rejected — shows exact document names.
+- **Header counter**: `X/Y uploaded` (amber) when incomplete → `All required ✓` (green) when done.
+
+### RP Contract Timeline (rental-provider/dashboard/contracts/[id]/page.tsx)
+
+Clean **6-step** timeline for non-renewal:
+1. Contract Issued → 2. Payment Collection → 3. Signatures → 4. Ejari Registration → 5. Move-In & DEWA → 6. Active Tenancy
+
+The `ContractDetail` interface has **no `viewing` field** on the frontend. The backend still returns it (reserved for future move-in checklist feature) — do not add it back to the TS interface unless you are building that feature.
+
+Renewal branch is separate and unchanged: Terms Agreed (1) → Signatures (2) → Ejari Renewal (3) → Active Renewal (4).
+
+### Customer Contract Detail Page (contracts/[id]/page.tsx)
+
+Tabs present: **Parties · Property · Period · Payments · Clauses**. The `documents` tab was intentionally removed. Do not add it back. Imports `Paperclip`, `UploadCloud`, `ExternalLink` are gone from this file — do not re-add them for a documents purpose.
+
+### Backend — contracts.module.ts / contracts.service.ts
+
+`Lead` and `Viewing` are registered in `ContractsModule.forFeature` and `leadRepo`/`viewingRepo` are injected in `ContractsService`. `getContractById` returns a `viewing` key in the response (latest viewing for that lead). The frontend RP page does not consume this field today — it is **reserved** for the move-in inspection feature (SCRUM-403). Do not remove the backend enrichment.
+
+### Pending DB migration (run before next deploy)
+
+```sql
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'rejected';
+```
+
+### Open next task — Unified Document Hub (CID-328-FE)
+
+See BACKLOG.md Sprint 4 for the full spec. Short version:
+- New page: `/dashboard/customer/documents`
+- Section A: Identity/KYC (all customers)
+- Section B: Rental docs (only when active tenancy/lead exists)
+- Section C: Free-form uploads
+- `RentalDocumentsCard` becomes a compact status chip + "Manage Documents →" link
+- `TenancyJourneyPanel` Step 3 becomes a link to this page, no inline upload

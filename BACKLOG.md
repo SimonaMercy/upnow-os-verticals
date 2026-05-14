@@ -20,11 +20,12 @@ Goal: registration, login, OTP, password reset, KYC upload UI; admin invite acce
 
 | Status | Ticket | Surface | Summary |
 |---|---|---|---|
-| 🔵 | SCRUM-1xx | `app/v2/(auth)/register` | Registration form (RHF + Zod) with phone OTP step |
-| 🔵 | SCRUM-1xx | `app/v2/(auth)/login` | Login + "Stay logged in" silent refresh |
-| 🔵 | SCRUM-1xx | `app/v2/(auth)/forgot-password` | OTP-based reset flow |
-| 🔵 | SCRUM-1xx | `app/v2/dashboard/profile/kyc` | KYC document upload (presigned URL flow) |
-| 🔵 | SCRUM-1xx | `app/invite/[token]` | Manager/technician invite acceptance |
+| � | SCRUM-101 | `app/login` | Login form (RHF + Zod) · `d6905c8` |
+| 🟢 | SCRUM-102 | `app/register/customer`, `app/register/rental-provider`, `app/register/service-provider` | Registration forms · `d6905c8` |
+| 🟢 | SCRUM-103 | `app/verify`, `app/verify-email` | OTP verification + email confirm landing · `d6905c8` |
+| 🟢 | SCRUM-104 | `app/forgot-password` | OTP-based password reset flow · `d6905c8` |
+| 🟢 | SCRUM-105 | `app/invite/[token]` | Manager/technician invite acceptance · `d6905c8` |
+| 🔵 | SCRUM-1xx | `app/dashboard/profile/kyc` | KYC document upload (presigned URL flow) — page missing |
 
 SRS: [docs/sprint-01-srs.html](../docs/sprint-01-srs.html)
 
@@ -36,11 +37,10 @@ Goal: RP onboarding wizard, property listing wizard, public property browse.
 
 | Status | Ticket | Surface | Summary |
 |---|---|---|---|
-| 🔵 | SCRUM-2xx | `app/v2/onboarding/rp` | RP onboarding wizard (multi-step) |
-| 🔵 | SCRUM-2xx | `app/v2/dashboard/rp/properties/new` | Property listing wizard (mirrors `Mockups/upnow_property_listing_wizard_mockup.html`) |
-| 🔵 | SCRUM-2xx | `app/v2/dashboard/rp/properties` | Property list + status pills |
-| 🔵 | SCRUM-2xx | `app/v2/spaces` | Public browse (filters, map, cards) |
-| 🔵 | SCRUM-2xx | `app/v2/spaces/[slug]` | Space detail page + inquire CTA |
+| � | SCRUM-201 | `app/rental-provider/dashboard/onboarding` | RP onboarding wizard · `d6905c8` |
+| 🟢 | SCRUM-202 | `app/rental-provider/dashboard/portfolio`, `units`, `documents` | Property portfolio + units list · `d6905c8` |
+| 🟢 | SCRUM-203 | `app/rental-provider/dashboard` | RP dashboard (overview, leads, contracts, team) · `d6905c8` |
+| 🟢 | SCRUM-204 | `app/listings`, `app/listings/units/[id]` | Public browse + unit detail + inquire CTA · `d6905c8` || 🟢 | CID-201-FE | `app/rental-provider/dashboard/contracts/[id]` | **RP contract timeline**: Clean 6-step timeline (Contract Issued → Payment Collection → Signatures → Ejari → Move-In & DEWA → Active Tenancy). `viewing` field removed from `ContractDetail` interface. Renewal branch unchanged (4 steps). || 🔵 | SCRUM-2xx | `app/rental-provider/dashboard/portfolio/new` | Property listing wizard (multi-step) |
 
 SRS: [docs/sprint-02-srs.html](../docs/sprint-02-srs.html)
 
@@ -52,13 +52,13 @@ Goal: customer books service, escrow paid upfront, tracks technician, signs off;
 
 | Status | Ticket | Surface | Summary |
 |---|---|---|---|
-| 🔵 | SCRUM-3xx | `app/v2/services` | Service category browse (mirrors `Mockups/upnow_tenant_services_journey_mockup.html`) |
-| 🔵 | SCRUM-3xx | `app/v2/services/[slug]/book` | Booking flow with escrow payment upfront |
-| 🔵 | SCRUM-3xx | `app/v2/dashboard/customer/bookings/[id]` | Live booking tracker (Pending → Escrow Held → ... → Escrow Released) |
-| 🔵 | SCRUM-3xx | `app/v2/dashboard/sp` | SP dashboard (jobs, dispatch) |
-| 🔵 | SCRUM-3xx | `app/v2/dashboard/tech` | Technician day view + status updates + photo upload |
-| 🔵 | SCRUM-3xx | `app/v2/dashboard/customer/maintenance/new` | Maintenance request form |
-| 🔵 | SCRUM-3xx | `app/v2/dashboard/*/disputes/[id]` | Dispute detail + evidence upload |
+| � | SCRUM-301 | `app/services` | Service category browse · `d6905c8` |
+| 🟢 | SCRUM-302 | `app/dashboard/(dashboard)/service-provider` | SP dashboard (onboarding, profile, team, documents) · `d6905c8` |
+| 🟢 | SCRUM-303 | `app/dashboard/(dashboard)/technician` | Technician dashboard stub · `d6905c8` |
+| 🔵 | SCRUM-3xx | `app/services/[slug]/book` | Booking flow with escrow payment upfront |
+| 🔵 | SCRUM-3xx | `app/dashboard/customer/bookings/[id]` | Live booking tracker (status lifecycle) |
+| 🔵 | SCRUM-3xx | `app/dashboard/customer/maintenance/new` | Maintenance request form |
+| 🔵 | SCRUM-3xx | `app/dashboard/*/disputes/[id]` | Dispute detail + evidence upload |
 
 SRS: [docs/sprint-03-srs.html](../docs/sprint-03-srs.html)
 
@@ -72,12 +72,18 @@ Goal: lead pipeline, in-portal offer, contract sign, move-in inspection, renewal
 
 | Status | Ticket | Surface | Summary |
 |---|---|---|---|
-| 🔵 | SCRUM-4xx | `app/v2/dashboard/am/leads` | Leads kanban (New → Contacted → Viewing → Offer Sent → Approved → Converted) |
-| 🔵 | SCRUM-4xx | `app/v2/dashboard/am/leads/[id]/offer` | **Send offer directly from portal** |
-| 🔵 | SCRUM-4xx | `app/v2/dashboard/am/contracts/new` | Tenancy contract wizard (mirrors `Mockups/upnow_tenancy_contract_workflow_mockup.html`) |
-| 🔵 | SCRUM-4xx | `app/v2/dashboard/customer/contract` | Customer e-sign view |
-| 🔵 | SCRUM-4xx | `app/v2/dashboard/am/move-in/[id]` | Move-in inspection checklist + photo capture |
-| 🔵 | SCRUM-4xx | `app/v2/dashboard/am/renewals` | Renewal pipeline (90/60/30-day reminders) |
+| � | SCRUM-401 | `app/rental-provider/dashboard/leads` | Leads kanban (RP-side) · `d6905c8` |
+| 🟢 | SCRUM-402 | `app/rental-provider/dashboard/contracts/new`, `contracts/[id]`, `contracts/[id]/print` | Tenancy contract wizard + detail + print · `d6905c8` |
+| 🟢 | SCRUM-403 | `app/dashboard/(dashboard)/customer/contracts`, `customer/contracts/[id]` | Customer contract list + e-sign view · `d6905c8` |
+| 🟢 | CID-326-FE | `app/dashboard/(dashboard)/customer/contracts/[id]` | **Documents tab removed from contract detail page** — tab bar entry, drawer, sidebar nav entry, all upload state/functions, `Paperclip`/`UploadCloud`/`ExternalLink` imports all deleted. Document management is now solely in the My Spaces `RentalDocumentsCard`. No TS errors. |
+| 🟢 | CID-327-FE | `app/dashboard/(dashboard)/customer/spaces/page.tsx` — `RentalDocumentsCard` | **Document UX overhaul**: (1) Priority sorting — rejected first, then required missing, landlord-requested, optional unuploaded, pending review, approved. (2) Distinct icons per state: `AlertTriangle` (rejected), `UploadCloud` (needs upload), `Clock` (pending review), `CheckCircle2` (approved). (3) Left-border color accents by state. (4) Summary banner naming missing/rejected docs. (5) Header counter: `X/Y uploaded` (amber) → `All required ✓` (green). (6) **Free-form "Attach additional document"** inline form at card bottom — tenant can upload any extra document with a custom name via the same presigned-URL flow. |
+| 🟢 | SCRUM-404 | `app/dashboard/(dashboard)/customer/spaces`, `customer/viewings` | Customer spaces + viewing calendar · `d6905c8` |
+| 🔵 | SCRUM-4xx | `app/rental-provider/dashboard/leads/[id]/offer` | Send offer directly from portal |
+| 🔵 | SCRUM-4xx | `app/rental-provider/dashboard/move-in/[id]` | Move-in inspection checklist + photo capture |
+| 🔵 | SCRUM-4xx | `app/rental-provider/dashboard/renewals` | Renewal pipeline (90/60/30-day reminders) |
+| 🔴 | GAP-G6 | `app/dashboard/customer/contracts/[id]` | Tenant e-sign canvas has no typed-name fallback — blocks automated testing |
+| 🔴 | GAP-G9 | `app/rental-provider/dashboard/contracts/[id]` | RP "Activate tenancy" button missing from contract detail page |
+| 🔵 | CID-328-FE | `app/dashboard/customer/documents` | **OPEN — Unified Document Hub**: Create `/dashboard/customer/documents` page with Section A (Identity/KYC, always shown), Section B (Rental docs, shown when tenancy exists), Section C (free-form uploads). Replace `RentalDocumentsCard` inline card with a compact status summary + "Manage Documents →" link. Update `TenancyJourneyPanel` Step 3 to be a simple link to this page. Replace dashboard stat card to show real doc count. See session context for full spec. |
 
 SRS: [docs/sprint-04-srs.html](../docs/sprint-04-srs.html)
 

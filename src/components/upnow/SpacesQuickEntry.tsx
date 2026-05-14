@@ -56,7 +56,7 @@ export function SpacesQuickEntry() {
         <div className="mt-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {spaces.map((s) => (
             <Link
-              href={s.categoryParam ? `/spaces?category=${encodeURIComponent(s.categoryParam)}` : '/spaces'}
+              href={s.categoryParam ? `/listings?category=${s.categoryParam.toLowerCase()}` : '/listings'}
               key={s.title}
               className="group relative flex flex-col justify-between overflow-hidden"
               style={{

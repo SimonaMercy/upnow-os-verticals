@@ -12,7 +12,7 @@
   --color-gold-light:    #f5d97a;
 
   /* === Base / Background === */
-  --color-base:          #fafaf8;
+  --color-surface:       #fafaf8;   /* renamed from --color-base to avoid colliding with Tailwind's text-base font-size utility */
   --color-base-100:      #f4f3ef;
   --color-base-200:      #e8e6e0;
 
@@ -64,6 +64,51 @@
   padding-inline: 24px;
 }
 
+/* ── Dual range slider ──────────────────────────────────────── */
+input[type="range"].dual-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+}
+input[type="range"].dual-range::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 4px;
+}
+input[type="range"].dual-range::-moz-range-track {
+  background: transparent;
+  height: 4px;
+}
+input[type="range"].dual-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  border: 2px solid #2e9f82;
+  cursor: pointer;
+  pointer-events: all;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+  margin-top: -8px;
+}
+input[type="range"].dual-range::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  border: 2px solid #2e9f82;
+  cursor: pointer;
+  pointer-events: all;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+}
+input[type="range"].dual-range:focus {
+  outline: none;
+}
+input[type="range"].dual-range:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(46,159,130,0.25);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -104,4 +149,83 @@ html, body {
 .skeleton-pulse {
   animation: skeleton-pulse 1.5s ease-in-out infinite;
   background-color: #e8e6e0;
+}
+
+/* ── react-day-picker v9 theme overrides ──────────────────────── */
+.rdp-root {
+  --rdp-accent-color:            #2e9f82;
+  --rdp-accent-background-color: #d8f2e8;
+  --rdp-today-color:             #2e9f82;
+  --rdp-day-height:              38px;
+  --rdp-day-width:               38px;
+  --rdp-day_button-height:       36px;
+  --rdp-day_button-width:        36px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+  color: #1a1916;
+}
+
+/* Caption (month + year label row) */
+.rdp-month_caption {
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+}
+
+/* Dropdown trigger labels */
+.rdp-caption_label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1a1916;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  transition: background 150ms;
+}
+.rdp-caption_label:hover {
+  background: #f4f3ef;
+}
+
+/* Weekday header row */
+.rdp-weekday {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #9b9890;
+}
+
+/* Day buttons */
+.rdp-day_button {
+  border-radius: 0.5rem !important;
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+/* Today indicator */
+.rdp-today:not(.rdp-selected) .rdp-day_button {
+  font-weight: 700;
+  color: #2e9f82;
+}
+
+/* Navigation prev/next buttons */
+.rdp-button_previous,
+.rdp-button_next {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms;
+}
+.rdp-button_previous:hover,
+.rdp-button_next:hover {
+  background: #f4f3ef;
+}
+
+/* Chevron inside nav buttons and dropdowns */
+.rdp-chevron {
+  fill: #3d3b35 !important;
+}
+/* Disabled dropdown chevron */
+.rdp-dropdown_root[data-disabled="true"] .rdp-chevron {
+  fill: #9b9890 !important;
 }

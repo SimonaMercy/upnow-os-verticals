@@ -39,7 +39,6 @@ const cols = [
       { text: 'Residential', href: '/spaces?category=Residential' },
       { text: 'Commercial',  href: '/spaces?category=Commercial' },
       { text: 'Industrial',  href: '/spaces?category=Industrial' },
-      { text: 'Venues',      href: '/spaces?category=Venues' },
       { text: 'View all spaces →', href: '/spaces' },
     ],
   },
