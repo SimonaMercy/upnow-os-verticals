@@ -1,160 +1,130 @@
+/**
+ * Reports landing page — lists every report card and routes to the slug detail
+ * page when available. Reports without backend data yet show as "Coming soon".
+ *
+ * The four `available: true` reports route to /reports/<slug> which fetches
+ * `/api/reports/<slug>` and renders an interactive table + CSV + PDF.
+ */
 'use client';
 
 import { useState } from 'react';
-import { Search, X, Download, FileText, BarChart2 } from 'lucide-react';
+import Link from 'next/link';
+import {
+  Search, X, FileText, BarChart2, Building2, AlertCircle, CalendarClock,
+  RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart,
+} from 'lucide-react';
 
-type ReportMode = 'monthly' | 'yearly';
-
-const REPORT_LIST = [
-  'Occupancy Report',
-  'Receivables Summary',
-  'Collection Rate Report',
-  'Security Deposits Report',
-  'Lease Expiry Report',
-  'Renewal Pipeline Report',
-  'Vacancy Analysis',
-  'Tenant Ledger',
-  'AMC & Vendor Spend',
-  'Income Statement',
-  'Portfolio Overview',
-  'Manager Performance Report',
-];
-
-function getCardSummary(name: string, period: string): string {
-  return `No data available for ${name} in ${period}`;
+interface ReportTile {
+  slug: string;
+  title: string;
+  description: string;
+  Icon: React.ComponentType<{ size?: number; className?: string }>;
+  available: boolean;
 }
 
+const REPORTS: ReportTile[] = [
+  { slug: 'occupancy',          title: 'Occupancy Report',         description: 'Units, occupied counts, and contracted rent per property.',           Icon: Building2,    available: true  },
+  { slug: 'receivables',        title: 'Receivables Summary',      description: 'Outstanding cheques aged 0-30 / 31-60 / 61-90 / 90+.',                Icon: Wallet,       available: true  },
+  { slug: 'lease-expiry',       title: 'Lease Expiry Report',      description: 'Active contracts ending within 30 / 60 / 90 / 180 / 365 days.',       Icon: CalendarClock, available: true },
+  { slug: 'renewal-pipeline',   title: 'Renewal Pipeline Report',  description: 'Renewals by stage with annual rent delta.',                           Icon: RefreshCw,    available: true  },
+  { slug: 'collection-rate',    title: 'Collection Rate Report',   description: 'Collected vs scheduled rent, by period.',                              Icon: BarChart2,    available: false },
+  { slug: 'security-deposits',  title: 'Security Deposits Report', description: 'Deposits held, status, and refund obligations.',                       Icon: ShieldCheck,  available: false },
+  { slug: 'vacancy-analysis',   title: 'Vacancy Analysis',         description: 'Time-on-market, turnover, and listing price changes.',                 Icon: MapPin,       available: false },
+  { slug: 'tenant-ledger',      title: 'Tenant Ledger',            description: 'Per-tenant payment history and balance.',                              Icon: FileText,     available: false },
+  { slug: 'portfolio-overview', title: 'Portfolio Overview',       description: 'Properties, units, types, and emirate breakdown.',                     Icon: FileBarChart, available: false },
+  { slug: 'income-statement',   title: 'Income Statement',         description: 'Revenue by stream — rent, admin, ejari, deposits.',                    Icon: BarChart2,    available: false },
+  { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false },
+  { slug: 'manager-performance', title: 'Manager Performance Report', description: 'Per-asset-manager activity and deal velocity.',                     Icon: Users,        available: false },
+];
+
 export default function ReportsPage() {
-  const [mode, setMode] = useState<ReportMode>('monthly');
-  const [period, setPeriod] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
-  const [yearPeriod, setYearPeriod] = useState(String(new Date().getFullYear()));
   const [search, setSearch] = useState('');
-  const [generating, setGenerating] = useState<string | null>(null);
-
-  const currentPeriod = mode === 'monthly' ? period : yearPeriod;
-
-  const periodLabel = mode === 'yearly'
-    ? currentPeriod
-    : (() => {
-        const [y, m] = currentPeriod.split('-');
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        return `${months[parseInt(m, 10) - 1] ?? 'Jan'} ${y}`;
-      })();
-
-  const filteredReports = REPORT_LIST.filter(r => r.toLowerCase().includes(search.toLowerCase()));
-
-  const handleGenerate = async (name: string) => {
-    setGenerating(name);
-    await new Promise(r => setTimeout(r, 800));
-    setGenerating(null);
-    // Toast / download would go here when backend is ready
-    alert(`Report generation coming in Sprint 5 (${name})`);
-  };
-
-  const years = ['2023', '2024', '2025', '2026', '2027'];
+  const filtered = REPORTS.filter(r =>
+    r.title.toLowerCase().includes(search.toLowerCase())
+    || r.description.toLowerCase().includes(search.toLowerCase()),
+  );
+  const available = filtered.filter(r => r.available);
+  const upcoming = filtered.filter(r => !r.available);
 
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Generate and download portfolio reports.</p>
-        </div>
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-800">
-          <span className="font-semibold">Sprint 5</span> — Live report data coming soon
+          <p className="text-sm text-[#6b6860] mt-0.5">Interactive portfolio reports — view inline, download CSV, or print as PDF.</p>
         </div>
       </div>
 
-      {/* Controls bar */}
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        {/* Mode toggle */}
-        <div className="flex gap-2">
-          {(['monthly', 'yearly'] as ReportMode[]).map(m => (
-            <button
-              key={m}
-              onClick={() => {
-                setMode(m);
-                if (m === 'yearly') setYearPeriod(String(new Date().getFullYear()));
-              }}
-              className={`px-4 py-2 rounded-full text-sm font-medium capitalize cursor-pointer transition-colors ${mode === m ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#3d3b35]'}`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
-        {/* Period selector */}
-        {mode === 'monthly' ? (
-          <input
-            type="month"
-            value={period}
-            onChange={e => setPeriod(e.target.value)}
-            className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm"
-          />
-        ) : (
-          <select value={yearPeriod} onChange={e => setYearPeriod(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white">
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-        )}
-      </div>
-
-      {/* Search */}
-      <div className="relative mb-6 max-w-sm">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+      <div className="relative max-w-sm mb-6">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
         <input
           type="text"
           placeholder="Search reports…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
+          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]"
         />
         {search && (
-          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-[#9b9890]">
-            <X size={14} />
+          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] hover:text-[#1a1916]">
+            <X size={12} />
           </button>
         )}
       </div>
 
-      {/* Report cards grid */}
-      {filteredReports.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <BarChart2 size={32} className="text-[#c9c7c1] mb-3" />
-          <p className="text-sm text-[#6b6860]">No reports match your search</p>
+      {filtered.length === 0 ? (
+        <div className="text-center py-16">
+          <BarChart2 size={32} className="mx-auto text-[#c8c6c0] mb-3" />
+          <p className="text-sm text-[#6b6860]">No reports match your search.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredReports.map((r, i) => (
-            <div key={i} className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <FileText size={16} className="text-[#2e9f82] shrink-0" />
-                <h3 className="font-semibold text-base text-[#1a1916] leading-tight">{r}</h3>
+        <>
+          {available.length > 0 && (
+            <>
+              <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">Available now</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+                {available.map(r => (
+                  <Link
+                    key={r.slug}
+                    href={`/rental-provider/dashboard/reports/${r.slug}`}
+                    className="group bg-white rounded-2xl border border-[#e8e6e0] p-5 shadow-sm hover:border-[#2e9f82] hover:shadow-md transition-all">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#f0faf6] flex items-center justify-center shrink-0 group-hover:bg-[#2e9f82] transition-colors">
+                        <r.Icon size={18} className="text-[#2e9f82] group-hover:text-white transition-colors" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-bold text-[#1a1916] leading-tight">{r.title}</h3>
+                        <p className="text-xs text-[#6b6860] mt-1 line-clamp-2">{r.description}</p>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
               </div>
-              <p className="text-sm text-[#6b6860] mt-1 mb-4 line-clamp-2">
-                {getCardSummary(r, periodLabel)}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => handleGenerate(r)}
-                  disabled={generating === r}
-                  className="text-xs text-white rounded-lg px-3 py-1.5 font-medium cursor-pointer disabled:opacity-50 transition-colors"
-                  style={{ background: generating === r ? '#9b9890' : '#2e9f82' }}
-                >
-                  {generating === r ? 'Generating…' : 'Generate'}
-                </button>
-                <button className="text-xs text-[#2e9f82] border border-[#2e9f82] rounded-lg px-3 py-1.5 font-medium cursor-pointer flex items-center gap-1">
-                  <Download size={11} /> PDF
-                </button>
-                <button className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-3 py-1.5 cursor-pointer flex items-center gap-1">
-                  <Download size={11} /> CSV
-                </button>
+            </>
+          )}
+
+          {upcoming.length > 0 && (
+            <>
+              <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3 mt-4 flex items-center gap-1.5">
+                <AlertCircle size={11} /> Coming soon — needs additional data tracking
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {upcoming.map(r => (
+                  <div key={r.slug} className="bg-white rounded-2xl border border-[#e8e6e0] p-5 opacity-60">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#f4f3ef] flex items-center justify-center shrink-0">
+                        <r.Icon size={18} className="text-[#9b9890]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-bold text-[#6b6860] leading-tight">{r.title}</h3>
+                        <p className="text-xs text-[#9b9890] mt-1 line-clamp-2">{r.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
-          ))}
-        </div>
+            </>
+          )}
+        </>
       )}
     </div>
   );

@@ -2,8 +2,9 @@
  * Rental Provider — Contract Detail page (rental-provider/dashboard/contracts/[id])
  *
  * Full contract management view for the RP. Includes:
- *   - 6-step non-renewal timeline: Contract Issued → Payment Collection →
- *     Signatures → Ejari Registration → Move-In & DEWA → Active Tenancy
+ *   - 5-step non-renewal timeline: Contract Issued → Signatures → Ejari
+ *     Registration → Move-In & Utility → Active Tenancy
+ *     (Payment collection happens upstream on the lead/plan, not on the contract.)
  *   - 4-step renewal timeline (separate branch): Terms Agreed → Signatures
  *     → Ejari Renewal → Active Renewal
  *   - Payment ledger, security deposits, signatures, custom clauses
@@ -26,7 +27,7 @@ import {
   User, Building2, Calendar, DollarSign, Pencil, RotateCcw,
   FileSignature, Download, BadgeCheck, ChevronDown, ChevronUp,
   ClipboardList, Plus, Trash2, Paperclip, UploadCloud, ExternalLink,
-  CreditCard, ListChecks, Eye, ChevronRight,
+  CreditCard, ListChecks, Eye, ChevronRight, ClipboardCheck,
 } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -67,6 +68,9 @@ interface ContractDetail {
   ejariStatus: string | null;
   contractActive: boolean;
   contractSent: boolean;
+  pdcConfirmed: boolean;
+  pdcConfirmedAt: string | null;
+  tenantChequesSubmittedAt: string | null;
   startDate: string;
   endDate: string;
   durationYears: number | null;
@@ -80,6 +84,17 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
+  // Renewal fields (SCRUM-272/273)
+  renewalAccepted: 'pending' | 'accepted' | 'rejected' | null;
+  renewalStatus: string | null;
+  termination: {
+    requestedByRole: 'tenant' | 'rental_provider' | null;
+    requestedAt: string | null;
+    reason: string | null;
+    effectiveDate: string | null;
+    response: 'pending' | 'accepted' | 'rejected' | null;
+    respondedAt: string | null;
+  } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
@@ -395,6 +410,7 @@ export default function ContractDetailPage() {
   const [addingInstalment, setAddingInstalment] = useState(false);
   const [newInstalment, setNewInstalment] = useState({ description: '', amount: '', chequeNumber: '', transactionDate: '' });
   const [docs, setDocs] = useState<ContractDoc[]>([]);
+  const [tenantUtilityDoc, setTenantUtilityDoc] = useState<ContractDoc | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
@@ -407,8 +423,30 @@ export default function ContractDetailPage() {
   const [hasTenantSigned, setHasTenantSigned] = useState(false);
   const [moveInConfirmed, setMoveInConfirmed] = useState(false);
   const [markingStep, setMarkingStep] = useState<string | null>(null);
-  const [rentChequesConsented, setRentChequesConsented] = useState(false);
+  const [confirmingPdc, setConfirmingPdc] = useState(false);
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null);
+  const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
+  const [terminateReason, setTerminateReason] = useState('');
+  const [terminateEffectiveDate, setTerminateEffectiveDate] = useState('');
+  const [terminateSubmitting, setTerminateSubmitting] = useState(false);
+  const [terminateError, setTerminateError] = useState<string | null>(null);
+  const [terminateResponding, setTerminateResponding] = useState(false);
+  // Renewal proposal (SCRUM-273)
+  const [showRenewalModal, setShowRenewalModal] = useState(false);
+  const [renewalSubmitting, setRenewalSubmitting] = useState(false);
+  const [renewalError, setRenewalError] = useState<string | null>(null);
+  const [renewalForm, setRenewalForm] = useState({
+    newAnnualRent: '',
+    newStartDate: '',
+    newEndDate: '',
+    numberOfInstallments: '4',
+    modeOfPayment: 'cheque',
+    samePayee: true,
+    chequePayeeName: '',
+    adminFee: '',
+    ejariFee: '',
+  });
+  const [renewalExtras, setRenewalExtras] = useState<Array<{ description: string; amount: string; dueDate: string }>>([]);
   const [tenantKycDocs, setTenantKycDocs] = useState<{ id: number; documentKey: string; displayName: string | null; fileUrl: string; status: string; notes: string | null }[] | null>(null);
   const [tenantKycLoading, setTenantKycLoading] = useState(false);
   const [reviewingDocId, setReviewingDocId] = useState<number | null>(null);
@@ -424,10 +462,11 @@ export default function ContractDetailPage() {
   const [ejariFile, setEjariFile] = useState<File | null>(null);
   const [ejariUploading, setEjariUploading] = useState(false);
   const [ejariError, setEjariError] = useState<string | null>(null);
-  const dewaInputRef = useRef<HTMLInputElement>(null);
-  const [dewaFile, setDewaFile] = useState<File | null>(null);
-  const [dewaUploading, setDewaUploading] = useState(false);
-  const [dewaError, setDewaError] = useState<string | null>(null);
+  const [ejariResetting, setEjariResetting] = useState(false);
+  const utilityInputRef = useRef<HTMLInputElement>(null);
+  const [utilityFile, setUtilityFile] = useState<File | null>(null);
+  const [utilityUploading, setUtilityUploading] = useState(false);
+  const [utilityError, setUtilityError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!params?.id) return;
@@ -450,22 +489,38 @@ export default function ContractDetailPage() {
         const hasTenantSig   = Array.isArray(sigs) && sigs.some((s: { role: string }) => s.role === 'tenant');
         if (hasLandlordSig) setSignedMode('online');
         if (hasTenantSig)   setHasTenantSigned(true);
-        // Restore cheque consent from localStorage
-        const stored = typeof window !== 'undefined' ? localStorage.getItem(`rent_cheques_consented_${data.id}`) : null;
-        if (stored === '1') setRentChequesConsented(true);
+
+        // Also check tenant's own documents for utility proof (uploaded by tenant or admin)
+        const tenantId = data?.tenant?.id;
+        if (tenantId) {
+          fetch(`/api/documents?ownerType=customer&ownerId=${tenantId}`, { credentials: 'include' })
+            .then(r => r.ok ? r.json() : [])
+            .then((tenantDocs: ContractDoc[]) => {
+              const utilityDocFound = Array.isArray(tenantDocs) ? tenantDocs.find((d) => d.documentKey === 'utility_proof_of_payment') : null;
+              if (utilityDocFound) setTenantUtilityDoc(utilityDocFound);
+            })
+            .catch(() => null);
+        }
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [params?.id]);
 
-  // Load tenant KYC docs when the Documents drawer opens
+  // Load tenant rental documents when the Documents drawer opens.
+  // For RENEWAL contracts the tenant uploads to ownerType='tenancy_contract', ownerId=<child id>
+  // (isolated per renewal). For the original lease, docs sit on the customer profile.
   useEffect(() => {
     if (activeDrawer !== 'documents') return;
     if (tenantKycDocs !== null) return; // already loaded
-    const tenantId = contract?.tenant?.id;
-    if (!tenantId) return;
+    if (!contract) return;
+    const tenantId = contract.tenant?.id;
+    const isRenewal = contract.contractType === 'renewal';
+    if (!isRenewal && !tenantId) return;
     setTenantKycLoading(true);
-    fetch(`/api/documents?ownerType=customer&ownerId=${tenantId}`, { credentials: 'include' })
+    const url = isRenewal
+      ? `/api/documents?ownerType=tenancy_contract&ownerId=${contract.id}`
+      : `/api/documents?ownerType=customer&ownerId=${tenantId}`;
+    fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
       .then(data => setTenantKycDocs(Array.isArray(data) ? data : []))
       .catch(() => setTenantKycDocs([]))
@@ -667,6 +722,25 @@ export default function ContractDetailPage() {
       setDocs(prev => [...prev, newDoc]);
       setEjariFile(null);
       if (ejariInputRef.current) ejariInputRef.current.value = '';
+
+      // Auto-progress: Ejari upload registers the contract with DLD and
+      // activates the tenancy in one step — no separate buttons needed.
+      const ejariRes = await fetch(`/api/contracts/${contract.id}/ejari`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ejariStatus: 'registered' }),
+      });
+      if (!ejariRes.ok) throw new Error('Failed to mark Ejari registered');
+      let updated = await ejariRes.json();
+
+      if (updated.status !== 'active') {
+        const actRes = await fetch(`/api/contracts/${contract.id}/activate`, {
+          method: 'PATCH', credentials: 'include',
+        });
+        if (!actRes.ok) throw new Error('Failed to activate tenancy');
+        updated = await actRes.json();
+      }
+      setContract(updated);
     } catch (e: unknown) {
       setEjariError(e instanceof Error ? e.message : 'Upload failed');
     } finally {
@@ -674,11 +748,31 @@ export default function ContractDetailPage() {
     }
   }
 
-  async function uploadDewaDoc(file: File) {
+  async function resetEjariUpload() {
     if (!contract) return;
-    setDewaUploading(true);
-    setDewaError(null);
-    const docKey = `dewa_${Date.now()}`;
+    if (!confirm('Roll the tenancy back to issued and clear the existing Ejari? You will then be able to upload a corrected certificate.')) return;
+    setEjariResetting(true);
+    setEjariError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/ejari/reset`, {
+        method: 'PATCH', credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const updated = await res.json();
+      setContract(updated);
+      setDocs(prev => prev.filter(d => !d.documentKey?.startsWith('ejari')));
+    } catch (e: unknown) {
+      setEjariError(e instanceof Error ? e.message : 'Failed to reset Ejari');
+    } finally {
+      setEjariResetting(false);
+    }
+  }
+
+  async function uploadUtilityDoc(file: File) {
+    if (!contract) return;
+    setUtilityUploading(true);
+    setUtilityError(null);
+    const docKey = `utility_${Date.now()}`;
     try {
       const urlRes = await fetch('/api/documents/upload-url', {
         method: 'POST', credentials: 'include',
@@ -695,17 +789,17 @@ export default function ContractDetailPage() {
       const docRes = await fetch('/api/documents', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, category: 'property', documentKey: docKey, displayName: 'DEWA Proof', fileUrl, mimeType: file.type || 'application/octet-stream', isVisibleToTenant: true }),
+        body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, category: 'property', documentKey: docKey, displayName: 'Utility Proof', fileUrl, mimeType: file.type || 'application/octet-stream', isVisibleToTenant: true }),
       });
       if (!docRes.ok) throw new Error('Failed to record document');
       const newDoc: ContractDoc = await docRes.json();
       setDocs(prev => [...prev, newDoc]);
-      setDewaFile(null);
-      if (dewaInputRef.current) dewaInputRef.current.value = '';
+      setUtilityFile(null);
+      if (utilityInputRef.current) utilityInputRef.current.value = '';
     } catch (e: unknown) {
-      setDewaError(e instanceof Error ? e.message : 'Upload failed');
+      setUtilityError(e instanceof Error ? e.message : 'Upload failed');
     } finally {
-      setDewaUploading(false);
+      setUtilityUploading(false);
     }
   }
 
@@ -770,6 +864,64 @@ export default function ContractDetailPage() {
     }
   }
 
+  async function submitProposeRenewal() {
+    if (!contract) return;
+    setRenewalError(null);
+
+    // Validation
+    const newRent = parseFloat(renewalForm.newAnnualRent);
+    if (!newRent || newRent <= 0) { setRenewalError('Enter a valid annual rent'); return; }
+    if (!renewalForm.newStartDate || !renewalForm.newEndDate) { setRenewalError('Pick start and end dates'); return; }
+    if (new Date(renewalForm.newStartDate) >= new Date(renewalForm.newEndDate)) {
+      setRenewalError('End date must be after start date');
+      return;
+    }
+
+    setRenewalSubmitting(true);
+    try {
+      const body: Record<string, unknown> = {
+        newAnnualRent: newRent,
+        newStartDate: renewalForm.newStartDate,
+        newEndDate: renewalForm.newEndDate,
+        numberOfInstallments: parseInt(renewalForm.numberOfInstallments, 10) || undefined,
+        modeOfPayment: renewalForm.modeOfPayment || undefined,
+      };
+      if (!renewalForm.samePayee && renewalForm.chequePayeeName.trim()) {
+        body.chequePayeeName = renewalForm.chequePayeeName.trim();
+      }
+      const adminFeeNum = parseFloat(renewalForm.adminFee);
+      const ejariFeeNum = parseFloat(renewalForm.ejariFee);
+      if (Number.isFinite(adminFeeNum) && adminFeeNum >= 0) body.adminFee = adminFeeNum;
+      if (Number.isFinite(ejariFeeNum) && ejariFeeNum >= 0) body.ejariFee = ejariFeeNum;
+      const cleanExtras = renewalExtras
+        .map(e => ({
+          description: e.description.trim(),
+          amount: parseFloat(e.amount),
+          dueDate: e.dueDate || undefined,
+        }))
+        .filter(e => e.description && Number.isFinite(e.amount) && e.amount > 0);
+      if (cleanExtras.length > 0) body.extraCharges = cleanExtras;
+      const res = await fetch(`/api/contracts/${contract.id}/renewal/propose`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => `Error ${res.status}`);
+        throw new Error(msg || `Error ${res.status}`);
+      }
+      // Refetch contract so the page reflects renewalAccepted='pending'
+      const refresh = await fetch(`/api/contracts/${contract.id}`, { credentials: 'include' });
+      if (refresh.ok) setContract(await refresh.json());
+      setShowRenewalModal(false);
+    } catch (e: unknown) {
+      setRenewalError(e instanceof Error ? e.message : 'Could not propose renewal');
+    } finally {
+      setRenewalSubmitting(false);
+    }
+  }
+
   async function markEjariRegistered() {
     if (!contract) return;
     setMarkingStep('ejari');
@@ -829,6 +981,71 @@ export default function ContractDetailPage() {
     }
   }
 
+  async function handleConfirmPdc() {
+    if (!contract) return;
+    setConfirmingPdc(true);
+    setFeeError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/confirm-pdc`, {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const updated = await res.json();
+      setContract(prev => prev ? { ...prev, pdcConfirmed: updated.pdcConfirmed ?? true, pdcConfirmedAt: updated.pdcConfirmedAt ?? null } : prev);
+    } catch (e: unknown) {
+      setFeeError(e instanceof Error ? e.message : 'Failed to confirm PDC collection');
+    } finally {
+      setConfirmingPdc(false);
+    }
+  }
+
+  async function submitTerminationRequest() {
+    if (!contract) return;
+    const reason = terminateReason.trim();
+    if (!reason) { setTerminateError('Please provide a reason'); return; }
+    if (!terminateEffectiveDate) { setTerminateError('Please pick an effective date'); return; }
+    setTerminateSubmitting(true);
+    setTerminateError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/termination/request`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, effectiveDate: terminateEffectiveDate }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as { message?: string }).message ?? `Error ${res.status}`); }
+      const updated = await res.json();
+      setContract(updated);
+      setShowTerminateConfirm(false);
+      setTerminateReason('');
+      setTerminateEffectiveDate('');
+    } catch (e: unknown) {
+      setTerminateError(e instanceof Error ? e.message : 'Failed to send termination request');
+    } finally {
+      setTerminateSubmitting(false);
+    }
+  }
+
+  async function respondToTermination(response: 'accepted' | 'rejected') {
+    if (!contract) return;
+    setTerminateResponding(true);
+    setTerminateError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/termination/respond`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as { message?: string }).message ?? `Error ${res.status}`); }
+      const updated = await res.json();
+      setContract(updated);
+    } catch (e: unknown) {
+      setTerminateError(e instanceof Error ? e.message : 'Failed to respond to termination request');
+    } finally {
+      setTerminateResponding(false);
+    }
+  }
+
   async function saveClauses() {
     if (!contract) return;
     setSavingClauses(true);
@@ -872,7 +1089,6 @@ export default function ContractDetailPage() {
     );
   }
 
-  const totalAtSigning = contract.adminFeeFils + contract.ejariFeeFils;
   const isRenewalContract = contract.contractType === 'renewal';
 
   // Derived from payment records — used in timeline + sidebar
@@ -895,10 +1111,13 @@ export default function ContractDetailPage() {
   const tl_isSigned  = !!signedMode;
   const tl_isIssued_or_active = tl_isIssued || tl_isActive;
 
+  // Show every cheque except the security deposit (rendered in its own section).
+  // The old code also excluded payments whose description contained "ejari" — that filter
+  // accidentally hid the "Admin Fee + Ejari + Commission + Installment 1" bundle row that's
+  // now created from the lead's plan, so it's removed.
   const rentChequePayments = payments.filter(p =>
     p.paymentType !== 'admin_fee' &&
-    p.paymentType !== 'security_deposit' &&
-    !p.description?.toLowerCase().includes('ejari')
+    p.paymentType !== 'security_deposit'
   );
   const expectedCheques = contract.numberOfInstallments ?? 0;
   const allChequesRecorded = expectedCheques > 0 && rentChequePayments.length >= expectedCheques;
@@ -913,11 +1132,14 @@ export default function ContractDetailPage() {
 
   const allPaymentsDone = allChequesComplete;
   const allSigsDone     = tl_isSigned && hasTenantSigned;
-  const dewaDoc         = docs.find(d => d.documentKey?.startsWith('dewa'));
+  const utilityDoc     = docs.find(d => d.documentKey?.startsWith('utility')) ?? tenantUtilityDoc ?? null;
 
   // Step state helpers
   const st1Done = tl_isIssued_or_active;
-  const st2Done = isRenewalContract ? true : (allChequesComplete && rentChequesConsented);  // renewal skips payment step
+  // For new contracts the payments are collected upstream on the lead, so step 2 is auto-true.
+  // For renewals there's no lead to collect against — the RP records cheques on the renewal
+  // child itself, so this gates on the contract's pdcConfirmed flag.
+  const st2Done = isRenewalContract ? (contract.pdcConfirmed ?? false) : true;
   const st3Done = allSigsDone;
   const st4Done = tl_hasEjari;
   const st5Done = tl_isActive;
@@ -940,7 +1162,7 @@ export default function ContractDetailPage() {
       <div className="bg-white border-b border-[#e8e6e0] px-4 sm:px-6 py-4 sticky top-0 z-20">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <Link href="/rental-provider/dashboard" className="text-[#6b6860] hover:text-[#1a1916]">
+            <Link href="/rental-provider/dashboard/contracts" className="text-[#6b6860] hover:text-[#1a1916]" title="Back to contracts">
               <ArrowLeft size={18} />
             </Link>
             <div className="min-w-0">
@@ -969,6 +1191,64 @@ export default function ContractDetailPage() {
             >
               <Download size={14} /> Download PDF
             </Link>
+            {/* Propose Renewal CTA — shown on active, NEW (non-renewal) contracts when no proposal is in flight */}
+            {contract.status === 'active' && contract.contractType !== 'renewal' && !contract.renewalAccepted && (
+              <button
+                onClick={() => {
+                  // Prefill renewal terms from current contract
+                  const today = new Date();
+                  const oneYear = new Date(today);
+                  oneYear.setFullYear(today.getFullYear() + 1);
+                  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+                  // Default to the day after current contract ends
+                  const newStart = new Date(contract.endDate);
+                  newStart.setDate(newStart.getDate() + 1);
+                  const newEnd = new Date(newStart);
+                  newEnd.setFullYear(newStart.getFullYear() + 1);
+                  newEnd.setDate(newEnd.getDate() - 1);
+                  setRenewalForm({
+                    newAnnualRent: String(contract.annualRent ?? ''),
+                    newStartDate: fmt(newStart),
+                    newEndDate: fmt(newEnd),
+                    numberOfInstallments: String(contract.numberOfInstallments ?? 4),
+                    modeOfPayment: contract.modeOfPayment ?? 'cheque',
+                    samePayee: true,
+                    chequePayeeName: '',
+                    adminFee: String(contract.adminFeeFils ?? ''),
+                    ejariFee: String(contract.ejariFeeFils ?? ''),
+                  });
+                  setRenewalExtras([]);
+                  setRenewalError(null);
+                  setShowRenewalModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors bg-white"
+              >
+                <RotateCcw size={14} /> Propose Renewal
+              </button>
+            )}
+            {contract.renewalAccepted === 'pending' && (
+              <span className="flex items-center gap-1.5 text-xs text-[#a85b15] font-semibold bg-[#fdf3e3] px-3 py-1.5 rounded-full border border-[#f3d08a]">
+                <RotateCcw size={13} /> Renewal Proposed — awaiting tenant
+              </span>
+            )}
+            {contract.renewalAccepted === 'rejected' && (
+              <span className="flex items-center gap-1.5 text-xs text-red-700 font-semibold bg-red-50 px-3 py-1.5 rounded-full border border-red-200">
+                <X size={13} /> Renewal Rejected by tenant
+              </span>
+            )}
+            {contract.renewalAccepted === 'accepted' && (
+              <span className="flex items-center gap-1.5 text-xs text-[#2e9f82] font-semibold bg-[#f0faf6] px-3 py-1.5 rounded-full border border-[#c5e8df]">
+                <CheckCircle size={13} /> Renewal Accepted
+              </span>
+            )}
+            {contract.status === 'active' && contract.termination?.response !== 'pending' && (
+              <button
+                onClick={() => setShowTerminateConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-red-200 text-red-600 hover:bg-red-50 transition-colors bg-white"
+              >
+                <X size={14} /> Request Termination
+              </button>
+            )}
             {signedMode ? (
               <span className="flex items-center gap-1.5 text-xs text-[#2e9f82] font-semibold bg-[#f0faf6] px-3 py-1.5 rounded-full border border-[#c5e8df]">
                 <BadgeCheck size={13} /> Signed Online
@@ -988,6 +1268,59 @@ export default function ContractDetailPage() {
 
       {/* Body */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+        {/* ── Termination request banner (only shows when one is in flight) ── */}
+        {contract.termination?.response === 'pending' && contract.termination.requestedByRole === 'tenant' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+            <AlertCircle size={18} className="text-amber-700 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-amber-900">Tenant has requested termination</p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Effective <b>{fmtDate(contract.termination.effectiveDate)}</b>
+                {contract.termination.requestedAt && <> · requested {fmtDate(contract.termination.requestedAt)}</>}
+              </p>
+              {contract.termination.reason && (
+                <p className="text-xs text-amber-900 mt-2 whitespace-pre-wrap">“{contract.termination.reason}”</p>
+              )}
+              {terminateError && <p className="text-xs text-red-600 mt-2">{terminateError}</p>}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-1.5 shrink-0">
+              <button
+                onClick={() => respondToTermination('accepted')}
+                disabled={terminateResponding}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                {terminateResponding ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />} Accept
+              </button>
+              <button
+                onClick={() => respondToTermination('rejected')}
+                disabled={terminateResponding}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-900 hover:bg-amber-100 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                <X size={12} /> Reject
+              </button>
+            </div>
+          </div>
+        )}
+        {contract.termination?.response === 'pending' && contract.termination.requestedByRole === 'rental_provider' && (
+          <div className="bg-[#fafaf8] border border-[#e8e6e0] rounded-2xl p-4 flex items-start gap-3">
+            <RotateCcw size={18} className="text-[#6b6860] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-[#1a1916]">Termination request sent</p>
+              <p className="text-xs text-[#6b6860] mt-0.5">
+                Awaiting tenant response · effective <b>{fmtDate(contract.termination.effectiveDate)}</b>
+              </p>
+              {contract.termination.reason && (
+                <p className="text-xs text-[#6b6860] mt-2 whitespace-pre-wrap">“{contract.termination.reason}”</p>
+              )}
+            </div>
+          </div>
+        )}
+        {contract.termination?.response === 'rejected' && (
+          <div className="bg-[#fafaf8] border border-[#e8e6e0] rounded-2xl px-4 py-2.5">
+            <p className="text-xs text-[#6b6860]">
+              Last termination request ({contract.termination.requestedByRole === 'tenant' ? 'tenant' : 'you'}) was rejected on {fmtDate(contract.termination.respondedAt)}.
+            </p>
+          </div>
+        )}
 
         {/* ── Quick-glance strip ── */}
         <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm px-5 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -1101,12 +1434,34 @@ export default function ContractDetailPage() {
                   <div className={activeDrawer !== 'period' ? 'hidden' : 'p-5 space-y-4'}>
                   {/* Rental Period */}
                   <SectionCard title="Rental Period" icon={Calendar}>
-                    <Row label="Start Date" value={fmtDate(contract.startDate)} />
-                    <Row label="End Date" value={fmtDate(contract.endDate)} />
-                    <Row label="Duration" value={contract.durationYears ? `${contract.durationYears} year(s)` : null} />
-                    <Row label="Contract Type" value={contract.contractType} />
-                    <Row label="Status" value={<StatusBadge status={contract.status} />} />
-                    <Row label="Ejari Status" value={contract.ejariStatus} />
+                    {(() => {
+                      // Derive a human duration label from start/end so we don't depend on the
+                      // optional contract.durationYears column (which isn't populated for new contracts).
+                      const dur = (() => {
+                        if (contract.durationYears) return `${contract.durationYears} year(s)`;
+                        if (!contract.startDate || !contract.endDate) return null;
+                        const s = new Date(contract.startDate);
+                        const e = new Date(contract.endDate);
+                        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) return null;
+                        // Whole months between dates (inclusive end day)
+                        const months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + (e.getDate() >= s.getDate() ? 0 : -1) + 1;
+                        const years = Math.floor(months / 12);
+                        const rem = months - years * 12;
+                        if (years > 0 && rem === 0) return `${years} year${years === 1 ? '' : 's'}`;
+                        if (years > 0) return `${years} year${years === 1 ? '' : 's'}, ${rem} month${rem === 1 ? '' : 's'}`;
+                        return `${months} month${months === 1 ? '' : 's'}`;
+                      })();
+                      return (
+                        <>
+                          <Row label="Start Date" value={fmtDate(contract.startDate)} />
+                          <Row label="End Date" value={fmtDate(contract.endDate)} />
+                          <Row label="Duration" value={dur} />
+                          <Row label="Contract Type" value={contract.contractType} />
+                          <Row label="Status" value={<StatusBadge status={contract.status} />} />
+                          <Row label="Ejari Status" value={contract.ejariStatus} />
+                        </>
+                      );
+                    })()}
                   </SectionCard>
                   </div>
                   <div className={activeDrawer !== 'payments' ? 'hidden' : 'p-5 space-y-4'}>
@@ -1190,9 +1545,10 @@ export default function ContractDetailPage() {
                     )}
                   </SectionCard>
 
-                  {/* Rental Instalments */}
+                  {/* Rental Instalments — includes the first-bundle cheque (Admin + Ejari + Commission + Installment 1)
+                       and any extra plan items (Tax, VAT, etc.). Security deposit is rendered separately above. */}
                   <SectionCard
-                    title={`Rental Instalments (${rentChequePayments.length} / ${expectedCheques})`}
+                    title={`Rental Instalments (${rentChequePayments.length} cheques)`}
                     icon={CreditCard}
                   >
               {rentChequePayments.length === 0 && !showAddInstalment && (
@@ -1310,6 +1666,33 @@ export default function ContractDetailPage() {
                 </button>
               </div>
                   </SectionCard>
+
+                  {/* Combined Contract Total — Security Deposit + Rental Instalments so the RP sees
+                       the same figure the lead and the tenant view. */}
+                  {(() => {
+                    const rentTotal = rentChequePayments.reduce((s, p) => s + (p.amount || 0), 0);
+                    const depositTotal = depositPayment?.amount ?? Number(contract.securityDepositAmount ?? 0);
+                    const grand = rentTotal + depositTotal;
+                    return (
+                      <div className="rounded-2xl border-2 border-[#c5e8df] bg-[#f0faf6] px-5 py-4">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a7a5a] mb-2">Contract Total</p>
+                        <div className="grid grid-cols-3 gap-3 text-xs">
+                          <div>
+                            <p className="text-[10px] text-[#6b6860] uppercase tracking-wide mb-0.5">Security Deposit</p>
+                            <p className="text-sm font-semibold text-[#1a1916]">{fmtAed(depositTotal)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-[#6b6860] uppercase tracking-wide mb-0.5">Rental Instalments ({rentChequePayments.length})</p>
+                            <p className="text-sm font-semibold text-[#1a1916]">{fmtAed(rentTotal)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-[#6b6860] uppercase tracking-wide mb-0.5">Grand Total</p>
+                            <p className="text-base font-bold" style={{ color: '#2e9f82' }}>{fmtAed(grand)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   </div>
                   <div className={activeDrawer !== 'documents' ? 'hidden' : 'p-5 space-y-4'}>
                   {/* Documents */}
@@ -1535,8 +1918,11 @@ export default function ContractDetailPage() {
               })()}
                   </SectionCard>
 
-                  {/* ── Tenant Rental Documents ── */}
-                  <SectionCard title="Rental Documents" icon={User}>
+                  {/* ── Tenant Rental Documents ──
+                       For renewal contracts these are the fresh docs the tenant uploaded against
+                       the renewal child specifically (ownerType=tenancy_contract). For the original
+                       lease they're the tenant's customer-scoped KYC pack. */}
+                  <SectionCard title={isRenewalContract ? 'Renewal Documents' : 'Rental Documents'} icon={User}>
                     {tenantKycLoading ? (
                       <p className="flex items-center gap-1.5 text-xs text-[#9b9890]"><Loader2 size={11} className="animate-spin" /> Loading…</p>
                     ) : (
@@ -1793,46 +2179,44 @@ export default function ContractDetailPage() {
                       <p className="text-xs text-white/70 mt-1">{contract.ref}</p>
                     </div>
                     <div className="px-5 py-4 space-y-0">
-                      <div className="flex justify-between py-2.5 border-b border-[#f4f3ef]">
-                        <span className="text-xs text-[#9b9890]">Status</span>
-                        <StatusBadge status={contract.status} />
-                      </div>
-                      <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                        <span className="text-xs text-[#9b9890]">Period</span>
-                        <span className="text-xs font-semibold text-[#1a1916] text-right">{fmtDate(contract.startDate)}<br />→ {fmtDate(contract.endDate)}</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                        <span className="text-xs text-[#9b9890]">Annual Rent</span>
-                        <span className="text-sm font-bold text-[#1a1916]">{fmtAed(contract.annualRent)}</span>
-                      </div>
-                      {contract.contractValue != null && (
-                        <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                          <span className="text-xs text-[#9b9890]">Contract Value</span>
-                          <span className="text-xs font-semibold text-[#1a1916]">{fmtAed(contract.contractValue)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                        <span className="text-xs text-[#9b9890]">Security Deposit</span>
-                        <span className="text-xs font-semibold text-[#1a1916]">{isRenewalContract ? 'Extended from prior' : contract.securityDepositAmount != null ? `${fmtAed(contract.securityDepositAmount)} (PDC)` : '—'}</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                        <span className="text-xs text-[#9b9890]">Admin Fee</span>
-                        <span className="text-xs font-semibold text-[#1a1916]">{fmtAed(contract.adminFeeFils)}</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                        <span className="text-xs text-[#9b9890]">Ejari Fee</span>
-                        <span className="text-xs font-semibold text-[#1a1916]">{fmtAed(contract.ejariFeeFils)}</span>
-                      </div>
-                      {contract.numberOfInstallments != null && (
-                        <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                          <span className="text-xs text-[#9b9890]">No. of Cheques</span>
-                          <span className="text-xs font-semibold text-[#1a1916]">{contract.numberOfInstallments}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center pt-3 pb-1">
-                        <span className="text-xs font-bold text-[#6b6860]">Due at Signing <span className="font-normal text-[#9b9890] text-[10px]">(excl. PDC)</span></span>
-                        <span className="text-base font-bold" style={{ color: '#2e9f82' }}>{fmtAed(totalAtSigning)}</span>
-                      </div>
+                      {/* Total contract value comes from the actual payment rows + deposit so it
+                          always matches the Payments tab and the tenant view. */}
+                      {(() => {
+                        const rentTotal = rentChequePayments.reduce((s, p) => s + (p.amount || 0), 0);
+                        const depositTotal = depositPayment?.amount ?? Number(contract.securityDepositAmount ?? 0);
+                        const grand = rentTotal + depositTotal;
+                        const totalCheques = rentChequePayments.length + (depositPayment ? 1 : (contract.securityDepositAmount ? 1 : 0));
+                        return (
+                          <>
+                            <div className="flex justify-between py-2.5 border-b border-[#f4f3ef]">
+                              <span className="text-xs text-[#9b9890]">Status</span>
+                              <StatusBadge status={contract.status} />
+                            </div>
+                            <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
+                              <span className="text-xs text-[#9b9890]">Period</span>
+                              <span className="text-xs font-semibold text-[#1a1916] text-right">{fmtDate(contract.startDate)}<br />→ {fmtDate(contract.endDate)}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
+                              <span className="text-xs text-[#9b9890]">Annual Rent</span>
+                              <span className="text-sm font-bold text-[#1a1916]">{fmtAed(contract.annualRent)}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
+                              <span className="text-xs text-[#9b9890]">Security Deposit</span>
+                              <span className="text-xs font-semibold text-[#1a1916]">{isRenewalContract ? 'Extended from prior' : depositTotal > 0 ? `${fmtAed(depositTotal)} (PDC)` : '—'}</span>
+                            </div>
+                            {totalCheques > 0 && (
+                              <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
+                                <span className="text-xs text-[#9b9890]">Total Cheques</span>
+                                <span className="text-xs font-semibold text-[#1a1916]">{totalCheques}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center pt-3 pb-1">
+                              <span className="text-xs font-bold text-[#6b6860]">Total Contract Value</span>
+                              <span className="text-base font-bold" style={{ color: '#2e9f82' }}>{fmtAed(grand)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -1934,10 +2318,209 @@ export default function ContractDetailPage() {
                     </StepRow>
                     );})()}
 
-                    {/* Step 2: Payment Collection */}
-                    {(()=>{ const state: TLStep = stepState(st1Done, st2Done); return (
+                    {/* Step 2: Signatures — tenant signs first, then landlord countersigns.
+                         Payments are collected upstream so this immediately follows Contract Issued. */}
+                    {(()=>{ const state: TLStep = stepState(st1Done, st3Done); return (
+                    <StepRow num={2} label="Signatures" state={state} last={false}>
+                      {state !== 'upcoming' && (
+                        <div className="mt-1.5 space-y-1.5">
+                          {/* Tenant first */}
+                          <div className="flex items-center gap-1.5">
+                            <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
+                            <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
+                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting tenant — they sign via their portal)</span>}
+                          </div>
+                          {/* Landlord countersigns only after tenant has signed */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${tl_isSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{tl_isSigned ? '✓' : '○'}</span>
+                              <span className="text-[10px] text-[#6b6860]">Landlord signed</span>
+                            </div>
+                            {!tl_isSigned && state === 'current' && hasTenantSigned && (
+                              <button onClick={() => setShowSignModal(true)}
+                                className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-[#2e9f82] text-white hover:bg-[#27896f]">
+                                Sign Now
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </StepRow>
+                    );})()}
+
+                    {/* Step 3: Ejari Registration */}
+                    {(()=>{ const state: TLStep = stepState(st3Done, st4Done); return (
+                    <StepRow num={3} label="Ejari Registration" state={state} last={false}>
+                      {state === 'current' && (
+                        <div className="mt-2 space-y-2">
+                          <p className="text-[10px] text-[#9b9890]">Upload the Ejari certificate from DLD — the tenancy will be activated automatically.</p>
+
+                          <div className="space-y-1">
+                            <input
+                              ref={ejariInputRef}
+                              type="file"
+                              accept="application/pdf,image/jpeg,image/png"
+                              className="hidden"
+                              onChange={e => setEjariFile(e.target.files?.[0] ?? null)}
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => ejariInputRef.current?.click()}
+                                disabled={ejariUploading}
+                                className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white disabled:opacity-50">
+                                <UploadCloud size={10} /> {ejariFile ? ejariFile.name : 'Choose file'}
+                              </button>
+                              {ejariFile && (
+                                <button
+                                  onClick={() => uploadEjariDoc(ejariFile)}
+                                  disabled={ejariUploading}
+                                  className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
+                                  {ejariUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />}
+                                  {ejariUploading ? 'Uploading & activating…' : 'Upload & Activate'}
+                                </button>
+                              )}
+                            </div>
+                            {ejariError && <p className="text-[9px] text-red-600">{ejariError}</p>}
+                          </div>
+                        </div>
+                      )}
+                      {state === 'done' && (
+                        <div className="mt-0.5 flex items-center justify-between gap-2">
+                          <p className="text-[10px] text-[#2e9f82]">Registered with DLD ✓</p>
+                          <button
+                            onClick={resetEjariUpload}
+                            disabled={ejariResetting}
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white disabled:opacity-50 flex items-center gap-1">
+                            {ejariResetting ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />}
+                            Re-upload Ejari
+                          </button>
+                        </div>
+                      )}
+                      {state === 'done' && ejariError && (
+                        <p className="text-[9px] text-red-600 mt-1">{ejariError}</p>
+                      )}
+                    </StepRow>
+                    );})()}
+
+                    {/* Step 5: Move-In & Utility */}
+                    {(()=>{ const state: TLStep = stepState(st4Done, st5Done); return (
+                    <StepRow num={4} label="Move-In & Utility" state={state} last={false}>
+                      {/* Inspection link is ALWAYS visible — before, during, and after this step.
+                          RPs need it to prepare the walkthrough early and to look it up afterwards. */}
+                      <Link href={`/rental-provider/dashboard/contracts/${contract.id}/inspection?type=move_in`}
+                        className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf7] w-fit">
+                        <ClipboardCheck size={10} /> {state === 'done' ? 'View Move-In Inspection' : 'Open Move-In Inspection'}
+                      </Link>
+                      {state !== 'done' && (
+                        <div className="mt-2 space-y-2">
+                          {feeError && state === 'current' && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5 border border-red-200">
+                              <AlertCircle size={11} />{feeError}
+                            </div>
+                          )}
+                          {state === 'current' && (
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox" checked={moveInConfirmed} onChange={e => setMoveInConfirmed(e.target.checked)}
+                                className="rounded border-[#c8c6be] text-[#2e9f82] focus:ring-[#2e9f82]" />
+                              <span className="text-[10px] text-[#6b6860]">Move-in inspection done & keys handed over</span>
+                            </label>
+                          )}
+                          {/* Utility upload + Activate are still gated to 'current' because they're only meaningful
+                              once signatures + Ejari are done. */}
+                          {state === 'current' && (<>
+                          <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" className="hidden"
+                            onChange={e => setUtilityFile(e.target.files?.[0] ?? null)} />
+                          <div className="space-y-1">
+                            <p className="text-[10px] text-[#6b6860] font-medium">Utility account activation verified</p>
+                            {utilityDoc ? (
+                              <div className="flex items-center gap-1.5 text-[10px] text-[#2e9f82]">
+                                <CheckCircle size={10} />
+                                <span className="font-medium">Proof uploaded ✓</span>
+                                {utilityDoc.fileUrl && (
+                                  <a href={utilityDoc.fileUrl} target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-0.5 text-[#2e9f82] hover:underline font-normal">
+                                    <ExternalLink size={9} /> View
+                                  </a>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <button onClick={() => utilityInputRef.current?.click()}
+                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
+                                    <UploadCloud size={10} /> {utilityFile ? utilityFile.name : 'Upload proof'}
+                                  </button>
+                                  {utilityFile && (
+                                    <button onClick={() => uploadUtilityDoc(utilityFile)} disabled={utilityUploading}
+                                      className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
+                                      {utilityUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
+                                    </button>
+                                  )}
+                                </div>
+                                {utilityError && <p className="text-[9px] text-red-600">{utilityError}</p>}
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={doActivateContract}
+                            disabled={!moveInConfirmed || !utilityDoc || markingStep === 'activate'}
+                            className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1 mt-1">
+                            {markingStep === 'activate' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
+                            Activate Contract
+                          </button>
+                          </>)}
+                        </div>
+                      )}
+                      {state === 'done' && (
+                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Unit handed over · Utility active ✓</p>
+                      )}
+                    </StepRow>
+                    );})()}
+
+                    {/* Step 6: Active Tenancy */}
+                    {(()=>{ const state: TLStep = tl_isActive ? 'current' : 'upcoming'; return (
+                    <StepRow num={5} label="Active Tenancy" state={state} last={true}>
+                      {tl_isActive && (
+                        <div className="mt-1 space-y-1">
+                          <p className="text-[10px] text-[#2e9f82] font-medium">Contract is live</p>
+                          <p className="text-[10px] text-[#9b9890]">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
+                        </div>
+                      )}
+                    </StepRow>
+                    );})()}
+                  </>
+                ) : (
+                  /* ── RENEWAL CONTRACT: 5 steps ── */
+                  <>
+                    {/* Step 1: Terms Agreed */}
+                    {(()=>{ const state: TLStep = 'done'; return (
+                    <StepRow num={1} label="Renewal Terms Agreed" state={state} last={false}>
+                      <p className="text-[10px] text-[#2e9f82] mt-0.5">New rent & duration confirmed ✓</p>
+                    </StepRow>
+                    );})()}
+
+                    {/* Step 2: Payment Collection — tenant brings PDC cheques, RP records them.
+                         For renewals there's no upstream lead, so cheques are collected on this
+                         contract before signatures can proceed. */}
+                    {(()=>{ const state: TLStep = stepState(true, st2Done); return (
                     <StepRow num={2} label="Payment Collection" state={state} last={false}>
-                      <p className="text-[10px] text-[#9b9890] mt-0.5">All cheques collected as PDC · Deposit + {expectedCheques} instalments</p>
+                      <p className="text-[10px] text-[#9b9890] mt-0.5">Tenant brings PDC cheques — record each and confirm receipt.</p>
+                      {/* Tenant submission status — mirrors the lead's CHEQUES_SUBMITTED stage.
+                          The tenant signals readiness from their portal before the RP records. */}
+                      {state === 'current' && contract.tenantChequesSubmittedAt && (
+                        <div className="mt-2 flex items-start gap-1.5 text-[10px] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5">
+                          <CheckCircle size={11} className="text-[#854d0e] shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="font-semibold text-[#854d0e]">Tenant confirmed cheques submitted</p>
+                            <p className="text-[9px] text-[#854d0e] opacity-80">
+                              {new Date(contract.tenantChequesSubmittedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              {' '}— record each cheque below and confirm receipt.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      {state === 'current' && !contract.tenantChequesSubmittedAt && (
+                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting tenant to confirm cheques handed over.</p>
+                      )}
                       {state === 'current' && (
                         <div className="mt-2 space-y-1.5">
                           {feeError && (
@@ -1945,20 +2528,20 @@ export default function ContractDetailPage() {
                               <AlertCircle size={11} />{feeError}
                             </div>
                           )}
-
-                          {/* Security Deposit row */}
-                          <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
-                            <div>
-                              <p className="text-[10px] font-semibold text-[#1a1916]">Security Deposit</p>
-                              <p className="text-[9px] text-[#9b9890]">{fmtAed(contract.securityDepositAmount ?? 0)}</p>
+                          {/* Security Deposit row — N/A for renewals (carries forward from parent) */}
+                          {(contract.securityDepositAmount ?? 0) > 0 && (
+                            <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
+                              <div>
+                                <p className="text-[10px] font-semibold text-[#1a1916]">Security Deposit</p>
+                                <p className="text-[9px] text-[#9b9890]">{fmtAed(contract.securityDepositAmount ?? 0)}</p>
+                              </div>
+                              {depositPayment ? (
+                                <span className="text-[9px] font-semibold text-[#2e9f82] flex items-center gap-0.5"><CheckCircle size={9} /> Recorded</span>
+                              ) : (
+                                <span className="text-[9px] text-[#9b9890] italic">Not recorded</span>
+                              )}
                             </div>
-                            {depositPayment ? (
-                              <span className="text-[9px] font-semibold text-[#2e9f82] flex items-center gap-0.5"><CheckCircle size={9} /> Received</span>
-                            ) : (
-                              <span className="text-[9px] text-[#9b9890] italic">Pending</span>
-                            )}
-                          </div>
-
+                          )}
                           {/* Rental Instalments row */}
                           <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
                             <div>
@@ -1971,239 +2554,63 @@ export default function ContractDetailPage() {
                               {rentChequePayments.length} / {expectedCheques}
                             </span>
                           </div>
-
                           {/* Open payments drawer */}
-                          {!allChequesComplete && (
+                          <button
+                            onClick={() => setActiveDrawer('payments')}
+                            className="w-full text-[10px] font-semibold py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-white flex items-center justify-center gap-1.5">
+                            <CreditCard size={10} /> Manage Cheques
+                            <ChevronRight size={9} className="ml-auto opacity-50" />
+                          </button>
+                          {/* Confirm PDC Received button */}
+                          <div className={`pt-0.5 ${!allChequesRecorded ? 'opacity-40 pointer-events-none' : ''}`}>
                             <button
-                              onClick={() => setActiveDrawer('payments')}
-                              className="w-full text-[10px] font-semibold py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-white flex items-center justify-center gap-1.5">
-                              <CreditCard size={10} /> Manage Cheques
-                              <ChevronRight size={9} className="ml-auto opacity-50" />
+                              onClick={handleConfirmPdc}
+                              disabled={confirmingPdc || !allChequesRecorded}
+                              className="w-full flex items-center justify-center gap-1.5 text-[10px] font-semibold py-2 rounded-lg text-white disabled:opacity-50"
+                              style={{ background: '#2e9f82' }}
+                            >
+                              {confirmingPdc
+                                ? <><Loader2 size={10} className="animate-spin" /> Confirming…</>
+                                : <><CheckCircle size={10} /> Confirm PDC Received</>
+                              }
                             </button>
-                          )}
-
-                          {/* Consent */}
-                          <label className={`flex items-start gap-2 pt-0.5 cursor-pointer ${
-                            !allChequesComplete ? 'opacity-40 pointer-events-none' : ''
-                          }`}>
-                            <input
-                              type="checkbox"
-                              checked={rentChequesConsented}
-                              onChange={e => {
-                                setRentChequesConsented(e.target.checked);
-                                if (typeof window !== 'undefined') {
-                                  e.target.checked
-                                    ? localStorage.setItem(`rent_cheques_consented_${contract.id}`, '1')
-                                    : localStorage.removeItem(`rent_cheques_consented_${contract.id}`);
-                                }
-                              }}
-                              className="mt-0.5 rounded border-[#c0bdb8] text-[#2e9f82] focus:ring-[#2e9f82] shrink-0"
-                            />
-                            <span className="text-[9px] text-[#6b6860] leading-tight">
-                              {!allChequesComplete
-                                ? `Add all ${totalExpectedCheques} cheques to confirm receipt`
-                                : <><strong className="text-[#1a1916]">All {totalExpectedCheques} cheques collected</strong> — tick to confirm and proceed to signatures</>}
-                            </span>
-                          </label>
-                          {rentChequesConsented && (
-                            <p className="text-[9px] text-[#2e9f82] font-semibold flex items-center gap-1">
-                              <CheckCircle size={9} /> Confirmed — proceed to signatures
-                            </p>
-                          )}
+                            {!allChequesRecorded && (
+                              <p className="text-[9px] text-[#9b9890] text-center mt-1">
+                                Record all {expectedCheques} rental cheques above first
+                              </p>
+                            )}
+                          </div>
                         </div>
+                      )}
+                      {state === 'done' && (
+                        <p className="text-[10px] text-[#2e9f82] mt-0.5 flex items-center gap-1">
+                          <CheckCircle size={9} /> PDC collection confirmed — proceed to signatures
+                        </p>
                       )}
                     </StepRow>
                     );})()}
 
-                    {/* Step 3: Signatures */}
+                    {/* Step 3: Signatures — tenant first, then landlord countersigns */}
                     {(()=>{ const state: TLStep = stepState(st2Done, st3Done); return (
                     <StepRow num={3} label="Signatures" state={state} last={false}>
                       {state !== 'upcoming' && (
                         <div className="mt-1.5 space-y-1.5">
-                          {/* Landlord */}
+                          <div className="flex items-center gap-1.5">
+                            <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
+                            <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
+                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting tenant — they sign via their portal)</span>}
+                          </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
                               <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${tl_isSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{tl_isSigned ? '✓' : '○'}</span>
                               <span className="text-[10px] text-[#6b6860]">Landlord signed</span>
                             </div>
-                            {!tl_isSigned && state === 'current' && (
+                            {!tl_isSigned && state === 'current' && hasTenantSigned && (
                               <button onClick={() => setShowSignModal(true)}
                                 className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-[#2e9f82] text-white hover:bg-[#27896f]">
                                 Sign Now
                               </button>
                             )}
-                          </div>
-                          {/* Tenant */}
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
-                            <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
-                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(tenant signs via their portal)</span>}
-                          </div>
-                        </div>
-                      )}
-                    </StepRow>
-                    );})()}
-
-                    {/* Step 4: Ejari Registration */}
-                    {(()=>{ const state: TLStep = stepState(st3Done, st4Done);
-                      const ejariDoc = docs.find(d => d.documentKey?.startsWith('ejari'));
-                      return (
-                    <StepRow num={4} label="Ejari Registration" state={state} last={false}>
-                      {state === 'current' && (
-                        <div className="mt-2 space-y-2">
-                          <p className="text-[10px] text-[#9b9890]">Upload the Ejari certificate from DLD, then mark as registered.</p>
-
-                          {/* Step A: Upload */}
-                          {ejariDoc ? (
-                            <div className="flex items-center gap-2 text-[10px] text-[#2e9f82] font-medium">
-                              <CheckCircle size={11} /> Ejari doc uploaded
-                              <span className="text-[#9b9890] font-normal truncate max-w-[120px]">{ejariDoc.displayName}</span>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <input
-                                ref={ejariInputRef}
-                                type="file"
-                                accept="application/pdf,image/jpeg,image/png"
-                                className="hidden"
-                                onChange={e => setEjariFile(e.target.files?.[0] ?? null)}
-                              />
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => ejariInputRef.current?.click()}
-                                  className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
-                                  <UploadCloud size={10} /> {ejariFile ? ejariFile.name : 'Choose file'}
-                                </button>
-                                {ejariFile && (
-                                  <button
-                                    onClick={() => uploadEjariDoc(ejariFile)}
-                                    disabled={ejariUploading}
-                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
-                                    {ejariUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
-                                  </button>
-                                )}
-                              </div>
-                              {ejariError && <p className="text-[9px] text-red-600">{ejariError}</p>}
-                            </div>
-                          )}
-
-                          {/* Step B: Mark registered — only after doc uploaded */}
-                          <button
-                            onClick={markEjariRegistered}
-                            disabled={!ejariDoc || markingStep === 'ejari'}
-                            className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1">
-                            {markingStep === 'ejari' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
-                            Mark Ejari Registered
-                          </button>
-                        </div>
-                      )}
-                      {state === 'done' && (
-                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Registered with DLD ✓</p>
-                      )}
-                    </StepRow>
-                    );})()}
-
-                    {/* Step 5: Move-In & DEWA */}
-                    {(()=>{ const state: TLStep = stepState(st4Done, st5Done); return (
-                    <StepRow num={5} label="Move-In & DEWA" state={state} last={false}>
-                      {state === 'current' && (
-                        <div className="mt-2 space-y-2">
-                          {feeError && (
-                            <div className="flex items-center gap-1.5 text-[10px] text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5 border border-red-200">
-                              <AlertCircle size={11} />{feeError}
-                            </div>
-                          )}
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={moveInConfirmed} onChange={e => setMoveInConfirmed(e.target.checked)}
-                              className="rounded border-[#c8c6be] text-[#2e9f82] focus:ring-[#2e9f82]" />
-                            <span className="text-[10px] text-[#6b6860]">Move-in inspection done & keys handed over</span>
-                          </label>
-                          {/* DEWA proof upload */}
-                          <input ref={dewaInputRef} type="file" accept="image/*,application/pdf" className="hidden"
-                            onChange={e => setDewaFile(e.target.files?.[0] ?? null)} />
-                          <div className="space-y-1">
-                            <p className="text-[10px] text-[#6b6860] font-medium">DEWA account activation verified</p>
-                            {dewaDoc ? (
-                              <div className="flex items-center gap-1.5 text-[10px] text-[#2e9f82]">
-                                <CheckCircle size={10} />
-                                <span className="font-medium">Proof uploaded</span>
-                                <span className="text-[#9b9890] font-normal truncate max-w-[140px]">{dewaDoc.displayName}</span>
-                              </div>
-                            ) : (
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1.5">
-                                  <button onClick={() => dewaInputRef.current?.click()}
-                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
-                                    <UploadCloud size={10} /> {dewaFile ? dewaFile.name : 'Upload proof'}
-                                  </button>
-                                  {dewaFile && (
-                                    <button onClick={() => uploadDewaDoc(dewaFile)} disabled={dewaUploading}
-                                      className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
-                                      {dewaUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
-                                    </button>
-                                  )}
-                                </div>
-                                {dewaError && <p className="text-[9px] text-red-600">{dewaError}</p>}
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={doActivateContract}
-                            disabled={!moveInConfirmed || !dewaDoc || markingStep === 'activate'}
-                            className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1 mt-1">
-                            {markingStep === 'activate' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
-                            Activate Contract
-                          </button>
-                        </div>
-                      )}
-                      {state === 'done' && (
-                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Unit handed over · DEWA active ✓</p>
-                      )}
-                    </StepRow>
-                    );})()}
-
-                    {/* Step 6: Active Tenancy */}
-                    {(()=>{ const state: TLStep = tl_isActive ? 'current' : 'upcoming'; return (
-                    <StepRow num={6} label="Active Tenancy" state={state} last={true}>
-                      {tl_isActive && (
-                        <div className="mt-1">
-                          <p className="text-[10px] text-[#2e9f82] font-medium">Contract is live</p>
-                          <p className="text-[10px] text-[#9b9890] mt-0.5">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
-                          <p className="text-[10px] text-[#9b9890] mt-0.5">Renewal / termination will appear here when initiated.</p>
-                        </div>
-                      )}
-                    </StepRow>
-                    );})()}
-                  </>
-                ) : (
-                  /* ── RENEWAL CONTRACT: 4 steps ── */
-                  <>
-                    {/* Step 1: Terms Agreed */}
-                    {(()=>{ const state: TLStep = 'done'; return (
-                    <StepRow num={1} label="Renewal Terms Agreed" state={state} last={false}>
-                      <p className="text-[10px] text-[#2e9f82] mt-0.5">New rent & duration confirmed ✓</p>
-                    </StepRow>
-                    );})()}
-
-                    {/* Step 2: Signatures */}
-                    {(()=>{ const state: TLStep = stepState(true, st3Done); return (
-                    <StepRow num={2} label="Signatures" state={state} last={false}>
-                      {state !== 'upcoming' && (
-                        <div className="mt-1.5 space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${tl_isSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{tl_isSigned ? '✓' : '○'}</span>
-                              <span className="text-[10px] text-[#6b6860]">Landlord signed</span>
-                            </div>
-                            {!tl_isSigned && state === 'current' && (
-                              <button onClick={() => setShowSignModal(true)}
-                                className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-[#2e9f82] text-white hover:bg-[#27896f]">
-                                Sign Now
-                              </button>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
-                            <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
                           </div>
                         </div>
                       )}
@@ -2212,48 +2619,49 @@ export default function ContractDetailPage() {
 
                     {/* Step 3: Ejari Renewal */}
                     {(()=>{ const state: TLStep = stepState(st3Done, st4Done);
-                      const ejariDoc = docs.find(d => d.documentKey?.startsWith('ejari'));
                       return (
-                    <StepRow num={3} label="Ejari Renewal" state={state} last={false}>
+                    <StepRow num={4} label="Ejari Renewal" state={state} last={false}>
                       {state === 'current' && (
                         <div className="mt-2 space-y-2">
-                          <p className="text-[10px] text-[#9b9890]">Upload the renewed Ejari certificate, then mark as renewed.</p>
-                          {ejariDoc ? (
-                            <div className="flex items-center gap-2 text-[10px] text-[#2e9f82] font-medium">
-                              <CheckCircle size={11} /> Ejari doc uploaded
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" className="hidden" onChange={e => setEjariFile(e.target.files?.[0] ?? null)} />
-                              <div className="flex items-center gap-2">
-                                <button onClick={() => ejariInputRef.current?.click()}
-                                  className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
-                                  <UploadCloud size={10} /> {ejariFile ? ejariFile.name : 'Choose file'}
+                          <p className="text-[10px] text-[#9b9890]">Upload the renewed Ejari certificate — the renewal will be activated automatically.</p>
+                          <div className="space-y-1">
+                            <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" className="hidden" onChange={e => setEjariFile(e.target.files?.[0] ?? null)} />
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => ejariInputRef.current?.click()} disabled={ejariUploading}
+                                className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white disabled:opacity-50">
+                                <UploadCloud size={10} /> {ejariFile ? ejariFile.name : 'Choose file'}
+                              </button>
+                              {ejariFile && (
+                                <button onClick={() => uploadEjariDoc(ejariFile)} disabled={ejariUploading}
+                                  className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
+                                  {ejariUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />}
+                                  {ejariUploading ? 'Uploading & activating…' : 'Upload & Activate'}
                                 </button>
-                                {ejariFile && (
-                                  <button onClick={() => uploadEjariDoc(ejariFile)} disabled={ejariUploading}
-                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
-                                    {ejariUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
-                                  </button>
-                                )}
-                              </div>
-                              {ejariError && <p className="text-[9px] text-red-600">{ejariError}</p>}
+                              )}
                             </div>
-                          )}
-                          <button onClick={markEjariRegistered} disabled={!ejariDoc || markingStep === 'ejari'}
-                            className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1">
-                            {markingStep === 'ejari' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
-                            Mark Ejari Renewed
+                            {ejariError && <p className="text-[9px] text-red-600">{ejariError}</p>}
+                          </div>
+                        </div>
+                      )}
+                      {state === 'done' && (
+                        <div className="mt-0.5 flex items-center justify-between gap-2">
+                          <p className="text-[10px] text-[#2e9f82]">Ejari renewed with DLD ✓</p>
+                          <button
+                            onClick={resetEjariUpload}
+                            disabled={ejariResetting}
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white disabled:opacity-50 flex items-center gap-1">
+                            {ejariResetting ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />}
+                            Re-upload Ejari
                           </button>
                         </div>
                       )}
-                      {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Ejari renewed with DLD ✓</p>}
+                      {state === 'done' && ejariError && <p className="text-[9px] text-red-600 mt-1">{ejariError}</p>}
                     </StepRow>
                     );})()}
 
                     {/* Step 4: Active Renewal */}
                     {(()=>{ const state: TLStep = stepState(st4Done, st5Done); return (
-                    <StepRow num={4} label="Active Renewal" state={state} last={true}>
+                    <StepRow num={5} label="Active Renewal" state={state} last={true}>
                       {tl_isActive && (
                         <div className="mt-1">
                           <p className="text-[10px] text-[#2e9f82] font-medium">Renewal is live</p>
@@ -2264,7 +2672,7 @@ export default function ContractDetailPage() {
                       {state === 'current' && !tl_isActive && (
                         <div className="mt-2">
                           <button onClick={doActivateContract}
-                            disabled={!moveInConfirmed || !dewaDoc || markingStep === 'activate'}
+                            disabled={!moveInConfirmed || !utilityDoc || markingStep === 'activate'}
                             className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1">
                             {markingStep === 'activate' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
                             Activate Renewal
@@ -2304,6 +2712,334 @@ export default function ContractDetailPage() {
             setShowSignModal(false);
           }}
         />
+      )}
+
+      {/* Propose Renewal modal — SCRUM-273 */}
+      {showRenewalModal && contract && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !renewalSubmitting && setShowRenewalModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-[#e8e6e0] flex items-center justify-between sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <RotateCcw size={18} className="text-[#2e9f82]" />
+                <h2 className="text-base font-bold text-[#1a1916]">Propose Renewal</h2>
+              </div>
+              <button onClick={() => !renewalSubmitting && setShowRenewalModal(false)} className="text-[#9b9890] hover:text-[#1a1916] p-1 rounded-lg hover:bg-[#f4f3ef] transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5">
+              {/* Current contract summary — read only */}
+              <div>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Current Contract</p>
+                <div className="bg-[#f7f6f2] border border-[#e8e6e0] rounded-xl p-3.5 grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
+                  <div><span className="text-[#9b9890]">Tenant </span><span className="font-semibold text-[#1a1916]">{contract.tenant.name ?? <span className="text-red-600">missing</span>}</span></div>
+                  <div><span className="text-[#9b9890]">Period </span><span className="font-semibold text-[#1a1916]">{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</span></div>
+                  <div><span className="text-[#9b9890]">Building </span><span className="font-semibold text-[#1a1916]">{contract.property.buildingName ?? '—'}</span></div>
+                  <div><span className="text-[#9b9890]">Unit </span><span className="font-semibold text-[#1a1916]">{contract.unit.number ?? '—'}</span></div>
+                  <div><span className="text-[#9b9890]">Location </span><span className="font-semibold text-[#1a1916]">{[contract.property.community, contract.property.emirate].filter(Boolean).join(', ') || '—'}</span></div>
+                  <div><span className="text-[#9b9890]">Annual Rent </span><span className="font-semibold text-[#1a1916]">{fmtAed(contract.annualRent)}</span></div>
+                  <div className="col-span-2"><span className="text-[#9b9890]">Cheques payable to </span><span className="font-semibold text-[#1a1916]">{contract.landlord.companyName ?? contract.landlord.name ?? '—'}</span></div>
+                </div>
+              </div>
+
+              {/* New renewal terms */}
+              <div>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">New Renewal Terms</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">New annual rent (AED)</label>
+                    <input
+                      type="number"
+                      value={renewalForm.newAnnualRent}
+                      onChange={e => setRenewalForm(f => ({ ...f, newAnnualRent: e.target.value }))}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="90000"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Start date</label>
+                      <input
+                        type="date"
+                        value={renewalForm.newStartDate}
+                        onChange={e => setRenewalForm(f => ({ ...f, newStartDate: e.target.value }))}
+                        className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-[#6b6860] block mb-1">End date</label>
+                      <input
+                        type="date"
+                        value={renewalForm.newEndDate}
+                        onChange={e => setRenewalForm(f => ({ ...f, newEndDate: e.target.value }))}
+                        className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Installments</label>
+                      <select
+                        value={renewalForm.numberOfInstallments}
+                        onChange={e => setRenewalForm(f => ({ ...f, numberOfInstallments: e.target.value }))}
+                        className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      >
+                        {[1, 2, 3, 4, 6, 12].map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Payment method</label>
+                      <select
+                        value={renewalForm.modeOfPayment}
+                        onChange={e => setRenewalForm(f => ({ ...f, modeOfPayment: e.target.value }))}
+                        className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      >
+                        <option value="cheque">Cheque</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="online">Online</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      checked={renewalForm.samePayee}
+                      onChange={e => setRenewalForm(f => ({ ...f, samePayee: e.target.checked }))}
+                      className="h-4 w-4 accent-[#2e9f82]"
+                    />
+                    <span className="text-xs text-[#6b6860]">
+                      Issue cheques to same payee (<span className="font-semibold text-[#1a1916]">{contract.landlord.companyName ?? contract.landlord.name ?? '—'}</span>)
+                    </span>
+                  </label>
+                  {!renewalForm.samePayee && (
+                    <input
+                      type="text"
+                      value={renewalForm.chequePayeeName}
+                      onChange={e => setRenewalForm(f => ({ ...f, chequePayeeName: e.target.value }))}
+                      placeholder="New payee name on cheques"
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Fees */}
+              <div>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Fees (AED)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Admin fee</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewalForm.adminFee}
+                      onChange={e => setRenewalForm(f => ({ ...f, adminFee: e.target.value }))}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="1000"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Ejari fee</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewalForm.ejariFee}
+                      onChange={e => setRenewalForm(f => ({ ...f, ejariFee: e.target.value }))}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="250"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-[#9b9890] mt-1.5">Prefilled from the current contract. Adjust if your fee rules have changed.</p>
+              </div>
+
+              {/* Installment preview */}
+              {(() => {
+                const n = parseInt(renewalForm.numberOfInstallments, 10) || 0;
+                const rent = parseFloat(renewalForm.newAnnualRent) || 0;
+                const start = renewalForm.newStartDate ? new Date(renewalForm.newStartDate) : null;
+                const end = renewalForm.newEndDate ? new Date(renewalForm.newEndDate) : null;
+                if (!n || !rent || !start || !end) return null;
+                const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000));
+                const stepDays = Math.max(1, Math.floor(totalDays / n));
+                const each = Math.round(rent / n);
+                const rows = Array.from({ length: n }, (_, i) => {
+                  const d = new Date(start);
+                  d.setDate(d.getDate() + i * stepDays);
+                  return { idx: i + 1, due: d, amount: each };
+                });
+                return (
+                  <div>
+                    <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Planned Installments</p>
+                    <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-[#f7f6f2] text-[10px] text-[#9b9890] uppercase tracking-wide">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">#</th>
+                            <th className="px-3 py-2 text-left font-medium">Description</th>
+                            <th className="px-3 py-2 text-left font-medium">Due date</th>
+                            <th className="px-3 py-2 text-right font-medium">Amount (AED)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map(r => (
+                            <tr key={r.idx} style={{ borderTop: '1px solid #f0ede8' }}>
+                              <td className="px-3 py-2 text-[#9b9890]">{r.idx}</td>
+                              <td className="px-3 py-2 text-[#1a1916]">Rent — Cheque {r.idx}/{n}</td>
+                              <td className="px-3 py-2 text-[#1a1916] tabular-nums">{fmtDate(r.due.toISOString())}</td>
+                              <td className="px-3 py-2 text-right text-[#1a1916] font-semibold tabular-nums">{r.amount.toLocaleString('en-AE')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-[#9b9890] mt-1.5">Even-split based on annual rent ÷ {n}. You can add extra one-off charges below.</p>
+                  </div>
+                );
+              })()}
+
+              {/* Extra installments / charges */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide">Additional Charges (optional)</p>
+                  <button
+                    type="button"
+                    onClick={() => setRenewalExtras(prev => [...prev, { description: '', amount: '', dueDate: renewalForm.newStartDate }])}
+                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors"
+                  >
+                    <Plus size={11} /> Add line
+                  </button>
+                </div>
+                {renewalExtras.length === 0 ? (
+                  <p className="text-[11px] text-[#9b9890] italic">No additional charges. Use this for VAT, Municipality Fee, parking add-on, etc.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {renewalExtras.map((ec, idx) => (
+                      <div key={idx} className="grid grid-cols-[1fr_120px_140px_28px] gap-2 items-center">
+                        <input
+                          type="text"
+                          value={ec.description}
+                          onChange={e => setRenewalExtras(prev => prev.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))}
+                          placeholder="e.g. Municipality Fee"
+                          className="text-xs px-2.5 py-1.5 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          value={ec.amount}
+                          onChange={e => setRenewalExtras(prev => prev.map((x, i) => i === idx ? { ...x, amount: e.target.value } : x))}
+                          placeholder="Amount AED"
+                          className="text-xs px-2.5 py-1.5 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82] text-right tabular-nums"
+                        />
+                        <input
+                          type="date"
+                          value={ec.dueDate}
+                          onChange={e => setRenewalExtras(prev => prev.map((x, i) => i === idx ? { ...x, dueDate: e.target.value } : x))}
+                          className="text-xs px-2.5 py-1.5 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setRenewalExtras(prev => prev.filter((_, i) => i !== idx))}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-[#9b9890] hover:text-red-600 hover:bg-red-50 transition-colors"
+                          aria-label="Remove charge"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {renewalError && (
+                <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{renewalError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-[#e8e6e0] flex justify-end gap-2 sticky bottom-0 bg-white">
+              <button
+                onClick={() => setShowRenewalModal(false)}
+                disabled={renewalSubmitting}
+                className="px-4 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f7f6f2] transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitProposeRenewal}
+                disabled={renewalSubmitting}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                style={{ background: '#2e9f82' }}
+              >
+                {renewalSubmitting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                {renewalSubmitting ? 'Proposing…' : 'Propose Renewal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Termination request modal */}
+      {showTerminateConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center shrink-0">
+                <AlertCircle size={18} className="text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#1a1916]">Request termination</p>
+                <p className="text-xs text-[#6b6860] mt-1">
+                  The tenant must accept this request before the contract terminates.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-[#1a1916] mb-1">Reason</label>
+                <textarea
+                  value={terminateReason}
+                  onChange={e => setTerminateReason(e.target.value)}
+                  rows={3}
+                  placeholder="Explain why you want to terminate this contract…"
+                  className="w-full text-xs px-2.5 py-2 border border-[#e8e6e0] rounded-lg focus:outline-none focus:border-[#2e9f82]"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-[#1a1916] mb-1">Effective date</label>
+                <input
+                  type="date"
+                  value={terminateEffectiveDate}
+                  onChange={e => setTerminateEffectiveDate(e.target.value)}
+                  className="w-full text-xs px-2.5 py-2 border border-[#e8e6e0] rounded-lg focus:outline-none focus:border-[#2e9f82]"
+                />
+              </div>
+              {terminateError && <p className="text-xs text-red-600">{terminateError}</p>}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setShowTerminateConfirm(false); setTerminateError(null); }}
+                disabled={terminateSubmitting}
+                className="flex-1 px-4 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f7f6f2] disabled:opacity-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitTerminationRequest}
+                disabled={terminateSubmitting}
+                className="flex-1 px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {terminateSubmitting && <Loader2 size={12} className="animate-spin" />}
+                Send Request
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
