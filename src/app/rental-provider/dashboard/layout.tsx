@@ -1,11 +1,17 @@
 /**
  * Layout for all Rental Provider dashboard routes (/rental-provider/dashboard/*).
- * Uses the same DashboardShell as the main dashboard — sidebar nav adapts to
- * the user's role, so RP users see RP-specific nav items.
+ * Wraps content in DashboardShell (sidebar nav + topbar) and the onboarding
+ * gate (forces new accounts through the onboarding flow before they can use
+ * any other RP page).
  */
 import { DashboardShell } from '@/components/dashboard/DashboardShell';
+import { RpOnboardingGate } from '@/components/dashboard/RpOnboardingGate';
 import { ReactNode } from 'react';
 
 export default function RentalProviderDashboardLayout({ children }: { children: ReactNode }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  return (
+    <DashboardShell>
+      <RpOnboardingGate>{children}</RpOnboardingGate>
+    </DashboardShell>
+  );
 }

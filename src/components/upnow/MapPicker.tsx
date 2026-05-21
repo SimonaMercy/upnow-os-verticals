@@ -1,7 +1,33 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MapPin, X } from 'lucide-react';
+import { MapPin } from 'lucide-react';
+
+const DEFAULT_LNG = 55.2708;
+const DEFAULT_LAT = 25.2048;
+
+// Singleton loader — only injects the script tag once per page
+let mapsLoadPromise: Promise<void> | null = null;
+
+function loadGoogleMaps(key: string): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const win = window as unknown as Record<string, unknown> & { google?: { maps?: { Map?: unknown } } };
+  if (win.google?.maps?.Map) return Promise.resolve();
+  if (mapsLoadPromise) return mapsLoadPromise;
+  mapsLoadPromise = new Promise<void>((resolve, reject) => {
+    const cbName = '__gm_' + Math.random().toString(36).slice(2);
+    win[cbName] = () => {
+      resolve();
+      delete win[cbName];
+    };
+    const s = document.createElement('script');
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=${cbName}`;
+    s.async = true;
+    s.onerror = () => reject(new Error('Google Maps failed to load'));
+    document.head.appendChild(s);
+  });
+  return mapsLoadPromise;
+}
 
 interface MapPickerProps {
   latitude?: number | null;
@@ -9,92 +35,102 @@ interface MapPickerProps {
   onChange: (lat: number, lng: number) => void;
 }
 
-// Dubai city centre as default
-const DEFAULT_LNG = 55.2708;
-const DEFAULT_LAT = 25.2048;
-
 export function MapPicker({ latitude, longitude, onChange }: MapPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markerRef = useRef<mapboxgl.Marker | null>(null);
+  const mapRef       = useRef<google.maps.Map | null>(null);
+  const markerRef    = useRef<google.maps.Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
 
+  const initLat = latitude  ?? DEFAULT_LAT;
   const initLng = longitude ?? DEFAULT_LNG;
-  const initLat = latitude ?? DEFAULT_LAT;
 
   useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Mapbox token from env — NEXT_PUBLIC_ prefix exposes it to the browser
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    if (!token) {
-      setError('NEXT_PUBLIC_MAPBOX_TOKEN is not set');
-      return;
-    }
-
-    let map: mapboxgl.Map;
-    let marker: mapboxgl.Marker;
+    let cancelled = false;
 
     (async () => {
+      let key: string;
       try {
-        const mapboxgl = (await import('mapbox-gl')).default;
-        await import('mapbox-gl/dist/mapbox-gl.css');
-
-        mapboxgl.accessToken = token;
-
-        map = new mapboxgl.Map({
-          container: containerRef.current!,
-          style: 'mapbox://styles/mapbox/streets-v12',
-          center: [initLng, initLat],
-          zoom: latitude && longitude ? 14 : 10,
-        });
-
-        map.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
-
-        // Drop a draggable marker
-        const el = document.createElement('div');
-        el.style.cssText =
-          'width:32px;height:32px;background:#2e9f82;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:grab';
-
-        marker = new mapboxgl.Marker({ element: el, draggable: true })
-          .setLngLat([initLng, initLat])
-          .addTo(map);
-
-        marker.on('dragend', () => {
-          const { lng, lat } = marker.getLngLat();
-          onChange(lat, lng);
-        });
-
-        // Click on map to move marker
-        map.on('click', (e) => {
-          const { lng, lat } = e.lngLat;
-          marker.setLngLat([lng, lat]);
-          onChange(lat, lng);
-        });
-
-        map.on('load', () => setMapLoaded(true));
-
-        mapRef.current = map;
-        markerRef.current = marker;
-      } catch (err) {
-        setError('Failed to load map. Check your Mapbox token.');
-        console.error(err);
+        const r = await fetch('/api/maps/key', { credentials: 'include' });
+        const data = await r.json() as { key?: string };
+        key = data.key ?? '';
+      } catch {
+        if (!cancelled) setError('Failed to fetch map key');
+        return;
       }
+      if (!key) { if (!cancelled) setError('Map key not configured'); return; }
+
+      try {
+        await loadGoogleMaps(key);
+      } catch (err) {
+        if (!cancelled) { setError('Failed to load map. Check your Google Maps key.'); console.error(err); }
+        return;
+      }
+
+      if (cancelled || !containerRef.current) return;
+
+      const center = { lat: initLat, lng: initLng };
+
+      const map = new google.maps.Map(containerRef.current, {
+        center,
+        zoom: latitude && longitude ? 14 : 10,
+        mapTypeControl:    false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        zoomControl:       true,
+        styles: [
+          { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+        ],
+      });
+
+      const marker = new google.maps.Marker({
+        position: center,
+        map,
+        draggable: true,
+        icon: {
+          path:        google.maps.SymbolPath.CIRCLE,
+          fillColor:   '#2e9f82',
+          fillOpacity: 1,
+          strokeColor: '#ffffff',
+          strokeWeight: 3,
+          scale:       10,
+        },
+      });
+
+      marker.addListener('dragend', () => {
+        const pos = marker.getPosition();
+        if (pos) onChange(pos.lat(), pos.lng());
+      });
+
+      map.addListener('click', (e: google.maps.MapMouseEvent) => {
+        if (e.latLng) {
+          marker.setPosition(e.latLng);
+          onChange(e.latLng.lat(), e.latLng.lng());
+        }
+      });
+
+      map.addListener('idle', () => { if (!cancelled) setMapLoaded(true); });
+
+      mapRef.current    = map;
+      markerRef.current = marker;
     })();
 
     return () => {
-      markerRef.current?.remove();
-      mapRef.current?.remove();
+      cancelled = true;
+      markerRef.current?.setMap(null);
+      markerRef.current = null;
+      mapRef.current    = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync external lat/lng changes to marker (e.g., geocoding result)
+  // Sync external lat/lng (e.g. from autocomplete selection)
   useEffect(() => {
-    if (latitude != null && longitude != null && markerRef.current) {
-      markerRef.current.setLngLat([longitude, latitude]);
-      mapRef.current?.flyTo({ center: [longitude, latitude], zoom: 14 });
+    if (latitude != null && longitude != null && markerRef.current && mapRef.current) {
+      const pos = { lat: latitude, lng: longitude };
+      markerRef.current.setPosition(pos);
+      mapRef.current.panTo(pos);
+      mapRef.current.setZoom(15);
     }
   }, [latitude, longitude]);
 

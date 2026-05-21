@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Users, Plus, Mail, Phone, Calendar } from 'lucide-react';
+import { Users, Plus, Mail, Phone, Calendar, Building2, Wrench } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { CanAccess } from '@/components/ui/CanAccess';
@@ -42,14 +42,24 @@ export default function AdminAccountsPage() {
         title="Admin Accounts"
         subtitle="Manage delegated admin accounts on the platform."
         actions={
-          <Link
-            href="/dashboard/admin/accounts/new"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            <Plus size={16} />
-            New Admin
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard/admin/accounts/new-provider"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-700)', border: '1px solid var(--color-base-200)' }}
+            >
+              <Building2 size={15} />
+              Register Provider
+            </Link>
+            <Link
+              href="/dashboard/admin/accounts/new"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              <Plus size={16} />
+              New Admin
+            </Link>
+          </div>
         }
       >
         <SectionHeader title={`${accounts.length} admin account${accounts.length !== 1 ? 's' : ''}`} />

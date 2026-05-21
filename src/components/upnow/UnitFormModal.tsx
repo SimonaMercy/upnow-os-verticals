@@ -1,14 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ─── Lookup data ──────────────────────────────────────────
 export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'townhouse', 'penthouse', 'studio', 'duplex_loft'];
-export const COMMERCIAL_UNIT_TYPES = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
-export const INDUSTRIAL_UNIT_TYPES = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
-
+export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
+export const INDUSTRIAL_UNIT_TYPES  = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
 
 const UNIT_TYPE_LABELS: Record<string, string> = {
   apartment: 'Apartment', villa: 'Villa', townhouse: 'Townhouse', penthouse: 'Penthouse',
@@ -18,7 +17,6 @@ const UNIT_TYPE_LABELS: Record<string, string> = {
   restaurant_fnb: 'Restaurant / F&B', clinic_medical: 'Clinic / Medical',
   warehouse: 'Warehouse', open_yard: 'Open Yard', storage_unit: 'Storage Unit',
   cold_storage: 'Cold Storage', logistics_facility: 'Logistics Facility',
-
 };
 
 function unitTypesForCategory(category: string): string[] {
@@ -32,9 +30,19 @@ function unitTypesForCategory(category: string): string[] {
 
 export const AMENITIES = [
   'Central A/C', 'Parking', 'Swimming Pool', 'Gym', 'Security', 'CCTV',
-  'Balcony', 'Elevator', 'Concierge', 'Playground', "Maid's Room", 'Storage",',
+  'Balcony', 'Elevator', 'Concierge', 'Playground', "Maid's Room", 'Storage',
   'Built-in Wardrobes', 'Shared Pool', 'Covered Parking', 'Pet Friendly',
   'High-Speed Internet', 'Smart Home', '24/7 Security', 'Kids Play Area',
+];
+
+const VIEW_OPTIONS = [
+  'Sea View', 'Partial Sea View', 'Full Sea View', 'Beach View', 'Marina View',
+  'Canal View', 'Lake View', 'Lagoon View', 'Pool View', 'Garden View',
+  'Park View', 'Community View', 'Courtyard View', 'City View', 'Skyline View',
+  'Downtown View', 'Landmark View', 'Burj View', 'Golf Course View', 'Mountain View',
+  'Desert View', 'Road View', 'Street View', 'Highway View', 'Creek View',
+  'Harbour View', 'Waterfront View', 'Palm View', 'Panoramic View', 'Open View',
+  'Burj Khalifa View', 'Palm Jumeirah View', 'Dubai Marina View', 'Fountain View',
 ];
 
 export const FURNISHING_OPTIONS = ['Unfurnished', 'Semi-Furnished', 'Fully Furnished'];
@@ -57,6 +65,10 @@ export interface UnitFormData {
   furnishing: string;
   amenities: string[];
   rentalPrice: string;
+  securityDeposit: string;
+  adminFee: string;
+  ejariFeeFils: string;
+  commission: string;
   serviceCharges: string;
   description: string;
 }
@@ -64,7 +76,9 @@ export interface UnitFormData {
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
   floor: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', view: '',
-  furnishing: 'Unfurnished', amenities: [], rentalPrice: '', serviceCharges: '', description: '',
+  furnishing: 'Unfurnished', amenities: [], rentalPrice: '',
+  securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
+  serviceCharges: '', description: '',
 };
 
 interface Props {
@@ -76,15 +90,53 @@ interface Props {
   title?: string;
 }
 
-function FieldLabel({ label, required }: { label: string; required?: boolean }) {
+// ─── View typeahead ───────────────────────────────────────
+function ViewInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const filtered = value.length >= 2
+    ? VIEW_OPTIONS.filter(v => v.toLowerCase().includes(value.toLowerCase()))
+    : [];
+  const showDropdown = open && filtered.length > 0;
+
   return (
-    <label className="block text-xs font-medium text-[#6b6860] mb-1">
-      {label} {required && <span className="text-red-500">*</span>}
-    </label>
+    <div ref={ref} className="relative">
+      <input
+        className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]"
+        placeholder="e.g. Sea View, Marina View…"
+        value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => { if (value.length >= 2) setOpen(true); }}
+        onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}
+      />
+      {showDropdown && (
+        <ul className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-[#e8e6e0] rounded-xl shadow-xl max-h-48 overflow-y-auto">
+          {filtered.map(v => (
+            <li key={v}>
+              <button
+                type="button"
+                onMouseDown={() => { onChange(v); setOpen(false); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-[#f4f3ef] text-[#1a1916] cursor-pointer"
+              >
+                {v}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
 const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+const INPUT_ERR = 'w-full border border-red-400 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-red-400';
 
 export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
@@ -92,12 +144,24 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setForm({ ...EMPTY_UNIT, ...initial });
+    if (open) { setForm({ ...EMPTY_UNIT, ...initial }); setErrors({}); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const upd = <K extends keyof UnitFormData>(k: K, v: UnitFormData[K]) => {
-    setForm(prev => ({ ...prev, [k]: v }));
+    setForm(prev => {
+      const next = { ...prev, [k]: v };
+      if (k === 'rentalPrice') {
+        const rent = Number(v);
+        if (!isNaN(rent) && rent > 0) {
+          next.securityDeposit = String(Math.round(rent * 0.05));
+          next.adminFee        = String(Math.round(rent * 0.05));
+          next.ejariFeeFils    = '220';
+          next.commission      = String(Math.round(rent * 0.05));
+        }
+      }
+      return next;
+    });
     setErrors(prev => ({ ...prev, [k]: undefined }));
   };
 
@@ -112,10 +176,10 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
 
   const validate = (): boolean => {
     const errs: typeof errors = {};
-    if (!form.unitNumber.trim()) errs.unitNumber = 'Required';
-    if (!form.unitType) errs.unitType = 'Required';
-    if (!form.unitSizeSqft) errs.unitSizeSqft = 'Required';
-    if (!form.rentalPrice) errs.rentalPrice = 'Required';
+    if (!form.unitNumber.trim()) errs.unitNumber  = 'Required';
+    if (!form.unitType)          errs.unitType    = 'Required';
+    if (!form.unitSizeSqft)      errs.unitSizeSqft = 'Required';
+    if (!form.rentalPrice)       errs.rentalPrice  = 'Required';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -124,17 +188,13 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
     e.preventDefault();
     if (!validate()) return;
     setSaving(true);
-    try {
-      await onSave(form);
-      onClose();
-    } finally {
-      setSaving(false);
-    }
+    try { await onSave(form); onClose(); }
+    finally { setSaving(false); }
   };
 
-  const unitTypes = unitTypesForCategory(propertyCategory);
+  const unitTypes   = unitTypesForCategory(propertyCategory);
   const showBedBath = ['residential', ''].includes(propertyCategory) ||
-    ['apartment', 'villa', 'townhouse', 'penthouse', 'studio', 'duplex_loft'].includes(form.unitType);
+    RESIDENTIAL_UNIT_TYPES.includes(form.unitType);
 
   if (!open) return null;
 
@@ -144,77 +204,52 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl">
+
         {/* Header */}
         <div className="sticky top-0 bg-white rounded-t-2xl flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] z-10">
           <h3 className="font-semibold text-lg text-[#1a1916]">{title ?? 'Add Unit'}</h3>
           <button onClick={onClose} className="cursor-pointer text-[#6b6860] hover:text-[#1a1916]"><X size={20} /></button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Unit Number + Name */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <FieldLabel label="Unit Number" required />
-              <input
-                className={cn(INPUT, errors.unitNumber && 'border-red-400')}
-                placeholder="e.g. 101, G-02"
-                value={form.unitNumber}
-                onChange={e => upd('unitNumber', e.target.value)}
-              />
-              {errors.unitNumber && <p className="text-xs text-red-500 mt-1">{errors.unitNumber}</p>}
-            </div>
-            <div>
-              <FieldLabel label="Title" />
-              <input
-                className={INPUT}
-                placeholder="Optional display name"
-                value={form.unitName}
-                onChange={e => upd('unitName', e.target.value)}
-              />
-            </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+
+          {/* Listing Unit Title */}
+          <div>
+            <label className="block text-xs font-medium text-[#6b6860] mb-1">Listing Unit Title</label>
+            <input
+              className={INPUT}
+              placeholder="e.g. Spacious 2BR Apartment with Balcony in Al Raffa"
+              value={form.unitName}
+              onChange={e => upd('unitName', e.target.value)}
+            />
           </div>
 
-          {/* Unit Type + Tier */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Unit Type + Unit Number + Floor */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <FieldLabel label="Unit Type" required />
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Type <span className="text-red-500">*</span></label>
               <select
-                className={cn(INPUT, 'appearance-none', errors.unitType && 'border-red-400')}
+                className={cn(errors.unitType ? INPUT_ERR : INPUT, 'appearance-none')}
                 value={form.unitType}
                 onChange={e => upd('unitType', e.target.value)}
               >
                 <option value="">Select type</option>
-                {unitTypes.map(t => (
-                  <option key={t} value={t}>{UNIT_TYPE_LABELS[t] ?? t}</option>
-                ))}
+                {unitTypes.map(t => <option key={t} value={t}>{UNIT_TYPE_LABELS[t] ?? t}</option>)}
               </select>
-              {errors.unitType && <p className="text-xs text-red-500 mt-1">{errors.unitType}</p>}
+              {errors.unitType && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitType}</p>}
             </div>
             <div>
-              <FieldLabel label="Tier" />
-              <div className="flex gap-2">
-                {UNIT_TIERS.map(t => (
-                  <button
-                    key={t.id} type="button"
-                    onClick={() => upd('unitTier', t.id)}
-                    className={cn(
-                      'flex-1 py-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors',
-                      form.unitTier === t.id
-                        ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]'
-                        : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c8c6c0]'
-                    )}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Number <span className="text-red-500">*</span></label>
+              <input
+                className={errors.unitNumber ? INPUT_ERR : INPUT}
+                placeholder="e.g. 101, G-02"
+                value={form.unitNumber}
+                onChange={e => upd('unitNumber', e.target.value)}
+              />
+              {errors.unitNumber && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitNumber}</p>}
             </div>
-          </div>
-
-          {/* Floor + Size */}
-          <div className="grid grid-cols-2 gap-3">
             <div>
-              <FieldLabel label="Floor" />
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Floor</label>
               <input
                 className={INPUT}
                 placeholder="e.g. G, 1, 2…"
@@ -222,25 +257,13 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
                 onChange={e => upd('floor', e.target.value)}
               />
             </div>
-            <div>
-              <FieldLabel label="Size (sq.ft)" required />
-              <input
-                type="number"
-                min="0"
-                className={cn(INPUT, errors.unitSizeSqft && 'border-red-400')}
-                placeholder="e.g. 1200"
-                value={form.unitSizeSqft}
-                onChange={e => upd('unitSizeSqft', e.target.value)}
-              />
-              {errors.unitSizeSqft && <p className="text-xs text-red-500 mt-1">{errors.unitSizeSqft}</p>}
-            </div>
           </div>
 
-          {/* Bed / Bath — only for residential */}
+          {/* Beds + Baths + Furnishing — residential only */}
           {showBedBath && (
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <FieldLabel label="Bedrooms" />
+                <label className="block text-xs font-medium text-[#6b6860] mb-1">Bedrooms</label>
                 <select className={cn(INPUT, 'appearance-none')} value={form.bedrooms} onChange={e => upd('bedrooms', e.target.value)}>
                   {['Studio', '1', '2', '3', '4', '5', '6+'].map(b => (
                     <option key={b} value={b}>{b === 'Studio' ? 'Studio' : `${b} BR`}</option>
@@ -248,13 +271,13 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
                 </select>
               </div>
               <div>
-                <FieldLabel label="Bathrooms" />
+                <label className="block text-xs font-medium text-[#6b6860] mb-1">Bathrooms</label>
                 <select className={cn(INPUT, 'appearance-none')} value={form.bathrooms} onChange={e => upd('bathrooms', e.target.value)}>
                   {['1', '2', '3', '4', '5+'].map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
               </div>
               <div>
-                <FieldLabel label="Furnishing" />
+                <label className="block text-xs font-medium text-[#6b6860] mb-1">Furnishing</label>
                 <select className={cn(INPUT, 'appearance-none')} value={form.furnishing} onChange={e => upd('furnishing', e.target.value)}>
                   {FURNISHING_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
@@ -264,45 +287,78 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
 
           {/* View */}
           <div>
-            <FieldLabel label="View" />
-            <input
-              className={INPUT}
-              placeholder="e.g. Sea View, Burj Khalifa View, Garden View"
-              value={form.view}
-              onChange={e => upd('view', e.target.value)}
-            />
+            <label className="block text-xs font-medium text-[#6b6860] mb-1">View</label>
+            <ViewInput value={form.view} onChange={v => upd('view', v)} />
           </div>
 
-          {/* Annual Rent + Service Charges */}
+          {/* Size + Annual Rent */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <FieldLabel label="Annual Rent (AED)" required />
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.ft) <span className="text-red-500">*</span></label>
               <input
-                type="number"
-                min="0"
-                className={cn(INPUT, errors.rentalPrice && 'border-red-400')}
+                type="number" min="0"
+                className={errors.unitSizeSqft ? INPUT_ERR : INPUT}
+                placeholder="e.g. 1200"
+                value={form.unitSizeSqft}
+                onChange={e => upd('unitSizeSqft', e.target.value)}
+              />
+              {errors.unitSizeSqft && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqft}</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
+              <input
+                type="number" min="0"
+                className={errors.rentalPrice ? INPUT_ERR : INPUT}
                 placeholder="e.g. 85000"
                 value={form.rentalPrice}
                 onChange={e => upd('rentalPrice', e.target.value)}
               />
-              {errors.rentalPrice && <p className="text-xs text-red-500 mt-1">{errors.rentalPrice}</p>}
+              {errors.rentalPrice && <p className="text-[10px] text-red-500 mt-0.5">{errors.rentalPrice}</p>}
+            </div>
+          </div>
+
+          {/* Financial Details */}
+          <div className="rounded-xl border border-[#a7f3d0] bg-[#f0fdf8] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a7a5a]">Financial Details</p>
+              {form.rentalPrice && (
+                <span className="text-[10px] text-[#4aaa8a]">Calculated from annual rent · edit to adjust</span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Security Deposit</label>
+                <input type="number" min="0" className={INPUT} placeholder="e.g. 10000"
+                  value={form.securityDeposit} onChange={e => upd('securityDeposit', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Admin Fee</label>
+                <input type="number" min="0" className={INPUT} placeholder="e.g. 5000"
+                  value={form.adminFee} onChange={e => upd('adminFee', e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Ejari Fee</label>
+                <input type="number" min="0" className={INPUT} placeholder="220"
+                  value={form.ejariFeeFils} onChange={e => upd('ejariFeeFils', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Commission</label>
+                <input type="number" min="0" className={INPUT} placeholder="e.g. 4000"
+                  value={form.commission} onChange={e => upd('commission', e.target.value)} />
+              </div>
             </div>
             <div>
-              <FieldLabel label="Service Charges (AED/yr)" />
-              <input
-                type="number"
-                min="0"
-                className={INPUT}
-                placeholder="e.g. 8000"
-                value={form.serviceCharges}
-                onChange={e => upd('serviceCharges', e.target.value)}
-              />
+              <label className="block text-xs font-medium text-[#3d3b35] mb-1">Service Charges (AED/yr)</label>
+              <input type="number" min="0" className={INPUT} placeholder="e.g. 8000"
+                value={form.serviceCharges} onChange={e => upd('serviceCharges', e.target.value)} />
             </div>
           </div>
 
           {/* Amenities */}
           <div>
-            <FieldLabel label="Amenities" />
+            <label className="block text-xs font-medium text-[#6b6860] mb-2">Amenities</label>
             <div className="flex flex-wrap gap-2">
               {AMENITIES.map(a => (
                 <button
@@ -323,10 +379,10 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
 
           {/* Description */}
           <div>
-            <FieldLabel label="Unit Description" />
+            <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Description</label>
             <textarea
-              className={cn(INPUT, 'min-h-[60px] resize-vertical')}
-              placeholder="Additional details for this unit…"
+              className={cn(INPUT, 'min-h-[70px] resize-vertical')}
+              placeholder="Describe this unit for the listing — features, highlights, unique selling points…"
               value={form.description}
               onChange={e => upd('description', e.target.value)}
             />

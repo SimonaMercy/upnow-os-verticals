@@ -6,8 +6,8 @@ import Link from 'next/link';
 import { useAuth, dashboardPath, type UserRole } from '@/contexts/AuthContext';
 import {
   MapPin, X, ChevronLeft, ChevronRight, BedDouble, Bath, Maximize2,
-  Building2, Layers, Wind, CheckCircle2, Check, Shield, Clock,
-  Calendar, MessageSquare, ImageIcon, Dumbbell, Waves, Car,
+  Layers, Wind, CheckCircle2, Check, Shield, Clock,
+  Calendar, MessageSquare, ImageIcon,
   Flame, AppWindow, DoorOpen, Hash, Star, Ruler,
 } from 'lucide-react';
 
@@ -353,9 +353,9 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
   // Inline auth state — shown when unauthenticated user hits "Confirm Viewing"
   type AuthStep = null | 'register' | 'verify-otp' | 'register-success';
   const [authStep, setAuthStep] = useState<AuthStep>(null);
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
   const [authEmail, setAuthEmail] = useState('');
-  const [authPhone, setAuthPhone] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
+  const [authDevOtp, setAuthDevOtp] = useState<string | null>(null);
   const [authOtp, setAuthOtp] = useState(['', '', '', '', '', '']);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -387,6 +387,13 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
         const body = await res.json().catch(() => ({}));
         throw new Error(body.message ?? `Failed: ${res.status}`);
       }
+      const body = await res.json().catch(() => ({}));
+      const leadId: number | undefined = body?.lead?.id;
+      if (leadId) {
+        router.push(`/dashboard/customer/spaces?space=v-${leadId}`);
+        return true;
+      }
+      // Fallback: no lead id in response — show inline success screen
       setDone(scheduledAt);
       return true;
     } catch (err) {
@@ -428,87 +435,67 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
     await submitBooking(date, time, notes, moveInDate);
   }
 
-  async function handleAuthRegister() {
-    if (!authEmail || !authPhone || !authPassword) {
-      setAuthError('Please enter email, phone number, and password.');
-      return;
-    }
+  // Step 1 — send OTP for register or login
+  async function handleAuthIdentify() {
+    const email = authEmail.trim().toLowerCase();
+    if (!email) { setAuthError('Enter your email address.'); return; }
     setAuthError(null);
     setAuthSubmitting(true);
     try {
-      const res = await fetch('/api/auth/register/customer', {
+      const endpoint = authMode === 'register'
+        ? '/api/auth/register/customer'
+        : '/api/auth/login';
+      const res = await fetch(endpoint, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: authEmail.trim().toLowerCase(),
-          phone: authPhone.trim(),
-          password: authPassword,
-        }),
+        body: JSON.stringify({ email }),
       });
       const body = await res.json();
       if (!res.ok) {
-        const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Registration failed';
+        const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Something went wrong';
         throw new Error(msg);
       }
-      // Registration succeeded — require email OTP verification before booking finalization.
+      if (body.devOtp) setAuthDevOtp(body.devOtp);
       setAuthOtp(['', '', '', '', '', '']);
       setAuthStep('verify-otp');
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Registration failed');
+      setAuthError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setAuthSubmitting(false);
     }
   }
 
-  async function ensureLoginSession() {
-    if (!authEmail || !authPassword) return;
-    await fetch('/api/auth/login', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: authEmail.trim().toLowerCase(),
-        password: authPassword,
-      }),
-    }).catch(() => null);
-  }
-
+  // Step 2 — verify the OTP and complete the booking
   async function handleAuthVerifyOtp() {
     const code = authOtp.join('');
-    if (code.length !== 6) {
-      setAuthError('Enter the 6-digit code sent to your email.');
-      return;
-    }
-    if (!authEmail) {
-      setAuthError('Email is required to verify your account.');
-      return;
-    }
-
+    if (code.length !== 6) { setAuthError('Enter the 6-digit code.'); return; }
     setAuthError(null);
     setAuthSubmitting(true);
     try {
-      const res = await fetch('/api/auth/email/verify-otp', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: authEmail.trim().toLowerCase(),
-          code,
-        }),
-      });
+      const email = authEmail.trim().toLowerCase();
+      let res: Response;
+      if (authMode === 'register') {
+        res = await fetch('/api/auth/email/verify-otp', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code }),
+        });
+      } else {
+        res = await fetch('/api/auth/login/verify-otp', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: email, code }),
+        });
+      }
       const body = await res.json();
       if (!res.ok) {
         const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Verification failed';
         throw new Error(msg);
       }
-
       const booked = await submitBooking(date, time, notes, moveInDate);
-      if (booked) {
-        setAuthStep('register-success');
-      } else {
-        setAuthError('Email verified, but we could not submit your viewing request. Please try again.');
-      }
+      if (booked) setAuthStep('register-success');
+      else setAuthError('Verified! But could not submit the viewing request. Please try again.');
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'Verification failed');
     } finally {
@@ -541,134 +528,108 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
     }
   }
 
-  // Inline registration view — shown when unauthenticated
+  // ── Step 1: email entry (register or sign-in toggle) ──────────────────────
   if (authStep === 'register') {
     return (
       <ModalShell onClose={onClose}>
+        {/* Mode toggle */}
+        <div className="flex rounded-xl overflow-hidden border border-[#e8e6e0] mb-5">
+          <button
+            type="button"
+            onClick={() => { setAuthMode('register'); setAuthError(null); }}
+            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
+            style={{
+              backgroundColor: authMode === 'register' ? '#1a1916' : 'transparent',
+              color: authMode === 'register' ? '#fff' : '#6b6860',
+            }}
+          >
+            Create account
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAuthMode('login'); setAuthError(null); }}
+            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
+            style={{
+              backgroundColor: authMode === 'login' ? '#1a1916' : 'transparent',
+              color: authMode === 'login' ? '#fff' : '#6b6860',
+            }}
+          >
+            Sign in
+          </button>
+        </div>
+
         <h3 className="font-bold text-xl text-[#1a1916] mb-1">
-          Create an account to continue
+          {authMode === 'register' ? 'Create your account' : 'Welcome back'}
         </h3>
         <p className="text-sm text-[#9b9890] mb-5">
-          Fill in your details to confirm this viewing.
+          {authMode === 'register'
+            ? 'Enter your email and we\'ll send you a verification code.'
+            : 'Enter your email and we\'ll send you a sign-in code.'}
         </p>
+
         {authError && (
           <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>
         )}
-        <div className="flex flex-col gap-3 mb-4">
-          <div>
-            <label className="block text-xs font-medium text-[#3d3b35] mb-1">Email address</label>
-            <input
-              type="email"
-              value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[#3d3b35] mb-1">Phone number</label>
-            <input
-              type="tel"
-              value={authPhone}
-              onChange={(e) => setAuthPhone(e.target.value)}
-              placeholder="+971501234567"
-              autoComplete="tel"
-              className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[#3d3b35] mb-1">Password <span className="text-[#9b9890] font-normal">(min 8 chars)</span></label>
-            <input
-              type="password"
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              placeholder="Create a strong password"
-              autoComplete="new-password"
-              minLength={8}
-              className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
-            />
-          </div>
+
+        <div className="mb-4">
+          <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">
+            Email address
+          </label>
+          <input
+            type="email"
+            value={authEmail}
+            onChange={(e) => setAuthEmail(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAuthIdentify()}
+            placeholder="you@example.com"
+            autoComplete="email"
+            autoFocus
+            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3.5 py-3 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20 focus:border-[#1a1916]"
+          />
         </div>
+
         <button
-          disabled={authSubmitting}
-          onClick={handleAuthRegister}
-          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90 mb-3"
-          style={{ backgroundColor: '#2e9f82' }}
+          disabled={authSubmitting || !authEmail.trim()}
+          onClick={handleAuthIdentify}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
+          style={{ backgroundColor: '#1a1916' }}
         >
-          {authSubmitting ? 'Creating account…' : 'Create account & confirm booking'}
+          {authSubmitting ? 'Sending code…' : 'Send verification code →'}
         </button>
       </ModalShell>
     );
   }
 
-  if (authStep === 'register-success') {
-    return (
-      <ModalShell onClose={onClose}>
-        <div className="text-center py-2">
-          <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: '#d8f2e8' }}>
-            <Check size={28} style={{ color: '#2e9f82' }} />
-          </div>
-          <h3 className="font-bold text-xl text-[#1a1916] mb-2">Registration Complete</h3>
-          <p className="text-sm text-[#6b6860] mb-5">
-            Your viewing request is submitted. What would you like to do next?
-          </p>
-        </div>
-        <button
-          disabled={authSubmitting}
-          onClick={async () => {
-            setAuthSubmitting(true);
-            await ensureLoginSession();
-            const meRes = await fetch('/api/auth/me', { credentials: 'include' });
-            if (meRes.ok) {
-              router.push('/dashboard/customer/spaces');
-            } else {
-              setAuthSubmitting(false);
-              setAuthError('Your session expired. Please sign in again to view bookings.');
-              setAuthStep('register');
-            }
-          }}
-          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90 mb-3"
-          style={{ backgroundColor: '#2e9f82' }}
-        >
-          {authSubmitting ? 'Opening…' : 'Track my booking'}
-        </button>
-        <button
-          disabled={authSubmitting}
-          onClick={async () => {
-            setAuthSubmitting(true);
-            await ensureLoginSession();
-            onClose();
-          }}
-          className="w-full py-3 rounded-xl text-sm font-semibold border border-[#2e9f82] disabled:opacity-50"
-          style={{ color: '#2e9f82' }}
-        >
-          Visit more properties
-        </button>
-        <div className="mt-4 flex items-center justify-center gap-4 text-sm">
-          <Link href="/listings" className="underline underline-offset-2" style={{ color: '#2e9f82' }}>
-            Browse listings
-          </Link>
-          <span className="text-[#c8c6c0]">|</span>
-          <Link href="/services" className="underline underline-offset-2" style={{ color: '#2e9f82' }}>
-            Browse services
-          </Link>
-        </div>
-      </ModalShell>
-    );
-  }
-
+  // ── Step 2: OTP verification ───────────────────────────────────────────────
   if (authStep === 'verify-otp') {
     const otpCode = authOtp.join('');
     return (
       <ModalShell onClose={onClose}>
-        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Verify your email</h3>
+        <button
+          type="button"
+          onClick={() => { setAuthStep('register'); setAuthError(null); setAuthOtp(['','','','','','']); }}
+          className="flex items-center gap-1 text-xs text-[#9b9890] hover:text-[#1a1916] mb-4 transition-colors"
+        >
+          <ChevronLeft size={14} /> Back
+        </button>
+
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Check your email</h3>
         <p className="text-sm text-[#9b9890] mb-5">
-          Enter the 6-digit code sent to <span className="font-medium text-[#3d3b35]">{authEmail}</span>.
+          We sent a 6-digit code to{' '}
+          <span className="font-semibold text-[#1a1916]">{authEmail}</span>
         </p>
+
         {authError && (
           <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>
         )}
+
+        {/* Dev hint */}
+        {authDevOtp && (
+          <div className="mb-4 rounded-xl px-4 py-3 text-sm font-mono font-bold tracking-widest text-center"
+            style={{ background: '#fdf3e1', color: '#7e3b00' }}>
+            Dev code: {authDevOtp}
+          </div>
+        )}
+
         <div className="flex gap-2 justify-center mb-5">
           {authOtp.map((d, i) => (
             <input
@@ -680,36 +641,40 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
               value={d}
               autoFocus={i === 0}
               onChange={(e) => handleOtpDigit(i, e.target.value)}
-              onKeyDown={(e) => handleOtpKeyDown(i, e)}
+              onKeyDown={(e) => {
+                handleOtpKeyDown(i, e);
+                if (e.key === 'Enter' && otpCode.length === 6) handleAuthVerifyOtp();
+              }}
               onPaste={handleOtpPaste}
-              className="w-11 h-12 text-center text-xl font-semibold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/40"
+              className="w-11 h-12 text-center text-xl font-semibold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20"
               style={{
-                borderColor: d ? '#2e9f82' : '#e8e6e0',
+                borderColor: d ? '#1a1916' : '#e8e6e0',
                 background: '#fafaf8',
                 color: '#1a1916',
               }}
             />
           ))}
         </div>
+
         <button
           disabled={authSubmitting || otpCode.length !== 6}
           onClick={handleAuthVerifyOtp}
-          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90 mb-3"
-          style={{ backgroundColor: '#2e9f82' }}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90 mb-3"
+          style={{ backgroundColor: '#1a1916' }}
         >
-          {authSubmitting ? 'Verifying…' : 'Verify email & continue'}
+          {authSubmitting ? 'Verifying…' : 'Verify & confirm booking'}
         </button>
+
         <p className="text-xs text-center text-[#9b9890]">
           Didn&apos;t receive the code?{' '}
           <button
             type="button"
-            className="font-medium underline-offset-2 hover:underline"
-            style={{ color: '#2e9f82' }}
+            className="font-semibold hover:underline"
+            style={{ color: '#1a1916' }}
             onClick={async () => {
               try {
                 await fetch('/api/auth/email/resend-otp', {
-                  method: 'POST',
-                  credentials: 'include',
+                  method: 'POST', credentials: 'include',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ email: authEmail.trim().toLowerCase() }),
                 });
@@ -722,6 +687,47 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
             Resend
           </button>
         </p>
+      </ModalShell>
+    );
+  }
+
+  // ── Step 3: booking confirmed ──────────────────────────────────────────────
+  if (authStep === 'register-success') {
+    return (
+      <ModalShell onClose={onClose}>
+        <div className="text-center py-2 mb-5">
+          <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: '#d8f2e8' }}>
+            <Check size={28} style={{ color: '#2e9f82' }} />
+          </div>
+          <h3 className="font-bold text-xl text-[#1a1916] mb-1">Viewing requested!</h3>
+          <p className="text-sm text-[#6b6860]">
+            Your account is ready and your viewing request is submitted.
+          </p>
+        </div>
+        <button
+          disabled={authSubmitting}
+          onClick={() => router.push('/dashboard/customer/spaces')}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90 mb-3"
+          style={{ backgroundColor: '#1a1916' }}
+        >
+          Track my booking
+        </button>
+        <button
+          disabled={authSubmitting}
+          onClick={onClose}
+          className="w-full py-3 rounded-xl text-sm font-semibold border border-[#e8e6e0] text-[#1a1916] disabled:opacity-40 hover:bg-[#f9f8f6] transition-colors"
+        >
+          Continue browsing
+        </button>
+        <div className="mt-4 flex items-center justify-center gap-4 text-sm">
+          <Link href="/listings" className="underline underline-offset-2 text-[#9b9890] hover:text-[#1a1916]">
+            Browse listings
+          </Link>
+          <span className="text-[#c8c6c0]">|</span>
+          <Link href="/services" className="underline underline-offset-2 text-[#9b9890] hover:text-[#1a1916]">
+            Browse services
+          </Link>
+        </div>
       </ModalShell>
     );
   }
@@ -858,109 +864,331 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
   );
 }
 
-/* ── Inquire Modal ──────────────────────────────────────────────────────── */
+/* ── Book Now Modal ─────────────────────────────────────────────────────── */
 function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property: PublicProperty; onClose: () => void }) {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
-  const [msg, setMsg] = useState('');
-  const [moveIn, setMoveIn] = useState('');
-  const [done, setDone] = useState(false);
-  const [adults, setAdults] = useState('1');
-  const [children, setChildren] = useState('0');
-  const [pets, setPets] = useState('0');
 
-  if (done) {
+  // Form state
+  const [moveIn,       setMoveIn]       = useState('');
+  const [adults,       setAdults]       = useState('1');
+  const [children,     setChildren]     = useState('0');
+  const [pets,         setPets]         = useState('0');
+  const [installments, setInstallments] = useState('4');
+  const [msg,          setMsg]          = useState('');
+
+  // Submission state
+  const [submitting, setSubmitting]   = useState(false);
+  const [error,      setError]        = useState<string | null>(null);
+  const [contractId, setContractId]   = useState<number | null>(null); // set on success
+
+  // Inline auth state
+  type AuthStep = null | 'register' | 'verify-otp';
+  const [authStep,       setAuthStep]       = useState<AuthStep>(null);
+  const [authMode,       setAuthMode]       = useState<'register' | 'login'>('register');
+  const [authEmail,      setAuthEmail]      = useState('');
+  const [authDevOtp,     setAuthDevOtp]     = useState<string | null>(null);
+  const [authOtp,        setAuthOtp]        = useState(['','','','','','']);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authError,      setAuthError]      = useState<string | null>(null);
+  const otpRefs = useRef<Array<HTMLInputElement | null>>([null,null,null,null,null,null]);
+
+  // ── Submit contract ────────────────────────────────────────────────────
+  async function submitContract(): Promise<boolean> {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const start = new Date(moveIn);
+      const end   = new Date(start);
+      end.setFullYear(end.getFullYear() + 1);
+      end.setDate(end.getDate() - 1); // 1-year lease: end = start + 1yr - 1day
+      const body = {
+        unitId:              unit.id,
+        contractStartDate:   moveIn,
+        contractEndDate:     end.toISOString().split('T')[0],
+        annualRent:          Number(unit.rentalPrice),
+        numberOfInstallments: Number(installments),
+
+        notes:               msg || undefined,
+      };
+      const res = await fetch('/api/contracts/tenant/initiate', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const m = Array.isArray(data.message) ? data.message.join(', ') : data.message ?? `Error ${res.status}`;
+        throw new Error(m);
+      }
+      setContractId(data.id ?? null);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+      return false;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // ── Handle main submit button ──────────────────────────────────────────
+  async function handleSubmit() {
+    setError(null);
+    const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+    if (meRes.status === 401) {
+      setAuthStep('register');
+      return;
+    }
+    const me = await meRes.json().catch(() => ({}));
+    if (me.role && me.role !== 'customer') {
+      setError('Only customer accounts can submit rental applications. Please sign in as a customer.');
+      return;
+    }
+    await submitContract();
+  }
+
+  // ── Step 1: send OTP (register or sign-in) ────────────────────────────
+  async function handleIdentify() {
+    const email = authEmail.trim().toLowerCase();
+    if (!email) { setAuthError('Enter your email address.'); return; }
+    setAuthError(null); setAuthSubmitting(true);
+    try {
+      const endpoint = authMode === 'register'
+        ? '/api/auth/register/customer'
+        : '/api/auth/login';
+      const res = await fetch(endpoint, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        const m = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Something went wrong';
+        throw new Error(m);
+      }
+      if (body.devOtp) setAuthDevOtp(body.devOtp);
+      setAuthOtp(['','','','','','']);
+      setAuthStep('verify-otp');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  // ── Step 2: verify OTP → then submit contract ─────────────────────────
+  async function handleVerifyOtp() {
+    const code = authOtp.join('');
+    if (code.length !== 6) { setAuthError('Enter the 6-digit code.'); return; }
+    setAuthError(null); setAuthSubmitting(true);
+    try {
+      const email = authEmail.trim().toLowerCase();
+      let res: Response;
+      if (authMode === 'register') {
+        res = await fetch('/api/auth/email/verify-otp', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code }),
+        });
+      } else {
+        res = await fetch('/api/auth/login/verify-otp', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: email, code }),
+        });
+      }
+      const body = await res.json();
+      if (!res.ok) {
+        const m = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Verification failed';
+        throw new Error(m);
+      }
+      const ok = await submitContract();
+      if (!ok) setAuthError('Verified! But could not create your reservation. Please try again.');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Verification failed');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  function handleOtpDigit(i: number, v: string) {
+    const d = v.replace(/\D/g,'').slice(-1);
+    const next = [...authOtp]; next[i] = d; setAuthOtp(next);
+    if (d && i < 5) otpRefs.current[i+1]?.focus();
+  }
+  function handleOtpKey(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Backspace' && !authOtp[i] && i > 0) otpRefs.current[i-1]?.focus();
+  }
+  function handleOtpPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const p = e.clipboardData.getData('text').replace(/\D/g,'').slice(0,6);
+    if (p.length === 6) { setAuthOtp(p.split('')); otpRefs.current[5]?.focus(); e.preventDefault(); }
+  }
+
+  const inputCls = 'w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30';
+
+  // ── Success state ──────────────────────────────────────────────────────
+  if (contractId !== null) {
     return (
       <ModalShell onClose={onClose}>
         <div className="text-center py-4">
           <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: '#d8f2e8' }}>
-            <MessageSquare size={24} style={{ color: '#2e9f82' }} />
+            <CheckCircle2 size={24} style={{ color: '#2e9f82' }} />
           </div>
-          <h3 className="font-bold text-xl text-[#1a1916] mb-2">Application Submitted!</h3>
-          <p className="text-sm text-[#6b6860]">The rental provider will respond within 2 hours.</p>
+          <h3 className="font-bold text-xl text-[#1a1916] mb-2">Reservation Submitted!</h3>
+          <p className="text-sm text-[#6b6860] mb-1">Your application for <span className="font-medium text-[#1a1916]">{unit.unitName ?? `Unit ${unit.unitNumber}`}</span> has been received.</p>
+          <p className="text-xs text-[#9b9890] mb-6">Reference: <span className="font-mono font-medium">CID-{contractId}</span> · We&apos;ll be in touch within 24 hours.</p>
           <button
-            onClick={() => {
-              if (isAuthenticated) {
-                router.push('/dashboard/customer/spaces');
-                return;
-              }
-              router.push('/register?next=/dashboard/customer/spaces');
-            }}
-            className="mt-6 w-full py-3 rounded-xl text-sm font-semibold text-white"
+            onClick={() => router.push('/dashboard/customer/spaces')}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-white"
             style={{ backgroundColor: '#2e9f82' }}
           >
-            {isAuthenticated ? 'Go to My Spaces' : 'Create account to track booking'}
+            View My Application &amp; Upload Documents
           </button>
           <button onClick={onClose} className="mt-2 w-full py-2.5 rounded-xl text-sm font-medium text-[#6b6860] bg-[#f4f3f0] hover:bg-[#ece9e3] transition-colors">
             Stay on this page
           </button>
-          <div className="mt-4 flex items-center justify-center gap-4 text-sm">
-            <Link href="/listings" className="underline underline-offset-2" style={{ color: '#2e9f82' }}>
-              Browse listings
-            </Link>
-            <span className="text-[#c8c6c0]">|</span>
-            <Link href="/services" className="underline underline-offset-2" style={{ color: '#2e9f82' }}>
-              Browse services
-            </Link>
-          </div>
         </div>
       </ModalShell>
     );
   }
 
+  // ── Step 1: email entry (register or sign-in toggle) ──────────────────
+  if (authStep === 'register') {
+    return (
+      <ModalShell onClose={onClose}>
+        <div className="flex rounded-xl overflow-hidden border border-[#e8e6e0] mb-5">
+          <button type="button" onClick={() => { setAuthMode('register'); setAuthError(null); }}
+            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
+            style={{ backgroundColor: authMode === 'register' ? '#1a1916' : 'transparent', color: authMode === 'register' ? '#fff' : '#6b6860' }}>
+            Create account
+          </button>
+          <button type="button" onClick={() => { setAuthMode('login'); setAuthError(null); }}
+            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
+            style={{ backgroundColor: authMode === 'login' ? '#1a1916' : 'transparent', color: authMode === 'login' ? '#fff' : '#6b6860' }}>
+            Sign in
+          </button>
+        </div>
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">
+          {authMode === 'register' ? 'Create your account' : 'Welcome back'}
+        </h3>
+        <p className="text-sm text-[#9b9890] mb-5">
+          {authMode === 'register' ? 'Enter your email — we\'ll send a verification code.' : 'Enter your email — we\'ll send a sign-in code.'}
+        </p>
+        {authError && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>}
+        <div className="mb-4">
+          <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">Email address</label>
+          <input
+            type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleIdentify()}
+            placeholder="you@example.com" autoComplete="email" autoFocus
+            className={inputCls}
+          />
+        </div>
+        <button disabled={authSubmitting || !authEmail.trim()} onClick={handleIdentify}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
+          style={{ backgroundColor: '#1a1916' }}>
+          {authSubmitting ? 'Sending code…' : 'Send verification code →'}
+        </button>
+      </ModalShell>
+    );
+  }
+
+  // ── Step 2: OTP verification ───────────────────────────────────────────
+  if (authStep === 'verify-otp') {
+    const otpCode = authOtp.join('');
+    return (
+      <ModalShell onClose={onClose}>
+        <button type="button" onClick={() => { setAuthStep('register'); setAuthError(null); setAuthOtp(['','','','','','']); }}
+          className="flex items-center gap-1 text-xs text-[#9b9890] hover:text-[#1a1916] mb-4 transition-colors">
+          <ChevronLeft size={14} /> Back
+        </button>
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Check your email</h3>
+        <p className="text-sm text-[#9b9890] mb-5">
+          We sent a 6-digit code to <span className="font-semibold text-[#1a1916]">{authEmail}</span>
+        </p>
+        {authError && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>}
+        {authDevOtp && (
+          <div className="mb-4 rounded-xl px-4 py-3 text-sm font-mono font-bold tracking-widest text-center"
+            style={{ background: '#fdf3e1', color: '#7e3b00' }}>
+            Dev code: {authDevOtp}
+          </div>
+        )}
+        <div className="flex gap-2 justify-center mb-5">
+          {authOtp.map((v, i) => (
+            <input key={i} ref={el => { otpRefs.current[i] = el; }}
+              type="text" inputMode="numeric" maxLength={1} value={v} autoFocus={i === 0}
+              onChange={e => handleOtpDigit(i, e.target.value)}
+              onKeyDown={e => { handleOtpKey(i, e); if (e.key === 'Enter' && otpCode.length === 6) handleVerifyOtp(); }}
+              onPaste={handleOtpPaste}
+              className="w-11 h-12 text-center text-lg font-bold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20"
+              style={{ borderColor: v ? '#1a1916' : '#e8e6e0', background: '#fafaf8', color: '#1a1916' }}
+            />
+          ))}
+        </div>
+        <button disabled={authSubmitting || otpCode.length !== 6} onClick={handleVerifyOtp}
+          className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
+          style={{ backgroundColor: '#1a1916' }}>
+          {authSubmitting ? 'Verifying…' : 'Verify & reserve'}
+        </button>
+        <p className="text-xs text-center text-[#9b9890] mt-3">
+          Didn&apos;t receive the code?{' '}
+          <button type="button" className="font-semibold hover:underline" style={{ color: '#1a1916' }}
+            onClick={async () => {
+              try {
+                await fetch('/api/auth/email/resend-otp', {
+                  method: 'POST', credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: authEmail.trim().toLowerCase() }),
+                });
+              } catch { setAuthError('Could not resend. Please try again.'); }
+            }}>Resend</button>
+        </p>
+      </ModalShell>
+    );
+  }
+
+  // ── Main form ──────────────────────────────────────────────────────────
   return (
     <ModalShell onClose={onClose}>
       <h3 className="font-bold text-xl text-[#1a1916] mb-1">Book Now</h3>
       <p className="text-sm text-[#9b9890] mb-5">{unit.unitName ?? `Unit ${unit.unitNumber}`} · {property.buildingName}</p>
 
-      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
-        Preferred move-in date <span className="text-red-500">*</span>
-      </label>
-      <input
-        type="date"
-        value={moveIn}
-        min={new Date().toISOString().split('T')[0]}
-        required
-        onChange={(e) => setMoveIn(e.target.value)}
-        className="w-full text-sm mb-4 border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
-      />
+      {error && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{error}</div>}
 
-      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
-        Occupants <span className="text-red-500">*</span>
-      </label>
+      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Move-in date <span className="text-red-500">*</span></label>
+      <input type="date" value={moveIn} min={new Date().toISOString().split('T')[0]} required
+        onChange={e => setMoveIn(e.target.value)} className={`${inputCls} mb-4`} />
+
+      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Occupants <span className="text-red-500">*</span></label>
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div>
-          <label className="block text-[11px] text-[#9b9890] mb-1">Adults</label>
-          <input type="number" min="1" value={adults} onChange={(e) => setAdults(e.target.value)}
-            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30" />
-        </div>
-        <div>
-          <label className="block text-[11px] text-[#9b9890] mb-1">Children</label>
-          <input type="number" min="0" value={children} onChange={(e) => setChildren(e.target.value)}
-            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30" />
-        </div>
-        <div>
-          <label className="block text-[11px] text-[#9b9890] mb-1">Pets</label>
-          <input type="number" min="0" value={pets} onChange={(e) => setPets(e.target.value)}
-            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30" />
-        </div>
+        {[['Adults','1',adults,setAdults],['Children','0',children,setChildren],['Pets','0',pets,setPets]].map(([label, min, val, setter]) => (
+          <div key={label as string}>
+            <p className="text-[11px] text-[#9b9890] mb-1">{label as string}</p>
+            <input type="number" min={min as string} value={val as string} onChange={e => (setter as (v:string)=>void)(e.target.value)} className={inputCls} />
+          </div>
+        ))}
       </div>
 
+      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Payment installments</label>
+      <div className="grid grid-cols-4 gap-2 mb-4">
+        {[['1','Annual'],['2','Semi-annual'],['4','Quarterly'],['12','Monthly']].map(([v, lbl]) => (
+          <button key={v} type="button" onClick={() => setInstallments(v)}
+            className={`py-2 rounded-xl text-xs font-medium border transition-colors ${installments === v ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82]'}`}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Message <span className="text-[#9b9890] font-normal">(optional)</span></label>
-      <textarea
-        value={msg}
-        onChange={(e) => setMsg(e.target.value)}
-        rows={3}
-        placeholder="I'm interested in this space…"
-        className="w-full text-sm mb-5 border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] resize-none focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
-      />
-      <button
-        disabled={!moveIn || !adults || Number(adults) < 1}
-        onClick={() => setDone(true)}
+      <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={2}
+        placeholder="Any questions or requirements…"
+        className={`${inputCls} resize-none mb-5`} />
+
+      <button disabled={!moveIn || Number(adults) < 1 || submitting} onClick={handleSubmit}
         className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
-        style={{ backgroundColor: '#2e9f82' }}
-      >
-        Submit Application
+        style={{ backgroundColor: '#2e9f82' }}>
+        {submitting ? 'Submitting…' : 'Submit Application'}
       </button>
     </ModalShell>
   );
@@ -984,7 +1212,6 @@ function ModalShell({ children, onClose }: { children: React.ReactNode; onClose:
 /* ── Header auth section ──────────────────────────────────────────────────── */
 function HeaderAuthSection() {
   const { isAuthenticated, user, signOut } = useAuth();
-  const router = useRouter();
 
   if (isAuthenticated && user) {
     const displayName = user.name ?? [user.firstName, user.lastName].filter(Boolean).join(' ');
@@ -996,7 +1223,7 @@ function HeaderAuthSection() {
           Dashboard
         </Link>
         <button
-          onClick={() => { signOut(); router.push('/'); }}
+          onClick={() => { signOut(); }}
           className="text-sm hover:text-[#1a1916] transition-colors"
         >
           Sign Out
@@ -1040,9 +1267,9 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
   const catKey = property.spaceCategory.toLowerCase();
   const fallbackImages = CATEGORY_IMAGES[catKey] ?? FALLBACK_IMAGES;
   // Use real uploaded photos if available; otherwise fall back to Unsplash placeholders
-  const BACKEND_ORIGIN = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001';
+  // Relative URLs (e.g. /uploads/...) are proxied via Next.js rewrites — works on any device
   const images: string[] = media.length > 0
-    ? media.map(m => m.url.startsWith('http') ? m.url : `${BACKEND_ORIGIN}${m.url}`)
+    ? media.map(m => m.url.startsWith('http') ? m.url : m.url)
     : fallbackImages;
   const catBg = CATEGORY_BG[catKey] ?? '#f4f3ef';
   const avail = AVAIL_STYLE[unit.availability] ?? { bg: '#f4f3ef', text: '#6b6860', label: unit.availability };
@@ -1071,13 +1298,6 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
 
   // `facilities` is the authoritative per-unit amenities list set by the RP.
   const features = facilities;
-
-  // Building-level amenity badges
-  const buildingAmenities = [
-    property.hasGym    && { icon: <Dumbbell size={14} />, label: 'Gym' },
-    property.hasPool   && { icon: <Waves size={14} />,    label: 'Swimming Pool' },
-    property.hasParking && { icon: <Car size={14} />,     label: 'Parking' },
-  ].filter(Boolean) as Array<{ icon: React.ReactNode; label: string }>;
 
   const displayAddress = buildAddress(property);
   const lat = property.latitude != null ? Number(property.latitude) : null;

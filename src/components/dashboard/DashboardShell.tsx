@@ -6,29 +6,28 @@ import Link from 'next/link';
 import {
   LayoutDashboard, Home, Search, Building2, Layers, FileText,
   CalendarCheck, Wrench, Users, Star, Wallet, BookOpen,
-  Bell, Settings, LogOut, Menu, X, ChevronRight,
+  Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
+  Heart, HelpCircle,
 } from 'lucide-react';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import shell from './DashboardShell.module.css';
 
 /* ─────────────────────────────────────────────
    Nav definitions per role
 ───────────────────────────────────────────── */
 type NavItem =
-  | { label: string; href: string; icon: React.ElementType }
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean }
   | { divider: true }
   | { section: string };
 
 const NAV: Record<UserRole, NavItem[]> = {
   customer: [
-    { label: 'Overview',     href: '/dashboard/customer',            icon: LayoutDashboard },
-    { label: 'My Spaces',    href: '/dashboard/customer/spaces',     icon: BedDouble },
-    { label: 'My Services',  href: '/dashboard/customer/bookings',   icon: CalendarCheck },
-    { divider: true },
-    { label: 'Documents',    href: '/dashboard/customer/documents',  icon: Layers },
-    { label: 'Settings',     href: '/dashboard/customer/settings',   icon: Settings },
+    { label: 'My Spaces',   href: '/dashboard/customer/spaces',   icon: BedDouble },
+    { label: 'My Services', href: '/dashboard/customer/services', icon: Wrench },
+    { label: 'My Profile',  href: '/dashboard/customer/profile',  icon: UserCircle },
   ],
   rental_provider: [
     { label: 'Dashboard',       href: '/rental-provider/dashboard',                icon: LayoutDashboard },
@@ -115,14 +114,15 @@ function Sidebar({
   role,
   pathname,
   onClose,
+  collapsed = false,
 }: {
   role: UserRole;
   pathname: string;
   onClose?: () => void;
+  collapsed?: boolean;
 }) {
   const navItems = NAV[role] ?? [];
   const { user, signOut } = useAuth();
-  const router = useRouter();
 
   const displayName =
     user?.name ??
@@ -132,53 +132,64 @@ function Sidebar({
 
   return (
     <aside
-      className="flex flex-col h-full"
-      style={{
-        width: 240,
-        backgroundColor: 'var(--color-neutral-900)',
-        color: '#fff',
-      }}
+      className={shell.rail}
+      style={collapsed ? { width: 60, padding: '18px 8px', alignItems: 'center' } : undefined}
     >
-      {/* Logo */}
-      <div className="flex items-center justify-between px-6 py-5">
-        <Link href="/dashboard" className="font-bold text-xl" style={{ color: 'var(--color-primary)' }}>
-          UpNow
-        </Link>
-        {onClose && (
-          <button onClick={onClose} className="text-white/60 hover:text-white lg:hidden">
-            <X size={20} />
+      {/* Brand */}
+      <Link
+        href={dashboardPath(role)}
+        className={shell.brand}
+        style={collapsed ? { justifyContent: 'center', padding: '6px 0', gap: 0 } : undefined}
+        title={collapsed ? 'UpNow' : undefined}
+      >
+        <span className={shell.brandMark}>U</span>
+        {!collapsed && <span>UpNow</span>}
+        {onClose && !collapsed && (
+          <button
+            onClick={(e) => { e.preventDefault(); onClose(); }}
+            className="ml-auto lg:hidden"
+            style={{ background: 'transparent', border: 0, color: '#8b968f', cursor: 'pointer' }}
+            aria-label="Close menu"
+          >
+            <X size={18} />
           </button>
         )}
-      </div>
+      </Link>
 
-      {/* Role badge */}
-      <div className="px-6 pb-4">
-        <span
-          className="text-xs font-semibold px-2 py-1 rounded-full"
-          style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-        >
-          {ROLE_LABEL[role]}
-        </span>
-      </div>
+      {/* Role chip — hidden when collapsed */}
+      {!collapsed && <span className={shell.roleChip}>{ROLE_LABEL[role]}</span>}
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 pb-4">
+      <nav className={shell.nav} style={collapsed ? { alignItems: 'center' } : undefined}>
         {navItems.map((item, i) => {
           if ('divider' in item) {
-            return <hr key={i} className="my-3 border-white/10" />;
+            return <hr key={`divider-${i}`} className={shell.divider} style={collapsed ? { width: '100%' } : undefined} />;
           }
           if ('section' in item) {
-            return (
-              <p
-                key={i}
-                className="mt-5 mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest"
-                style={{ color: 'rgba(255,255,255,0.35)' }}
-              >
-                {item.section}
-              </p>
-            );
+            if (collapsed) return null;
+            return <p key={`section-${i}`} className={shell.section}>{item.section}</p>;
           }
           const Icon = item.icon;
+
+          if ('soon' in item && item.soon) {
+            if (collapsed) {
+              return (
+                <div key={item.href} className={shell.itemSoon}
+                  style={{ justifyContent: 'center', padding: '8px', gap: 0 }}
+                  title={item.label}>
+                  <span className={shell.glyph}><Icon size={16} /></span>
+                </div>
+              );
+            }
+            return (
+              <div key={item.href} className={shell.itemSoon}>
+                <span className={shell.glyph}><Icon size={16} /></span>
+                <span>{item.label}</span>
+                <span className={shell.soonChip}>Soon</span>
+              </div>
+            );
+          }
+
           const overviewRoutes = [
             '/dashboard/customer', '/rental-provider/dashboard',
             '/dashboard/service-provider', '/dashboard/manager',
@@ -194,44 +205,122 @@ function Sidebar({
               key={item.href}
               href={item.href}
               onClick={onClose}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-white/10 text-white'
-                  : 'text-white/60 hover:text-white hover:bg-white/5'
-              )}
+              className={cn(shell.item, isActive && shell.active)}
+              style={collapsed ? { justifyContent: 'center', padding: '8px', gap: 0 } : undefined}
+              title={collapsed ? item.label : undefined}
             >
-              <Icon size={18} />
-              {item.label}
-              {isActive && <ChevronRight size={14} className="ml-auto opacity-50" />}
+              <span className={shell.glyph}><Icon size={16} /></span>
+              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && isActive && <ChevronRight size={14} className={shell.activeChevron} />}
             </Link>
           );
         })}
       </nav>
 
       {/* User footer */}
-      <div className="px-4 py-4 border-t border-white/10">
-        <div className="flex items-center gap-3 mb-3">
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            {initials}
+      <div
+        className={shell.user}
+        style={collapsed ? { flexDirection: 'column', gap: 0, padding: '12px 0 4px' } : undefined}
+      >
+        <span className={shell.userAv} title={collapsed ? `${displayName} · ${user?.email ?? ''}` : undefined}>
+          {initials}
+        </span>
+        {!collapsed && (
+          <div className={shell.userMin}>
+            <div className={shell.userName} title={displayName}>{displayName}</div>
+            <div className={shell.userEmail} title={user?.email ?? ''}>{user?.email}</div>
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-white truncate">{displayName}</p>
-            <p className="text-xs text-white/50 truncate">{user?.email}</p>
-          </div>
-        </div>
-        <button
-          onClick={() => { signOut(); router.push('/'); }}
-          className="flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors w-full"
-        >
-          <LogOut size={15} />
-          Sign out
-        </button>
+        )}
       </div>
+      <button
+        type="button"
+        onClick={() => { signOut(); }}
+        className={shell.signOut}
+        style={collapsed ? { justifyContent: 'center', padding: '8px', gap: 0 } : undefined}
+        title={collapsed ? 'Sign out' : undefined}
+      >
+        <span className={shell.glyph}><LogOut size={16} /></span>
+        {!collapsed && 'Sign out'}
+      </button>
     </aside>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Customer avatar menu (topbar dropdown)
+───────────────────────────────────────────── */
+function CustomerAvatarMenu() {
+  const { user, signOut } = useAuth();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  const displayName =
+    user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ') ?? 'You';
+  const initials = displayName.charAt(0).toUpperCase();
+
+  const items: Array<{ label: string; href: string; icon: React.ElementType }> = [
+    { label: 'Profile',         href: '/dashboard/customer/profile',       icon: UserCircle },
+    { label: 'My Spaces',       href: '/dashboard/customer/spaces',        icon: BedDouble },
+    { label: 'My Services',     href: '/dashboard/customer/services',      icon: Wrench },
+    { label: 'Wishlist',        href: '/dashboard/customer/wishlist',      icon: Heart },
+    { label: 'Notifications',   href: '/dashboard/customer/notifications', icon: Bell },
+    { label: 'Help Center',     href: '/dashboard/customer/help',          icon: HelpCircle },
+  ];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all"
+        style={{ background: 'var(--color-primary)', color: '#fff' }}
+        aria-label="User menu"
+      >
+        {initials}
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-2 w-60 rounded-2xl bg-white shadow-xl z-30 overflow-hidden"
+          style={{ border: '1px solid var(--color-base-200)' }}
+        >
+          <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-base-200)' }}>
+            <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{displayName}</p>
+            <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{user?.email}</p>
+          </div>
+          <nav className="py-1">
+            {items.map(({ label, href, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-[var(--color-base-50,#fafafa)]"
+                style={{ color: 'var(--color-neutral-700)' }}
+              >
+                <Icon size={16} style={{ color: 'var(--color-neutral-400)' }} />
+                {label}
+              </Link>
+            ))}
+            <hr className="my-1" style={{ borderColor: 'var(--color-base-200)' }} />
+            <button
+              onClick={() => { setOpen(false); signOut(); }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-[var(--color-base-50,#fafafa)]"
+              style={{ color: 'var(--color-error, #dc2626)' }}
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
+          </nav>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -243,7 +332,21 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const checkedAuthRef = useRef(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('upnow_sidebar_collapsed');
+    if (stored === 'true') setSidebarCollapsed(true);
+  }, []);
+
+  function toggleCollapse() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('upnow_sidebar_collapsed', String(next));
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (loading || user) return;
@@ -259,6 +362,23 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     }
   }, [loading, user, isAuthenticated, refresh, router]);
 
+  // Lock html/body scroll so the only scroll surface is <main> inside this shell
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = { htmlOverflow: html.style.overflow, htmlHeight: html.style.height, bodyOverflow: body.style.overflow, bodyHeight: body.style.height };
+    html.style.overflow = 'hidden';
+    html.style.height = '100%';
+    body.style.overflow = 'hidden';
+    body.style.height = '100%';
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.height = prev.bodyHeight;
+    };
+  }, []);
+
   if (loading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-base-100)' }}>
@@ -272,15 +392,24 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   const role = user.role;
 
+  // Hide the sidebar entirely on the onboarding page so it's a focused
+  // full-screen flow (no nav to escape to before submitting).
+  const hideSidebar = pathname?.endsWith('/rental-provider/dashboard/onboarding');
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-base-100)' }}>
       {/* Desktop sidebar */}
-      <div className="hidden lg:flex flex-shrink-0 h-full" style={{ width: 240 }}>
-        <Sidebar role={role} pathname={pathname} />
-      </div>
+      {!hideSidebar && (
+        <div
+          className="hidden lg:flex flex-shrink-0 h-full overflow-hidden"
+          style={{ width: sidebarCollapsed ? 60 : 240, transition: 'width 0.2s ease' }}
+        >
+          <Sidebar role={role} pathname={pathname} collapsed={sidebarCollapsed} />
+        </div>
+      )}
 
       {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
+      {!hideSidebar && sidebarOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div
             className="absolute inset-0 bg-black/50"
@@ -294,7 +423,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Topbar */}
+        {/* Topbar — hidden on pages that provide their own (e.g. onboarding) */}
+        {!pathname?.endsWith('/rental-provider/dashboard/onboarding') && (
         <header
           className="flex-shrink-0 flex items-center justify-between px-5 h-14 border-b"
           style={{
@@ -302,6 +432,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             borderColor: 'var(--color-base-200)',
           }}
         >
+          {/* Mobile hamburger */}
           <button
             className="lg:hidden text-[var(--color-neutral-700)] hover:text-[var(--color-neutral-900)]"
             onClick={() => setSidebarOpen(true)}
@@ -309,28 +440,48 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <Menu size={22} />
           </button>
 
-          <div className="hidden lg:block" />
+          {/* Desktop collapse/expand toggle */}
+          {!hideSidebar && (
+            <button
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg transition-colors"
+              style={{ color: 'var(--color-neutral-500)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--color-base-100)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+              onClick={toggleCollapse}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            </button>
+          )}
 
           <div className="flex items-center gap-3">
-            {/* KYC warning badge */}
-            {user.kycStatus && user.kycStatus !== 'verified' && (
+            {/* KYC warning badge — only for non-customer roles */}
+            {role !== 'customer' && user.kycStatus && !['verified', 'approved'].includes(user.kycStatus) && (
               <Link
                 href={`${dashboardPath(role)}/documents`}
                 className="hidden sm:flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full"
-                style={{ backgroundColor: '#fef3c7', color: '#92400e' }}
+                style={{
+                  backgroundColor: user.kycStatus === 'rejected' ? '#fef2f2' : user.kycStatus === 'pending_review' ? '#eff6ff' : '#fef3c7',
+                  color: user.kycStatus === 'rejected' ? '#dc2626' : user.kycStatus === 'pending_review' ? '#1d4ed8' : '#92400e',
+                }}
               >
                 <AlertTriangle size={12} />
-                KYC {user.kycStatus === 'pending' ? 'pending' : 'required'}
+                {user.kycStatus === 'pending_review' ? 'KYC under review' : user.kycStatus === 'rejected' ? 'KYC rejected' : 'KYC required'}
               </Link>
             )}
             <button className="relative text-[var(--color-neutral-500)] hover:text-[var(--color-neutral-900)]">
               <Bell size={20} />
             </button>
+
+            {/* Customer-only avatar dropdown with the full personal nav list */}
+            {role === 'customer' && <CustomerAvatarMenu />}
           </div>
         </header>
+        )}
 
         {/* Page content */}
-        <main className="flex-1 min-h-0 overflow-y-auto">
+        <main className={cn('flex-1 min-h-0 overflow-y-auto', shell.mainCanvas)}>
           {children}
         </main>
       </div>

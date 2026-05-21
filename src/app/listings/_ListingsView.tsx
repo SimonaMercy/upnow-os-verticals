@@ -98,7 +98,7 @@ export default async function ListingsView({ country, emirate, searchParams }: P
   const bedrooms  = sp.bedrooms  ?? '';
   const minPrice  = sp.minPrice  ?? '';
   const maxPrice  = sp.maxPrice  ?? '';
-  const sort      = sp.sort      ?? 'price_asc';
+  const sort      = sp.sort      ?? 'newest';
   const q         = sp.q         ?? '';
   const page      = parseInt(sp.page ?? '1', 10);
 

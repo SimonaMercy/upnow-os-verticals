@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useState, FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, FormEvent, Suspense } from "react";
 import { useAuth, dashboardPath } from "@/contexts/AuthContext";
 import { apiPatch } from "@/lib/api";
 import {
@@ -14,16 +14,24 @@ import {
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
-export default function VerifyOtpPage() {
+function VerifyOtpInner() {
   const router = useRouter();
+  const params = useSearchParams();
   const {
     user,
     loading,
     maskedPhone,
     verifyOtp,
+    verifyLoginOtp,
     requestOtp,
+    login,
     refresh,
   } = useAuth();
+
+  const isLoginMode = params.get("mode") === "login";
+  // For login mode, the identifier comes from the query param (email used as key)
+  const identifierFromQuery = (params.get("email") ?? "").trim();
+  const devOtpFromQuery = params.get("devOtp");
 
   // "add phone" step — shown when the user skipped phone at registration
   const [phoneInput, setPhoneInput] = useState("");
@@ -36,33 +44,29 @@ export default function VerifyOtpPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [sentTo, setSentTo] = useState<string | null>(maskedPhone);
+  const [devOtp, setDevOtp] = useState<string | null>(devOtpFromQuery);
 
-  // Guard logic:
-  // - Not logged in → /login
-  // - Phone already verified → back to dashboard (nothing left to do)
-  // - Email not yet verified → /verify-email first
+  // Guard logic only applies to registration flow, not login mode
   useEffect(() => {
-    if (loading) return;
+    if (isLoginMode || loading) return;
     if (!user) router.replace("/login");
     else if (user.phoneVerified) router.replace(dashboardPath(user.role));
     else if (!user.emailVerified) router.replace("/verify-email");
-  }, [loading, user, router]);
+  }, [isLoginMode, loading, user, router]);
 
-  // Auto-send OTP only when the user already has a phone number on file.
-  // Users who skipped phone at registration see the "add phone" step first.
+  // Auto-send OTP for registration flow when user has phone on file
   useEffect(() => {
-    if (loading || !user || user.phoneVerified || !user.emailVerified) return;
-    if (!user.phone) return; // wait until they add a phone
+    if (isLoginMode || loading || !user || user.phoneVerified || !user.emailVerified) return;
+    if (!user.phone) return;
     requestOtp()
       .then((res) => {
         setSentTo(res.maskedPhone);
         setCooldown(RESEND_COOLDOWN_SECONDS);
+        if (res.devOtp) setDevOtp(res.devOtp);
       })
-      .catch(() => {
-        // If auto-send fails (e.g. rate limited), let user press Resend manually
-      });
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [isLoginMode, loading]);
 
   async function onSavePhone(e: FormEvent) {
     e.preventDefault();
@@ -71,10 +75,10 @@ export default function VerifyOtpPage() {
     try {
       await apiPatch("/auth/me", { phone: phoneInput });
       await refresh();
-      // After refresh, user.phone will be set — trigger OTP send
       const res = await requestOtp();
       setSentTo(res.maskedPhone);
       setCooldown(RESEND_COOLDOWN_SECONDS);
+      if (res.devOtp) setDevOtp(res.devOtp);
     } catch (err) {
       setPhoneError(err instanceof Error ? err.message : "Could not save phone number");
     } finally {
@@ -94,9 +98,15 @@ export default function VerifyOtpPage() {
     setInfo(null);
     setSubmitting(true);
     try {
-      const res = await verifyOtp(code);
-      await refresh();
-      router.push(dashboardPath(res.user.role));
+      if (isLoginMode) {
+        const res = await verifyLoginOtp(identifierFromQuery, code);
+        const freshUser = await refresh();
+        router.push(dashboardPath(freshUser?.role ?? res.user?.role ?? "customer"));
+      } else {
+        const res = await verifyOtp(code);
+        await refresh();
+        router.push(dashboardPath(res.user?.role ?? "customer"));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed");
     } finally {
@@ -109,8 +119,15 @@ export default function VerifyOtpPage() {
     setError(null);
     setInfo(null);
     try {
-      const res = await requestOtp();
-      setSentTo(res.maskedPhone);
+      if (isLoginMode) {
+        const res = await login(identifierFromQuery);
+        if (res.devOtp) setDevOtp(res.devOtp);
+        setSentTo(res.maskedPhone ?? null);
+      } else {
+        const res = await requestOtp();
+        setSentTo(res.maskedPhone);
+        if (res.devOtp) setDevOtp(res.devOtp);
+      }
       setInfo("A new code has been sent.");
       setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
@@ -118,8 +135,8 @@ export default function VerifyOtpPage() {
     }
   }
 
-  // Step 1: user skipped phone at registration — ask them to add it now
-  if (!loading && user && !user.phone && !user.phoneVerified) {
+  // Registration flow only: user skipped phone at registration — ask them to add it now
+  if (!isLoginMode && !loading && user && !user.phone && !user.phoneVerified) {
     return (
       <AuthShell
         title="Add your phone number"
@@ -148,10 +165,14 @@ export default function VerifyOtpPage() {
     );
   }
 
+  const displayTarget = isLoginMode
+    ? (identifierFromQuery || "your phone number")
+    : (sentTo ?? "your phone number");
+
   return (
     <AuthShell
-      title="Verify your phone number"
-      subtitle={`Enter the 6-digit code we sent to ${sentTo ?? "your phone number"}.`}
+      title={isLoginMode ? "Check your phone" : "Verify your phone number"}
+      subtitle={`Enter the 6-digit code we sent to ${displayTarget}.`}
       footer={
         <button
           type="button"
@@ -167,6 +188,12 @@ export default function VerifyOtpPage() {
       }
     >
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+        {process.env.NODE_ENV !== 'production' && devOtp && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-0.5">Dev — OTP code</p>
+            <p className="text-2xl font-mono font-bold tracking-[0.3em] text-amber-900">{devOtp}</p>
+          </div>
+        )}
         <FormField label="Verification code">
           <input
             inputMode="numeric"
@@ -185,9 +212,17 @@ export default function VerifyOtpPage() {
         {info && <Alert kind="success">{info}</Alert>}
 
         <PrimaryButton loading={submitting} disabled={code.length !== 6}>
-          Verify
+          {isLoginMode ? "Sign in" : "Verify"}
         </PrimaryButton>
       </form>
     </AuthShell>
+  );
+}
+
+export default function VerifyOtpPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyOtpInner />
+    </Suspense>
   );
 }

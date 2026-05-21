@@ -1,3 +1,4 @@
+import { HomeRedirect } from '@/components/HomeRedirect';
 import { Navbar } from '@/components/upnow/Navbar';
 import { HeroSection } from '@/components/upnow/HeroSection';
 import { ServiceCategories } from '@/components/upnow/ServiceCategories';
@@ -12,6 +13,7 @@ import { Footer } from '@/components/upnow/Footer';
 export default function Home() {
   return (
     <>
+      <HomeRedirect />
       <Navbar />
       <main>
         <HeroSection />

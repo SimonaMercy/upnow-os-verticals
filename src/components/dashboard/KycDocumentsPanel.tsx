@@ -63,6 +63,18 @@ export interface KycDocumentsPanelProps {
   /** Used in /documents/upload-url and /documents POST calls */
   ownerType: "rental_provider" | "service_provider" | "customer";
   /**
+   * When provided, overrides the server-computed checklist with the client-side
+   * requirements for this entity type. Use this when the entity type is selected
+   * in a form that hasn't been saved yet — so the document list updates instantly.
+   */
+  entityTypeOverride?: "individual" | "company";
+  /**
+   * For rental providers in "company" mode — selects between the landlord,
+   * brokerage, and agents document variants. Only consulted when ownerType is
+   * "rental_provider" and entityTypeOverride is "company".
+   */
+  companyTypeOverride?: "landlord" | "brokerage" | "agents";
+  /**
    * Optional — only needed for RP/SP onboarding panels.
    * When set and all required docs are uploaded, a "Continue" button appears
    * and calls this callback.
@@ -76,6 +88,62 @@ export interface KycDocumentsPanelProps {
    */
   profileHref?: string;
 }
+
+// ─── Client-side requirements (mirrors backend document-requirements.ts) ──────
+// Kept in sync with src/documents/document-requirements.ts.
+// Stored here so the checklist updates instantly when entityTypeOverride changes
+// without waiting for a profile re-fetch.
+
+type DocReq = Pick<KycChecklistItem, "key" | "displayName" | "category" | "required" | "description">;
+
+// Shared base documents for landlord/brokerage company variants. Passport
+// and Visa are optional — only effectively required for non-UAE signatories.
+const RP_COMPANY_BASE: DocReq[] = [
+  { key: "trade_license",   displayName: "Trade License",                       category: "license",    required: true,  description: "Valid UAE trade license. Must be current — expired licences cannot be accepted." },
+  { key: "emirates_id",     displayName: "Emirates ID of Authorised Signatory", category: "identity",   required: true,  description: "Emirates ID (both sides) of the person authorised to sign on behalf of the company." },
+  { key: "passport",        displayName: "Passport",                            category: "identity",   required: false, description: "Bio-data page of the authorised signatory's valid passport. Required only for non-UAE signatories." },
+  { key: "visa",            displayName: "UAE Visa",                            category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
+];
+
+const RP_INDIVIDUAL: DocReq[] = [
+  { key: "emirates_id", displayName: "Emirates ID",        category: "identity", required: true,  description: "Clear scan of your Emirates ID (both sides). Required for UAE nationals and residents." },
+  { key: "passport",    displayName: "Passport",           category: "identity", required: false, description: "Bio-data page of your valid passport. Required for non-UAE nationals." },
+  { key: "visa",        displayName: "UAE Residency Visa", category: "identity", required: false, description: "Residency visa page. Required for expatriate residents." },
+];
+
+const RP_LANDLORD: DocReq[] = [...RP_COMPANY_BASE];
+
+const RP_BROKERAGE: DocReq[] = [
+  ...RP_COMPANY_BASE,
+  { key: "brokerage_license", displayName: "Brokerage License", category: "license", required: true, description: "Valid real-estate brokerage license from the relevant emirate regulator (RERA/DLD for Dubai, DMT for Abu Dhabi, SRERD for Sharjah, or the local authority where you operate)." },
+];
+
+// Agents Company operates under a parent brokerage's licence — so MOA / UBO
+// declaration sit with the parent. Replace those with agent-registration
+// + the agency agreement linking the agents company to its parent.
+const RP_AGENTS: DocReq[] = [
+  { key: "trade_license",              displayName: "Trade License",                          category: "license",    required: true,  description: "Valid UAE trade license. Must be current — expired licences cannot be accepted." },
+  { key: "emirates_id",                displayName: "Emirates ID of Authorised Signatory",    category: "identity",   required: true,  description: "Emirates ID (both sides) of the person authorised to sign on behalf of the company." },
+  { key: "passport",                   displayName: "Passport",                               category: "identity",   required: false, description: "Bio-data page of the authorised signatory's valid passport. Required only for non-UAE signatories." },
+  { key: "visa",                       displayName: "UAE Visa",                               category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
+  { key: "broker_registration",        displayName: "Broker Registration Number Certificate", category: "license",    required: true,  description: "Real-estate agent registration certificate issued by the relevant emirate regulator (BRN card or equivalent)." },
+  { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Brokerage", category: "compliance", required: true,  description: "Signed agreement authorising you to operate as an agent under the named parent brokerage firm." },
+];
+
+const CLIENT_REQUIREMENTS: Partial<Record<string, Partial<Record<"individual" | "company", DocReq[]>>>> = {
+  rental_provider: {
+    individual: RP_INDIVIDUAL,
+    // company default (no companyType supplied) = landlord
+    company: RP_LANDLORD,
+  },
+};
+
+// Company-variant lookup — only consulted for ownerType=rental_provider + entityType=company
+const RP_COMPANY_VARIANTS: Record<"landlord" | "brokerage" | "agents", DocReq[]> = {
+  landlord:  RP_LANDLORD,
+  brokerage: RP_BROKERAGE,
+  agents:    RP_AGENTS,
+};
 
 // ─── Status labels ────────────────────────────────────────────────────────────
 
@@ -93,6 +161,8 @@ const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf"
 export function KycDocumentsPanel({
   profileApiPath,
   ownerType,
+  entityTypeOverride,
+  companyTypeOverride,
   onAllRequiredUploaded,
   continueLabel = "Go to my dashboard",
   profileHref,
@@ -185,7 +255,7 @@ export function KycDocumentsPanel({
       });
       if (!s3Res.ok) throw new Error("Upload to storage failed");
 
-      const req = data.checklist.find((c) => c.key === docKey)!;
+      const req = checklist.find((c) => c.key === docKey) ?? data.checklist.find((c) => c.key === docKey)!;
       await apiPost("/documents", {
         ownerType,
         ownerId: data.profile.id,
@@ -216,7 +286,32 @@ export function KycDocumentsPanel({
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
-  const checklist = data?.checklist ?? [];
+  // When entityTypeOverride is provided, compute the checklist client-side so
+  // the document list updates instantly when the user switches Individual ↔ Company
+  // in the onboarding form — before the profile is saved to the DB.
+  const checklist: KycChecklistItem[] = (() => {
+    if (!data) return [];
+    if (entityTypeOverride) {
+      const reqs =
+        ownerType === "rental_provider" && entityTypeOverride === "company" && companyTypeOverride
+          ? RP_COMPANY_VARIANTS[companyTypeOverride] ?? []
+          : (CLIENT_REQUIREMENTS[ownerType]?.[entityTypeOverride] ?? []);
+      const uploadedByKey = new Map(data.checklist.map((c) => [c.key, c]));
+      return reqs.map((req) => {
+        const existing = uploadedByKey.get(req.key);
+        return {
+          ...req,
+          uploaded:    existing?.uploaded    ?? false,
+          status:      existing?.status      ?? null,
+          documentId:  existing?.documentId  ?? null,
+          fileUrl:     existing?.fileUrl     ?? null,
+          mimeType:    existing?.mimeType    ?? null,
+        };
+      });
+    }
+    return data.checklist;
+  })();
+
   const uploadedCount = checklist.filter((c) => c.uploaded).length;
   const totalCount = checklist.length;
   const requiredDone =

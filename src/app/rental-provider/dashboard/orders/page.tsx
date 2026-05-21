@@ -1,17 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Search, Plus, X, FileText, RefreshCw, ChevronRight } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import {
+  Search, Plus, X, FileText, RefreshCw, ChevronRight,
+  ChevronLeft, ChevronRight as ChevronRightIcon,
+} from 'lucide-react';
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
+type TabKey = ContractStatus | 'all' | 'upcoming_renewal';
 
 const STATUS_LABELS: Record<ContractStatus, string> = {
   active:     'Active',
   expired:    'Expired',
   terminated: 'Terminated',
   pending:    'Pending',
-  issued:     'Issued',
+  issued:     'In Progress',
 };
 
 const STATUS_STYLE: Record<ContractStatus, string> = {
@@ -21,6 +26,18 @@ const STATUS_STYLE: Record<ContractStatus, string> = {
   pending:    'bg-[#fef3c7] text-[#92400e]',
   issued:     'bg-[#d8f2e8] text-[#1a7a5a]',
 };
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'all',             label: 'All' },
+  { key: 'active',          label: 'Active' },
+  { key: 'pending',         label: 'Pending' },
+  { key: 'issued',          label: 'In Progress' },
+  { key: 'expired',         label: 'Expired' },
+  { key: 'upcoming_renewal', label: 'Upcoming Renewal' },
+  { key: 'terminated',      label: 'Terminated' },
+];
+
+const PAGE_SIZE = 15;
 
 interface Contract {
   id: number;
@@ -45,11 +62,13 @@ function fmt(dateStr: string | null) {
 }
 
 export default function OrdersPage() {
+  const router = useRouter();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
   const [filterAsset, setFilterAsset] = useState('all');
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
@@ -59,36 +78,36 @@ export default function OrdersPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const assets = [...new Set(contracts.map(c => c.property.buildingName).filter(Boolean))];
+  // Reset page when tab / filters change
+  useEffect(() => { setPage(1); }, [activeTab, search, filterAsset]);
 
-  const filtered = contracts.filter(c => {
-    if (filterStatus !== 'all' && c.status !== filterStatus) return false;
-    if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (
-        !c.ref.toLowerCase().includes(q) &&
-        !(c.tenant.name ?? '').toLowerCase().includes(q) &&
-        !(c.unit.name ?? '').toLowerCase().includes(q) &&
-        !(c.tenant.email ?? '').toLowerCase().includes(q)
-      ) return false;
+  const now = useMemo(() => new Date(), []);
+  const in60 = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 60); return d; }, []);
+
+  const assets = useMemo(
+    () => [...new Set(contracts.map(c => c.property.buildingName).filter(Boolean))],
+    [contracts],
+  );
+
+  // Counts per tab for badges
+  const tabCounts = useMemo(() => {
+    const counts: Partial<Record<TabKey, number>> = {};
+    counts.all = contracts.length;
+    for (const s of Object.keys(STATUS_LABELS) as ContractStatus[]) {
+      counts[s] = contracts.filter(c => c.status === s).length;
     }
-    return true;
-  });
+    counts.upcoming_renewal = contracts.filter(c => {
+      if (c.status !== 'active') return false;
+      const end = new Date(c.endDate);
+      return end >= now && end <= in60;
+    }).length;
+    return counts;
+  }, [contracts, now, in60]);
 
-  const hasFilters = filterStatus !== 'all' || filterAsset !== 'all' || search !== '';
-  const clearFilters = () => { setFilterStatus('all'); setFilterAsset('all'); setSearch(''); };
-
-  const now = new Date();
-  const in60 = new Date(); in60.setDate(in60.getDate() + 60);
-
-  const activeCount   = contracts.filter(c => c.status === 'active').length;
-  const expiringCount = contracts.filter(c => {
-    if (c.status !== 'active') return false;
-    const end = new Date(c.endDate);
-    return end >= now && end <= in60;
-  }).length;
-  const totalRent = contracts
+  // Stats
+  const activeCount   = tabCounts.active ?? 0;
+  const expiringCount = tabCounts.upcoming_renewal ?? 0;
+  const totalRent     = contracts
     .filter(c => c.status === 'active')
     .reduce((s, c) => s + c.annualRent, 0);
 
@@ -99,6 +118,38 @@ export default function OrdersPage() {
     { label: 'Active Rent / yr', value: `AED ${totalRent.toLocaleString('en-AE')}` },
   ];
 
+  // Filter logic
+  const tabFiltered = useMemo(() => {
+    return contracts.filter(c => {
+      if (activeTab === 'upcoming_renewal') {
+        if (c.status !== 'active') return false;
+        const end = new Date(c.endDate);
+        if (!(end >= now && end <= in60)) return false;
+      } else if (activeTab !== 'all') {
+        if (c.status !== activeTab) return false;
+      }
+      if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (
+          !c.ref.toLowerCase().includes(q) &&
+          !(c.tenant.name ?? '').toLowerCase().includes(q) &&
+          !(c.unit.name ?? '').toLowerCase().includes(q) &&
+          !(c.unit.number ?? '').toLowerCase().includes(q) &&
+          !(c.tenant.email ?? '').toLowerCase().includes(q)
+        ) return false;
+      }
+      return true;
+    });
+  }, [contracts, activeTab, filterAsset, search, now, in60]);
+
+  const totalPages = Math.max(1, Math.ceil(tabFiltered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = tabFiltered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const hasFilters = filterAsset !== 'all' || search !== '';
+  const clearFilters = () => { setFilterAsset('all'); setSearch(''); };
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -107,7 +158,11 @@ export default function OrdersPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Contracts</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">All tenancy agreements and their lifecycle status.</p>
         </div>
-        <Link href="/rental-provider/dashboard/contracts/new" className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white cursor-pointer" style={{ background: '#2e9f82' }}>
+        <Link
+          href="/rental-provider/dashboard/contracts/new"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white cursor-pointer"
+          style={{ background: '#2e9f82' }}
+        >
           <Plus size={15} /> New Contract
         </Link>
       </div>
@@ -124,6 +179,34 @@ export default function OrdersPage() {
         ))}
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 overflow-x-auto pb-1 mb-4 scrollbar-none">
+        {TABS.map(tab => {
+          const count = tabCounts[tab.key] ?? 0;
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                isActive
+                  ? 'bg-[#2e9f82] text-white'
+                  : 'bg-white text-[#6b6860] hover:bg-[#f4f3ef] border border-[#e8e6e0]'
+              }`}
+            >
+              {tab.label}
+              {!loading && (
+                <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-[#f4f3ef] text-[#6b6860]'
+                }`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm">
         <div className="relative flex-1 min-w-[200px]">
@@ -136,18 +219,19 @@ export default function OrdersPage() {
             className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
           />
         </div>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
-          <option value="all">All Statuses</option>
-          {(Object.keys(STATUS_LABELS) as ContractStatus[]).map(s => (
-            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </select>
-        <select value={filterAsset} onChange={e => setFilterAsset(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
+        <select
+          value={filterAsset}
+          onChange={e => setFilterAsset(e.target.value)}
+          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]"
+        >
           <option value="all">All Properties</option>
           {assets.map(a => <option key={a!} value={a!}>{a}</option>)}
         </select>
         {hasFilters && (
-          <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
+          <button
+            onClick={clearFilters}
+            className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto"
+          >
             <X size={12} /> Reset
           </button>
         )}
@@ -155,8 +239,13 @@ export default function OrdersPage() {
 
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm text-[#6b6860]">
-          {loading ? 'Loading…' : `${filtered.length} contract${filtered.length !== 1 ? 's' : ''} found`}
+          {loading ? 'Loading…' : `${tabFiltered.length} contract${tabFiltered.length !== 1 ? 's' : ''}`}
         </span>
+        {!loading && totalPages > 1 && (
+          <span className="text-sm text-[#9b9890]">
+            Page {safePage} of {totalPages}
+          </span>
+        )}
       </div>
 
       {/* Table */}
@@ -166,62 +255,119 @@ export default function OrdersPage() {
             <RefreshCw size={24} className="text-[#2e9f82] animate-spin mb-3" />
             <p className="text-sm text-[#6b6860]">Loading contracts…</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : tabFiltered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
               <FileText size={24} className="text-[#2e9f82]" />
             </div>
             <p className="text-sm text-[#6b6860] mb-1">No contracts found</p>
-            <p className="text-xs text-[#9b9890]">Try adjusting your filters</p>
+            <p className="text-xs text-[#9b9890]">
+              {hasFilters ? 'Try adjusting your filters' : 'No contracts in this category yet'}
+            </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[1100px]">
-              <thead>
-                <tr className="bg-[#f4f3ef]">
-                  {['Ref', 'Unit', 'Property', 'Tenant', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(c => {
-                  const endDate = new Date(c.endDate);
-                  const isExpiringSoon = c.status === 'active' && endDate >= now && endDate <= in60;
-                  return (
-                    <tr
-                      key={c.id}
-                      className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916] cursor-pointer"
-                      onClick={() => window.location.href = `/rental-provider/dashboard/contracts/${c.id}`}
-                    >
-                      <td className="px-4 py-3.5 font-medium text-[#2e9f82] whitespace-nowrap">{c.ref}</td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">{c.unit.number ?? '—'}</td>
-                      <td className="px-4 py-3.5 text-[#6b6860] whitespace-nowrap">{c.property.buildingName ?? '—'}</td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">{c.tenant.name ?? '—'}</td>
-                      <td className="px-4 py-3.5 text-[#6b6860] text-xs">{c.tenant.email ?? '—'}</td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">{fmt(c.startDate)}</td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span className={isExpiringSoon ? 'text-amber-600 font-medium' : ''}>{fmt(c.endDate)}</span>
-                        {isExpiringSoon && <span className="ml-1 text-[10px] bg-amber-100 text-amber-700 rounded px-1">Soon</span>}
-                      </td>
-                      <td className="px-4 py-3.5 font-medium whitespace-nowrap">
-                        AED {c.annualRent.toLocaleString('en-AE')}
-                      </td>
-                      <td className="px-4 py-3.5 capitalize text-[#6b6860]">{c.contractType ?? '—'}</td>
-                      <td className="px-4 py-3.5">
-                        <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[c.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
-                          {STATUS_LABELS[c.status] ?? c.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <ChevronRight size={14} className="text-[#9b9890]" />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left min-w-[1100px]">
+                <thead>
+                  <tr className="bg-[#f4f3ef]">
+                    {['Ref', 'Unit', 'Property', 'Tenant', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
+                      <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map(c => {
+                    const endDate = new Date(c.endDate);
+                    const isExpiringSoon = c.status === 'active' && endDate >= now && endDate <= in60;
+                    return (
+                      <tr
+                        key={c.id}
+                        className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916] cursor-pointer"
+                        onClick={() => router.push(`/rental-provider/dashboard/contracts/${c.id}`)}
+                      >
+                        <td className="px-4 py-3.5 font-medium text-[#2e9f82] whitespace-nowrap">{c.ref}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">{c.unit.number ?? '—'}</td>
+                        <td className="px-4 py-3.5 text-[#6b6860] whitespace-nowrap">{c.property.buildingName ?? '—'}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">{c.tenant.name ?? '—'}</td>
+                        <td className="px-4 py-3.5 text-[#6b6860] text-xs">{c.tenant.email ?? '—'}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">{fmt(c.startDate)}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className={isExpiringSoon ? 'text-amber-600 font-medium' : ''}>{fmt(c.endDate)}</span>
+                          {isExpiringSoon && (
+                            <span className="ml-1 text-[10px] bg-amber-100 text-amber-700 rounded px-1">Soon</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 font-medium whitespace-nowrap">
+                          AED {c.annualRent.toLocaleString('en-AE')}
+                        </td>
+                        <td className="px-4 py-3.5 capitalize text-[#6b6860]">{c.contractType ?? '—'}</td>
+                        <td className="px-4 py-3.5">
+                          <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[c.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
+                            {STATUS_LABELS[c.status] ?? c.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <ChevronRight size={14} className="text-[#9b9890]" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-[#e8e6e0]">
+                <span className="text-xs text-[#9b9890]">
+                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, tabFiltered.length)} of {tabFiltered.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={safePage === 1}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                    let p: number;
+                    if (totalPages <= 7) {
+                      p = i + 1;
+                    } else if (safePage <= 4) {
+                      p = i < 6 ? i + 1 : totalPages;
+                    } else if (safePage >= totalPages - 3) {
+                      p = i === 0 ? 1 : totalPages - 6 + i;
+                    } else {
+                      const mid = [1, safePage - 1, safePage, safePage + 1, totalPages];
+                      p = mid[Math.min(i, mid.length - 1)];
+                    }
+                    return (
+                      <button
+                        key={`pg-${p}-${i}`}
+                        onClick={() => setPage(p)}
+                        className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-medium cursor-pointer transition-colors ${
+                          p === safePage
+                            ? 'bg-[#2e9f82] text-white'
+                            : 'border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={safePage === totalPages}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <ChevronRightIcon size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

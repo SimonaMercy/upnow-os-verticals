@@ -2,21 +2,21 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   Menu, X, LogOut, Building2, Calendar, MessageSquare,
-  Settings, HelpCircle,
+  Settings, HelpCircle, Heart, Bell, UserCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 
 const customerDropdownItems = [
-  { label: 'My Spaces',          icon: Building2,    href: '/dashboard/customer/spaces' },
-  { label: 'My Services',        icon: Calendar,     href: '/dashboard/customer/bookings' },
-  { label: 'Messages',           icon: MessageSquare,href: '/dashboard/customer/messages' },
-  { divider: true },
-  { label: 'Account Settings',   icon: Settings,     href: '/dashboard/customer/settings' },
-  { label: 'Help Center',        icon: HelpCircle,   href: '/help-center' },
+  { label: 'Profile',          icon: UserCircle, href: '/dashboard/customer/profile' },
+  { label: 'My Spaces',        icon: Building2,  href: '/dashboard/customer/spaces' },
+  { label: 'My Services',      icon: Calendar,   href: '/dashboard/customer/services' },
+  { label: 'Wishlist',         icon: Heart,      href: '/dashboard/customer/wishlist' },
+  { label: 'Notifications',    icon: Bell,       href: '/dashboard/customer/notifications' },
+  { label: 'Help Center',      icon: HelpCircle, href: '/dashboard/customer/help' },
 ] as const;
 
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () => void) {
@@ -37,7 +37,6 @@ export function Navbar() {
   useClickOutside(avatarRef, () => setAvatarOpen(false));
 
   const { isAuthenticated, user, signOut } = useAuth();
-  const router = useRouter();
   const pathname = usePathname();
 
   const isServiceProviderContext = pathname?.startsWith('/providers/services') || pathname?.startsWith('/signup/service-provider');
@@ -55,7 +54,6 @@ export function Navbar() {
 
   const handleSignOut = () => {
     signOut();
-    router.push('/');
   };
 
   // role check for customer dashboard link

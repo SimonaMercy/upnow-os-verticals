@@ -68,6 +68,8 @@ interface ContractDetail {
   ejariStatus: string | null;
   contractActive: boolean;
   contractSent: boolean;
+  pdcConfirmed: boolean;
+  pdcConfirmedAt: string | null;
   startDate: string;
   endDate: string;
   durationYears: number | null;
@@ -322,7 +324,7 @@ export default function TenantContractDetailPage() {
   const isIssued  = contract?.status === 'issued';
   const isActive  = contract?.status === 'active';
   const hasEjari  = contract?.ejariStatus === 'registered';
-  const canSign   = isIssued && !hasTenantSigned;
+  const canSign   = isIssued && !hasTenantSigned && (contract?.pdcConfirmed ?? false);
 
   const rentPayments = (contract?.payments ?? []).filter(p =>
     p.paymentType !== 'admin_fee' && p.paymentType !== 'security_deposit' &&
@@ -336,10 +338,10 @@ export default function TenantContractDetailPage() {
     return thisDone ? 'done' : 'current';
   }
   const st1Done = !isPending;                           // Contract Issued
-  const st2Done = allSigned;                            // Payment Collection (proxy: both signed = cheques collected)
+  const st2Done = contract?.pdcConfirmed ?? false;      // Payment Collection confirmed by RP
   const st3Done = allSigned;                            // Signatures
   const st4Done = hasEjari;                             // Ejari
-  const st5Done = isActive;                             // Move-In & DEWA
+  const st5Done = isActive;                             // Move-In & Utility
   const expectedCheques = contract?.numberOfInstallments ?? 0;
   const rentChequePayments = rentPayments.filter(p => p.chequeStatus === 'received');
   const allChequesReceived = rentChequePayments.length >= expectedCheques && expectedCheques > 0;
@@ -499,6 +501,17 @@ export default function TenantContractDetailPage() {
             >
               Sign Now
             </button>
+          </div>
+        )}
+
+        {/* Awaiting PDC confirmation banner */}
+        {isIssued && !contract.pdcConfirmed && !hasTenantSigned && (
+          <div className="flex items-start gap-3 bg-[#fdf3e3] border border-[#f3d08a] rounded-2xl px-5 py-4">
+            <AlertCircle size={18} className="text-[#a85b15] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-[#7c3d0e]">Awaiting payment collection confirmation</p>
+              <p className="text-xs text-[#a85b15] mt-0.5">Your landlord needs to confirm receipt of all PDC cheques and security deposit before you can review and sign this contract. You will be notified once confirmed.</p>
+            </div>
           </div>
         )}
 
@@ -866,30 +879,17 @@ export default function TenantContractDetailPage() {
                 {/* Step 2: Payment Collection */}
                 {(()=>{ const state: TLState = ss(st1Done, st2Done); return (
                 <StepRow num={2} label="Payment Collection" state={state} last={false}>
-                  <p className="text-[10px] text-[#9b9890] mt-0.5">Cheques &amp; deposit collected by landlord · {expectedCheques} instalment{expectedCheques !== 1 ? 's' : ''}</p>
+                  <p className="text-[10px] text-[#9b9890] mt-0.5">PDC cheques and security deposit collected and confirmed by landlord</p>
                   {state === 'current' && (
-                    <div className="mt-2 space-y-1.5">
-                      <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
-                        <div>
-                          <p className="text-[10px] font-semibold text-[#1a1916]">Security Deposit</p>
-                          <p className="text-[9px] text-[#9b9890]">{fmtAed(contract.securityDepositAmount ?? 0)}</p>
-                        </div>
-                        {depositPayment?.chequeStatus === 'received'
-                          ? <span className="text-[9px] font-semibold text-[#2e9f82] flex items-center gap-0.5"><CheckCircle size={9} /> Received</span>
-                          : <span className="text-[9px] text-[#9b9890] italic">Pending</span>}
-                      </div>
-                      <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
-                        <div>
-                          <p className="text-[10px] font-semibold text-[#1a1916]">Rental Instalments</p>
-                          <p className="text-[9px] text-[#9b9890]">{expectedCheques} cheques (PDC)</p>
-                        </div>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                          allChequesReceived ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef9c3] text-[#854d0e]'
-                        }`}>{rentChequePayments.length} / {expectedCheques}</span>
-                      </div>
-                    </div>
+                    <p className="text-[9px] text-[#a85b15] bg-[#fdf3e3] rounded-lg px-2.5 py-1.5 mt-1.5 leading-tight">
+                      Your landlord is confirming receipt of all cheques. You will be able to review and sign once confirmed.
+                    </p>
                   )}
-                  {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">All cheques collected as PDC · Deposit + {expectedCheques} instalments</p>}
+                  {state === 'done' && (
+                    <p className="text-[10px] text-[#2e9f82] mt-0.5 flex items-center gap-1">
+                      <CheckCircle size={9} /> Payment confirmed — contract is ready for signatures
+                    </p>
+                  )}
                 </StepRow>
                 );})()}
 
@@ -937,16 +937,16 @@ export default function TenantContractDetailPage() {
                 </StepRow>
                 );})()}
 
-                {/* Step 5: Move-In & DEWA */}
+                {/* Step 5: Move-In & Utility */}
                 {(()=>{ const state: TLState = ss(st4Done, st5Done); return (
-                <StepRow num={5} label="Move-In &amp; DEWA" state={state} last={false}>
+                <StepRow num={5} label="Move-In &amp; Utility" state={state} last={false}>
                   {state === 'current' && (
                     <div className="mt-1.5 space-y-1">
                       <p className="text-[10px] text-[#9b9890]">Move-in inspection &amp; key handover in progress.</p>
-                      <p className="text-[10px] text-[#9b9890]">DEWA account activation being verified by landlord.</p>
+                      <p className="text-[10px] text-[#9b9890]">Utility account activation being verified by landlord.</p>
                     </div>
                   )}
-                  {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Keys handed over · DEWA active ✓</p>}
+                  {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Keys handed over · Utility active ✓</p>}
                 </StepRow>
                 );})()}
 

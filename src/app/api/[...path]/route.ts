@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
  *   `Authorization: Bearer …` before forwarding to NestJS.
  *
  * • Logout clears the cookie without a backend call (stateless JWTs expire
- *   naturally at 15 min; full token-revocation via the tokens module is a
+ *   naturally at 7 days; full token-revocation via the tokens module is a
  *   later Sprint 1 task).
  */
 
@@ -25,16 +25,19 @@ const BACKEND =
   'http://localhost:3001/api';
 
 const COOKIE = 'upnow_token';
-const TOKEN_TTL = 15 * 60; // seconds — must match backend JWT expiry
+const TOKEN_TTL = 7 * 24 * 60 * 60; // 7 days — matches JWT_EXPIRES_IN in backend .env
 
 /** Paths whose successful response body contains a fresh `access_token`. */
 const TOKEN_ISSUING_PATHS = new Set([
   '/auth/login',
+  '/auth/login/verify-otp',
   '/auth/register/customer',
   '/auth/register/rental-provider',
   '/auth/register/service-provider',
   '/auth/otp/verify',
-  '/auth/email/verify-otp',  // public OTP verification — also issues JWT
+  '/auth/email/verify-otp',
+  '/auth/google',
+  '/auth/apple',
 ]);
 
 /** Dynamic token-issuing path pattern: /invitations/:token/accept */

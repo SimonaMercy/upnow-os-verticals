@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import ListingPageClient, { type PublicUnit, type PublicProperty, type UnitMediaItem } from './ListingPageClient';
 
-const BACKEND = process.env.BACKEND_URL ?? 'http://localhost:3000/api';
+const BACKEND = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
 interface ListingPayload {
   unit: PublicUnit;

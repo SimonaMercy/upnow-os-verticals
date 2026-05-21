@@ -1,23 +1,20 @@
 /**
- * Rental Provider — Property Portfolio (rental-provider/dashboard/portfolio)
+ * Rental Provider — Property Portfolio.
  *
- * Lists all of the RP's properties with their units and availability status.
- * Each property card shows: building name, unit count, occupancy rate,
- * listing status, and quick links to add units / create contract.
+ * Lists all of the RP's properties (accordion) with their units and listing
+ * workflow status. Click a property card to expand and manage its units.
  *
- * Data: GET /properties/my (returns properties with nested units).
- * Unit availability: available | occupied | maintenance | unlisted.
- *
- * The "Add property" flow (SCRUM-2xx — property listing wizard) is not yet
- * built; the button links to rental-provider/dashboard/portfolio/new.
+ * Data: GET /properties (returns properties with unit counts).
+ * Units: GET /properties/:id/units (loaded on expand).
+ * Contracts: GET /contracts (used to surface tenant + lease end on unit rows).
  */
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-  Building2, LayoutGrid, List, MapPin, Plus, Pencil, Trash2,
-  ChevronDown, ChevronUp, Loader2, AlertCircle, Camera, X, ImagePlus, Trash, Eye, FileText, Radio
+  Building2, MapPin, Plus, Pencil, Trash2, Search,
+  ChevronDown, Loader2, AlertCircle, Camera, X, ImagePlus, Trash, Eye, FileText,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
@@ -30,8 +27,13 @@ import {
 import {
   UnitFormModal,
   type UnitFormData,
+  RESIDENTIAL_UNIT_TYPES,
+  COMMERCIAL_UNIT_TYPES,
+  INDUSTRIAL_UNIT_TYPES,
 } from '@/components/upnow/UnitFormModal';
-import { EmptyState } from '@/components/ui/EmptyState';
+import s from './portfolio.module.css';
+
+const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
 
 // ─── Types ────────────────────────────────────────────────
 interface Property {
@@ -39,7 +41,13 @@ interface Property {
   buildingName: string;
   spaceCategory: string;
   fullAddress: string | null;
+  emirateId: number | null;
+  communityId: number | null;
+  emirateName: string | null;
+  communityName: string | null;
+  street: string | null;
   makaniNumber: string | null;
+  plotNumber: string | null;
   latitude: number | null;
   longitude: number | null;
   hasGym: boolean;
@@ -49,6 +57,8 @@ interface Property {
   propertyDescription: string | null;
   numberOfFloors: string | null;
   createdAt: string;
+  unitCount?: number;
+  listedCount?: number;
 }
 
 interface Unit {
@@ -67,13 +77,16 @@ interface Unit {
   facilities: string | null;
   rentalPrice: number | null;
   marketPrice: number | null;
+  securityDeposit: number | null;
+  adminFee: number | null;
+  ejariFeeFils: number | null;
+  commission: number | null;
   serviceCharges: number | null;
   availability: string;
   description: string | null;
   isListed: boolean;
+  listingStatus: 'draft' | 'pending' | 'in_review' | 'published' | 'expired' | 'rejected';
 }
-
-type ViewMode = 'card' | 'table';
 
 interface ContractSummary {
   id: number;
@@ -91,18 +104,94 @@ interface UnitMediaItem {
   sortOrder: number;
 }
 
+// ─── View options ─────────────────────────────────────────
+const VIEW_OPTIONS = [
+  'Sea View', 'Burj Khalifa View', 'City View', 'Marina View',
+  'Canal View', 'Creek View', 'Garden View', 'Pool View',
+  'Park View', 'Golf View', 'Community View', 'Desert View',
+  'Mountain View', 'Skyline View', 'Partial Sea View', 'Lake View',
+];
+
+// ─── View multiselect (kept from original; lightly tweaked styles to fit) ─
+function ViewMultiSelect({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggle = (v: string) =>
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+
+  const label = selected.length === 0
+    ? 'Filter by view'
+    : selected.length === 1
+    ? selected[0]
+    : `${selected.length} views selected`;
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={s.sel}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+      >
+        <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        {selected.length > 0 && (
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 99, background: 'var(--green-t)', color: 'var(--green-d)' }}>
+            {selected.length}
+          </span>
+        )}
+        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30, background: '#fff', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 8px 30px -10px rgba(0,0,0,.18)', overflow: 'hidden', width: 224 }}>
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--line-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--mute)' }}>Views</span>
+            {selected.length > 0 && (
+              <button onClick={() => onChange([])} style={{ background: 'transparent', border: 0, fontSize: 11, color: 'var(--green-d)', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>Clear</button>
+            )}
+          </div>
+          <ul style={{ maxHeight: 220, overflowY: 'auto', margin: 0, padding: 4, listStyle: 'none' }}>
+            {VIEW_OPTIONS.map((v) => {
+              const sel = selected.includes(v);
+              return (
+                <li key={v}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(v)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 10px', background: 'transparent', border: 0, textAlign: 'left', fontSize: 13, borderRadius: 8, cursor: 'pointer', color: sel ? 'var(--ink)' : 'var(--ink-2)' }}
+                  >
+                    <span style={{ width: 14, height: 14, borderRadius: 4, border: sel ? 'none' : '1.5px solid var(--mute-2)', background: sel ? 'var(--green)' : '#fff', display: 'grid', placeItems: 'center', flexShrink: 0, color: '#fff' }}>
+                      {sel && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    </span>
+                    {v}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────
 function amenitiesFromUnit(unit: Unit): string[] {
   if (!unit.facilities) return [];
   try { return JSON.parse(unit.facilities) as string[]; } catch { return []; }
 }
 
-function categoryIcon(cat: string): string {
-  return SPACE_CATEGORIES.find(c => c.id === cat)?.icon ?? '🏢';
-}
-
 function categoryLabel(cat: string): string {
-  return SPACE_CATEGORIES.find(c => c.id === cat)?.label ?? cat;
+  return SPACE_CATEGORIES.find((c) => c.id === cat)?.label ?? cat;
 }
 
 // ─── API mappers ──────────────────────────────────────────
@@ -140,6 +229,10 @@ function unitFormToDto(data: UnitFormData) {
     amenities: data.amenities.length > 0 ? data.amenities : undefined,
     view: data.view || undefined,
     rentalPrice: data.rentalPrice ? Number(data.rentalPrice) : undefined,
+    securityDeposit: data.securityDeposit ? Number(data.securityDeposit) : undefined,
+    adminFee: data.adminFee ? Number(data.adminFee) : undefined,
+    ejariFeeFils: data.ejariFeeFils ? Number(data.ejariFeeFils) : undefined,
+    commission: data.commission ? Number(data.commission) : undefined,
     serviceCharges: data.serviceCharges ? Number(data.serviceCharges) : undefined,
     description: data.description || undefined,
   };
@@ -171,7 +264,7 @@ function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyI
           method: 'POST',
           credentials: 'include',
           body: fd,
-        }).then(async r => {
+        }).then(async (r) => {
           if (!r.ok) {
             const err = await r.json().catch(() => ({}));
             throw new Error((err as { message?: string }).message ?? 'Upload failed');
@@ -188,15 +281,14 @@ function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyI
   }, [propertyId, unit.id, qc, qKey]);
 
   const deletePhoto = useMutation({
-    mutationFn: (mediaId: number) =>
-      apiDelete(`/properties/${propertyId}/units/${unit.id}/media/${mediaId}`),
+    mutationFn: (mediaId: number) => apiDelete(`/properties/${propertyId}/units/${unit.id}/media/${mediaId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
   });
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0]">
@@ -217,11 +309,11 @@ function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyI
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-3">
-              {photos.map(p => (
+              {photos.map((p) => (
                 <div key={p.id} className="relative group rounded-xl overflow-hidden bg-[#f4f3ef] aspect-square">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`http://localhost:3000${p.url}`}
+                    src={p.url.startsWith('http') ? p.url : `/api${p.url}`}
                     alt={p.caption ?? 'Unit photo'}
                     className="w-full h-full object-cover"
                   />
@@ -262,136 +354,240 @@ function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyI
   );
 }
 
-// ─── Property Card ────────────────────────────────────────
+// ─── Property card (new design) ──────────────────────────
 function PropertyCard({
   property, units, contracts, expanded, onToggle, onEdit, onDelete,
-  onAddUnit, onEditUnit, onDeleteUnit, onManagePhotos, onToggleListing,
+  onAddUnit, onEditUnit, onDeleteUnit, onSubmitListing, onWithdrawListing,
 }: {
   property: Property; units: Unit[]; contracts: ContractSummary[]; expanded: boolean;
   onToggle: () => void; onEdit: () => void; onDelete: () => void;
   onAddUnit: () => void; onEditUnit: (u: Unit) => void; onDeleteUnit: (uid: number) => void;
-  onManagePhotos: (u: Unit) => void; onToggleListing: (u: Unit) => void;
+  onSubmitListing: (u: Unit) => void; onWithdrawListing: (u: Unit) => void;
 }) {
-  const totalRent = units.reduce((s, u) => s + (Number(u.rentalPrice ?? u.marketPrice) || 0), 0);
-  const occupied = units.filter(u => u.availability === 'occupied').length;
+  const totalRent = units.reduce((sum, u) => sum + (Number(u.rentalPrice ?? u.marketPrice) || 0), 0);
+  const occupied = units.filter((u) => u.availability === 'occupied').length;
+  const available = units.filter((u) => u.availability === 'available').length;
+  const maintenance = units.filter((u) => u.availability === 'maintenance').length;
+  const totalUnits = property.unitCount ?? units.length;
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] overflow-hidden">
-      <div className="flex items-center justify-between p-5 cursor-pointer" onClick={onToggle}>
-        <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-xl bg-[#d8f2e8] flex items-center justify-center text-2xl shrink-0">
-            {categoryIcon(property.spaceCategory)}
+    <div className={cn(s.prop, expanded && s.expanded)}>
+      {/* Header row */}
+      <div className={s.propH} onClick={onToggle} role="button">
+        <div className={s.thumb}>{property.spaceCategory.charAt(0).toUpperCase()}</div>
+
+        <div className={s.propInfo}>
+          <div className={s.propName}>
+            {property.buildingName}
+            <span className={s.propCat}>{categoryLabel(property.spaceCategory)}</span>
           </div>
-          <div>
-            <div className="font-semibold text-[#1a1916]">{property.buildingName}</div>
-            <div className="text-xs text-[#9b9890] mt-0.5 flex items-center gap-1">
-              <MapPin size={11} />
-              {property.fullAddress ?? '—'}
-              {property.makaniNumber && (
-                <span className="ml-2 font-mono text-[10px] text-[#b0ae9a]">Makani {property.makaniNumber}</span>
-              )}
-            </div>
+          <div className={s.propAddr}>
+            <MapPin size={12} />
+            <span>{property.fullAddress ?? '—'}</span>
+            {property.makaniNumber && <code>Makani {property.makaniNumber}</code>}
           </div>
         </div>
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="text-right hidden sm:block">
-            <div className="text-sm font-bold text-[#2e9f82]">AED {totalRent.toLocaleString('en-AE')}</div>
-            <div className="text-[10px] text-[#9b9890]">/year · {units.length} unit{units.length !== 1 ? 's' : ''}</div>
+
+        <div className={s.propAgg}>
+          <div className={s.aggItem}>
+            <div className={s.aggV}>{totalUnits}</div>
+            <div className={s.aggL}>Units</div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={e => { e.stopPropagation(); onEdit(); }} className="p-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer"><Pencil size={13} /></button>
-            <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-1.5 rounded-lg border border-[#e8e6e0] text-red-400 hover:bg-red-50 cursor-pointer"><Trash2 size={13} /></button>
-            {expanded ? <ChevronUp size={16} className="text-[#9b9890]" /> : <ChevronDown size={16} className="text-[#9b9890]" />}
+          {totalUnits > 0 && (
+            <div className={s.aggItem}>
+              <div className={s.aggV}>{occupied}/{totalUnits}</div>
+              <div className={s.aggL}>Occupied</div>
+            </div>
+          )}
+          {totalRent > 0 && (
+            <div className={s.aggItem}>
+              <div className={s.aggV}>AED {Math.round(totalRent).toLocaleString('en-AE')}</div>
+              <div className={s.aggL}>per year</div>
+            </div>
+          )}
+          <div className={s.propActions}>
+            <button
+              type="button"
+              className={s.actsBtn}
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              title="Edit property"
+              aria-label="Edit property"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              className={cn(s.actsBtn, s.danger)}
+              onClick={(e) => { e.stopPropagation(); if (confirm('Delete this property and all its units?')) onDelete(); }}
+              title="Delete property"
+              aria-label="Delete property"
+            >
+              <Trash2 size={14} />
+            </button>
+            <ChevronDown size={16} className={s.chev} />
           </div>
         </div>
       </div>
 
-      {(property.hasGym || property.hasPool || property.hasParking) && (
-        <div className="px-5 pb-3 flex gap-2">
-          {property.hasParking && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860]">🅿️ Parking</span>}
-          {property.hasPool && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860]">🏊 Pool</span>}
-          {property.hasGym && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860]">🏋️ Gym</span>}
-        </div>
-      )}
-
+      {/* Expanded body */}
       {expanded && (
-        <div className="border-t border-[#e8e6e0] px-5 pt-4 pb-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold uppercase text-[#9b9890] tracking-wide">Units ({units.length})</span>
+        <div className={s.propBody}>
+          <div className={s.unitH}>
+            <div className={s.unitHTtl}>Units ({units.length})</div>
             {!property.isStandaloneUnit && (
-              <button onClick={onAddUnit} className="text-xs text-white px-3 py-1.5 rounded-lg font-medium cursor-pointer flex items-center gap-1" style={{ background: '#2e9f82' }}>
-                <Plus size={12} /> Add Unit
+              <button type="button" className={cn(s.btn, s.btnPrimary, s.btnSm)} onClick={onAddUnit}>
+                <Plus size={13} /> Add unit
               </button>
             )}
           </div>
+
           {units.length === 0 ? (
-            <div className="text-center py-6 text-sm text-[#9b9890]">
-              {property.isStandaloneUnit
-                ? 'This is a standalone property — the property itself is the unit.'
-                : <>No units yet. <button onClick={onAddUnit} className="text-[#2e9f82] underline cursor-pointer">Add the first unit</button></>}
+            <div className={s.empty}>
+              <div className={s.emptyIc}><Building2 size={20} /></div>
+              <h3 className={s.emptyTtl}>
+                {property.isStandaloneUnit ? 'Standalone property' : 'No units yet'}
+              </h3>
+              <p className={s.emptyDesc}>
+                {property.isStandaloneUnit
+                  ? 'This is a standalone property — the property itself is the unit.'
+                  : 'Add the first unit to start listing this property.'}
+              </p>
+              {!property.isStandaloneUnit && (
+                <button type="button" className={cn(s.btn, s.btnPrimary)} onClick={onAddUnit}>
+                  <Plus size={14} /> Add first unit
+                </button>
+              )}
             </div>
           ) : (
-            <div className="space-y-2">
-              {units.map(u => {
-                const contract = contracts.find(c => c.unit?.id === u.id && c.contractActive);
+            <div className={s.units}>
+              {units.map((u) => {
+                const contract = contracts.find((c) => c.unit?.id === u.id && c.contractActive);
                 const tenant = contract?.tenant?.name ?? null;
-                const contractEnd = contract?.endDate ? new Date(contract.endDate).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+                const contractEnd = contract?.endDate
+                  ? new Date(contract.endDate).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' })
+                  : null;
+                const isConfirmingDelete = confirmDeleteId === u.id;
+
+                // Pick the visible pill — availability dominates over listing status
+                const pillInfo = (() => {
+                  if (u.availability === 'occupied')   return { cls: s.pillOcc, label: 'Occupied' };
+                  if (u.availability === 'maintenance') return { cls: s.pillMaint, label: 'Maintenance' };
+                  switch (u.listingStatus) {
+                    case 'published': return { cls: s.pillPublished, label: 'Published' };
+                    case 'pending':   return { cls: s.pillPending,   label: 'Pending' };
+                    case 'in_review': return { cls: s.pillReview,    label: 'In review' };
+                    case 'expired':   return { cls: s.pillPending,   label: 'Expired' };
+                    case 'rejected':  return { cls: s.pillRejected,  label: 'Rejected' };
+                    default:          return { cls: s.pillDraft,     label: 'Draft' };
+                  }
+                })();
+
+                const sizeStr = u.unitSizeSqft
+                  ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
+                  : u.unitSizeSqm
+                  ? `${Number(u.unitSizeSqm).toLocaleString()} sqm`
+                  : null;
+
                 return (
-                <div key={u.id} className="rounded-xl border border-[#e8e6e0] px-4 py-3 hover:bg-[#f4f3ef]">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 flex-1 min-w-0 flex-wrap">
-                      <span className="font-semibold text-[#1a1916] text-sm">#{u.unitNumber}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860] capitalize">{u.unitType.replace(/_/g, ' ')}</span>
-                      {u.bedrooms != null && <span className="text-xs text-[#9b9890]">{u.bedrooms} BR</span>}
-                      {u.unitSizeSqm && <span className="text-xs text-[#9b9890]">{Number(u.unitSizeSqm).toLocaleString()} sqm</span>}
-                      {!u.unitSizeSqm && u.unitSizeSqft && <span className="text-xs text-[#9b9890]">{Number(u.unitSizeSqft).toLocaleString()} sqft</span>}
+                  <div key={u.id} className={cn(s.unit, isConfirmingDelete && s.unitConfirmDel)}>
+                    <div className={s.unitNum}>{u.unitNumber}</div>
+
+                    <div className={s.unitMeta}>
+                      <div className={s.unitTop}>
+                        <span className={s.unitType}>{u.unitType.replace(/_/g, ' ')}</span>
+                        {u.bedrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bedrooms} BR</span></>)}
+                        {u.bathrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bathrooms} BA</span></>)}
+                        {sizeStr && (<><span className={s.unitDot} /><span className={s.unitSpec}>{sizeStr}</span></>)}
+                        {u.view && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.view}</span></>)}
+                      </div>
                       {tenant && (
-                        <span className="text-xs text-[#2e9f82] font-medium truncate max-w-[160px]" title={tenant}>👤 {tenant}</span>
-                      )}
-                      {contractEnd && (
-                        <span className="text-xs text-[#9b9890]">until {contractEnd}</span>
+                        <div className={s.unitBottom}>
+                          <span className={s.unitTenant}>{tenant}</span>
+                          {contractEnd && <span>· until {contractEnd}</span>}
+                        </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+
+                    <div className={s.unitRight}>
                       {(u.rentalPrice ?? u.marketPrice) && (
-                        <span className="text-sm font-bold text-[#2e9f82]">
-                          AED {Number(u.rentalPrice ?? u.marketPrice).toLocaleString('en-AE')}<span className="text-[10px] font-normal text-[#9b9890]">/yr</span>
-                        </span>
+                        <div className={s.unitPrice}>
+                          AED {Number(u.rentalPrice ?? u.marketPrice).toLocaleString('en-AE')}
+                          <small>per year</small>
+                        </div>
                       )}
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${u.availability === 'available' ? 'bg-[#d8f2e8] text-[#1a7a5a]' : u.availability === 'occupied' ? 'bg-[#dbeafe] text-[#1e40af]' : 'bg-[#fef3c7] text-[#92400e]'}`}>
-                        {u.availability}
+
+                      <span className={cn(s.pill, pillInfo.cls)}>
+                        <span className={s.pdot} /> {pillInfo.label}
                       </span>
-                      {u.isListed && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-[#2e9f82] text-white">Listed</span>
+
+                      {u.availability === 'available' && (
+                        <>
+                          {(u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
+                            <button type="button" className={s.submitBtn} onClick={() => onSubmitListing(u)}>
+                              {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
+                            </button>
+                          )}
+                          {(u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
+                            <button type="button" className={s.withdrawBtn} onClick={() => onWithdrawListing(u)}>
+                              Withdraw
+                            </button>
+                          )}
+                        </>
                       )}
-                      <Link href={`/listings/units/${u.id}`} target="_blank" className="p-1 text-[#6b6860] hover:text-[#1a1916]" title="Preview listing"><Eye size={12} /></Link>
-                      {contract && (
-                        <Link href={`/rental-provider/dashboard/contracts/${contract.id}`} className="p-1 text-[#2e9f82] hover:text-[#1a5a4a]" title="View contract"><FileText size={12} /></Link>
-                      )}
-                      <button onClick={() => onEditUnit(u)} className="p-1 text-[#6b6860] hover:text-[#1a1916] cursor-pointer" title="Edit unit"><Pencil size={12} /></button>
-                      <button onClick={() => onDeleteUnit(u.id)} className="p-1 text-red-400 hover:text-red-600 cursor-pointer" title="Delete unit"><Trash2 size={12} /></button>
-                      <button
-                        onClick={() => onToggleListing(u)}
-                        title={u.isListed ? 'Remove from listings' : 'List this unit'}
-                        className={`p-1 cursor-pointer rounded ${u.isListed ? 'text-[#2e9f82]' : 'text-[#c9c7c1] hover:text-[#2e9f82]'}`}
-                      >
-                        <Radio size={12} />
-                      </button>
-                      <button onClick={() => onManagePhotos(u)} className="p-1 text-[#2e9f82] hover:text-[#1a5a4a] cursor-pointer" title="Manage photos"><Camera size={12} /></button>
+
+                      <div className={s.unitActs}>
+                        <Link href={`/listings/units/${u.id}`} target="_blank" className={s.actsBtn} title="Preview listing">
+                          <Eye size={14} />
+                        </Link>
+                        {contract && (
+                          <Link href={`/rental-provider/dashboard/contracts/${contract.id}`} className={s.actsBtn} title="View contract">
+                            <FileText size={14} />
+                          </Link>
+                        )}
+                        <button type="button" className={s.actsBtn} onClick={() => onEditUnit(u)} title="Edit unit">
+                          <Pencil size={14} />
+                        </button>
+
+                        {isConfirmingDelete ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span className={s.unitConfirmText}>Delete?</span>
+                            <button type="button" className={s.unitConfirmYes} onClick={() => { onDeleteUnit(u.id); setConfirmDeleteId(null); }}>Yes</button>
+                            <button type="button" className={s.unitConfirmNo} onClick={() => setConfirmDeleteId(null)}>No</button>
+                          </div>
+                        ) : (
+                          <button type="button" className={cn(s.actsBtn, s.danger)} onClick={() => setConfirmDeleteId(u.id)} title="Delete unit">
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
                 );
               })}
             </div>
           )}
-          <div className="grid grid-cols-3 gap-3 mt-4">
-            {[{ label: 'Total', value: String(units.length) }, { label: 'Occupied', value: String(occupied) }, { label: 'Annual Revenue', value: `AED ${totalRent.toLocaleString('en-AE')}` }].map(s => (
-              <div key={s.label} className="bg-[#f4f3ef] rounded-xl px-3 py-2 text-center">
-                <div className="text-[10px] uppercase text-[#9b9890] font-medium">{s.label}</div>
-                <div className="text-sm font-bold text-[#1a1916] mt-0.5">{s.value}</div>
+
+          {/* Footer mini-stats */}
+          <div className={s.propFooter}>
+            <div className={s.statMini}>
+              <div className={s.statMiniL}>Total</div>
+              <div className={s.statMiniV}>{totalUnits}</div>
+            </div>
+            <div className={s.statMini}>
+              <div className={s.statMiniL}>Available</div>
+              <div className={s.statMiniV}>{available}</div>
+            </div>
+            <div className={s.statMini}>
+              <div className={s.statMiniL}>Occupied</div>
+              <div className={s.statMiniV}>{occupied}</div>
+            </div>
+            <div className={s.statMini}>
+              <div className={s.statMiniL}>{maintenance > 0 ? 'Maintenance' : 'Annual revenue'}</div>
+              <div className={s.statMiniV}>
+                {maintenance > 0 ? maintenance : `AED ${Math.round(totalRent).toLocaleString('en-AE')}`}
               </div>
-            ))}
+            </div>
           </div>
         </div>
       )}
@@ -399,21 +595,36 @@ function PropertyCard({
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────
+// ─── Main page ────────────────────────────────────────────
 export default function PortfolioPage() {
   const qc = useQueryClient();
-  const searchParams = useSearchParams();
-  const [viewMode, setViewMode] = useState<ViewMode>('card');
+  const router = useRouter();
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'residential' | 'commercial' | 'industrial'>('all');
+  const [search, setSearch] = useState('');
+  const [unitTypeFilter, setUnitTypeFilter] = useState('');
+  const [selectedViews, setSelectedViews] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: Property }>({
-    open: searchParams.get('action') === 'add',
-  });
+  const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: Property }>({ open: false });
   const [unitModal, setUnitModal] = useState<{ open: boolean; propertyId?: number; propertyCategory?: string; editingUnit?: Unit }>({ open: false });
   const [photoModal, setPhotoModal] = useState<{ open: boolean; unit?: Unit; propertyId?: number }>({ open: false });
 
   const { data: properties = [], isLoading, error } = useQuery<Property[]>({
     queryKey: ['properties'],
     queryFn: () => apiGet<Property[]>('/properties'),
+  });
+
+  const filteredProperties = properties.filter((p) => {
+    if (categoryFilter !== 'all' && p.spaceCategory !== categoryFilter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (
+        p.buildingName.toLowerCase().includes(q) ||
+        (p.fullAddress ?? '').toLowerCase().includes(q) ||
+        (p.communityName ?? '').toLowerCase().includes(q) ||
+        (p.emirateName ?? '').toLowerCase().includes(q)
+      );
+    }
+    return true;
   });
 
   const { data: expandedUnits = [] } = useQuery<Unit[]>({
@@ -451,9 +662,14 @@ export default function PortfolioPage() {
     mutationFn: ({ propertyId, unitId }: { propertyId: number; unitId: number }) => apiDelete<void>(`/properties/${propertyId}/units/${unitId}`),
     onSuccess: (_, vars) => qc.invalidateQueries({ queryKey: ['units', vars.propertyId] }),
   });
-  const toggleListing = useMutation({
+  const submitListing = useMutation({
     mutationFn: ({ propertyId, unitId }: { propertyId: number; unitId: number }) =>
-      apiPatch<{ isListed: boolean }>(`/properties/${propertyId}/units/${unitId}/toggle-listing`, {}),
+      apiPatch<Unit>(`/properties/${propertyId}/units/${unitId}/submit-listing`, {}),
+    onSuccess: (_, vars) => qc.invalidateQueries({ queryKey: ['units', vars.propertyId] }),
+  });
+  const withdrawListing = useMutation({
+    mutationFn: ({ propertyId, unitId }: { propertyId: number; unitId: number }) =>
+      apiPatch<Unit>(`/properties/${propertyId}/units/${unitId}/withdraw-listing`, {}),
     onSuccess: (_, vars) => qc.invalidateQueries({ queryKey: ['units', vars.propertyId] }),
   });
 
@@ -476,172 +692,248 @@ export default function PortfolioPage() {
     }
   }, [unitModal, createUnit, updateUnit]);
 
+  // ── Aggregated KPIs (from the loaded properties list) ──
+  const totalProperties = properties.length;
+  const totalUnits     = properties.reduce((sum, p) => sum + (p.unitCount ?? 0), 0);
+  const totalListed    = properties.reduce((sum, p) => sum + (p.listedCount ?? 0), 0);
+  const activeLeases   = allContracts.filter((c) => c.contractActive).length;
+  const occupancyPct   = totalUnits > 0 ? Math.round((activeLeases / totalUnits) * 100) : 0;
+
+  const filtersDirty = !!search || !!unitTypeFilter || selectedViews.length > 0;
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Portfolio</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">
-            {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'} — click a card to manage units
-          </p>
+    <div className={s.app}>
+      <div className={s.main}>
+
+        {/* Hero */}
+        <div className={s.hero}>
+          <div className={s.heroLeft}>
+            <div className={s.heroEyebrow}><Building2 size={12} /> Portfolio</div>
+            <h1 className={s.heroTitle}>Your <span className={s.serif}>properties</span></h1>
+            <p className={s.heroDesc}>
+              {totalProperties === 0
+                ? "You haven't added a property yet — once you do, manage all buildings, units, and listings from this dashboard."
+                : `Manage your ${totalProperties} propert${totalProperties === 1 ? 'y' : 'ies'}, ${totalUnits} unit${totalUnits === 1 ? '' : 's'}, and listings in one place.`}
+            </p>
+          </div>
+          <div className={s.heroRight}>
+            <button type="button" className={cn(s.btn, s.btnPrimary)} onClick={() => router.push('/rental-provider/dashboard/portfolio/add')}>
+              <Plus size={14} /> Add property
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-lg border border-[#e8e6e0] overflow-hidden">
-            {(['card', 'table'] as ViewMode[]).map(v => (
-              <button key={v} onClick={() => setViewMode(v)} className={`px-3 py-2 cursor-pointer transition-colors ${viewMode === v ? 'bg-[#1a1916] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
-                {v === 'card' ? <LayoutGrid size={16} /> : <List size={16} />}
+
+        {/* KPI strip */}
+        {totalProperties > 0 && (
+          <div className={s.summary}>
+            <div className={s.kpi}>
+              <div className={s.kpiLbl}>Properties</div>
+              <div className={s.kpiVal}>{totalProperties}</div>
+              <div className={s.kpiSub}>Buildings under management</div>
+            </div>
+            <div className={s.kpi}>
+              <div className={s.kpiLbl}>Total units</div>
+              <div className={s.kpiVal}>{totalUnits}</div>
+              <div className={s.kpiSub}>Across all properties</div>
+            </div>
+            <div className={s.kpi}>
+              <div className={s.kpiLbl}>Active leases</div>
+              <div className={s.kpiVal}>{activeLeases}</div>
+              <div className={s.kpiSub}>{occupancyPct}% occupancy</div>
+            </div>
+            <div className={s.kpi}>
+              <div className={s.kpiLbl}>Live listings</div>
+              <div className={s.kpiVal}>{totalListed}</div>
+              <div className={s.kpiSub}>Published & searchable</div>
+            </div>
+          </div>
+        )}
+
+        {/* Range tabs */}
+        <div className={s.rangetabs}>
+          <div className={s.rangetabsTabs}>
+            {(['all', 'residential', 'commercial', 'industrial'] as const).map((key) => {
+              const label = key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1);
+              const count = key === 'all' ? properties.length : properties.filter((p) => p.spaceCategory === key).length;
+              const active = categoryFilter === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setCategoryFilter(key)}
+                  className={cn(s.rangetabBtn, active && s.active)}
+                >
+                  {label}
+                  <span className={s.rangetabCount}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Filters */}
+        {totalProperties > 0 && (
+          <div className={s.filters}>
+            <div className={s.search}>
+              <Search size={14} className={s.searchIc} />
+              <input
+                type="text"
+                placeholder="Search building, area, emirate…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button type="button" className={s.searchClear} onClick={() => setSearch('')}><X size={12} /></button>
+              )}
+            </div>
+
+            <div className={s.selWrap}>
+              <select
+                value={unitTypeFilter}
+                onChange={(e) => setUnitTypeFilter(e.target.value)}
+                className={s.sel}
+              >
+                <option value="">All unit types</option>
+                <optgroup label="Residential">
+                  {RESIDENTIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                </optgroup>
+                <optgroup label="Commercial">
+                  {COMMERCIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                </optgroup>
+                <optgroup label="Industrial">
+                  {INDUSTRIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                </optgroup>
+              </select>
+            </div>
+
+            <ViewMultiSelect selected={selectedViews} onChange={setSelectedViews} />
+
+            {filtersDirty && (
+              <button
+                type="button"
+                className={s.filtersClear}
+                onClick={() => { setSearch(''); setUnitTypeFilter(''); setSelectedViews([]); }}
+              >
+                Clear all
               </button>
-            ))}
+            )}
           </div>
-          <button onClick={() => setPropertyModal({ open: true })} className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white cursor-pointer" style={{ background: '#2e9f82' }}>
-            <Plus size={15} /> Add Property
-          </button>
-        </div>
-      </div>
+        )}
 
-      {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 mb-4">
-          <AlertCircle size={16} /> {(error as Error).message}
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="flex items-center justify-center py-16 gap-3 text-[#9b9890]">
-          <Loader2 size={20} className="animate-spin" /> Loading properties…
-        </div>
-      )}
-
-      {!isLoading && properties.length === 0 && (
-        <div className="bg-white rounded-2xl shadow-sm">
-          <EmptyState
-            icon={<Building2 />}
-            heading="No properties yet"
-            subtext="Add your first property — then add as many units as you need without re-entering location details."
-            action={{ label: '+ Add First Property', onClick: () => setPropertyModal({ open: true }) }}
-          />
-        </div>
-      )}
-
-      {!isLoading && properties.length > 0 && viewMode === 'card' && (
-        <div className="space-y-4">
-          {properties.map(p => (
-            <PropertyCard
-              key={p.id} property={p}
-              units={expandedId === p.id ? expandedUnits : []}
-              contracts={allContracts}
-              expanded={expandedId === p.id}
-              onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
-              onEdit={() => setPropertyModal({ open: true, editing: p })}
-              onDelete={() => { if (confirm('Delete this property and all its units?')) deleteProperty.mutate(p.id); }}
-              onAddUnit={() => setUnitModal({ open: true, propertyId: p.id, propertyCategory: p.spaceCategory })}
-              onEditUnit={u => setUnitModal({ open: true, propertyId: p.id, propertyCategory: p.spaceCategory, editingUnit: u })}
-              onDeleteUnit={uid => { if (confirm('Delete this unit?')) deleteUnit.mutate({ propertyId: p.id, unitId: uid }); }}
-              onManagePhotos={u => setPhotoModal({ open: true, unit: u, propertyId: p.id })}
-              onToggleListing={u => toggleListing.mutate({ propertyId: p.id, unitId: u.id })}
-            />
-          ))}
-        </div>
-      )}
-
-      {!isLoading && properties.length > 0 && viewMode === 'table' && (
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[700px]">
-              <thead>
-                <tr className="bg-[#f4f3ef]">
-                  {['Name', 'Category', 'Location', 'Amenities', 'Floors', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {properties.map(p => (
-                  <tr key={p.id} className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916]">
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">{categoryIcon(p.spaceCategory)}</span>
-                        <div>
-                          <div className="font-medium">{p.buildingName}</div>
-                          {p.makaniNumber && <div className="text-xs text-[#9b9890] font-mono">Makani {p.makaniNumber}</div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 capitalize">{categoryLabel(p.spaceCategory)}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{p.fullAddress ?? '—'}</td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex gap-1">
-                        {p.hasParking && <span title="Parking">🅿️</span>}
-                        {p.hasPool && <span title="Pool">🏊</span>}
-                        {p.hasGym && <span title="Gym">🏋️</span>}
-                        {!p.hasParking && !p.hasPool && !p.hasGym && <span className="text-[#c9c7c1]">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5">{p.numberOfFloors ?? '—'}</td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => { setExpandedId(p.id); setViewMode('card'); }} className="text-xs text-[#2e9f82] font-medium cursor-pointer hover:underline">Units</button>
-                        <button onClick={() => setPropertyModal({ open: true, editing: p })} className="text-xs text-[#6b6860] cursor-pointer hover:underline">Edit</button>
-                        <button onClick={() => { if (confirm('Delete this property?')) deleteProperty.mutate(p.id); }} className="text-xs text-red-400 cursor-pointer hover:underline">Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Error / loading / empty / list */}
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', background: 'var(--danger-bg)', color: 'var(--danger-fg)', borderRadius: 10, marginBottom: 16, fontSize: 13.5 }}>
+            <AlertCircle size={14} /> {(error as Error).message}
           </div>
-        </div>
-      )}
+        )}
 
-      <PropertyFormModal
-        open={propertyModal.open}
-        title={propertyModal.editing ? 'Edit Property' : 'Add Property'}
-        initial={propertyModal.editing ? {
-          buildingName: propertyModal.editing.buildingName,
-          spaceCategory: propertyModal.editing.spaceCategory,
-          makaniNumber: propertyModal.editing.makaniNumber ?? '',
-          propertyDescription: propertyModal.editing.propertyDescription ?? '',
-          latitude: propertyModal.editing.latitude,
-          longitude: propertyModal.editing.longitude,
-          hasGym: propertyModal.editing.hasGym,
-          hasPool: propertyModal.editing.hasPool,
-          hasParking: propertyModal.editing.hasParking,
-          numberOfFloors: propertyModal.editing.numberOfFloors ?? '',
-        } : undefined}
-        onClose={() => setPropertyModal({ open: false })}
-        onSave={handleSaveProperty}
-      />
+        {isLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '60px 0', color: 'var(--mute)' }}>
+            <Loader2 size={18} className="animate-spin" /> Loading properties…
+          </div>
+        )}
 
-      <UnitFormModal
-        open={unitModal.open}
-        propertyCategory={unitModal.propertyCategory ?? ''}
-        title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
-        initial={unitModal.editingUnit ? {
-          unitNumber: unitModal.editingUnit.unitNumber,
-          unitName: unitModal.editingUnit.unitName ?? '',
-          unitType: unitModal.editingUnit.unitType,
-          unitTier: unitModal.editingUnit.unitTier,
-          floor: unitModal.editingUnit.floor ?? '',
-          bedrooms: unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : '1',
-          bathrooms: unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
-          unitSizeSqft: unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
-          view: unitModal.editingUnit.view ?? '',
-          amenities: amenitiesFromUnit(unitModal.editingUnit),
-          rentalPrice: unitModal.editingUnit.rentalPrice != null ? String(unitModal.editingUnit.rentalPrice) : '',
-          serviceCharges: unitModal.editingUnit.serviceCharges != null ? String(unitModal.editingUnit.serviceCharges) : '',
-          description: unitModal.editingUnit.description ?? '',
-        } : undefined}
-        onClose={() => setUnitModal({ open: false })}
-        onSave={handleSaveUnit}
-      />
+        {!isLoading && properties.length === 0 && (
+          <div className={s.empty}>
+            <div className={s.emptyIc}><Building2 size={22} /></div>
+            <h3 className={s.emptyTtl}>No properties yet</h3>
+            <p className={s.emptyDesc}>Add your first property — then add as many units as you need without re-entering location details.</p>
+            <button type="button" className={cn(s.btn, s.btnPrimary)} onClick={() => router.push('/rental-provider/dashboard/portfolio/add')}>
+              <Plus size={14} /> Add first property
+            </button>
+          </div>
+        )}
 
-      {/* \u2500\u2500 Unit Photo Manager \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
-      {photoModal.open && photoModal.unit && photoModal.propertyId && (
-        <UnitPhotoManager
-          unit={photoModal.unit}
-          propertyId={photoModal.propertyId}
-          onClose={() => setPhotoModal({ open: false })}
+        {!isLoading && filteredProperties.length > 0 && (
+          <div className={s.props}>
+            {filteredProperties.map((p) => {
+              const visibleUnits = expandedId === p.id
+                ? expandedUnits.filter((u) => {
+                    if (unitTypeFilter && u.unitType !== unitTypeFilter) return false;
+                    if (selectedViews.length > 0 && !selectedViews.some((v) => (u.view ?? '').toLowerCase().includes(v.toLowerCase()))) return false;
+                    return true;
+                  })
+                : [];
+              return (
+                <PropertyCard
+                  key={p.id}
+                  property={p}
+                  units={visibleUnits}
+                  contracts={allContracts}
+                  expanded={expandedId === p.id}
+                  onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                  onEdit={() => setPropertyModal({ open: true, editing: p })}
+                  onDelete={() => deleteProperty.mutate(p.id)}
+                  onAddUnit={() => setUnitModal({ open: true, propertyId: p.id, propertyCategory: p.spaceCategory })}
+                  onEditUnit={(u) => setUnitModal({ open: true, propertyId: p.id, propertyCategory: p.spaceCategory, editingUnit: u })}
+                  onDeleteUnit={(uid) => deleteUnit.mutate({ propertyId: p.id, unitId: uid })}
+                  onSubmitListing={(u) => submitListing.mutate({ propertyId: p.id, unitId: u.id })}
+                  onWithdrawListing={(u) => withdrawListing.mutate({ propertyId: p.id, unitId: u.id })}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Modals (unchanged) ── */}
+        <PropertyFormModal
+          open={propertyModal.open}
+          title={propertyModal.editing ? 'Edit Property' : 'Add Property'}
+          initial={propertyModal.editing ? {
+            buildingName:        propertyModal.editing.buildingName,
+            spaceCategory:       propertyModal.editing.spaceCategory,
+            emirateId:           propertyModal.editing.emirateId ?? null,
+            communityId:         propertyModal.editing.communityId ?? null,
+            makaniNumber:        propertyModal.editing.makaniNumber ?? '',
+            plotNumber:          propertyModal.editing.plotNumber ?? '',
+            propertyDescription: propertyModal.editing.propertyDescription ?? '',
+            latitude:            propertyModal.editing.latitude,
+            longitude:           propertyModal.editing.longitude,
+            hasGym:              propertyModal.editing.hasGym,
+            hasPool:             propertyModal.editing.hasPool,
+            hasParking:          propertyModal.editing.hasParking,
+            isStandaloneUnit:    propertyModal.editing.isStandaloneUnit,
+            numberOfFloors:      propertyModal.editing.numberOfFloors ?? '',
+          } : undefined}
+          onClose={() => setPropertyModal({ open: false })}
+          onSave={handleSaveProperty}
         />
-      )}
+
+        <UnitFormModal
+          open={unitModal.open}
+          propertyCategory={unitModal.propertyCategory ?? ''}
+          title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
+          initial={unitModal.editingUnit ? {
+            unitNumber:      unitModal.editingUnit.unitNumber,
+            unitName:        unitModal.editingUnit.unitName ?? '',
+            unitType:        unitModal.editingUnit.unitType,
+            unitTier:        unitModal.editingUnit.unitTier,
+            floor:           unitModal.editingUnit.floor ?? '',
+            bedrooms:        unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : '1',
+            bathrooms:       unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
+            unitSizeSqft:    unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
+            view:            unitModal.editingUnit.view ?? '',
+            amenities:       amenitiesFromUnit(unitModal.editingUnit),
+            rentalPrice:     unitModal.editingUnit.rentalPrice != null ? String(unitModal.editingUnit.rentalPrice) : '',
+            securityDeposit: unitModal.editingUnit.securityDeposit != null ? String(unitModal.editingUnit.securityDeposit) : '',
+            adminFee:        unitModal.editingUnit.adminFee != null ? String(unitModal.editingUnit.adminFee) : '',
+            ejariFeeFils:    unitModal.editingUnit.ejariFeeFils != null ? String(unitModal.editingUnit.ejariFeeFils) : '',
+            commission:      unitModal.editingUnit.commission != null ? String(unitModal.editingUnit.commission) : '',
+            serviceCharges:  unitModal.editingUnit.serviceCharges != null ? String(unitModal.editingUnit.serviceCharges) : '',
+            description:     unitModal.editingUnit.description ?? '',
+          } : undefined}
+          onClose={() => setUnitModal({ open: false })}
+          onSave={handleSaveUnit}
+        />
+
+        {photoModal.open && photoModal.unit && photoModal.propertyId && (
+          <UnitPhotoManager
+            unit={photoModal.unit}
+            propertyId={photoModal.propertyId}
+            onClose={() => setPhotoModal({ open: false })}
+          />
+        )}
+      </div>
     </div>
   );
 }

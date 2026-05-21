@@ -59,6 +59,13 @@ const UAE_LICENSING_AUTHORITIES = [
   "Other",
 ] as const;
 
+const shareholderSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  nationality: z.string(),
+  ownershipPercent: z.number(),
+});
+
 const schema = z.object({
   fullName: z.string().min(2, "Name must be at least 2 characters"),
   dateOfBirth: z.string().optional(),
@@ -66,6 +73,8 @@ const schema = z.object({
   gender: z.enum(["male", "female", "prefer_not_to_say"]).optional(),
   entityType: z.enum(["individual", "company"]),
   companyName: z.string().optional(),
+  companyType: z.enum(["landlord", "brokerage", "agents"]).optional(),
+  parentBrokerageName: z.string().optional(),
   tradeLicenseNumber: z.string().optional(),
   tradeLicenseAuthority: z.string().optional(),
   authorizedSignatoryName: z.string().optional(),
@@ -73,35 +82,46 @@ const schema = z.object({
   passportNumber: z.string().optional(),
   legalNoticesAddress: z.string().optional(),
   hasPoa: z.boolean(),
+  poaPersonPhone: z.string().optional(),
+  poaPersonEmail: z.string().email("Enter a valid email").optional().or(z.literal("")),
+  // Shareholders are read-only on this page — edit via onboarding
+  shareholders: z.array(shareholderSchema).optional(),
   // Contact & banking
   contactAddress: z.string().optional(),
   bankAccountName: z.string().optional(),
   bankIban: z.string().optional(),
   bankName: z.string().optional(),
 }).superRefine((data, ctx) => {
-  if (data.hasPoa) {
-    if (!data.authorizedSignatoryName?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Full name of the authorized signatory is required",
-        path: ["authorizedSignatoryName"],
-      });
-    }
-    if (!data.emiratesIdNumber?.trim() && !data.passportNumber?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Provide at least one identity document for the signatory",
-        path: ["emiratesIdNumber"],
-      });
-    }
+  if (data.hasPoa && !data.authorizedSignatoryName?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Full name of the authorized signatory is required",
+      path: ["authorizedSignatoryName"],
+    });
+  }
+  if (data.entityType === "company" && data.companyType === "agents" && !data.parentBrokerageName?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Parent brokerage name is required for Agents companies",
+      path: ["parentBrokerageName"],
+    });
   }
 });
 
 type FormValues = z.infer<typeof schema>;
 
+interface Shareholder {
+  id: string;
+  name: string;
+  nationality: string;
+  ownershipPercent: number;
+}
+
 interface RpProfile {
   entityType: string;
   companyName: string | null;
+  companyType: "landlord" | "brokerage" | "agents" | null;
+  parentBrokerageName: string | null;
   contactAddress: string | null;
   dateOfBirth: string | null;
   nationality: string | null;
@@ -113,6 +133,9 @@ interface RpProfile {
   passportNumber: string | null;
   legalNoticesAddress: string | null;
   hasPoa: boolean;
+  poaPersonPhone: string | null;
+  poaPersonEmail: string | null;
+  shareholders: Shareholder[] | null;
   bankAccountName: string | null;
   bankIban: string | null;
   bankName: string | null;
@@ -150,6 +173,8 @@ export default function RentalProviderProfilePage() {
       gender: undefined,
       entityType: "individual",
       companyName: "",
+      companyType: undefined,
+      parentBrokerageName: "",
       tradeLicenseNumber: "",
       tradeLicenseAuthority: "",
       authorizedSignatoryName: "",
@@ -157,6 +182,9 @@ export default function RentalProviderProfilePage() {
       passportNumber: "",
       legalNoticesAddress: "",
       hasPoa: false,
+      poaPersonPhone: "",
+      poaPersonEmail: "",
+      shareholders: [],
       contactAddress: "",
       bankAccountName: "",
       bankIban: "",
@@ -165,6 +193,8 @@ export default function RentalProviderProfilePage() {
   });
   const hasPoa = useWatch({ control, name: "hasPoa" });
   const entityType = useWatch({ control, name: "entityType" });
+  const companyType = useWatch({ control, name: "companyType" });
+  const shareholders = useWatch({ control, name: "shareholders" }) ?? [];
 
   useEffect(() => {
     apiGet<{ profile: RpProfile }>("/profiles/rental-provider/me")
@@ -177,6 +207,8 @@ export default function RentalProviderProfilePage() {
           gender: (profile.gender as "male" | "female" | "prefer_not_to_say") ?? undefined,
           entityType: et,
           companyName: profile.companyName ?? "",
+          companyType: profile.companyType ?? undefined,
+          parentBrokerageName: profile.parentBrokerageName ?? "",
           tradeLicenseNumber: profile.tradeLicenseNumber ?? "",
           tradeLicenseAuthority: profile.tradeLicenseAuthority ?? "",
           authorizedSignatoryName: profile.authorizedSignatoryName ?? "",
@@ -184,6 +216,9 @@ export default function RentalProviderProfilePage() {
           passportNumber: profile.passportNumber ?? "",
           legalNoticesAddress: profile.legalNoticesAddress ?? "",
           hasPoa: profile.hasPoa ?? false,
+          poaPersonPhone: profile.poaPersonPhone ?? "",
+          poaPersonEmail: profile.poaPersonEmail ?? "",
+          shareholders: profile.shareholders ?? [],
           contactAddress: profile.contactAddress ?? "",
           bankAccountName: profile.bankAccountName ?? "",
           bankIban: profile.bankIban ?? "",
@@ -207,6 +242,8 @@ export default function RentalProviderProfilePage() {
         apiPatch("/profiles/rental-provider/me", {
           entityType: data.entityType,
           companyName: data.companyName || null,
+          companyType: data.entityType === "company" ? (data.companyType ?? null) : null,
+          parentBrokerageName: data.companyType === "agents" ? (data.parentBrokerageName || null) : null,
           contactAddress: data.contactAddress || null,
           dateOfBirth: data.dateOfBirth || null,
           nationality: data.nationality || null,
@@ -219,6 +256,8 @@ export default function RentalProviderProfilePage() {
           legalNoticesAddress: data.legalNoticesAddress || null,
           hasPoa: data.hasPoa,
           poaPersonName: data.authorizedSignatoryName || null,
+          poaPersonPhone: data.hasPoa ? (data.poaPersonPhone || null) : null,
+          poaPersonEmail: data.hasPoa ? (data.poaPersonEmail || null) : null,
           bankAccountName: data.bankAccountName || null,
           bankIban: data.bankIban || null,
           bankName: data.bankName || null,
@@ -358,11 +397,35 @@ export default function RentalProviderProfilePage() {
                 </p>
 
                 <Input
-                  label="Company name"
-                  placeholder="Registered business name"
+                  label="Legal name (as per Trade License)"
+                  placeholder="Registered legal name on the trade license"
                   autoComplete="organization"
                   {...register("companyName")}
                 />
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium" style={{ color: "var(--color-neutral-700)" }}>
+                    Company type
+                  </label>
+                  <select
+                    {...register("companyType")}
+                    className="w-full rounded-xl border border-[var(--color-base-200)] bg-white px-4 py-2.5 text-sm text-[var(--color-neutral-900)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                  >
+                    <option value="">Select type…</option>
+                    <option value="landlord">Landlord — owns and lets its own properties</option>
+                    <option value="brokerage">Brokerage — licensed real-estate firm</option>
+                    <option value="agents">Agents — operating under a parent brokerage</option>
+                  </select>
+                </div>
+
+                {companyType === "agents" && (
+                  <Input
+                    label="Parent brokerage name"
+                    placeholder="Name of the brokerage you operate under"
+                    error={errors.parentBrokerageName?.message}
+                    {...register("parentBrokerageName")}
+                  />
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Input
@@ -385,12 +448,71 @@ export default function RentalProviderProfilePage() {
                     </select>
                   </div>
                 </div>
+
+                {/* Shareholders — read-only summary, captured at onboarding */}
+                {companyType !== "agents" && shareholders.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium" style={{ color: "var(--color-neutral-700)" }}>
+                        Shareholders (UBO)
+                      </label>
+                      <a
+                        href="/rental-provider/dashboard/onboarding"
+                        className="text-xs underline underline-offset-2"
+                        style={{ color: "var(--color-primary)" }}
+                      >
+                        Edit in onboarding
+                      </a>
+                    </div>
+                    <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-base-200)" }}>
+                      <table className="w-full text-xs">
+                        <thead style={{ backgroundColor: "var(--color-base-100)" }}>
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium" style={{ color: "var(--color-neutral-500)" }}>Name</th>
+                            <th className="text-left px-3 py-2 font-medium" style={{ color: "var(--color-neutral-500)" }}>Nationality</th>
+                            <th className="text-right px-3 py-2 font-medium" style={{ color: "var(--color-neutral-500)" }}>Ownership</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {shareholders.map((sh) => (
+                            <tr key={sh.id} style={{ borderTop: "1px solid var(--color-base-200)" }}>
+                              <td className="px-3 py-2" style={{ color: "var(--color-neutral-700)" }}>{sh.name}</td>
+                              <td className="px-3 py-2" style={{ color: "var(--color-neutral-700)" }}>{sh.nationality}</td>
+                              <td className="px-3 py-2 text-right tabular-nums" style={{ color: "var(--color-neutral-700)" }}>{sh.ownershipPercent}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
+            {/* Identity documents — always visible */}
             <hr style={{ borderColor: "var(--color-base-200)" }} />
 
-            {/* Authorized signatory */}
+            <p className="text-sm font-semibold" style={{ color: "var(--color-neutral-700)" }}>
+              Identity documents
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Emirates ID number"
+                placeholder="784-XXXX-XXXXXXX-X"
+                error={errors.emiratesIdNumber?.message}
+                {...register("emiratesIdNumber")}
+              />
+              <Input
+                label="Passport number"
+                placeholder="e.g. A12345678"
+                {...register("passportNumber")}
+              />
+            </div>
+
+            {/* Power of Attorney */}
+            <hr style={{ borderColor: "var(--color-base-200)" }} />
+
             <label className="flex items-center gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -403,26 +525,30 @@ export default function RentalProviderProfilePage() {
             </label>
 
             {hasPoa && (
-              <>
+              <div className="flex flex-col gap-4">
                 <Input
-                  label="Full name"
-                  placeholder="Full name of the authorized signatory"
+                  label="Authorized signatory full name"
+                  placeholder="Full name of the person acting on your behalf"
+                  error={errors.authorizedSignatoryName?.message}
                   {...register("authorizedSignatoryName")}
                 />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Input
-                    label="Emirates ID number"
-                    placeholder="784-XXXX-XXXXXXX-X"
-                    error={errors.emiratesIdNumber?.message}
-                    {...register("emiratesIdNumber")}
+                    label="Authorized signatory phone"
+                    placeholder="+971 50 123 4567"
+                    autoComplete="tel"
+                    {...register("poaPersonPhone")}
                   />
                   <Input
-                    label="Passport number"
-                    placeholder="e.g. A12345678"
-                    {...register("passportNumber")}
+                    label="Authorized signatory email"
+                    placeholder="signatory@example.com"
+                    autoComplete="email"
+                    type="email"
+                    error={errors.poaPersonEmail?.message}
+                    {...register("poaPersonEmail")}
                   />
                 </div>
-              </>
+              </div>
             )}
 
             <hr style={{ borderColor: "var(--color-base-200)" }} />

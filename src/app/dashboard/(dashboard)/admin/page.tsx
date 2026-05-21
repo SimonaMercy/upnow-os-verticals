@@ -88,6 +88,12 @@ export default function AdminOverview() {
           icon={Inbox}
           description="Support messages"
         />
+        <QuickAction
+          label="Register Provider"
+          href="/dashboard/admin/accounts/new-provider"
+          icon={Building2}
+          description="Onboard a Rental or Service Provider"
+        />
         <CanAccess roles={['super_admin']}>
           <QuickAction
             label="Admin Accounts"

@@ -489,7 +489,7 @@ export default function FilterBar(props: Props) {
         <div className="flex items-center gap-3">
           {/* Sort */}
           <select
-            value={sort || 'price_asc'}
+            value={sort || 'newest'}
             onChange={e => navigate({ sort: e.target.value })}
             className="text-sm border border-[#e8e6e0] rounded-lg bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
             style={{ padding: '8px 12px', color: '#1a1916' }}

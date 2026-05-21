@@ -22,8 +22,8 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
-  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null };
-  landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
+  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null };
+  landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null };
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null };
   unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null; sizeSqm: number | null };
 }
@@ -126,20 +126,48 @@ function SigSection({ tenantSig, landlordSig }: { tenantSig?: Signature | null; 
   );
 }
 
-function DLDHeader() {
+/**
+ * Official logos. Drop the licensed artwork here:
+ *   - /public/dld/government-of-dubai.png   (Dubai Government emblem + wordmark)
+ *   - /public/dld/land-department.png       (Dubai Land Department palm + wordmark)
+ * Recommended export: ~200px tall PNG with transparent background.
+ * Until the files are added, browsers show a broken-image icon — intentional,
+ * so it is obvious which placeholders still need real artwork.
+ */
+function DLDHeader({ contractDate }: { contractDate?: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottom: '2px solid #1a3c6e' }}>
-      <div style={{ border: '1px solid #1a3c6e', borderRadius: 3, padding: '3px 10px', textAlign: 'center' }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700, color: '#1a3c6e', direction: 'rtl' }}>حكومـة دبـي</div>
-        <div style={{ fontSize: 7.5, color: '#444' }}>GOVERNMENT OF DUBAI</div>
+    <div style={{ marginBottom: 10 }}>
+      {/* Row 1: logos at top-left & top-right — generous sizing to match official DLD layout */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 80 }}>
+        <img
+          src="/dld/government-of-dubai.png"
+          alt="Government of Dubai"
+          style={{ height: 72, width: 'auto', maxWidth: 280, objectFit: 'contain' }}
+        />
+        <img
+          src="/dld/land-department.png"
+          alt="Dubai Land Department"
+          style={{ height: 72, width: 'auto', maxWidth: 300, objectFit: 'contain' }}
+        />
       </div>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 17, fontWeight: 900, color: '#1a3c6e', letterSpacing: 5, direction: 'rtl', fontFamily: 'Georgia, serif' }}>عـقـد إيـجـار</div>
-        <div style={{ fontSize: 13, fontWeight: 900, color: '#1a3c6e', letterSpacing: 3, fontFamily: 'Georgia, serif' }}>TENANCY CONTRACT</div>
-      </div>
-      <div style={{ textAlign: 'center', border: '1px solid #1a3c6e', borderRadius: 3, padding: '3px 10px' }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700, color: '#1a3c6e', direction: 'rtl' }}>دائرة الأراضي والأملاك</div>
-        <div style={{ fontSize: 7.5, color: '#444' }}>Land Department</div>
+
+      {/* Row 2: Date (left) + big bold title (centered) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginTop: 14, marginBottom: 8, gap: 16 }}>
+        {/* Left: Date */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+          <span style={{ fontSize: 11, color: '#222' }}>Date</span>
+          <span style={{ borderBottom: '1px dashed #888', display: 'inline-block', minWidth: 180, fontSize: 11, paddingLeft: 6, paddingBottom: 1, color: '#000' }}>
+            {contractDate ?? ''}
+          </span>
+          <span style={{ fontSize: 11, direction: 'rtl', color: '#222' }}>التاريخ</span>
+        </div>
+        {/* Center: title */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: '#1a3c6e', letterSpacing: 14, direction: 'rtl', fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1.1 }}>عـقـد إيـجـار</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1a3c6e', letterSpacing: 6, fontFamily: 'Georgia, "Times New Roman", serif', marginTop: 2 }}>TENANCY CONTRACT</div>
+        </div>
+        {/* Right: empty spacer for symmetric centering */}
+        <div />
       </div>
     </div>
   );
@@ -249,9 +277,6 @@ export default function ContractPrintPage() {
   while (additionalTerms.length < minRows) additionalTerms.push('');
 
   const pageStyle: React.CSSProperties = {
-    maxWidth: 794,
-    margin: '0 auto',
-    padding: '18px 22px',
     fontSize: 9,
     lineHeight: 1.5,
     fontFamily: 'Arial, sans-serif',
@@ -261,12 +286,40 @@ export default function ContractPrintPage() {
   return (
     <>
       <style>{`
-        @page { size: A4; margin: 12mm 10mm; }
+        /* @page has zero margin — .page itself carries the 10mm/9mm inset
+           so on-screen preview is pixel-identical to printed output. */
+        @page { size: A4 portrait; margin: 0; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+
+        /* Each .page is one A4 sheet, exact mm dimensions on both screen and print */
+        .page {
+          width: 210mm;
+          min-height: 297mm;
+          padding: 10mm 9mm;
+          background: #fff;
+          page-break-after: always;
+          break-after: page;
+          overflow: hidden;
+        }
+        .page:last-of-type { page-break-after: auto; break-after: auto; }
+
+        /* Section blocks should not be split across pages */
+        .keep-together { page-break-inside: avoid; break-inside: avoid; }
+
+        /* Screen preview: grey backdrop + drop shadow per "sheet" */
+        @media screen {
+          body { background: #e5e7eb; padding: 16px 0; }
+          .page { margin: 0 auto 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+        }
+
         @media print {
           .no-print { display: none !important; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          html, body { background: #fff !important; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
+          img { image-rendering: -webkit-optimize-contrast; }
+          .page { margin: 0; box-shadow: none; }
         }
-        * { box-sizing: border-box; }
       `}</style>
 
       {/* Screen toolbar */}
@@ -284,17 +337,8 @@ export default function ContractPrintPage() {
       </div>
 
       {/* ═══ PAGE 1 ═══ */}
-      <div style={pageStyle}>
-        <DLDHeader />
-
-        {/* Date */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 10 }}>
-          <span style={{ fontSize: 8.5, direction: 'rtl' }}>التاريخ</span>
-          <span style={{ borderBottom: '1px dashed #888', display: 'inline-block', minWidth: 130, fontSize: 8.5, paddingLeft: 4, color: '#000' }}>
-            {fmtDate(new Date().toISOString())}
-          </span>
-          <span style={{ fontSize: 8.5 }}>Date</span>
-        </div>
+      <div className="page" style={pageStyle}>
+        <DLDHeader contractDate={fmtDate(contract.createdAt) || fmtDate(new Date().toISOString())} />
 
         {/* Owner / Lessor */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
@@ -302,10 +346,10 @@ export default function ContractPrintPage() {
           <div style={{ padding: '4px 8px 2px' }}>
             <Field label="Owner's Name" labelAr="اسم المالك" value={landlordName} />
             <Field label="Lessor's Name" labelAr="اسم المؤجر" value={landlordName} />
-            <Field label="Lessor's Emirates ID" labelAr="الهوية اللإماراتية للمؤجر" value="" />
+            <Field label="Lessor's Emirates ID" labelAr="الهوية اللإماراتية للمؤجر" value={contract.landlord.emiratesId ?? ''} />
             <div style={{ display: 'flex' }}>
-              <Field label="License No. (Incase of a Company)" labelAr="رقم الرخصة" value="" half />
-              <Field label="Licensing Authority (Incase of a Company)" labelAr="سلطة الترخيص" value="" half />
+              <Field label="License No. (Incase of a Company)" labelAr="رقم الرخصة" value={contract.landlord.licenseNumber ?? ''} half />
+              <Field label="Licensing Authority (Incase of a Company)" labelAr="سلطة الترخيص" value={contract.landlord.licenseAuthority ?? ''} half />
             </div>
             <Field label="Lessor's Email" labelAr="البريد اللإلكتروني للمؤجر" value={contract.landlord.email ?? ''} />
             <Field label="Lessor's Phone" labelAr="رقم هاتف المؤجر" value={contract.landlord.phone ?? ''} />
@@ -314,13 +358,13 @@ export default function ContractPrintPage() {
 
         {/* Tenant */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
-          <SectionHeader en="Owner / Lessor Information" ar="معلومات المستأجر" />
+          <SectionHeader en="Tenant Information" ar="معلومات المستأجر" />
           <div style={{ padding: '4px 8px 2px' }}>
             <Field label="Tenant's Name" labelAr="اسم المستأجر" value={contract.tenant.name ?? ''} />
-            <Field label="Tenant's Emirates ID" labelAr="الهوية الإماراتية للمستأجر" value="" />
+            <Field label="Tenant's Emirates ID" labelAr="الهوية الإماراتية للمستأجر" value={contract.tenant.emiratesId ?? ''} />
             <div style={{ display: 'flex' }}>
-              <Field label="License No. (Incase of a Company)" labelAr="رقم الرخصة" value="" half />
-              <Field label="Licensing Authority (Incase of a Company)" labelAr="سلطة الترخيص" value="" half />
+              <Field label="License No. (Incase of a Company)" labelAr="رقم الرخصة" value={contract.tenant.licenseNumber ?? ''} half />
+              <Field label="Licensing Authority (Incase of a Company)" labelAr="سلطة الترخيص" value={contract.tenant.licenseAuthority ?? ''} half />
             </div>
             <Field label="Tenant's Email" labelAr="البريد الإلكتروني للمستأجر" value={contract.tenant.email ?? ''} />
             <Field label="Tenant's Phone" labelAr="رقم هاتف المستأجر" value={contract.tenant.phone ?? ''} />
@@ -364,7 +408,7 @@ export default function ContractPrintPage() {
             </div>
             <div style={{ display: 'flex' }}>
               <Field label="Location" labelAr="الموقع" value={contract.property.fullAddress ?? contract.property.community ?? contract.property.emirate ?? ''} half />
-              <Field label="Premises No. (DEWA)" labelAr="رقم المبنى (ديوا)" value="" half />
+              <Field label="Premises No. (Utility)" labelAr="رقم المبنى (ديوا)" value="" half />
             </div>
           </div>
         </div>
@@ -403,8 +447,8 @@ export default function ContractPrintPage() {
       </div>
 
       {/* ═══ PAGE 2 — Terms & Conditions ═══ */}
-      <div style={{ ...pageStyle, pageBreakBefore: 'always' }}>
-        <DLDHeader />
+      <div className="page" style={pageStyle}>
+        <DLDHeader contractDate={fmtDate(contract.createdAt) || fmtDate(new Date().toISOString())} />
         <div style={{ border: '1px solid #bbb' }}>
           <SectionHeader en="Terms and Conditions" ar="الأحكام و الشروط" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: '1px solid #e0e0e0' }}>
@@ -426,8 +470,8 @@ export default function ContractPrintPage() {
       </div>
 
       {/* ═══ PAGE 3 — Rights / Additional Terms ═══ */}
-      <div style={{ ...pageStyle, pageBreakBefore: 'always' }}>
-        <DLDHeader />
+      <div className="page" style={pageStyle}>
+        <DLDHeader contractDate={fmtDate(contract.createdAt) || fmtDate(new Date().toISOString())} />
 
         {/* Know your Rights */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>

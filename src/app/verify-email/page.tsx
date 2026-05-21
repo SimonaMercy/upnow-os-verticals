@@ -12,26 +12,29 @@ type Status = "idle" | "submitting" | "success" | "error";
 function VerifyEmailInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const { refresh, user } = useAuth();
+  const { refresh, user, verifyLoginOtp, login } = useAuth();
 
-  // Email comes from query param (recommended) or current auth user.
   const emailFromQuery = (params.get("email") ?? "").trim().toLowerCase();
   const resolvedEmail = emailFromQuery || user?.email || "";
+  const isLoginMode = params.get("mode") === "login";
 
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState<string | null>(null);
+  const [devOtp, setDevOtp] = useState<string | null>(params.get("devOtp"));
   const inputRefs = useRef<Array<HTMLInputElement | null>>([null, null, null, null, null, null]);
 
   const code = digits.join("");
 
   function handleDigitChange(index: number, e: ChangeEvent<HTMLInputElement>) {
     const val = e.target.value.replace(/\D/g, "").slice(-1);
-    const next = [...digits];
-    next[index] = val;
-    setDigits(next);
+    setDigits(prev => {
+      const next = [...prev];
+      next[index] = val;
+      return next;
+    });
     if (val && index < 5) inputRefs.current[index + 1]?.focus();
   }
 
@@ -53,32 +56,44 @@ function VerifyEmailInner() {
   async function handleSubmit() {
     if (code.length !== 6) return;
     if (!resolvedEmail) {
-      setError("Email is missing. Please sign in again to continue verification.");
+      setError("Email is missing. Please sign in again to continue.");
       return;
     }
 
     setError(null);
     setStatus("submitting");
     try {
-      const res = await apiPost<{ user?: AppUser }>("/auth/email/verify-otp", {
-        email: resolvedEmail,
-        code,
-      });
-      setStatus("success");
-      const refreshedUser = await refresh();
-      const verifiedUser = refreshedUser ?? res?.user;
-      if (verifiedUser) {
-        if (verifiedUser.role === "rental_provider") {
-          router.replace("/dashboard/rental-provider/onboarding");
-        } else if (verifiedUser.role === "service_provider") {
-          router.replace("/dashboard/service-provider/onboarding");
-        } else {
-          router.replace(dashboardPath(verifiedUser.role));
+      if (isLoginMode) {
+        // Login OTP flow — verifyLoginOtp issues the JWT
+        const res = await verifyLoginOtp(resolvedEmail, code);
+        const freshUser = await refresh();
+        const target = freshUser ?? res?.user;
+        if (target) {
+          router.replace(dashboardPath(target.role));
+          return;
         }
-        return;
+        router.replace("/login");
+      } else {
+        // Registration email verification flow
+        const res = await apiPost<{ user?: AppUser }>("/auth/email/verify-otp", {
+          email: resolvedEmail,
+          code,
+        });
+        setStatus("success");
+        const refreshedUser = await refresh();
+        const verifiedUser = refreshedUser ?? res?.user;
+        if (verifiedUser) {
+          if (verifiedUser.role === "rental_provider") {
+            router.replace("/dashboard/rental-provider/onboarding");
+          } else if (verifiedUser.role === "service_provider") {
+            router.replace("/dashboard/service-provider/onboarding");
+          } else {
+            router.replace(dashboardPath(verifiedUser.role));
+          }
+          return;
+        }
+        router.replace("/login?emailVerified=1");
       }
-
-      router.replace("/login?emailVerified=1");
     } catch (err) {
       setStatus("error");
       setError(err instanceof Error ? err.message : "Verification failed. Please try again.");
@@ -91,7 +106,14 @@ function VerifyEmailInner() {
     setResending(true);
     setResendMsg(null);
     try {
-      await apiPost("/auth/email/resend-otp", { email: resolvedEmail });
+      if (isLoginMode) {
+        // Resend login OTP by re-triggering step 1
+        const res = await login(resolvedEmail);
+        if (res.devOtp) setDevOtp(res.devOtp);
+      } else {
+        const res = await apiPost<{ sent: boolean; devOtp?: string }>("/auth/email/resend-otp", { email: resolvedEmail });
+        if (res.devOtp) setDevOtp(res.devOtp);
+      }
       setResendMsg("New code sent. Check your inbox.");
       setDigits(["", "", "", "", "", ""]);
       inputRefs.current[0]?.focus();
@@ -102,14 +124,15 @@ function VerifyEmailInner() {
     }
   }
 
+  const title = isLoginMode ? "Check your email" : "Verify your email";
+  const subtitleText = resolvedEmail
+    ? `Enter the 6-digit sign-in code we sent to ${resolvedEmail}.`
+    : "Enter the 6-digit code we sent to your email address.";
+
   return (
     <AuthShell
-      title="Verify your email"
-      subtitle={
-        resolvedEmail
-          ? `Enter the 6-digit code we sent to ${resolvedEmail}.`
-          : "Enter the 6-digit code we sent to your email address."
-      }
+      title={title}
+      subtitle={subtitleText}
       footer={
         <p className="text-sm mt-3 text-center" style={{ color: "var(--neutral-700)" }}>
           <Link
@@ -123,6 +146,12 @@ function VerifyEmailInner() {
       }
     >
       <div className="flex flex-col gap-4">
+        {process.env.NODE_ENV !== 'production' && devOtp && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-0.5">Dev — OTP code</p>
+            <p className="text-2xl font-mono font-bold tracking-[0.3em] text-amber-900">{devOtp}</p>
+          </div>
+        )}
         <div className="flex gap-2 justify-center">
           {digits.map((d, i) => (
             <input
@@ -152,7 +181,7 @@ function VerifyEmailInner() {
         {resendMsg && <Alert kind={resendMsg.includes("sent") ? "success" : "error"}>{resendMsg}</Alert>}
 
         <PrimaryButton onClick={handleSubmit} loading={status === "submitting"} disabled={code.length !== 6}>
-          Verify email
+          {isLoginMode ? "Sign in" : "Verify email"}
         </PrimaryButton>
 
         <button
