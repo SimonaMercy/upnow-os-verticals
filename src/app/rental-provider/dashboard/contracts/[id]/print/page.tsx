@@ -35,6 +35,17 @@ interface Signature {
   signedAt: string;
 }
 
+interface PrintAddendum {
+  id: number;
+  name: string;
+  fileUrl: string;
+  mimeType: string;
+  tenantSig: string | null;
+  tenantSignedAt: string | null;
+  landlordSig: string | null;
+  landlordSignedAt: string | null;
+}
+
 function fmtDate(d: string | null | undefined) {
   if (!d) return '';
   const dt = new Date(d);
@@ -213,6 +224,7 @@ export default function ContractPrintPage() {
   const autoDownload = searchParams?.get('download') === '1';
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<Signature[]>([]);
+  const [addendums, setAddendums] = useState<PrintAddendum[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -226,10 +238,14 @@ export default function ContractPrintPage() {
       fetch(`/api/contracts/${params.id}/signatures`, { credentials: 'include' }).then(r =>
         r.ok ? r.json() : []
       ),
+      fetch(`/api/contracts/${params.id}/addendums`, { credentials: 'include' }).then(r =>
+        r.ok ? r.json() : []
+      ),
     ])
-      .then(([data, sigs]) => {
+      .then(([data, sigs, adds]) => {
         setContract(data);
         setSignatures(Array.isArray(sigs) ? sigs : []);
+        setAddendums(Array.isArray(adds) ? adds : []);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -538,6 +554,48 @@ export default function ContractPrintPage() {
           <span style={{ fontSize: 7, color: '#888' }}>Ref: {contract.ref} · Generated: {fmtDate(new Date().toISOString())}</span>
         </div>
       </div>
+
+      {/* ═══ ADDENDUM PAGES — one coversheet per attached addendum ═══ */}
+      {addendums.map((a, idx) => (
+        <div key={a.id} style={{ ...pageStyle, pageBreakBefore: 'always' }}>
+          <DLDHeader />
+          <div style={{ marginTop: 8 }}>
+            <div style={{ background: '#1a3c6e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', marginBottom: 6 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff' }}>
+                Addendum {idx + 1} of {addendums.length} — {a.name}
+              </span>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff', direction: 'rtl' }}>ملحق العقد</span>
+            </div>
+            <div style={{ border: '1px solid #bbb', borderTop: 'none', padding: '14px 16px', minHeight: 380 }}>
+              <p style={{ fontSize: 11, color: '#222', margin: '0 0 12px' }}>
+                The full text of this addendum is attached as a separate file:
+              </p>
+              <div style={{ padding: '12px 14px', background: '#f4f3ef', borderRadius: 4, fontSize: 10.5, color: '#333', wordBreak: 'break-all' }}>
+                {a.fileUrl}
+              </div>
+              <p style={{ fontSize: 9, color: '#666', margin: '12px 0 0', fontStyle: 'italic' }}>
+                Both parties have reviewed the attached document and signed below to confirm acceptance of its terms. This page is part of the bound contract record.
+              </p>
+            </div>
+          </div>
+
+          {/* Addendum signatures — landlord + tenant boxes */}
+          <div style={{ background: '#1a3c6e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', marginTop: 14 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff' }}>Signatures</span>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff', direction: 'rtl' }}>التوقيعات</span>
+          </div>
+          <div style={{ border: '1px solid #bbb', borderTop: 'none', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+            <div style={{ borderRight: '1px solid #bbb', padding: '4px 8px' }}>
+              <SigBox sig={a.tenantSig ? { role: 'tenant', signatoryName: '', signatureImage: a.tenantSig, signedAt: a.tenantSignedAt ?? '' } : null}
+                label="Tenant Signature" labelAr="توقيع المستأجر" />
+            </div>
+            <div style={{ padding: '4px 8px' }}>
+              <SigBox sig={a.landlordSig ? { role: 'landlord', signatoryName: '', signatureImage: a.landlordSig, signedAt: a.landlordSignedAt ?? '' } : null}
+                label="Lessor's Signature" labelAr="توقيع المؤجر" />
+            </div>
+          </div>
+        </div>
+      ))}
     </>
   );
 }

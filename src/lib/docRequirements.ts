@@ -13,7 +13,7 @@ export const INDUSTRIAL_TYPES = ['warehouse','open_yard','storage_unit','cold_st
 export const KYC_DOCS: DocReq[] = [
   { key: 'emirates_id', label: 'Emirates ID',         category: 'identity', required: true,  hint: 'Both sides of your Emirates ID card (all occupants)' },
   { key: 'passport',    label: 'Passport',             category: 'identity', required: true,  hint: 'Bio-data page of your valid passport (all occupants)' },
-  { key: 'uae_visa',    label: 'UAE Visa / Residency', category: 'identity', required: false, hint: 'UAE residence visa page — required for non-citizens' },
+  { key: 'uae_visa',    label: 'UAE Visa / Residency', category: 'identity', required: true,  hint: 'UAE residence visa page (not required for UAE nationals)' },
 ];
 
 export const KYC_DOC_KEYS = new Set(KYC_DOCS.map(d => d.key));
@@ -69,6 +69,41 @@ export function getRentalSectionDocs(unitType: string | null | undefined): DocRe
 /** All docs (KYC + rental) combined — used by the spaces page journey tracker. */
 export function getRequiredDocs(unitType: string | null | undefined): DocReq[] {
   return [...KYC_DOCS, ...getRentalSectionDocs(unitType)];
+}
+
+/**
+ * Identity docs (Emirates ID, Passport, UAE Visa) for occupants 2..n.
+ * Occupant 1 (the primary tenant) reuses the existing `emirates_id`,
+ * `passport`, `uae_visa` keys. Returns [] when `occupantCount` ≤ 1.
+ */
+export function getOccupantDocs(occupantCount: number): DocReq[] {
+  if (!occupantCount || occupantCount <= 1) return [];
+  const out: DocReq[] = [];
+  for (let i = 2; i <= occupantCount; i++) {
+    out.push(
+      { key: `occupant_${i}_emirates_id`, label: `Occupant ${i} — Emirates ID`,         category: 'identity', required: true, hint: 'Both sides of Emirates ID card' },
+      { key: `occupant_${i}_passport`,    label: `Occupant ${i} — Passport`,             category: 'identity', required: true, hint: 'Bio-data page of valid passport' },
+      { key: `occupant_${i}_uae_visa`,    label: `Occupant ${i} — UAE Visa / Residency`, category: 'identity', required: true, hint: 'UAE residence visa page (skip for UAE nationals)' },
+    );
+  }
+  return out;
+}
+
+/**
+ * Derive minimum occupant count from existing doc keys. If the tenant
+ * uploaded `occupant_3_emirates_id` previously, the stepper should
+ * default back to 3 on reload. Returns 1 if no occupant-prefixed docs.
+ */
+export function deriveOccupantCount(docKeys: Iterable<string>): number {
+  let max = 1;
+  for (const k of docKeys) {
+    const m = k.match(/^occupant_(\d+)_/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  return max;
 }
 
 /**

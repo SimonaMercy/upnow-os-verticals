@@ -423,6 +423,12 @@ export default function SettingsPage() {
   const [bizSaved, setBizSaved]             = useState(false);
   const [bizError, setBizError]             = useState<string | null>(null);
 
+  // ── Contract date config ─────────────────────────────────────
+  const [preferredDays,    setPreferredDays]    = useState<number[]>([]);
+  const [daysSaving,       setDaysSaving]       = useState(false);
+  const [daysSaved,        setDaysSaved]        = useState(false);
+  const [daysError,        setDaysError]        = useState<string | null>(null);
+
   const [notifs, setNotifs] = useState<Record<NotifKey, boolean>>({
     newInquiry: true, chequeReminder: true, renewalAlert: true,
     maintenanceUpdate: false, promotional: false,
@@ -464,6 +470,7 @@ export default function SettingsPage() {
         const ct = p.companyType as 'landlord' | 'brokerage' | 'agents' | null | undefined;
         if (ct) setCompanyType(ct);
         if (p.parentBrokerageName) setParentBrokerageName(p.parentBrokerageName as string);
+        if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
         const matched = EMIRATES_LIST.find(e => addr.endsWith(`, ${e}`) || addr === e);
@@ -560,6 +567,26 @@ export default function SettingsPage() {
       setBizError('Failed to save. Please try again.');
     } finally {
       setSavingBiz(false);
+    }
+  };
+
+  const handleSaveDays = async () => {
+    setDaysSaving(true);
+    setDaysError(null);
+    setDaysSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferredStartDays: preferredDays }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setDaysSaved(true);
+    } catch {
+      setDaysError('Failed to save. Please try again.');
+    } finally {
+      setDaysSaving(false);
     }
   };
 
@@ -867,6 +894,58 @@ export default function SettingsPage() {
                   <Toggle value={notifs[key]} onChange={v => setNotifs(prev => ({ ...prev, [key]: v }))} />
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Contract Date Configuration */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="mb-4">
+              <h2 className="font-semibold text-base text-[#1a1916]">Contract Start Days</h2>
+              <p className="text-xs text-[#9b9890] mt-0.5">
+                Select the days of the month when contracts can start. Tenants will only be able to pick these days in the booking calendar. Leave empty to allow any date.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
+                const active = preferredDays.includes(day);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => {
+                      setPreferredDays(prev =>
+                        prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
+                      );
+                      setDaysSaved(false);
+                    }}
+                    className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
+                      ${active
+                        ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
+                        : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+
+            {preferredDays.length > 0 && (
+              <p className="text-xs text-[#2e9f82] mb-3">
+                Selected: {preferredDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each month
+              </p>
+            )}
+
+            <div className="flex items-center gap-3 flex-wrap">
+              {daysError  && <p className="text-xs text-red-600 flex-1">{daysError}</p>}
+              {daysSaved  && !daysSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+              {preferredDays.length > 0 && (
+                <button type="button" onClick={() => { setPreferredDays([]); setDaysSaved(false); }}
+                  className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
+                  Clear all
+                </button>
+              )}
+              <SaveButton saving={daysSaving} label="Save Start Days" />
             </div>
           </div>
 

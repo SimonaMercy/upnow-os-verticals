@@ -7,8 +7,17 @@ import {
   Clock, CheckCircle2, MessageSquare, User, Calendar,
   FileText, ExternalLink, Loader2, MoreVertical, ArrowRight,
   StickyNote, ShieldAlert, Copy, Check, CreditCard, Plus, Trash2,
-  ClipboardList, BadgeCheck, Printer, Eye,
+  ClipboardList, BadgeCheck, Printer, Eye, ZoomIn,
 } from 'lucide-react';
+import Lightbox from 'yet-another-react-lightbox';
+import Zoom from 'yet-another-react-lightbox/plugins/zoom';
+import Captions from 'yet-another-react-lightbox/plugins/captions';
+import Thumbnails from 'yet-another-react-lightbox/plugins/thumbnails';
+import 'yet-another-react-lightbox/styles.css';
+import 'yet-another-react-lightbox/plugins/captions.css';
+import 'yet-another-react-lightbox/plugins/thumbnails.css';
+import { toast } from 'sonner';
+import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -136,6 +145,8 @@ interface PaymentPlan {
   securityDepositFils: number;
   items: PaymentPlanItem[];
   notes?: string;
+  rentalIndexReportUrl?: string;
+  chequesPayableTo?: string;
   issuedAt: string;
 }
 
@@ -167,6 +178,10 @@ interface ApiLead {
     id: number; unitNumber: string; unitName: string | null;
     unitType: string | null;
     rentalPrice: number | null;
+    securityDeposit: number | null;
+    adminFee: number | null;
+    ejariFeeFils: number | null;
+    commission: number | null;
     property?: { id: number; buildingName: string };
   } | null;
   docStats: { total: number; pending: number } | null;
@@ -272,21 +287,38 @@ const CHEQUE_STATUS_STYLE: Record<ChequeRowStatus, string> = {
   cancelled: 'bg-[#f4f3ef] text-[#6b6860] border-[#d6d4ce]',
 };
 
+/** Increment the trailing numeric portion of a cheque serial, e.g. "CK001234" → "CK001235" */
+function nextSerial(base: string, offset = 1): string {
+  const match = base.match(/^(.*?)(\d+)$/);
+  if (!match) return base;
+  const [, prefix, digits] = match;
+  const next = (parseInt(digits, 10) + offset).toString().padStart(digits.length, '0');
+  return prefix + next;
+}
+
 function ChequeRow({
   seq, description, amountFils, dueDate, recorded,
-  onRecord, onDelete, onStatusChange,
+  suggestedSerial, onRecord, onDelete, onStatusChange, onSerialChange,
 }: {
   seq: number;
   description: string;
   amountFils: number;
   dueDate: string;
   recorded?: LeadChequeRecord;
+  suggestedSerial?: string;
   onRecord: (serial: string) => void | Promise<void>;
   onDelete: () => void | Promise<void>;
   onStatusChange: (status: ChequeRowStatus) => void | Promise<void>;
+  onSerialChange?: (serial: string) => void;
 }) {
-  const [serial, setSerial] = useState('');
+  const [serial, setSerial] = useState(suggestedSerial ?? '');
   const [saving, setSaving] = useState(false);
+
+  // Apply parent suggestion only when the field is still empty
+  useEffect(() => {
+    if (suggestedSerial && !serial) setSerial(suggestedSerial);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestedSerial]);
 
   if (recorded) {
     const status = (recorded.status as ChequeRowStatus) || 'pending';
@@ -324,7 +356,7 @@ function ChequeRow({
       <input
         type="text"
         value={serial}
-        onChange={e => setSerial(e.target.value)}
+        onChange={e => { setSerial(e.target.value); onSerialChange?.(e.target.value); }}
         placeholder="Cheque #"
         className="w-40 shrink-0 text-[10px] border border-[#fde68a] rounded px-2 py-1 focus:outline-none focus:border-[#f59e0b] bg-white"
       />
@@ -341,7 +373,7 @@ function ChequeRow({
 
 /* ─── Lead Row ────────────────────────────────────────────────────────────── */
 function LeadRow({
-  lead, onMoveStage, moving, onConvert, setLeads, feeRules,
+  lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays,
 }: {
   lead: ApiLead;
   onMoveStage: (id: number, s: LeadStage) => void;
@@ -349,8 +381,9 @@ function LeadRow({
   onConvert: (lead: ApiLead) => void;
   setLeads: React.Dispatch<React.SetStateAction<ApiLead[]>>;
   feeRules: FeeRulesMap | null;
+  preferredStartDays: number[];
 }) {
-  const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'cheques'>('none');
+  const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
   const [visitRemarks, setVisitRemarks] = useState('');
   const [markingVisit, setMarkingVisit] = useState(false);
   const [visitError, setVisitError]   = useState<string | null>(null);
@@ -364,7 +397,9 @@ function LeadRow({
     return at(b) - at(a);
   })[0] ?? null;
   const _defaultInstallments = _existingPlan?.installmentCount ?? _latestViewing?.preferredChequeCount ?? 4;
-  const _startDateInit = _existingPlan?.items?.[0]?.dueDate ?? _latestViewing?.desiredMoveIn?.slice(0, 10) ?? '';
+  const _startDateInit = _existingPlan?.items?.find(it => it.type === 'first_bundle')?.dueDate
+    ?? _existingPlan?.items?.[0]?.dueDate
+    ?? _latestViewing?.desiredMoveIn?.slice(0, 10) ?? '';
   const [planRentAed,         setPlanRentAed]         = useState<string>(_existingPlan ? String(_existingPlan.rentFils / 100) : _unitRentAed);
   const [planInstallmentCount, setPlanInstallmentCount] = useState<number>(_defaultInstallments);
   const [planStartDate,       setPlanStartDate]       = useState<string>(_startDateInit);
@@ -391,6 +426,7 @@ function LeadRow({
       : Array.from({ length: Math.max(0, _defaultInstallments - 1) }, (_, i) => _installmentDatesInit[i] ?? ''),
   );
   const [planNotes, setPlanNotes] = useState(_existingPlan?.notes ?? '');
+  const [planChequesPayableTo, setPlanChequesPayableTo] = useState(_existingPlan?.chequesPayableTo ?? '');
   // Hydrate Extra Installments from the existing plan (items typed 'extra_installment',
   // or legacy plans where extras live as type='installment' beyond installmentCount+1).
   const _extrasFromPlan: { description: string; amountAed: string; dueDate: string }[] = (() => {
@@ -414,15 +450,28 @@ function LeadRow({
   );
   const [planSaving, setPlanSaving] = useState(false);
   const [planError, setPlanError]   = useState<string | null>(null);
+  const [rentalIndexUrl, setRentalIndexUrl]         = useState<string>(_existingPlan?.rentalIndexReportUrl ?? '');
+  const [rentalIndexUploading, setRentalIndexUploading] = useState(false);
+  const [rentalIndexFileName, setRentalIndexFileName]   = useState<string>('');
+  const [rentalIndexStatus, setRentalIndexStatus]       = useState<{ ok: boolean; msg: string } | null>(null);
 
   // Cheque collection state
   const [cheques, setCheques] = useState<LeadChequeRecord[]>([]);
   const [chequesLoaded, setChequesLoaded] = useState(false);
   const [chequesLoading, setChequesLoading] = useState(false);
+  // Auto-fill suggestions: index-in-sortedItems → suggested serial (propagated when user types in any row)
+  const [chequeSuggestions, setChequeSuggestions] = useState<Record<number, string>>({});
   const [chequeError, setChequeError]   = useState<string | null>(null);
   const [confirmingCollection, setConfirmingCollection] = useState(false);
   const [tenantDocs, setTenantDocs]   = useState<TenantDoc[] | null>(null);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [viewAllOpen, setViewAllOpen]   = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [docActioning, setDocActioning]     = useState<number | null>(null);
+  const [docActionError, setDocActionError] = useState<string | null>(null);
+  const [rejectingDoc, setRejectingDoc]     = useState<{ id: number; label: string } | null>(null);
+  const [rejectReason, setRejectReason]     = useState('');
   const [docsNoteItems, setDocsNoteItems] = useState<string[]>(() => {
     try { const p = JSON.parse(lead.additionalDocsNote ?? ''); return Array.isArray(p) ? p : []; }
     catch { return []; }
@@ -438,6 +487,28 @@ function LeadRow({
   const [guardContact, setGuardContact] = useState('');
   const [guardMsg, setGuardMsg]       = useState('');
   const [copied, setCopied]           = useState(false);
+
+  // Sync rentalIndexUrl when the plan's report URL changes (e.g. after a within-session save updates lead.paymentPlan)
+  const _existingReportUrl = _existingPlan?.rentalIndexReportUrl;
+  useEffect(() => {
+    if (_existingReportUrl && !rentalIndexUrl) setRentalIndexUrl(_existingReportUrl);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_existingReportUrl]);
+
+  // Auto-fill "Cheques payable to" from RP profile when the plan form opens
+  useEffect(() => {
+    if (panel !== 'plan' || planChequesPayableTo) return;
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { bankAccountName?: string | null; companyName?: string | null; user?: { name?: string | null } } } | null) => {
+        if (!data?.profile) return;
+        const p = data.profile;
+        const name = p.bankAccountName?.trim() || p.companyName?.trim() || p.user?.name?.trim() || '';
+        if (name) setPlanChequesPayableTo(name);
+      })
+      .catch(() => {/* silent — field stays blank, backend will fill from profile on submit */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -624,6 +695,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           installmentDueDates: planInstallmentDates,
           notes: planNotes.trim() || undefined,
           extraItems: extraItemsPayload.length ? extraItemsPayload : undefined,
+          rentalIndexReportUrl: rentalIndexUrl || undefined,
+          chequesPayableTo: planChequesPayableTo.trim() || undefined,
           ...(planInstallmentCount === 1 && planDiscountType !== 'none' && planDiscountValue && parseFloat(planDiscountValue) > 0 && {
             discountType: planDiscountType,
             ...(planDiscountType === 'percent' ? { discountPercent: parseFloat(planDiscountValue) } : { discountFils: Math.round(parseFloat(planDiscountValue) * 100) }),
@@ -661,7 +734,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     } finally { setConfirmingCollection(false); }
   }
 
-  function openPanel(p: 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'cheques') {
+  function openPanel(p: 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques') {
     setPanel(prev => prev === p ? 'none' : p);
     setMenuOpen(false);
     if (p === 'plan' && !lead.paymentPlan) {
@@ -669,20 +742,28 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       // (planStartDate is initialised from the tenant's desiredMoveIn). Falls back to a blank resize when no date.
       if (planStartDate) applyStartDate(planStartDate, planInstallmentCount);
       else resizeInstallmentDates(planInstallmentCount);
-      // Prefill fees from the RP's saved fee rules
-      if (feeRules) {
+      // Prefill fees: unit-specific values take priority over global fee rules
+      const u = lead.unit;
+      const hasUnitAdmin   = u?.adminFee    != null;
+      const hasUnitEjari   = u?.ejariFeeFils != null;
+      const hasUnitComm    = u?.commission   != null;
+      const hasUnitDeposit = u?.securityDeposit != null;
+
+      if (hasUnitAdmin)   setPlanAdminFeeAed(String(Number(u!.adminFee)));
+      if (hasUnitEjari)   setPlanEjariAed(String(Number(u!.ejariFeeFils)));
+      if (hasUnitComm)    setPlanCommissionAed(String(Number(u!.commission)));
+      if (hasUnitDeposit) setPlanDepositAed(String(Number(u!.securityDeposit)));
+
+      // Fill any remaining gaps from global fee rules
+      if (feeRules && (!hasUnitAdmin || !hasUnitEjari || !hasUnitComm || !hasUnitDeposit)) {
         const cat   = unitSpaceCategory(lead.unit?.unitType);
         const rules = feeRules[cat] ?? feeRules['residential'] ?? [];
         const rent  = parseFloat(planRentAed) || 0;
         const find  = (ft: string) => rules.find(r => r.feeType === ft);
-        const adminRule  = find('admin_fee');
-        const ejariRule  = find('ejari_fee');
-        const commRule   = find('commission');
-        const depRule    = find('security_deposit');
-        if (adminRule)  setPlanAdminFeeAed(feeToAed(adminRule, rent));
-        if (ejariRule)  setPlanEjariAed(feeToAed(ejariRule, rent));
-        if (commRule)   setPlanCommissionAed(feeToAed(commRule, rent));
-        if (depRule)    setPlanDepositAed(feeToAed(depRule, rent));
+        if (!hasUnitAdmin)   { const r = find('admin_fee');        if (r) setPlanAdminFeeAed(feeToAed(r, rent)); }
+        if (!hasUnitEjari)   { const r = find('ejari_fee');        if (r) setPlanEjariAed(feeToAed(r, rent)); }
+        if (!hasUnitComm)    { const r = find('commission');       if (r) setPlanCommissionAed(feeToAed(r, rent)); }
+        if (!hasUnitDeposit) { const r = find('security_deposit'); if (r) setPlanDepositAed(feeToAed(r, rent)); }
       }
     }
     if (p === 'cheques') loadCheques();
@@ -727,6 +808,28 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (panel === 'docs') loadDocs();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel]);
+
+  async function handleApproveDoc(docId: number) {
+    setDocActioning(docId); setDocActionError(null);
+    try {
+      const res = await fetch(`/api/documents/${docId}/verify`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) { setDocActionError('Failed to approve'); return; }
+      setTenantDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'processed' } : d) : null);
+    } finally { setDocActioning(null); }
+  }
+
+  async function handleRejectDoc(docId: number, reason?: string) {
+    setDocActioning(docId); setDocActionError(null);
+    try {
+      const res = await fetch(`/api/documents/${docId}/reject`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+      });
+      if (!res.ok) { setDocActionError('Failed to reject'); return; }
+      setTenantDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'rejected' } : d) : null);
+    } finally { setDocActioning(null); }
+  }
 
   async function handleMarkVisited() {
     if (!viewing) return;
@@ -927,6 +1030,18 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                     </button>
                   </>
                 )}
+                {canCheques && (
+                  <>
+                    <div className="my-1 border-t border-[#f0ede8]" />
+                    <button
+                      onClick={() => openPanel('plan_summary')}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                    >
+                      <ClipboardList size={13} className="text-[#9b9890]" />
+                      {panel === 'plan_summary' ? 'Hide Plan' : 'View Payment Plan'}
+                    </button>
+                  </>
+                )}
                 {canEditPlan && (
                   <>
                     <div className="my-1 border-t border-[#f0ede8]" />
@@ -1040,40 +1155,137 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             <p className="text-xs font-semibold text-[#3d3b35] flex items-center gap-1.5">
               <FileText size={12} className="text-[#2e9f82]" /> Tenant Documents
             </p>
-            <button
-              onClick={() => setPanel('none')}
-              className="text-xs font-medium text-[#9b9890] hover:text-[#3d3b35] transition-colors cursor-pointer"
-            >
-              Hide
-            </button>
+            <div className="flex items-center gap-2">
+              {tenantDocs && tenantDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 && (
+                <button
+                  onClick={() => setViewAllOpen(true)}
+                  className="flex items-center gap-1 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-2.5 py-1 hover:bg-[#f0faf6] transition-colors cursor-pointer"
+                >
+                  <Printer size={11} /> View All
+                </button>
+              )}
+              <button
+                onClick={() => setPanel('none')}
+                className="text-xs font-medium text-[#9b9890] hover:text-[#3d3b35] transition-colors cursor-pointer"
+              >
+                Hide
+              </button>
+            </div>
           </div>
+          {docActionError && <p className="text-[10px] text-[#b91c1c] mb-2">{docActionError}</p>}
           {docsLoading ? (
             <p className="flex items-center gap-2 text-xs text-[#9b9890]">
               <Loader2 size={12} className="animate-spin" /> Loading…
             </p>
-          ) : !tenantDocs || tenantDocs.filter(d => d.documentKey !== 'profile_picture').length === 0 ? (
-            <p className="text-xs text-[#9b9890]">No documents uploaded yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {tenantDocs.filter(d => d.documentKey !== 'profile_picture').map(doc => (
-                <div key={doc.id} className="flex items-center gap-3 bg-white rounded-lg border border-[#e8e6e0] px-3 py-2.5">
-                  <FileText size={13} className="text-[#2e9f82] shrink-0" />
+          ) : (() => {
+            const KYC_1 = new Set(['emirates_id', 'passport', 'uae_visa']);
+            const RENTAL = new Set(['employment_letter', 'bank_statement', 'marriage_certificate', 'rental_history', 'credit_report', 'utility_clearance', 'trade_license', 'tax_registration', 'moa', 'business_license', 'utility_proof_of_payment']);
+            const docs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
+
+            const occ1Docs    = docs.filter(d => KYC_1.has(d.documentKey));
+            const rentalDocs  = docs.filter(d => RENTAL.has(d.documentKey));
+            const extraOccMap = new Map<number, TenantDoc[]>();
+            const otherDocs: TenantDoc[]  = [];
+            for (const d of docs) {
+              const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+              if (m) {
+                const n = parseInt(m[2]);
+                if (!extraOccMap.has(n)) extraOccMap.set(n, []);
+                extraOccMap.get(n)!.push(d);
+              } else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) {
+                otherDocs.push(d);
+              }
+            }
+            const extraNs = [...extraOccMap.keys()].sort((a, b) => a - b);
+            const hasAny  = occ1Docs.length > 0 || extraNs.length > 0 || rentalDocs.length > 0 || otherDocs.length > 0;
+
+            function DocRow({ doc }: { doc: TenantDoc }) {
+              const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              const isPending    = ['pending', 'attached'].includes(doc.status);
+              const isApproved   = doc.status === 'processed';
+              const isRejected   = doc.status === 'rejected';
+              const isActioning  = docActioning === doc.id;
+              return (
+                <div className="flex items-center gap-2.5 bg-white rounded-lg border border-[#e8e6e0] px-3 py-2">
+                  <FileText size={12} className="text-[#2e9f82] shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-[#1a1916] truncate">
-                      {doc.displayName ?? doc.documentKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                    <p className="text-[11px] font-semibold text-[#1a1916] truncate">{label}</p>
+                    <p className={`text-[10px] capitalize ${isApproved ? 'text-[#16a34a]' : isRejected ? 'text-[#b91c1c]' : 'text-[#9b9890]'}`}>
+                      {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Uploaded'}
                     </p>
-                    <p className="text-[10px] text-[#9b9890] capitalize">{doc.status}</p>
                   </div>
-                  <a
-                    href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline"
-                  >
+                  <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline">
                     View <ExternalLink size={10} />
                   </a>
+                  {isPending && (
+                    <>
+                      <button disabled={!!isActioning} onClick={() => handleApproveDoc(doc.id)}
+                        className="shrink-0 flex items-center gap-0.5 text-[10px] font-semibold text-[#065f46] bg-[#d1fae5] hover:bg-[#a7f3d0] disabled:opacity-50 rounded px-2 py-0.5 transition-colors cursor-pointer">
+                        {isActioning ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />} Approve
+                      </button>
+                      <button disabled={!!isActioning} onClick={() => { setRejectingDoc({ id: doc.id, label }); setRejectReason(''); }}
+                        className="shrink-0 flex items-center gap-0.5 text-[10px] font-semibold text-[#b91c1c] bg-[#fee2e2] hover:bg-[#fecaca] disabled:opacity-50 rounded px-2 py-0.5 transition-colors cursor-pointer">
+                        <X size={9} /> Reject
+                      </button>
+                    </>
+                  )}
+                  {isApproved && <span className="shrink-0 text-[9px] font-bold text-[#16a34a] bg-[#dcfce7] rounded px-1.5 py-0.5">✓</span>}
+                  {isRejected && <span className="shrink-0 text-[9px] font-bold text-[#b91c1c] bg-[#fee2e2] rounded px-1.5 py-0.5">✗</span>}
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            }
+
+            if (!hasAny) return <p className="text-xs text-[#9b9890]">No documents uploaded yet.</p>;
+
+            return (
+              <div className="space-y-3">
+                {/* ── Per-occupant identity docs ── */}
+                <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
+                  {/* Occupant 1 */}
+                  <div className={extraNs.length > 0 ? 'border-b border-[#e8e6e0]' : ''}>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] px-3 pt-2 pb-1">Occupant 1</p>
+                    <div className="px-3 pb-2.5 space-y-1.5">
+                      {occ1Docs.length > 0
+                        ? occ1Docs.map(doc => <DocRow key={doc.id} doc={doc} />)
+                        : <p className="text-[10px] text-[#9b9890]">No identity documents uploaded yet.</p>}
+                    </div>
+                  </div>
+                  {/* Occupants 2+ */}
+                  {extraNs.map(n => (
+                    <div key={n} className="border-t border-[#e8e6e0]">
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] px-3 pt-2 pb-1 flex items-center justify-between">
+                        Occupant {n} <span className="text-[8px] font-normal normal-case text-[#c8c6c0]">optional</span>
+                      </p>
+                      <div className="px-3 pb-2.5 space-y-1.5">
+                        {extraOccMap.get(n)!.map(doc => <DocRow key={doc.id} doc={doc} />)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Rental docs ── */}
+                {rentalDocs.length > 0 && (
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">Rental Documents</p>
+                    <div className="space-y-1.5">
+                      {rentalDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Other docs ── */}
+                {otherDocs.length > 0 && (
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">Other</p>
+                    <div className="space-y-1.5">
+                      {otherDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* ── Additional docs request ── */}
           <div className="mt-4 pt-4 border-t border-[#e8e6e0]">
@@ -1392,15 +1604,11 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
                   Contract Start Date
                 </label>
-                <input
-                  type="date"
+                <PreferredDayPicker
                   value={planStartDate}
-                  onChange={e => {
-                    const d = e.target.value;
-                    setPlanStartDate(d);
-                    if (d) applyStartDate(d, planInstallmentCount);
-                  }}
-                  className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
+                  preferredDays={preferredStartDays}
+                  onChange={d => { setPlanStartDate(d); if (d) applyStartDate(d, planInstallmentCount); }}
+                  placeholder="Pick start date"
                 />
                 {planStartDate && (
                   <p className="text-[9px] text-[#0369a1] mt-0.5">Cheque dates auto-generated from start date</p>
@@ -1570,6 +1778,20 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             </div>
 
             <div className="mb-3">
+              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
+                Cheques payable to <span className="font-normal normal-case text-[#9b9890]">(name tenant writes on cheques)</span>
+              </label>
+              <input
+                type="text"
+                value={planChequesPayableTo}
+                onChange={e => setPlanChequesPayableTo(e.target.value)}
+                placeholder="e.g. ABC Real Estate LLC"
+                className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
+              />
+              <p className="mt-1 text-[10px] text-[#9b9890]">Auto-filled from your profile. Edit if you need a different name on the cheques.</p>
+            </div>
+
+            <div className="mb-3">
               <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">Notes (optional)</label>
               <input
                 type="text"
@@ -1578,6 +1800,80 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 placeholder="e.g. 4 quarterly cheques"
                 className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
               />
+            </div>
+
+            {/* ── Rental Index Report attachment ── */}
+            <div className="mb-3">
+              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
+                Rental Index Report <span className="font-normal normal-case text-[#9b9890]">(optional — visible to tenant)</span>
+              </label>
+              {rentalIndexUrl ? (
+                <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#2e9f82] rounded-lg px-3 py-2">
+                  <FileText size={13} className="text-[#2e9f82] shrink-0" />
+                  <span className="flex-1 text-[11px] font-medium text-[#1a1916] truncate">
+                    {rentalIndexFileName || 'Rental Index Report'}
+                  </span>
+                  <a href={rentalIndexUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] text-[#2e9f82] hover:underline shrink-0 flex items-center gap-0.5">
+                    View <ExternalLink size={9} />
+                  </a>
+                  <button type="button" onClick={() => { setRentalIndexUrl(''); setRentalIndexFileName(''); setRentalIndexStatus(null); }}
+                    className="text-[#9b9890] hover:text-[#b91c1c] transition-colors cursor-pointer shrink-0">
+                    <X size={13} />
+                  </button>
+                </div>
+              ) : (
+                <label className={`flex items-center gap-2 border border-dashed border-[#bae6fd] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f0f9ff] transition-colors ${rentalIndexUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setRentalIndexUploading(true);
+                      try {
+                        const urlRes = await fetch('/api/documents/upload-url', {
+                          method: 'POST', credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            ownerType: 'rental_provider', ownerId: lead.unit?.id ?? lead.id,
+                            documentKey: 'rental_index_report', mimeType: file.type,
+                            originalName: file.name,
+                          }),
+                        });
+                        if (!urlRes.ok) {
+                          const errBody = await urlRes.json().catch(() => ({})) as { message?: string };
+                          const msg = `Upload failed — ${errBody.message ?? urlRes.status}`;
+                          setRentalIndexStatus({ ok: false, msg });
+                          toast.error(msg);
+                          return;
+                        }
+                        const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+                        // Normalise to a relative path so the PUT stays same-origin (fixes 127.0.0.1 vs localhost mismatch)
+                        const safeUploadUrl = (() => {
+                          try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; }
+                          catch { return uploadUrl; }
+                        })();
+                        let putRes: Response;
+                        try { putRes = await fetch(safeUploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } }); }
+                        catch { setRentalIndexStatus({ ok: false, msg: 'Upload failed — network error' }); toast.error('Upload failed — network error'); return; }
+                        if (!putRes.ok) { setRentalIndexStatus({ ok: false, msg: `Upload failed — server error ${putRes.status}` }); toast.error(`Upload failed — server error ${putRes.status}`); return; }
+                        setRentalIndexUrl(fileUrl);
+                        setRentalIndexFileName(file.name);
+                        setRentalIndexStatus({ ok: true, msg: `"${file.name}" uploaded successfully` });
+                        toast.success(`Rental Index Report uploaded — "${file.name}"`);
+                      } finally { setRentalIndexUploading(false); e.target.value = ''; }
+                    }}
+                  />
+                  {rentalIndexUploading
+                    ? <><Loader2 size={13} className="animate-spin text-[#0ea5e9]" /><span className="text-[11px] text-[#0ea5e9]">Uploading…</span></>
+                    : <><FileText size={13} className="text-[#9b9890]" /><span className="text-[11px] text-[#9b9890]">Attach PDF or image</span></>}
+                </label>
+              )}
+              {rentalIndexStatus && (
+                <p className={`mt-1.5 text-[10px] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 ${rentalIndexStatus.ok ? 'bg-[#f0faf6] text-[#16a34a] border border-[#bbf7d0]' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                  {rentalIndexStatus.ok ? <CheckCircle2 size={10} /> : <X size={10} />}
+                  {rentalIndexStatus.msg}
+                </p>
+              )}
             </div>
 
             {planError && (
@@ -1603,7 +1899,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       })()}
 
       {/* ── Payment Plan summary ── */}
-      {['payment_plan_shared','cheques_submitted','cheques_collected'].includes(lead.stage) && lead.paymentPlan && panel !== 'plan' && (() => {
+      {panel === 'plan_summary' && lead.paymentPlan && (() => {
         const plan = lead.paymentPlan;
         const sorted = plan.items.slice().sort((a, b) => {
           if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
@@ -1656,7 +1952,19 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 </p>
               ))}
             </div>
-            {plan.notes && <p className="text-[10px] text-[#6b6860] italic">{plan.notes}</p>}
+            {plan.chequesPayableTo && (
+              <p className="text-[10px] text-[#1a1916] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <BadgeCheck size={11} className="text-[#854d0e] shrink-0" />
+                <span><span className="font-semibold text-[#854d0e]">Cheques payable to:</span> {plan.chequesPayableTo}</span>
+              </p>
+            )}
+            {plan.notes && <p className="text-[10px] text-[#6b6860] italic mt-1">{plan.notes}</p>}
+            {plan.rentalIndexReportUrl && (
+              <a href={plan.rentalIndexReportUrl} target="_blank" rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-3 py-1.5 hover:bg-[#f0faf6] transition-colors">
+                <FileText size={11} /> View Rental Index Report
+              </a>
+            )}
           </div>
         );
       })()}
@@ -1713,6 +2021,21 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       amountFils={it.amountFils}
                       dueDate={it.dueDate}
                       recorded={recorded}
+                      suggestedSerial={!recorded ? chequeSuggestions[i] : undefined}
+                      onSerialChange={(value) => {
+                        // Propagate incremented serials to all subsequent unrecorded rows
+                        if (!value.trim()) return;
+                        setChequeSuggestions(prev => {
+                          const next: Record<number, string> = { ...prev };
+                          sortedItems.forEach((_, j) => {
+                            if (j <= i) return;
+                            const jDesc = sortedItems[j]?.description ?? `Cheque ${j + 1}`;
+                            if (chequeByDesc.get(jDesc)) return; // already recorded
+                            next[j] = nextSerial(value, j - i);
+                          });
+                          return next;
+                        });
+                      }}
                       onRecord={async (serial) => {
                         if (!serial.trim()) { setChequeError('Cheque number is required'); return; }
                         setChequeError(null);
@@ -1730,6 +2053,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                         const body = await res.json().catch(() => ({}));
                         if (!res.ok) { setChequeError(body.message ?? 'Failed to record'); return; }
                         setCheques(prev => [...prev, body]);
+                        setChequeSuggestions(prev => { const n = { ...prev }; delete n[i]; return n; });
                       }}
                       onDelete={async () => {
                         if (!recorded) return;
@@ -1873,6 +2197,197 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           </div>
         </div>
       )}
+
+      {/* ── Reject document dialog ── */}
+      {rejectingDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setRejectingDoc(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex items-center justify-center w-9 h-9 rounded-full bg-[#fee2e2] shrink-0">
+                <X size={16} className="text-[#b91c1c]" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#1a1916]">Reject Document</p>
+                <p className="text-[11px] text-[#9b9890] mt-0.5">{rejectingDoc.label}</p>
+              </div>
+            </div>
+            <label className="block text-[11px] font-semibold text-[#3d3b35] mb-1.5">
+              Reason <span className="font-normal text-[#9b9890]">(optional — tenant will see this)</span>
+            </label>
+            <textarea
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              placeholder="e.g. Document is blurry, please re-upload a clearer copy"
+              rows={3}
+              className="w-full text-xs border border-[#e8e6e0] rounded-xl px-3 py-2.5 resize-none focus:outline-none focus:border-[#b91c1c] text-[#1a1916] placeholder:text-[#c8c6c0]"
+            />
+            <div className="flex gap-2.5 mt-4">
+              <button
+                onClick={() => setRejectingDoc(null)}
+                className="flex-1 text-xs font-semibold px-4 py-2.5 rounded-xl border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors cursor-pointer">
+                Cancel
+              </button>
+              <button
+                disabled={docActioning === rejectingDoc.id}
+                onClick={async () => {
+                  const { id, label: _l } = rejectingDoc;
+                  setRejectingDoc(null);
+                  await handleRejectDoc(id, rejectReason);
+                }}
+                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl bg-[#b91c1c] hover:bg-[#991b1b] text-white disabled:opacity-50 transition-colors cursor-pointer">
+                {docActioning === rejectingDoc.id
+                  ? <><Loader2 size={12} className="animate-spin" /> Rejecting…</>
+                  : <><X size={12} /> Reject Document</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Document viewer modal ── */}
+      {(() => {
+        const KYC_1  = new Set(['emirates_id', 'passport', 'uae_visa']);
+        const RENTAL = new Set(['employment_letter','bank_statement','marriage_certificate','rental_history','credit_report','utility_clearance','trade_license','tax_registration','moa','business_license','utility_proof_of_payment']);
+        const allDocs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
+
+        // Build ordered flat list of image-only docs for lightbox navigation
+        const imgDocs = allDocs.filter(d => {
+          const up = d.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = d.mimeType === 'application/pdf' || up.endsWith('.pdf');
+          return !isPdf && (d.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(up));
+        });
+        const lightboxSlides = imgDocs.map(d => ({
+          src: d.fileUrl,
+          title: d.displayName ?? d.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          description: d.status === 'processed' ? '✓ Approved' : d.status === 'rejected' ? '✗ Rejected' : 'Uploaded',
+        }));
+
+        if (!viewAllOpen) {
+          // Lightbox can still be open (opened from within modal, then modal closed) — keep it mounted
+          return lightboxOpen ? (
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[Zoom, Captions, Thumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          ) : null;
+        }
+
+        // Group docs for the panel
+        const occ1   = allDocs.filter(d => KYC_1.has(d.documentKey));
+        const rental = allDocs.filter(d => RENTAL.has(d.documentKey));
+        const extraMap = new Map<number, TenantDoc[]>();
+        const other: TenantDoc[] = [];
+        for (const d of allDocs) {
+          const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+          if (m) { const n = parseInt(m[2]); if (!extraMap.has(n)) extraMap.set(n, []); extraMap.get(n)!.push(d); }
+          else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) other.push(d);
+        }
+        type DocGroup = { heading: string; sub?: string; docs: TenantDoc[] };
+        const groups: DocGroup[] = [];
+        if (occ1.length)   groups.push({ heading: 'Occupant 1 — Identity', docs: occ1 });
+        [...extraMap.keys()].sort((a,b) => a-b).forEach(n =>
+          groups.push({ heading: `Occupant ${n} — Identity`, sub: 'optional', docs: extraMap.get(n)! })
+        );
+        if (rental.length) groups.push({ heading: 'Rental Documents', docs: rental });
+        if (other.length)  groups.push({ heading: 'Other', docs: other });
+
+        const tenantName = lead.convertedTenant?.user?.name?.trim() || lead.customerName || '—';
+        const unitLabel  = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : '—');
+
+        function StatusChip({ status }: { status: string }) {
+          if (status === 'processed') return <span className="text-[9px] font-bold bg-[#dcfce7] text-[#16a34a] rounded px-1.5 py-0.5">Approved</span>;
+          if (status === 'rejected')  return <span className="text-[9px] font-bold bg-[#fee2e2] text-[#b91c1c] rounded px-1.5 py-0.5">Rejected</span>;
+          return <span className="text-[9px] font-bold bg-[#f4f3ef] text-[#6b6860] rounded px-1.5 py-0.5">Uploaded</span>;
+        }
+
+        function DocEntry({ doc }: { doc: TenantDoc }) {
+          const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const urlPath = doc.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = doc.mimeType === 'application/pdf' || urlPath.endsWith('.pdf');
+          const isImg = !isPdf && (doc.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(urlPath));
+          const imgIdx = isImg ? imgDocs.findIndex(d => d.id === doc.id) : -1;
+          return (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[12px] font-semibold text-[#1a1916]">{label}</span>
+                <StatusChip status={doc.status} />
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0">
+                  Open <ExternalLink size={10} />
+                </a>
+              </div>
+              {isPdf ? (
+                <iframe src={doc.fileUrl} className="w-full h-[480px] rounded-xl border border-[#e8e6e0]" />
+              ) : isImg ? (
+                /* Clickable thumbnail → opens YALR lightbox with zoom/nav */
+                <button type="button" onClick={() => { setLightboxIndex(imgIdx); setLightboxOpen(true); }}
+                  className="group relative block w-full rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f8f7f4] cursor-zoom-in">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={doc.fileUrl} alt={label} loading="lazy"
+                    className="max-h-[320px] w-full object-contain block transition-transform duration-200 group-hover:scale-[1.02]" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                    <span className="bg-white/90 rounded-full p-2 shadow"><ZoomIn size={18} className="text-[#1a1916]" /></span>
+                  </div>
+                </button>
+              ) : (
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline">
+                  <FileText size={14} /> Open file
+                </a>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <>
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4"
+              onClick={(e) => { if (e.target === e.currentTarget) setViewAllOpen(false); }}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+                {/* Header */}
+                <div className="sticky top-0 bg-white rounded-t-2xl border-b border-[#e8e6e0] px-6 py-4 flex items-center justify-between z-10">
+                  <div>
+                    <p className="text-sm font-bold text-[#1a1916]">{tenantName}</p>
+                    <p className="text-[11px] text-[#9b9890]">{unitLabel} · {allDocs.length} document{allDocs.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button onClick={() => setViewAllOpen(false)}
+                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-[#f4f3ef] text-[#6b6860] transition-colors cursor-pointer">
+                    <X size={16} />
+                  </button>
+                </div>
+                {/* Content */}
+                <div className="px-6 py-6 space-y-8">
+                  {groups.map((g, gi) => (
+                    <section key={gi}>
+                      <div className="flex items-baseline gap-2 mb-4 border-b-2 border-[#2e9f82] pb-1.5">
+                        <h2 className="text-[13px] font-bold text-[#1a1916]">{g.heading}</h2>
+                        {g.sub && <span className="text-[10px] text-[#9b9890]">{g.sub}</span>}
+                      </div>
+                      {g.docs.map(doc => <DocEntry key={doc.id} doc={doc} />)}
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* Lightbox — rendered outside the scrollable modal so z-index stacks correctly */}
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[Zoom, Captions, Thumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -1886,7 +2401,8 @@ export default function LeadsPage() {
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
   const [movingLead, setMovingLead] = useState<number | null>(null);
-  const [feeRules, setFeeRules]     = useState<FeeRulesMap | null>(null);
+  const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
+  const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true); setError(null);
@@ -1915,6 +2431,17 @@ export default function LeadsPage() {
       .then((data: FeeRulesMap | null) => { if (data) setFeeRules(data); })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { preferredStartDays?: number[] | null } } | null) => {
+        if (Array.isArray(data?.profile?.preferredStartDays)) {
+          setPreferredStartDays(data!.profile!.preferredStartDays!);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
   useEffect(() => { setSearch(''); }, [activeTab]);
 
   async function moveStage(leadId: number, stage: LeadStage) {
@@ -1930,10 +2457,14 @@ export default function LeadsPage() {
   }
 
   function handleConvert(lead: ApiLead) {
-    const name         = encodeURIComponent(lead.convertedTenant?.user?.name ?? lead.customerName ?? '');
-    const moveIn       = lead.viewings?.find(v => v.desiredMoveIn)?.desiredMoveIn ?? '';
-    const startParam   = moveIn ? `&startDate=${moveIn}` : '';
-    const chequeParam  = lead.paymentPlan?.chequeCount ? `&chequeCount=${lead.paymentPlan.chequeCount}` : '';
+    const name = encodeURIComponent(lead.convertedTenant?.user?.name ?? lead.customerName ?? '');
+    // Prefer the payment plan's first_bundle date (the agreed start date) over the
+    // tenant's original desiredMoveIn (just their initial preference at viewing time).
+    const planStart = lead.paymentPlan?.items?.find(it => it.type === 'first_bundle')?.dueDate
+      ?? lead.paymentPlan?.items?.slice().sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))[0]?.dueDate;
+    const startDate = planStart ?? lead.viewings?.find(v => v.desiredMoveIn)?.desiredMoveIn ?? '';
+    const startParam  = startDate ? `&startDate=${startDate}` : '';
+    const chequeParam = lead.paymentPlan?.chequeCount ? `&chequeCount=${lead.paymentPlan.chequeCount}` : '';
     router.push(
       `/rental-provider/dashboard/contracts/new?unitId=${lead.unit?.id}&tenantId=${lead.convertedTenant?.id}&leadId=${lead.id}&tenantName=${name}${startParam}${chequeParam}`,
     );
@@ -2073,6 +2604,7 @@ export default function LeadsPage() {
               onConvert={handleConvert}
               setLeads={setLeads}
               feeRules={feeRules}
+              preferredStartDays={preferredStartDays}
             />
           ))}
         </div>

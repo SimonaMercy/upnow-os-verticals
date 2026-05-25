@@ -610,3 +610,93 @@ Backed by 4 backend endpoints (Occupancy, Receivables, Lease Expiry, Renewal Pip
 The lease-expiry report has a window selector (30 / 60 / 90 / 180 / 365 days) that updates the URL query string + refetches.
 
 The reports landing page ([`/reports/page.tsx`](src/app/rental-provider/dashboard/reports/page.tsx)) lists all 12 report tiles, with the 4 backed ones in an "Available now" grid (clickable to `/reports/<slug>`) and the other 8 in a dimmed "Coming soon — needs additional data tracking" grid.
+
+---
+
+## Session May 22–25, 2026 — Customer Spaces v2, Addendums, Profile edits, Occupants
+
+### Customer Spaces v2 — Tenancy Journey redesign
+
+New parallel route [`/dashboard/customer/spaces/v2/[spaceKey]`](src/app/dashboard/(dashboard)/customer/spaces/v2/[spaceKey]/page.tsx) implementing the Quest-layout tenancy life-cycle from the design bundle. Coexists with v1 (`/dashboard/customer/spaces`) — both are live; v2 is the design-aligned single-space focused view, v1 remains the list view.
+
+Key pieces:
+- `deriveStateKey(resolved)` → 25 named states (viewing → application_review → documents → documents_submitted → payment_plan → cheques_submitted → contract_issued → signature → ejari → utility → awaiting_movein_inspection → move_in → awaiting_activation → active → termination_* → renewal_*). State priority intentionally puts `c.renewalAccepted === 'pending'` BEFORE the renewal child contract's state, so the Terms-Offered card (step 1 of 6) shows before the cheques screen.
+- Action bodies via `<ActionBody stateKey={…} resolved={…} onRefresh={…} />` dispatch — one component per state.
+- Renewal mode shows two stacked QuestActionCards (original lease + renewal child) when both contracts coexist.
+- `RenewalOfferedAction` shows full terms with comparison vs current rent, delta %, period, cheques, contract value, carry-forward deposit note.
+
+### Step 3 — Inline Rental Documents & Preferences (restored + extended)
+
+A previous CID-328-FE refactor deleted the inline preferences/docs form from `TenancyJourneyPanel` Step 3 (replaced with a deep-link to Document Hub) — but the design and product flow required the inline form. Restored in v1 from HEAD verbatim and ported to v2's `DocumentsAction`.
+
+Form contents (v1 + v2 identical behaviour, different visual systems — v1 Tailwind, v2 inline CSS-var styles):
+- **Contract Start Date** picker — calendar respects `rp.preferredStartDays` (per-RP day-of-month allow-list); falls back to all-days when unrestricted.
+- **Number of Payments** pills — Annual / Semi-Annual / Quarterly / Bi-Monthly / Monthly.
+- **Number of Occupants** stepper (residential only) — default 1.
+- Inline required document rows with one-click upload (3-step S3 presigned-PUT).
+- **Submit** → `PATCH /api/leads/my-viewings/:viewingId/preferences` with `desiredMoveIn` + `preferredChequeCount` + `paymentType: 'postdated_cheque'`, then refresh.
+
+After submit, the action card collapses to a single "Documents & preferences submitted ✓" line and the state machine flips to `documents_submitted`.
+
+### Occupant identity docs (multi-occupant booking support)
+
+New helpers in [`docRequirements.ts`](src/lib/docRequirements.ts):
+
+```ts
+getOccupantDocs(occupantCount: number): DocReq[]    // emits 3 docs per occupant >= 2
+deriveOccupantCount(docKeys: Iterable<string>): number   // count from existing keys
+```
+
+For occupant N ≥ 2, three doc rows render with stable keys: `occupant_${N}_emirates_id`, `occupant_${N}_passport`, `occupant_${N}_uae_visa`. Occupant 1 (the primary tenant) reuses the existing `emirates_id` / `passport` / `uae_visa` keys.
+
+Occupant count is **not persisted** as a column — `deriveOccupantCount(myDocs.map(d => d.documentKey))` reads it back from uploaded docs so the stepper survives reload without a backend migration. `useEffect` on `myDocs` bumps `occupantCount` to the derived value when higher.
+
+`requiredMissing` and `docsOk` checks now include the occupant docs, so the Submit button stays disabled until every occupant's identity docs are uploaded.
+
+### Addendum templates feature (Sprint-11 delta)
+
+End-to-end PDF/DOCX addendum library tied to contracts, with both-party signatures.
+
+**Backend**:
+- New entities: `addendum_templates` (per-RP reusable library), `contract_addendums` (template attached to a specific contract + tenant/landlord sig). Schema delta SQL: [`upnow-backend/docs/sprint-11-schema-delta-addendum.sql`](../upnow-backend/docs/sprint-11-schema-delta-addendum.sql) — applied to dev DB.
+- New module: `addendum-templates.{controller,service,module}.ts` — CRUD + `POST /addendum-templates/upload-url` (presigned). `ALLOWED_MIME = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']`.
+- ContractsService gains `attachAddendum / listAddendums / removeAddendum / signAddendum` — locked to `ContractStatus.PENDING` for attach/remove (cannot mutate after issuance).
+- ContractsController exposes `GET/POST/DELETE /:id/addendums` + dual-role sign endpoints (`POST /:id/addendums/:addendumId/sign` for RP and `POST /tenant/:id/addendums/:addendumId/sign` for tenant).
+- Audit logs use `actionKey: 'contract.addendum.attach' | '.remove' | '.sign'` and `actorUserId` (NOT `action` / `actorId` — those are wrong field names).
+
+**Frontend**:
+- New reusable [`AddendumsPanel`](src/components/upnow/AddendumsPanel.tsx) — role-aware (`role="landlord" | "tenant"`); landlord can attach (template picker OR one-off upload) + remove, tenant can only sign. Canvas signature pad inside.
+- New RP page [`/rental-provider/dashboard/templates/page.tsx`](src/app/rental-provider/dashboard/templates/page.tsx) — addendum template library CRUD; nav entry added under "Leasing" in [`DashboardShell`](src/components/dashboard/DashboardShell.tsx).
+- `<AddendumsPanel role="landlord">` mounted at the top of [`rental-provider/dashboard/contracts/[id]/page.tsx`](src/app/rental-provider/dashboard/contracts/[id]/page.tsx); `<AddendumsPanel role="tenant">` mounted above the main action banner on [`customer/contracts/[id]/page.tsx`](src/app/dashboard/(dashboard)/customer/contracts/[id]/page.tsx).
+- Both `/contracts/[id]/print/page.tsx` pages fetch `/api/contracts/:id/addendums` and append one A4 coversheet per addendum (with name + file URL + tenant/landlord SigBox).
+
+### Profile — Email + Phone change with OTP
+
+[`customer/profile/page.tsx`](src/app/dashboard/(dashboard)/customer/profile/page.tsx) now ships `EmailField` and `PhoneField` components for in-place email/phone changes (the previous form silently no-op'd these fields).
+
+- **EmailField** detects auto-generated phone-only emails (matching `@upnow.local` or `^phone-`) and prompts the user to add a real one. New email → PATCH `/auth/me` (which resets `emailVerified=false`) → `POST /auth/email/resend` → OTP entry → `POST /auth/email/verify-otp`. Dev-mode OTP rendered in the banner with an Auto-fill button when `NODE_ENV !== 'production'`.
+- **PhoneField** mirrors the email pattern — new phone → PATCH `/auth/me` (resets `phoneVerified=false`) → `POST /auth/otp/request` → `POST /auth/otp/verify`.
+- The form's main submit no longer includes `email` or `phone` (they have their own flows).
+
+Backend [`auth.service.ts`](../upnow-backend/src/auth/auth.service.ts) `updateMe` enforces uniqueness on both email and phone before persisting (throws `ConflictException` with a friendly message). `UpdateProfileDto` in [`auth.dto.ts`](../upnow-backend/src/auth/auth.dto.ts) now accepts an `email` field with `@IsEmail` + `@MaxLength(150)`.
+
+### Auto-generate Unit Description
+
+[`UnitFormModal`](src/components/upnow/UnitFormModal.tsx) gained a `composeUnitDescription(d, propertyCategory)` helper + "Auto-generate" / "Re-generate" button next to the Description label. Synthesizes 3 sentences from the selected unit type, tier, bedrooms/bathrooms, floor (with ordinal), size, view, furnishing, and top 6 amenities. Button is disabled until a unit type is selected.
+
+### Bulk operational note
+
+When marking an RP as "onboarding-verified" for dev/testing, the SQL is:
+
+```sql
+UPDATE rental_providers
+SET compliance_status = 'compliant',
+    document_status = 'complete',
+    bank_account_status = 'complete',
+    poa_status = CASE WHEN has_poa THEN 'complete' ELSE poa_status END,
+    compliance_paused_at = NULL,
+    updated_at = NOW()
+WHERE id = <rp_id>;
+```
+
+`account_type_confirmed_at` should already be set if the RP completed Step 2 of onboarding; `email_verified` / `phone_verified` flags live on the `users` row.

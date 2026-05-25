@@ -10,8 +10,22 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature, Camera } from 'lucide-react';
+import Link from 'next/link';
+import { useParams, useSearchParams } from 'next/navigation';
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature } from 'lucide-react';
+
+/**
+ * Back link that works whether the page was opened in a new tab (no history)
+ * or via in-app navigation. Always navigates to the parent contract detail.
+ */
+function BackLink({ contractId }: { contractId: string | undefined }) {
+  const href = contractId ? `/dashboard/customer/contracts/${contractId}` : '/dashboard/customer/spaces';
+  return (
+    <Link href={href} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] w-fit">
+      <ArrowLeft size={15} /> Back to contract
+    </Link>
+  );
+}
 
 type InspType = 'move_in' | 'move_out';
 
@@ -24,8 +38,9 @@ interface InspectionArea {
 }
 interface InspectionPhoto { id: string; url: string; caption: string }
 interface InspectionData {
+  reportGeneratedDate?: string;
   inspectorName: string;
-  inspectionDate: string;
+  inspectionDate?: string;
   moveInDate: string;
   areas: InspectionArea[];
   generalNotes: string;
@@ -33,6 +48,8 @@ interface InspectionData {
   tenantSig: string | null;
   landlordSig: string | null;
   tenantSignedAt?: string | null;
+  rpCounterSig?: string | null;
+  rpCounterSignedAt?: string | null;
 }
 
 function condLabel(c: InspectionItem['inCondition']) {
@@ -108,7 +125,6 @@ function SigPad({ value, onChange }: { value: string | null; onChange: (v: strin
 }
 
 export default function TenantInspectionPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const contractId = Number(params.id);
@@ -175,9 +191,8 @@ export default function TenantInspectionPage() {
   if (loadError || !data) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8">
-        <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4">
-          <ArrowLeft size={15} /> Back
-        </button>
+        <BackLink contractId={params?.id} />
+        <div style={{ height: 16 }} />
         <div className="bg-[#fff7ed] border border-[#fed7aa] rounded-2xl p-5 flex items-start gap-3">
           <AlertCircle size={18} className="text-[#c2410c] shrink-0 mt-0.5" />
           <div>
@@ -191,15 +206,14 @@ export default function TenantInspectionPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-      <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916]">
-        <ArrowLeft size={15} /> Back
-      </button>
+      <BackLink contractId={params?.id} />
 
       <div>
         <h1 className="text-xl font-bold text-[#1a1916]">{title}</h1>
         <p className="text-xs text-[#9b9890] mt-1">
           Inspector: <strong className="text-[#1a1916]">{data.inspectorName || '—'}</strong>
-          {data.inspectionDate && <> · {new Date(data.inspectionDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}</>}
+          {data.inspectionDate && <> · Inspection date: <strong className="text-[#1a1916]">{new Date(data.inspectionDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong></>}
+          {data.reportGeneratedDate && <> · Report generated: <strong className="text-[#1a1916]">{new Date(data.reportGeneratedDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong></>}
         </p>
       </div>
 
@@ -223,23 +237,6 @@ export default function TenantInspectionPage() {
         </div>
       )}
 
-      {/* Photos */}
-      {data.photos && data.photos.length > 0 && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5 mb-3">
-            <Camera size={14} className="text-[#2e9f82]" /> Photos
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {data.photos.map(p => (
-              <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.url} alt={p.caption || 'Inspection photo'} className="w-full h-32 object-cover" />
-                {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
 
       {data.generalNotes && (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
@@ -259,9 +256,22 @@ export default function TenantInspectionPage() {
           </p>
         </div>
         {signed ? (
-          <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
-            <CheckCircle2 size={15} className="text-[#2e9f82]" />
-            <p className="text-sm font-medium text-[#1a7a5a]">You have signed this inspection ✓</p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
+              <CheckCircle2 size={15} className="text-[#2e9f82]" />
+              <p className="text-sm font-medium text-[#1a7a5a]">You have signed this inspection ✓</p>
+            </div>
+            {data.rpCounterSig ? (
+              <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
+                <CheckCircle2 size={15} className="text-[#2e9f82]" />
+                <p className="text-sm font-medium text-[#1a7a5a]">Rental provider has counter-signed — tenancy is now active ✓</p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-[#fffbeb] border border-[#fde68a] rounded-xl px-4 py-3">
+                <AlertCircle size={15} className="text-[#92400e] shrink-0" />
+                <p className="text-sm font-medium text-[#78350f]">Awaiting rental provider counter-signature to activate tenancy</p>
+              </div>
+            )}
           </div>
         ) : (
           <>

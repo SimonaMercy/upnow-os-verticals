@@ -146,7 +146,7 @@ export default function RentalProviderOnboardingPage() {
         setProfileId(p.id);
         setChecklist(res.checklist ?? []);
 
-        if (p.complianceStatus === "compliant") {
+        if (p.complianceStatus === "compliant" && p.accountTypeConfirmedAt) {
           router.replace("/rental-provider/dashboard");
           return;
         }

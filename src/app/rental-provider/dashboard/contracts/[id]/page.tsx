@@ -27,8 +27,16 @@ import {
   User, Building2, Calendar, DollarSign, Pencil, RotateCcw,
   FileSignature, Download, BadgeCheck, ChevronDown, ChevronUp,
   ClipboardList, Plus, Trash2, Paperclip, UploadCloud, ExternalLink,
-  CreditCard, ListChecks, Eye, ChevronRight, ClipboardCheck,
+  CreditCard, ListChecks, Eye, ChevronRight, ClipboardCheck, ZoomIn,
 } from 'lucide-react';
+import Lightbox from 'yet-another-react-lightbox';
+import LbZoom from 'yet-another-react-lightbox/plugins/zoom';
+import LbCaptions from 'yet-another-react-lightbox/plugins/captions';
+import LbThumbnails from 'yet-another-react-lightbox/plugins/thumbnails';
+import 'yet-another-react-lightbox/styles.css';
+import 'yet-another-react-lightbox/plugins/captions.css';
+import 'yet-another-react-lightbox/plugins/thumbnails.css';
+import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -221,23 +229,29 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function SectionCard({ title, icon: Icon, children, defaultOpen = true }: {
+function SectionCard({ title, icon: Icon, children, defaultOpen = true, headerAction }: {
   title: string; icon: React.ElementType; children: React.ReactNode; defaultOpen?: boolean;
+  headerAction?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      <button
-        type="button"
-        className="w-full flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]"
-        onClick={() => setOpen(o => !o)}
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
+        <button
+          type="button"
+          className="flex items-center gap-2 flex-1 text-left"
+          onClick={() => setOpen(o => !o)}
+        >
           <Icon size={15} className="text-[#2e9f82]" />
           <span className="text-sm font-semibold text-[#1a1916]">{title}</span>
+        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {headerAction}
+          <button type="button" onClick={() => setOpen(o => !o)}>
+            {open ? <ChevronUp size={14} className="text-[#9b9890]" /> : <ChevronDown size={14} className="text-[#9b9890]" />}
+          </button>
         </div>
-        {open ? <ChevronUp size={14} className="text-[#9b9890]" /> : <ChevronDown size={14} className="text-[#9b9890]" />}
-      </button>
+      </div>
       {open && <div className="px-5 py-4">{children}</div>}
     </div>
   );
@@ -447,10 +461,14 @@ export default function ContractDetailPage() {
     ejariFee: '',
   });
   const [renewalExtras, setRenewalExtras] = useState<Array<{ description: string; amount: string; dueDate: string }>>([]);
-  const [tenantKycDocs, setTenantKycDocs] = useState<{ id: number; documentKey: string; displayName: string | null; fileUrl: string; status: string; notes: string | null }[] | null>(null);
+  type TenantKycDoc = { id: number; documentKey: string; displayName: string | null; fileUrl: string; mimeType: string | null; status: string; notes: string | null };
+  const [tenantKycDocs, setTenantKycDocs] = useState<TenantKycDoc[] | null>(null);
   const [tenantKycLoading, setTenantKycLoading] = useState(false);
   const [reviewingDocId, setReviewingDocId] = useState<number | null>(null);
   const [rejectingDocId, setRejectingDocId] = useState<number | null>(null);
+  const [viewAllOpen,   setViewAllOpen]   = useState(false);
+  const [lightboxOpen,  setLightboxOpen]  = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const [rejectionReason, setRejectionReason] = useState('');
   const [docRequestInput, setDocRequestInput] = useState('');
   const [docRequestNotes, setDocRequestNotes] = useState('');
@@ -467,6 +485,16 @@ export default function ContractDetailPage() {
   const [utilityFile, setUtilityFile] = useState<File | null>(null);
   const [utilityUploading, setUtilityUploading] = useState(false);
   const [utilityError, setUtilityError] = useState<string | null>(null);
+  const [moveInInsp, setMoveInInsp] = useState<{
+    rpSubmittedAt?: string | null;
+    tenantSig?: string | null;
+    rpCounterSig?: string | null;
+    rpCounterSignedAt?: string | null;
+  } | null>(null);
+  // Inline RP counter-sign for the move-in inspection (Step 5).
+  const [inspSigImg, setInspSigImg]       = useState<string | null>(null);
+  const [inspSigBusy, setInspSigBusy]     = useState(false);
+  const [inspSigError, setInspSigError]   = useState<string | null>(null);
 
   useEffect(() => {
     if (!params?.id) return;
@@ -489,6 +517,14 @@ export default function ContractDetailPage() {
         const hasTenantSig   = Array.isArray(sigs) && sigs.some((s: { role: string }) => s.role === 'tenant');
         if (hasLandlordSig) setSignedMode('online');
         if (hasTenantSig)   setHasTenantSigned(true);
+
+        // Load move-in inspection signing state for Step 4 status display.
+        fetch(`/api/contracts/${params.id}/inspection?type=move_in`, { credentials: 'include' })
+          .then(r => r.ok ? r.json() : null)
+          .then((insp: { rpSubmittedAt?: string | null; tenantSig?: string | null; rpCounterSig?: string | null; rpCounterSignedAt?: string | null } | null) => {
+            if (insp) setMoveInInsp({ rpSubmittedAt: insp.rpSubmittedAt, tenantSig: insp.tenantSig, rpCounterSig: insp.rpCounterSig, rpCounterSignedAt: insp.rpCounterSignedAt });
+          })
+          .catch(() => null);
 
         // Also check tenant's own documents for utility proof (uploaded by tenant or admin)
         const tenantId = data?.tenant?.id;
@@ -723,23 +759,15 @@ export default function ContractDetailPage() {
       setEjariFile(null);
       if (ejariInputRef.current) ejariInputRef.current.value = '';
 
-      // Auto-progress: Ejari upload registers the contract with DLD and
-      // activates the tenancy in one step — no separate buttons needed.
+      // Register Ejari with DLD. Tenancy activation happens automatically when
+      // the RP counter-signs the move-in inspection (step 4 of the workflow).
       const ejariRes = await fetch(`/api/contracts/${contract.id}/ejari`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ejariStatus: 'registered' }),
       });
       if (!ejariRes.ok) throw new Error('Failed to mark Ejari registered');
-      let updated = await ejariRes.json();
-
-      if (updated.status !== 'active') {
-        const actRes = await fetch(`/api/contracts/${contract.id}/activate`, {
-          method: 'PATCH', credentials: 'include',
-        });
-        if (!actRes.ok) throw new Error('Failed to activate tenancy');
-        updated = await actRes.json();
-      }
+      const updated = await ejariRes.json();
       setContract(updated);
     } catch (e: unknown) {
       setEjariError(e instanceof Error ? e.message : 'Upload failed');
@@ -1142,6 +1170,13 @@ export default function ContractDetailPage() {
   const st2Done = isRenewalContract ? (contract.pdcConfirmed ?? false) : true;
   const st3Done = allSigsDone;
   const st4Done = tl_hasEjari;
+  // Utility step (NEW, between Ejari and Move-In). Either party can upload —
+  // tenant via their portal OR RP here. The utility doc presence is the truth.
+  const stUtilityDone = !!utilityDoc;
+  // Move-in inspection complete once RP counter-signs.
+  const stMoveInDone  = !!moveInInsp?.rpCounterSig || tl_isActive;
+  // st5Done kept as alias for tl_isActive so the renewal-flow steps (which
+  // still use the 4-step model: Terms → Sigs → Ejari → Active) keep working.
   const st5Done = tl_isActive;
 
   type TLStep = 'done' | 'current' | 'upcoming';
@@ -1162,7 +1197,7 @@ export default function ContractDetailPage() {
       <div className="bg-white border-b border-[#e8e6e0] px-4 sm:px-6 py-4 sticky top-0 z-20">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <Link href="/rental-provider/dashboard/contracts" className="text-[#6b6860] hover:text-[#1a1916]" title="Back to contracts">
+            <Link href="/rental-provider/dashboard/orders" className="text-[#6b6860] hover:text-[#1a1916]" title="Back to orders">
               <ArrowLeft size={18} />
             </Link>
             <div className="min-w-0">
@@ -1268,6 +1303,9 @@ export default function ContractDetailPage() {
 
       {/* Body */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+        {/* Addendums — visible at all times. Attach/remove gated to draft state inside the component. */}
+        <AddendumsPanel contractId={contract.id} role="landlord" contractStatus={contract.status} />
 
         {/* ── Termination request banner (only shows when one is in flight) ── */}
         {contract.termination?.response === 'pending' && contract.termination.requestedByRole === 'tenant' && (
@@ -1922,7 +1960,21 @@ export default function ContractDetailPage() {
                        For renewal contracts these are the fresh docs the tenant uploaded against
                        the renewal child specifically (ownerType=tenancy_contract). For the original
                        lease they're the tenant's customer-scoped KYC pack. */}
-                  <SectionCard title={isRenewalContract ? 'Renewal Documents' : 'Rental Documents'} icon={User}>
+                  <SectionCard
+                    title={isRenewalContract ? 'Renewal Documents' : 'Rental Documents'}
+                    icon={User}
+                    headerAction={
+                      tenantKycDocs && tenantKycDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setViewAllOpen(true); }}
+                          className="flex items-center gap-1 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-2.5 py-1 hover:bg-[#f0faf6] transition-colors cursor-pointer"
+                        >
+                          <FileText size={11} /> View All
+                        </button>
+                      ) : undefined
+                    }
+                  >
                     {tenantKycLoading ? (
                       <p className="flex items-center gap-1.5 text-xs text-[#9b9890]"><Loader2 size={11} className="animate-spin" /> Loading…</p>
                     ) : (
@@ -2402,87 +2454,154 @@ export default function ContractDetailPage() {
                     </StepRow>
                     );})()}
 
-                    {/* Step 5: Move-In & Utility */}
-                    {(()=>{ const state: TLStep = stepState(st4Done, st5Done); return (
-                    <StepRow num={4} label="Move-In & Utility" state={state} last={false}>
-                      {/* Inspection link is ALWAYS visible — before, during, and after this step.
-                          RPs need it to prepare the walkthrough early and to look it up afterwards. */}
+                    {/* Step 4: Utility Account — either party can upload */}
+                    {(()=>{ const state: TLStep = stepState(st4Done, stUtilityDone); return (
+                    <StepRow num={4} label="Utility Account" state={state} last={false}>
+                      <p className="text-[10px] text-[#9b9890] mt-0.5">
+                        DEWA / utility proof — tenant can upload from their portal, or you can attach it here.
+                      </p>
+
+                      {/* Utility upload — shown when step is current OR when doc exists */}
+                      {(state === 'current' || utilityDoc) && (
+                        <div className="mt-2 space-y-1">
+                          <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" className="hidden"
+                            onChange={e => setUtilityFile(e.target.files?.[0] ?? null)} />
+                          {utilityDoc ? (
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#2e9f82]">
+                              <CheckCircle size={10} />
+                              <span className="font-medium">Proof uploaded ✓</span>
+                              {utilityDoc.fileUrl && (
+                                <a href={utilityDoc.fileUrl} target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-0.5 text-[#2e9f82] hover:underline font-normal">
+                                  <ExternalLink size={9} /> View
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={() => utilityInputRef.current?.click()}
+                                  className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
+                                  <UploadCloud size={10} /> {utilityFile ? utilityFile.name : 'Upload proof'}
+                                </button>
+                                {utilityFile && (
+                                  <button onClick={() => uploadUtilityDoc(utilityFile)} disabled={utilityUploading}
+                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
+                                    {utilityUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
+                                  </button>
+                                )}
+                              </div>
+                              {utilityError && <p className="text-[9px] text-red-600">{utilityError}</p>}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </StepRow>
+                    );})()}
+
+                    {/* Step 5: Move-In Inspection */}
+                    {(()=>{ const state: TLStep = stepState(stUtilityDone, stMoveInDone); return (
+                    <StepRow num={5} label="Move-In Inspection" state={state} last={false}>
                       <Link href={`/rental-provider/dashboard/contracts/${contract.id}/inspection?type=move_in`}
                         className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf7] w-fit">
                         <ClipboardCheck size={10} /> {state === 'done' ? 'View Move-In Inspection' : 'Open Move-In Inspection'}
                       </Link>
-                      {state !== 'done' && (
-                        <div className="mt-2 space-y-2">
-                          {feeError && state === 'current' && (
-                            <div className="flex items-center gap-1.5 text-[10px] text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5 border border-red-200">
-                              <AlertCircle size={11} />{feeError}
+
+                      {state !== 'upcoming' && (
+                        <div className="mt-2 space-y-1">
+                          <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide">Inspection signing progress</p>
+                          {[
+                            { label: 'RP submitted inspection', done: !!moveInInsp?.rpSubmittedAt },
+                            { label: 'Tenant signed', done: !!moveInInsp?.tenantSig },
+                            { label: 'RP counter-signed → tenancy activated', done: !!moveInInsp?.rpCounterSig },
+                          ].map(({ label, done }) => (
+                            <div key={label} className="flex items-center gap-1.5">
+                              <span className={`w-3 h-3 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${done ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{done ? '✓' : '○'}</span>
+                              <span className={`text-[10px] ${done ? 'text-[#2e9f82] font-medium' : 'text-[#9b9890]'}`}>{label}</span>
                             </div>
-                          )}
-                          {state === 'current' && (
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input type="checkbox" checked={moveInConfirmed} onChange={e => setMoveInConfirmed(e.target.checked)}
-                                className="rounded border-[#c8c6be] text-[#2e9f82] focus:ring-[#2e9f82]" />
-                              <span className="text-[10px] text-[#6b6860]">Move-in inspection done & keys handed over</span>
-                            </label>
-                          )}
-                          {/* Utility upload + Activate are still gated to 'current' because they're only meaningful
-                              once signatures + Ejari are done. */}
-                          {state === 'current' && (<>
-                          <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" className="hidden"
-                            onChange={e => setUtilityFile(e.target.files?.[0] ?? null)} />
-                          <div className="space-y-1">
-                            <p className="text-[10px] text-[#6b6860] font-medium">Utility account activation verified</p>
-                            {utilityDoc ? (
-                              <div className="flex items-center gap-1.5 text-[10px] text-[#2e9f82]">
-                                <CheckCircle size={10} />
-                                <span className="font-medium">Proof uploaded ✓</span>
-                                {utilityDoc.fileUrl && (
-                                  <a href={utilityDoc.fileUrl} target="_blank" rel="noopener noreferrer"
-                                    className="flex items-center gap-0.5 text-[#2e9f82] hover:underline font-normal">
-                                    <ExternalLink size={9} /> View
-                                  </a>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1.5">
-                                  <button onClick={() => utilityInputRef.current?.click()}
-                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
-                                    <UploadCloud size={10} /> {utilityFile ? utilityFile.name : 'Upload proof'}
-                                  </button>
-                                  {utilityFile && (
-                                    <button onClick={() => uploadUtilityDoc(utilityFile)} disabled={utilityUploading}
-                                      className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
-                                      {utilityUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
-                                    </button>
-                                  )}
-                                </div>
-                                {utilityError && <p className="text-[9px] text-red-600">{utilityError}</p>}
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={doActivateContract}
-                            disabled={!moveInConfirmed || !utilityDoc || markingStep === 'activate'}
-                            className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1 mt-1">
-                            {markingStep === 'activate' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
-                            Activate Contract
-                          </button>
-                          </>)}
+                          ))}
                         </div>
                       )}
+
+                      {/* Inline RP counter-sign — visible when tenant has signed but RP hasn't yet.
+                          Posting here auto-activates the tenancy server-side. */}
+                      {moveInInsp?.tenantSig && !moveInInsp?.rpCounterSig && state !== 'upcoming' && (
+                        <div className="mt-3 p-3 rounded-lg border border-[#fed7aa] bg-[#fff7ed] space-y-2">
+                          <p className="text-[10px] font-semibold text-[#9a3412]">Counter-sign to activate the tenancy</p>
+                          <p className="text-[10px] text-[#c2410c]">Tenant has signed. Add your signature below to lock the inspection record and activate the contract.</p>
+                          <div className="bg-white rounded-md border border-[#fed7aa] overflow-hidden">
+                            <SignaturePad onSignatureChange={setInspSigImg} />
+                          </div>
+                          {inspSigError && <p className="text-[9px] text-red-600">{inspSigError}</p>}
+                          <button
+                            type="button"
+                            disabled={inspSigBusy || !inspSigImg}
+                            onClick={async () => {
+                              if (!inspSigImg) { setInspSigError('Please draw your signature.'); return; }
+                              setInspSigBusy(true); setInspSigError(null);
+                              try {
+                                const res = await fetch(`/api/contracts/${contract.id}/inspection/sign?type=move_in`, {
+                                  method: 'POST', credentials: 'include',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ signatureImage: inspSigImg }),
+                                });
+                                if (!res.ok) {
+                                  const b = await res.json().catch(() => ({}));
+                                  throw new Error(b?.message ?? `Error ${res.status}`);
+                                }
+                                // Re-fetch inspection so rpCounterSig is reflected; reload the contract too
+                                // since signing here auto-activates the tenancy.
+                                const ir = await fetch(`/api/contracts/${contract.id}/inspection?type=move_in`, { credentials: 'include' });
+                                if (ir.ok) {
+                                  const insp = await ir.json();
+                                  setMoveInInsp({ rpSubmittedAt: insp.rpSubmittedAt, tenantSig: insp.tenantSig, rpCounterSig: insp.rpCounterSig, rpCounterSignedAt: insp.rpCounterSignedAt });
+                                }
+                                const cr = await fetch(`/api/contracts/${contract.id}`, { credentials: 'include' });
+                                if (cr.ok) setContract(await cr.json());
+                                setInspSigImg(null);
+                              } catch (e) {
+                                setInspSigError(e instanceof Error ? e.message : 'Failed to sign');
+                              } finally {
+                                setInspSigBusy(false);
+                              }
+                            }}
+                            className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#c2410c] text-white text-[10px] font-semibold hover:bg-[#9a3412] disabled:opacity-50"
+                          >
+                            {inspSigBusy ? <Loader2 size={10} className="animate-spin" /> : <FileSignature size={10} />}
+                            {inspSigBusy ? 'Signing…' : 'Counter-sign & activate tenancy'}
+                          </button>
+                        </div>
+                      )}
+
                       {state === 'done' && (
-                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Unit handed over · Utility active ✓</p>
+                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Unit handed over ✓</p>
                       )}
                     </StepRow>
                     );})()}
 
                     {/* Step 6: Active Tenancy */}
                     {(()=>{ const state: TLStep = tl_isActive ? 'current' : 'upcoming'; return (
-                    <StepRow num={5} label="Active Tenancy" state={state} last={true}>
+                    <StepRow num={6} label="Active Tenancy" state={state} last={true}>
                       {tl_isActive && (
-                        <div className="mt-1 space-y-1">
+                        <div className="mt-1 space-y-2">
                           <p className="text-[10px] text-[#2e9f82] font-medium">Contract is live</p>
                           <p className="text-[10px] text-[#9b9890]">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
+                          <div className="flex gap-2 pt-1">
+                            <Link
+                              href={`/rental-provider/dashboard/contracts/${contract.id}/print`}
+                              target="_blank"
+                              className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf7] transition-colors"
+                            >
+                              <Eye size={10} /> Preview Rental Agreement
+                            </Link>
+                            <Link
+                              href={`/rental-provider/dashboard/contracts/${contract.id}/print/receipt`}
+                              target="_blank"
+                              className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors"
+                            >
+                              <FileText size={10} /> Preview Receipt
+                            </Link>
+                          </div>
                         </div>
                       )}
                     </StepRow>
@@ -3041,6 +3160,143 @@ export default function ContractDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── View All Documents modal ── */}
+      {(() => {
+        const KYC_1  = new Set(['emirates_id', 'passport', 'uae_visa']);
+        const RENTAL = new Set(['employment_letter','bank_statement','marriage_certificate','rental_history','credit_report','utility_clearance','trade_license','tax_registration','moa','business_license','utility_proof_of_payment']);
+        const allDocs = (tenantKycDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
+
+        const imgDocs = allDocs.filter(d => {
+          const up = d.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = d.mimeType === 'application/pdf' || up.endsWith('.pdf');
+          return !isPdf && (d.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(up));
+        });
+        const lightboxSlides = imgDocs.map(d => ({
+          src: d.fileUrl,
+          title: d.displayName ?? d.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          description: d.status === 'processed' ? '✓ Approved' : d.status === 'rejected' ? '✗ Rejected' : 'Uploaded',
+        }));
+
+        if (!viewAllOpen) {
+          return lightboxOpen ? (
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[LbZoom, LbCaptions, LbThumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          ) : null;
+        }
+
+        const occ1   = allDocs.filter(d => KYC_1.has(d.documentKey));
+        const rental = allDocs.filter(d => RENTAL.has(d.documentKey));
+        const extraMap = new Map<number, TenantKycDoc[]>();
+        const other: TenantKycDoc[] = [];
+        for (const d of allDocs) {
+          const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+          if (m) { const n = parseInt(m[2]); if (!extraMap.has(n)) extraMap.set(n, []); extraMap.get(n)!.push(d); }
+          else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) other.push(d);
+        }
+        type DocGroup = { heading: string; sub?: string; docs: TenantKycDoc[] };
+        const groups: DocGroup[] = [];
+        if (occ1.length)   groups.push({ heading: 'Occupant 1 — Identity', docs: occ1 });
+        [...extraMap.keys()].sort((a,b) => a-b).forEach(n =>
+          groups.push({ heading: `Occupant ${n} — Identity`, sub: 'optional', docs: extraMap.get(n)! })
+        );
+        if (rental.length) groups.push({ heading: 'Rental Documents', docs: rental });
+        if (other.length)  groups.push({ heading: 'Other', docs: other });
+
+        const tenantName = contract.tenant.name?.trim() || '—';
+        const unitLabel  = contract.unit.name ?? (contract.unit.number ? `Unit ${contract.unit.number}` : '—');
+
+        function StatusChip({ status }: { status: string }) {
+          if (status === 'processed') return <span className="text-[9px] font-bold bg-[#dcfce7] text-[#16a34a] rounded px-1.5 py-0.5">Approved</span>;
+          if (status === 'rejected')  return <span className="text-[9px] font-bold bg-[#fee2e2] text-[#b91c1c] rounded px-1.5 py-0.5">Rejected</span>;
+          return <span className="text-[9px] font-bold bg-[#f4f3ef] text-[#6b6860] rounded px-1.5 py-0.5">Uploaded</span>;
+        }
+
+        function DocEntry({ doc }: { doc: TenantKycDoc }) {
+          const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const urlPath = doc.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = doc.mimeType === 'application/pdf' || urlPath.endsWith('.pdf');
+          const isImg = !isPdf && (doc.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(urlPath));
+          const imgIdx = isImg ? imgDocs.findIndex(d => d.id === doc.id) : -1;
+          return (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[12px] font-semibold text-[#1a1916]">{label}</span>
+                <StatusChip status={doc.status} />
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0">
+                  Open <ExternalLink size={10} />
+                </a>
+              </div>
+              {isPdf ? (
+                <iframe src={doc.fileUrl} className="w-full h-[480px] rounded-xl border border-[#e8e6e0]" />
+              ) : isImg ? (
+                <button type="button" onClick={() => { setLightboxIndex(imgIdx); setLightboxOpen(true); }}
+                  className="group relative block w-full rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f8f7f4] cursor-zoom-in">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={doc.fileUrl} alt={label} loading="lazy"
+                    className="max-h-[320px] w-full object-contain block transition-transform duration-200 group-hover:scale-[1.02]" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                    <span className="bg-white/90 rounded-full p-2 shadow"><ZoomIn size={18} className="text-[#1a1916]" /></span>
+                  </div>
+                </button>
+              ) : (
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline">
+                  <FileText size={14} /> Open file
+                </a>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <>
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4"
+              onClick={(e) => { if (e.target === e.currentTarget) setViewAllOpen(false); }}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+                <div className="sticky top-0 bg-white rounded-t-2xl border-b border-[#e8e6e0] px-6 py-4 flex items-center justify-between z-10">
+                  <div>
+                    <p className="text-sm font-bold text-[#1a1916]">{tenantName}</p>
+                    <p className="text-[11px] text-[#9b9890]">{unitLabel} · {allDocs.length} document{allDocs.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button onClick={() => setViewAllOpen(false)}
+                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-[#f4f3ef] text-[#6b6860] transition-colors cursor-pointer">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="px-6 py-6 space-y-8">
+                  {groups.map((g, gi) => (
+                    <section key={gi}>
+                      <div className="flex items-baseline gap-2 mb-4 border-b-2 border-[#2e9f82] pb-1.5">
+                        <h2 className="text-[13px] font-bold text-[#1a1916]">{g.heading}</h2>
+                        {g.sub && <span className="text-[10px] text-[#9b9890]">{g.sub}</span>}
+                      </div>
+                      {g.docs.map(doc => <DocEntry key={doc.id} doc={doc} />)}
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[LbZoom, LbCaptions, LbThumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          </>
+        );
+      })()}
     </div>
   );
 }

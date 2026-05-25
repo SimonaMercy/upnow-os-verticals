@@ -73,6 +73,72 @@ export interface UnitFormData {
   description: string;
 }
 
+/**
+ * Compose a sensible listing description from the unit's structured fields.
+ * Used by the "Generate" button on the Description input — RPs can edit
+ * freely afterwards, but this gives them a non-blank starting point that
+ * matches the data they already filled in.
+ */
+function composeUnitDescription(d: UnitFormData, propertyCategory: string): string {
+  const typeLabel = d.unitType ? d.unitType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null;
+  const isResidential = RESIDENTIAL_UNIT_TYPES.includes(d.unitType);
+  const isCommercial  = COMMERCIAL_UNIT_TYPES.includes(d.unitType);
+  const isIndustrial  = INDUSTRIAL_UNIT_TYPES.includes(d.unitType);
+
+  // Headline: tier + bedroom count (residential) OR just the type
+  const tierLabel = UNIT_TIERS.find(t => t.id === d.unitTier)?.label;
+  const tierPrefix = tierLabel && tierLabel !== 'Standard' ? `${tierLabel}-tier ` : '';
+  let headline: string;
+  if (isResidential) {
+    const beds = d.bedrooms === 'Studio' ? 'studio' : d.bedrooms ? `${d.bedrooms}-bedroom` : '';
+    headline = [tierPrefix, beds, typeLabel ? typeLabel.toLowerCase() : 'home'].filter(Boolean).join(' ').trim();
+  } else if (isCommercial) {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'commercial unit'}`;
+  } else if (isIndustrial) {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'industrial unit'}`;
+  } else {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? propertyCategory.toLowerCase() + ' unit'}`;
+  }
+  headline = headline.charAt(0).toUpperCase() + headline.slice(1);
+
+  // First sentence: location/size details
+  const sentenceBits: string[] = [];
+  if (d.floor) sentenceBits.push(`located on the ${ordinal(d.floor)} floor`);
+  if (d.unitSizeSqft) sentenceBits.push(`spanning ${Number(d.unitSizeSqft).toLocaleString('en-AE')} sqft`);
+  if (isResidential && d.bathrooms) {
+    const bathLabel = Number(d.bathrooms) === 1 ? '1 bathroom' : `${d.bathrooms} bathrooms`;
+    sentenceBits.push(`with ${bathLabel}`);
+  }
+  const sentence1 = sentenceBits.length
+    ? `${headline}${sentenceBits.length ? ', ' + sentenceBits.join(', ') : ''}.`
+    : `${headline}.`;
+
+  // Second sentence: view + furnishing
+  const sentence2Bits: string[] = [];
+  if (d.view) sentence2Bits.push(`Enjoys a ${d.view.toLowerCase()}`);
+  if (isResidential && d.furnishing && d.furnishing !== 'Unfurnished') {
+    const furnLabel = d.furnishing.toLowerCase();
+    sentence2Bits.push(sentence2Bits.length ? `comes ${furnLabel}` : `Comes ${furnLabel}`);
+  }
+  const sentence2 = sentence2Bits.length ? sentence2Bits.join(' and ') + '.' : '';
+
+  // Third sentence: amenities (top 6)
+  const topAmenities = d.amenities.slice(0, 6);
+  const sentence3 = topAmenities.length
+    ? `Amenities include ${topAmenities.join(', ').toLowerCase()}.`
+    : '';
+
+  return [sentence1, sentence2, sentence3].filter(Boolean).join(' ').trim();
+}
+
+function ordinal(n: string): string {
+  const v = Number(n);
+  if (Number.isNaN(v)) return n;
+  if (v % 100 >= 11 && v % 100 <= 13) return `${v}th`;
+  const suffix = ['th', 'st', 'nd', 'rd'][v % 10] ?? 'th';
+  return `${v}${v % 10 <= 3 ? suffix : 'th'}`;
+}
+
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
   floor: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', view: '',
@@ -144,6 +210,7 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (open) { setForm({ ...EMPTY_UNIT, ...initial }); setErrors({}); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -377,15 +444,37 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
             </div>
           </div>
 
-          {/* Description */}
+          {/* Description — with auto-generate from selected fields */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Description</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-[#6b6860]">Unit Description</label>
+              <button
+                type="button"
+                onClick={() => upd('description', composeUnitDescription(form, propertyCategory))}
+                disabled={!form.unitType}
+                title={form.unitType ? 'Compose a description from the selected fields' : 'Select a unit type first'}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors',
+                  form.unitType
+                    ? 'bg-[#d8f2e8] text-[#1a7a5a] hover:bg-[#c0e8d6] cursor-pointer'
+                    : 'bg-[#f4f3ef] text-[#9b9890] cursor-not-allowed',
+                )}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+                </svg>
+                {form.description ? 'Re-generate' : 'Auto-generate'}
+              </button>
+            </div>
             <textarea
               className={cn(INPUT, 'min-h-[70px] resize-vertical')}
-              placeholder="Describe this unit for the listing — features, highlights, unique selling points…"
+              placeholder="Describe this unit for the listing — features, highlights, unique selling points… or click Auto-generate above to compose from the selected fields."
               value={form.description}
               onChange={e => upd('description', e.target.value)}
             />
+            <p className="text-[10px] text-[#9b9890] mt-1">
+              Tip: fill in unit type, beds/baths, view, furnishing, and amenities first, then auto-generate for a sharper draft.
+            </p>
           </div>
 
           {/* Actions */}

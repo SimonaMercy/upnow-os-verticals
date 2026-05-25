@@ -35,6 +35,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { section: 'Leasing' },
     { label: 'Leads',          href: '/rental-provider/dashboard/leads',           icon: TrendingUp },
     { label: 'Contracts',      href: '/rental-provider/dashboard/orders',          icon: FileText },
+    { label: 'Templates',      href: '/rental-provider/dashboard/templates',       icon: FileText },
     { section: 'Finance' },
     { label: 'Receivables',    href: '/rental-provider/dashboard/receivables',     icon: Receipt },
     { label: 'Deposits',       href: '/rental-provider/dashboard/deposits',        icon: Wallet },

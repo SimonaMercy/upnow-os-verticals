@@ -20,7 +20,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { getRequiredDocs, getRenewalRequiredDocs } from '@/lib/docRequirements';
+import { getRequiredDocs, getRenewalRequiredDocs, KYC_DOCS, getRentalSectionDocs, getOccupantDocs, deriveOccupantCount } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import {
   Calendar, Clock, MapPin, X, CheckCircle2, Ban, Home,
@@ -48,7 +48,8 @@ interface SpaceUnit {
     fullAddress: string | null;
     emirate?: { name: string } | null;
     community?: { name: string } | null;
-    rentalProvider?: { id: number; companyName: string | null; user?: { name?: string | null } | null } | null;
+    rentalProvider?: { id: number; companyName: string | null; user?: { name?: string | null } | null; preferredStartDays?: number[] | null } | null;
+    rental_provider?: { id: number; companyName: string | null; user?: { name?: string | null } | null; preferredStartDays?: number[] | null } | null;
   };
 }
 
@@ -97,6 +98,7 @@ interface PaymentPlan {
   securityDepositFils: number;
   items: PaymentPlanItem[];
   notes?: string;
+  rentalIndexReportUrl?: string;
   issuedAt: string;
 }
 
@@ -674,6 +676,7 @@ function InlineDocRow({
   );
 }
 
+
 function TenancyJourneyPanel({
   contract,
   viewingStatus,
@@ -735,7 +738,7 @@ function TenancyJourneyPanel({
       return d.toISOString().slice(0, 10);
     })() : null;
     const fmt = (iso: string | null) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-    const rp = unit?.property?.rentalProvider;
+    const rp = unit?.property?.rentalProvider ?? unit?.property?.rental_provider;
     const landlordName = rp?.user?.name?.trim() || null;
     const landlordCompany = rp?.companyName?.trim() || null;
     const ownerName = landlordName && landlordCompany ? `${landlordName} (${landlordCompany})` : (landlordName || landlordCompany || 'To be confirmed');
@@ -849,6 +852,9 @@ function TenancyJourneyPanel({
   // ---------- Document collection (inline upload) ----------
   const viewed = ['completed', 'no_show'].includes(viewingStatus ?? '');
   const requiredDocs = getRequiredDocs(unitType);
+  const isResidential = !unitType || !['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue','warehouse','open_yard','storage_unit','cold_storage','logistics_facility'].includes(unitType);
+  const [occupantCount, setOccupantCount] = useState<number>(1);
+  const rentalSectionDocs = getRentalSectionDocs(unitType);
   const [myDocsLoading, setMyDocsLoading] = useState(false);
   const [myDocs, setMyDocs]               = useState<InlineDoc[] | null>(null);
   const [tenantProfileId, setTenantPId]   = useState<number | null>(null);
@@ -857,8 +863,11 @@ function TenancyJourneyPanel({
 
   // ---------- Contract preferences (start date, installments) ----------
   const _initMoveIn = initialDesiredMoveIn?.slice(0, 10) ?? '';
+  const rpPreferredDays: number[] = (unit?.property?.rentalProvider ?? unit?.property?.rental_provider)?.preferredStartDays ?? [];
+  const _initDay = _initMoveIn ? parseInt(_initMoveIn.slice(8, 10)) || 1 : 1;
+
   const [prefMonth,      setPrefMonth]      = useState<string>(_initMoveIn.slice(0, 7) || '');
-  const [prefDay,        setPrefDay]        = useState<1 | 15>(_initMoveIn.endsWith('-15') ? 15 : 1);
+  const [prefDay,        setPrefDay]        = useState<number>(_initMoveIn ? _initDay : (rpPreferredDays[0] ?? 1));
   const [prefCheques,    setPrefCheques]    = useState<number>(initialPreferredChequeCount ?? 4);
   const [prefSaving,   setPrefSaving]   = useState(false);
   const [prefSaved,    setPrefSaved]    = useState(false);
@@ -890,7 +899,7 @@ function TenancyJourneyPanel({
     if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
     else setCalMonth(m => m + 1);
   }
-  function selectCalDate(year: number, month: number, day: 1 | 15) {
+  function selectCalDate(year: number, month: number, day: number) {
     const mm = `${year}-${String(month + 1).padStart(2, '0')}`;
     setPrefMonth(mm);
     setPrefDay(day);
@@ -1076,9 +1085,25 @@ function TenancyJourneyPanel({
   const uploadedKeys = new Set((myDocs ?? []).filter(d => d.status !== 'pending').map(d => d.documentKey));
   const rejectedDocs = (myDocs ?? []).filter(d => d.status === 'rejected');
   const rejectedKeys = new Set(rejectedDocs.map(d => d.documentKey));
-  const requiredMissing   = requiredDocs.filter(d => d.required && !uploadedKeys.has(d.key));
+  // Identity docs for additional occupants (2..n). Only applies to residential.
+  const occupantDocs = isResidential ? getOccupantDocs(occupantCount) : [];
+  const requiredMissing   = [
+    ...requiredDocs.filter(d => d.required && !uploadedKeys.has(d.key)),
+    ...occupantDocs.filter(d => !uploadedKeys.has(d.key)),
+  ];
   const rpDocsUploaded    = rpRequestedDocs.every(req => uploadedKeys.has(req.key) && !rejectedKeys.has(req.key));
   const docsOk = myDocs !== null && requiredMissing.length === 0 && rpDocsUploaded && rejectedDocs.length === 0;
+
+  // Auto-hydrate occupant count from previously-uploaded occupant_N_* docs so
+  // the stepper survives reload (we don't persist count in the DB — the docs
+  // themselves are the source of truth).
+  useEffect(() => {
+    if (!myDocs) return;
+    const derived = deriveOccupantCount(myDocs.map(d => d.documentKey));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (derived > occupantCount) setOccupantCount(derived);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myDocs]);
 
   // Contract-driven steps
   const isIssued  = contract?.status === 'issued' || contract?.status === 'active';
@@ -1096,10 +1121,10 @@ function TenancyJourneyPanel({
     ? (chequesOk ? 'done' : planShared ? 'current' : docsOk ? 'current' : 'upcoming')
     : 'done';
 
-  // 9 steps:
+  // 10 steps (mirrors the RP timeline so customer and RP always agree on the current stage):
   // 1 Viewing Booked  2 Viewing Completed  3 Application Documents
   // 4 Payment Plan (new pipeline) / Submit Reservation (legacy)
-  // 5 Contract Issued  6 Signatures  7 Ejari Registration  8 Utility  9 Active Tenancy
+  // 5 Contract Issued  6 Signatures  7 Ejari Registration  8 Utility  9 Move-In Inspection  10 Active Tenancy
   const s1: TLState = 'done';
   const s2 = ss(true, viewed);
   const s_docs = ss(viewed, docsOk);
@@ -1110,6 +1135,11 @@ function TenancyJourneyPanel({
   const s5 = ss(isIssued, hasSigned);
   const s6 = ss(hasSigned, hasEjari);
   const s7 = ss(hasEjari, hasUtility);
+  // Move-in inspection — done once tenant counter-signed OR contract is active.
+  const inspectionSubmitted = !!contract?.moveInInspection?.submitted;
+  const inspectionSignedByTenant = !!contract?.moveInInspection?.signedByTenant;
+  const moveInDone = inspectionSignedByTenant || isActive;
+  const s_movein = ss(hasUtility, moveInDone);
   const s8: TLState = isActive ? 'current' : 'upcoming';
 
   const headerSub = leadStage === 'rejected'
@@ -1219,6 +1249,7 @@ function TenancyJourneyPanel({
     );
   }
 
+
   return (
     <div className="overflow-hidden border-t border-[#e8e6e0]">
       {/* Green header */}
@@ -1254,6 +1285,8 @@ function TenancyJourneyPanel({
             const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
             const calMonthLabel  = new Date(calYear, calMonth, 1).toLocaleString('en-AE', { month: 'long', year: 'numeric' });
             const todayMidnight  = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate());
+            // RP-restricted day-of-month list (empty = all days allowed)
+            const dayAllowed = (day: number) => rpPreferredDays.length === 0 || rpPreferredDays.includes(day);
 
             return (
               <div className="mt-2 space-y-3">
@@ -1289,20 +1322,25 @@ function TenancyJourneyPanel({
                             {Array.from({ length: calFirstDow }, (_, i) => <div key={`e${i}`} />)}
                             {Array.from({ length: calDaysInMonth }, (_, i) => {
                               const day = i + 1;
-                              const isActive = day === 1 || day === 15;
+                              const isActive = dayAllowed(day);
                               const isPast = new Date(calYear, calMonth, day) < todayMidnight;
                               const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                               const isSelected = dateStr === prefMoveIn;
                               if (!isActive) return <div key={day} className="flex items-center justify-center h-7 text-[9px] text-[#e0deda]">{day}</div>;
                               return (
                                 <button key={day} type="button" disabled={isPast}
-                                  onClick={() => selectCalDate(calYear, calMonth, day as 1 | 15)}
+                                  onClick={() => selectCalDate(calYear, calMonth, day)}
                                   className={`flex items-center justify-center h-7 rounded-lg text-[10px] font-bold transition-colors ${isSelected ? 'bg-[#2e9f82] text-white cursor-pointer' : isPast ? 'text-[#c8c6c0] cursor-not-allowed' : 'bg-[#e8f5f1] text-[#2e9f82] hover:bg-[#2e9f82] hover:text-white cursor-pointer'}`}>
                                   {day}
                                 </button>
                               );
                             })}
                           </div>
+                          {rpPreferredDays.length > 0 && (
+                            <p className="text-[8px] text-[#9b9890] mt-2 leading-relaxed">
+                              Only days highlighted by the landlord can be selected as a start date.
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1324,6 +1362,29 @@ function TenancyJourneyPanel({
                   </div>
                 )}
 
+                {/* Number of Occupants (residential only) */}
+                {viewingId && isResidential && (
+                  <div className="bg-[#f4f3ef] rounded-xl px-3 py-3">
+                    <p className="text-[10px] font-semibold text-[#3d3b35] uppercase tracking-wide mb-2">Number of Occupants</p>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => setOccupantCount(c => Math.max(1, c - 1))}
+                        disabled={occupantCount <= 1}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-[#d6d4ce] bg-white text-[#3d3b35] hover:border-[#2e9f82] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">−</button>
+                      <span className="text-[12px] font-bold text-[#1a1916] tabular-nums min-w-[18px] text-center">{occupantCount}</span>
+                      <button type="button" onClick={() => setOccupantCount(c => c + 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-[#d6d4ce] bg-white text-[#3d3b35] hover:border-[#2e9f82] cursor-pointer">+</button>
+                      <span className="ml-2 text-[10px] text-[#6b6860]">
+                        {occupantCount === 1 ? 'Just me' : `${occupantCount - 1} additional ${occupantCount === 2 ? 'occupant' : 'occupants'}`}
+                      </span>
+                    </div>
+                    {occupantCount > 1 && (
+                      <p className="text-[10px] text-[#6b6860] mt-2 leading-relaxed">
+                        Each additional occupant needs Emirates ID, Passport, and UAE Visa uploaded below.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Documents */}
                 {myDocsLoading ? (
                   <p className="text-[10px] text-[#9b9890] flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading documents…</p>
@@ -1332,6 +1393,16 @@ function TenancyJourneyPanel({
                     {requiredDocs.filter(d => d.required).map(req => (
                       <InlineDocRow key={req.key} req={req} docRecord={(myDocs ?? []).find(d => d.documentKey === req.key)} uploading={docUploading === req.key} onUpload={handleUpload} />
                     ))}
+                    {occupantDocs.length > 0 && (
+                      <>
+                        <p className="text-[10px] font-semibold text-[#3d3b35] mt-2 mb-0.5 flex items-center gap-1">
+                          <Info size={10} /> Identity documents for additional occupants
+                        </p>
+                        {occupantDocs.map(req => (
+                          <InlineDocRow key={req.key} req={req} docRecord={(myDocs ?? []).find(d => d.documentKey === req.key)} uploading={docUploading === req.key} onUpload={handleUpload} />
+                        ))}
+                      </>
+                    )}
                     {rpRequestedDocs.length > 0 && (
                       <>
                         <p className="text-[10px] font-semibold text-[#1e40af] mt-2 mb-0.5 flex items-center gap-1"><Info size={10} /> Additional documents requested by provider</p>
@@ -1388,194 +1459,61 @@ function TenancyJourneyPanel({
               </div>
             );
           })()}
+          {s_docs === 'done' && !prefSaved && !docsOk && (
+            <p className="text-[10px] text-[#2e9f82] mt-0.5">All documents uploaded ✓</p>
+          )}
         </StepRow>
 
+        {/* Step 4: Payment Plan (new pipeline) or Reserve Unit (legacy) */}
         {isNewPipeline ? (
-          /* ── New pipeline: Step 4 = Payment Plan & Cheques ── */
-          <StepRow num={4} label="Payment Plan & Cheques" state={s_plan} last={false}>
-            {s_plan === 'current' && (
-              <div className="mt-2 space-y-2">
-                {!planShared ? (
-                  <p className="text-[10px] text-[#0369a1] bg-[#f0f9ff] border border-[#bae6fd] rounded-lg px-2.5 py-1.5">
-                    ✓ All done on your end — your rental provider will review and issue the payment plan shortly.
+          <StepRow num={4} label="Payment Plan" state={s_plan} last={false}>
+            {s_plan === 'current' && paymentPlan && (() => {
+              const aed = (fils: number) => `AED ${(fils / 100).toLocaleString('en-AE')}`;
+              const items = sortPlanItems(paymentPlan.items);
+              return (
+                <div className="mt-2 space-y-2">
+                  <p className="text-[10px] text-[#9b9890]">
+                    {paymentPlan.chequeCount} cheque{paymentPlan.chequeCount !== 1 ? 's' : ''} · {aed(paymentPlan.rentFils)} annual rent
                   </p>
-                ) : (
-                  <>
-                    {/* Plan ready / updated banner */}
-                    {paymentPlan && !chequesOk && leadStage === 'payment_plan_shared' && (
-                      <div className="flex items-start gap-2 bg-[#fef9c3] border border-[#fde68a] rounded-lg px-3 py-2">
-                        <AlertTriangle size={11} className="text-[#f59e0b] shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-[10px] font-semibold text-[#92400e]">Payment Plan Ready — Action Required</p>
-                          <p className="text-[10px] text-[#92400e] mt-0.5">
-                            Your rental provider has shared a payment plan. Please review the details below and confirm when your cheques are ready.
-                            {paymentPlan.issuedAt && (
-                              <> · <span className="opacity-70">Issued {new Date(paymentPlan.issuedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}</span></>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {paymentPlan && (() => {
-                      const startDate = paymentPlan.items?.[0]?.dueDate ?? null;
-                      const endDate = startDate ? (() => {
-                        const d = new Date(startDate + 'T00:00:00');
-                        d.setFullYear(d.getFullYear() + 1);
-                        d.setDate(d.getDate() - 1);
-                        return d.toISOString().slice(0, 10);
-                      })() : null;
-                      const fmt = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
-                      const tenantName = user?.name?.trim() ?? '';
-                      const rp = unit?.property?.rentalProvider;
-                      const landlordName = rp?.user?.name?.trim() || null;
-                      const landlordCompany = rp?.companyName?.trim() || null;
-                      const ownerName = landlordName && landlordCompany
-                        ? `${landlordName} (${landlordCompany})`
-                        : (landlordName || landlordCompany);
-                      const location = [unit?.property?.community?.name, unit?.property?.emirate?.name].filter(Boolean).join(', ') || unit?.property?.fullAddress || null;
-                      return (
-                        <div className="bg-white border border-[#bae6fd] rounded-lg overflow-hidden">
-                          {/* Header */}
-                          <div className="bg-[#f0f9ff] border-b border-[#bae6fd] px-3 py-2 flex items-center justify-between">
-                            <p className="text-[10px] font-semibold text-[#0369a1] flex items-center gap-1.5">
-                              <FileSignature size={11} /> Contract &amp; Payment Plan
-                            </p>
-                            <button
-                              type="button"
-                              onClick={handlePrintPlan}
-                              className="text-[10px] font-semibold text-[#0369a1] hover:text-[#0284c7] flex items-center gap-1 cursor-pointer"
-                            >
-                              <Printer size={10} /> Print / Download
-                            </button>
-                          </div>
-
-                          {/* Details grid */}
-                          <div className="p-3 border-b border-[#e0f2fe] grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
-                            <div className="col-span-2">
-                              <p className="text-[9px] text-[#9b9890] uppercase tracking-wide">Cheque Drawer (You)</p>
-                              {tenantName ? (
-                                <p className="text-[#1a1916] font-semibold">{tenantName}</p>
-                              ) : (
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <input
-                                    type="text"
-                                    value={nameInput}
-                                    onChange={e => setNameInput(e.target.value)}
-                                    placeholder="Enter your full name"
-                                    className="flex-1 text-[10px] border border-[#fecaca] rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#f59e0b]/30 bg-white"
-                                  />
-                                  <button type="button" disabled={nameSaving} onClick={handleSaveName}
-                                    className="text-[10px] px-2.5 py-1 rounded bg-[#2e9f82] text-white font-semibold disabled:opacity-50 cursor-pointer">
-                                    {nameSaving ? 'Saving…' : 'Save'}
-                                  </button>
-                                </div>
-                              )}
-                              {nameError && <p className="text-[9px] text-red-600 mt-0.5">{nameError}</p>}
-                            </div>
-                            <div className="col-span-2">
-                              <p className="text-[9px] text-[#9b9890] uppercase tracking-wide">Cheque Payee (Landlord)</p>
-                              <p className="text-[#1a1916] font-semibold">{ownerName ?? <span className="text-[#9b9890] font-normal italic">Will be confirmed by your landlord</span>}</p>
-                            </div>
-                            {unit?.property?.buildingName && (
-                              <div>
-                                <p className="text-[9px] text-[#9b9890] uppercase tracking-wide">Building</p>
-                                <p className="text-[#1a1916] font-semibold">{unit.property.buildingName}</p>
-                              </div>
-                            )}
-                            {unit?.unitNumber && (
-                              <div>
-                                <p className="text-[9px] text-[#9b9890] uppercase tracking-wide">Unit No.</p>
-                                <p className="text-[#1a1916] font-semibold">{unit.unitNumber}</p>
-                              </div>
-                            )}
-                            {location && (
-                              <div className="col-span-2">
-                                <p className="text-[9px] text-[#9b9890] uppercase tracking-wide">Location</p>
-                                <p className="text-[#1a1916] font-semibold">{location}</p>
-                              </div>
-                            )}
-                            {startDate && endDate && (
-                              <div className="col-span-2">
-                                <p className="text-[9px] text-[#9b9890] uppercase tracking-wide">Contract Period</p>
-                                <p className="text-[#1a1916] font-semibold">{fmt(startDate)} → {fmt(endDate)} <span className="text-[#9b9890] font-normal">(12 months)</span></p>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Fee summary */}
-                          <div className="px-3 py-2 border-b border-[#e0f2fe] bg-[#fafaf8]">
-                            <p className="text-[9px] text-[#9b9890] uppercase tracking-wide mb-1">Rent &amp; Fees</p>
-                            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#6b6860]">
-                              {paymentPlan.originalRentFils != null ? (
-                                <span className="col-span-2">
-                                  Annual Rent: <span className="line-through text-[#9b9890]">AED {(paymentPlan.originalRentFils / 100).toLocaleString('en-AE')}</span>
-                                  {' '}<span className="text-[#16a34a] font-semibold">→ AED {(paymentPlan.rentFils / 100).toLocaleString('en-AE')}</span>
-                                  {' '}<span className="text-[#16a34a] text-[9px]">
-                                    ({paymentPlan.discountType === 'percent'
-                                      ? `${paymentPlan.discountPercent}% discount`
-                                      : `AED ${((paymentPlan.discountFils ?? 0) / 100).toLocaleString('en-AE')} discount`})
-                                  </span>
-                                </span>
-                              ) : (
-                                paymentPlan.rentFils != null && <span>Annual Rent: <b className="text-[#1a1916]">AED {(paymentPlan.rentFils / 100).toLocaleString('en-AE')}</b></span>
-                              )}
-                              {paymentPlan.securityDepositFils != null && <span>Security Deposit: <b className="text-[#1a1916]">AED {(paymentPlan.securityDepositFils / 100).toLocaleString('en-AE')}</b></span>}
-                              {paymentPlan.adminFeeFils > 0 && <span>Admin Fee: <b className="text-[#1a1916]">AED {(paymentPlan.adminFeeFils / 100).toLocaleString('en-AE')}</b></span>}
-                              {paymentPlan.ejariFils > 0 && <span>Ejari Fee: <b className="text-[#1a1916]">AED {(paymentPlan.ejariFils / 100).toLocaleString('en-AE')}</b></span>}
-                              {paymentPlan.commissionFils > 0 && <span>Commission: <b className="text-[#1a1916]">AED {(paymentPlan.commissionFils / 100).toLocaleString('en-AE')}</b></span>}
-                            </div>
-                            <p className="text-[10px] font-bold text-[#0369a1] mt-1">
-                              Total Contract Value: AED {(paymentPlan.totalAmountFils / 100).toLocaleString('en-AE')} · {paymentPlan.chequeCount} cheques
-                            </p>
-                          </div>
-
-                          {/* Cheque schedule */}
-                          <div className="px-3 py-2">
-                            <p className="text-[9px] text-[#9b9890] uppercase tracking-wide mb-1">Cheque Schedule</p>
-                            <div className="space-y-1">
-                              {sortPlanItems(paymentPlan.items).map((item, i) => (
-                                <p key={item.index} className="text-[10px] py-0.5 border-b border-[#e0f2fe] last:border-0 leading-snug">
-                                  <span className="text-[#0369a1]">#{i + 1} {item.description ?? `Cheque ${i + 1}`}</span>
-                                  <span className="text-[#6b6860]"> — </span>
-                                  <span className="font-semibold text-[#1a1916]">AED {(item.amountFils / 100).toLocaleString('en-AE')}</span>
-                                  <span className="text-[#6b6860]"> · {item.dueDate}</span>
-                                </p>
-                              ))}
-                            </div>
-                            {paymentPlan.notes && <p className="text-[10px] text-[#6b6860] mt-1.5 italic">{paymentPlan.notes}</p>}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    {!chequesOk && leadStage === 'payment_plan_shared' && (
-                      <>
-                        <p className="text-[10px] text-[#6b6860]">Prepare your cheques as per the schedule above, then confirm.</p>
-                        {chequesError && (
-                          <p className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">{chequesError}</p>
-                        )}
-                        <button
-                          disabled={chequesLoading}
-                          onClick={handleChequesReady}
-                          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white rounded-lg px-3 py-2 disabled:opacity-50 cursor-pointer"
-                          style={{ background: '#2e9f82' }}
-                        >
-                          <CheckCircle2 size={12} />
-                          {chequesLoading ? 'Submitting…' : 'Confirm Cheques Ready'}
-                        </button>
-                      </>
-                    )}
-                    {chequesOk && (
-                      <p className="text-[10px] text-[#2e9f82]">Cheques confirmed — provider is collecting them ✓</p>
-                    )}
-                  </>
-                )}
-              </div>
+                  {items.slice(0, 3).map((it, i) => (
+                    <div key={i} className="flex items-center justify-between text-[10px] bg-[#f4f2ef] rounded-lg px-2.5 py-1.5">
+                      <span className="text-[#6b6860]">{it.description ?? `Cheque ${i + 1}`}</span>
+                      <span className="font-semibold text-[#1a1916] tabular-nums">{aed(it.amountFils)}</span>
+                      {it.dueDate && <span className="text-[#9b9890]">{new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short' })}</span>}
+                    </div>
+                  ))}
+                  {chequesOk ? (
+                    <p className="text-[10px] text-[#2e9f82] flex items-center gap-1"><CheckCircle2 size={10} /> Cheques confirmed ✓</p>
+                  ) : (
+                    <button
+                      disabled={chequesLoading}
+                      onClick={async () => {
+                        if (!leadId) return;
+                        setChequesLoading(true); setChequesError(null);
+                        try {
+                          const r = await fetch(`/api/leads/${leadId}/cheques-submitted`, { method: 'PATCH', credentials: 'include' });
+                          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message ?? `Error ${r.status}`);
+                          setChequesDone(true); onStageChange?.('cheques_submitted');
+                        } catch (e) { setChequesError(e instanceof Error ? e.message : 'Failed'); }
+                        finally { setChequesLoading(false); }
+                      }}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white rounded-lg px-3 py-2 disabled:opacity-50 cursor-pointer"
+                      style={{ background: '#2e9f82' }}
+                    >
+                      {chequesLoading ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                      Confirm Cheques Ready
+                    </button>
+                  )}
+                  {chequesError && <p className="text-[10px] text-red-600">{chequesError}</p>}
+                </div>
+              );
+            })()}
+            {s_plan === 'current' && !paymentPlan && (
+              <p className="text-[10px] text-[#9b9890] mt-0.5">Waiting for your payment plan from the landlord</p>
             )}
-            {s_plan === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Payment plan confirmed & cheques submitted ✓</p>}
+            {s_plan === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Cheques confirmed ✓</p>}
           </StepRow>
         ) : (
-          /* ── Legacy pipeline: Step 4 = Submit Reservation ── */
           <StepRow num={4} label="Submit Reservation" state={s3} last={false}>
             {s3 === 'current' && (
               <div className="mt-2 space-y-2">
@@ -1620,13 +1558,20 @@ function TenancyJourneyPanel({
 
         <StepRow num={5} label="Contract Issued" state={s4} last={false}>
           {s4 === 'current' && <p className="text-[10px] text-[#9b9890] mt-0.5">Landlord is preparing your contract</p>}
-          {s4 === 'done' && contract && (
-            <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued ✓</p>
-          )}
+          {s4 === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued ✓</p>}
         </StepRow>
 
         <StepRow num={6} label="Sign Contract" state={s5} last={false}>
-          {s5 === 'current' && <p className="text-[10px] text-[#9b9890] mt-0.5">Awaiting your signature on the contract</p>}
+          {s5 === 'current' && contract && (
+            <div className="mt-1 space-y-1.5">
+              <p className="text-[10px] text-[#9b9890]">Review and sign the contract above</p>
+              <Link href={`/dashboard/customer/contracts/${contract.id}`}
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white rounded-lg px-3 py-2 cursor-pointer"
+                style={{ background: '#2e9f82' }}>
+                Sign Contract <ArrowRight size={11} />
+              </Link>
+            </div>
+          )}
           {s5 === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">All parties signed ✓</p>}
         </StepRow>
 
@@ -1638,7 +1583,7 @@ function TenancyJourneyPanel({
         <StepRow num={8} label="Add Utility Account" state={s7} last={false}>
           {s7 === 'current' && (
             <div className="mt-2 space-y-2">
-              {utilitySuccess || hasUtility ? (
+              {utilitySuccess || contract?.utilityAccountNumber ? (
                 <p className="text-[10px] text-[#2e9f82]">Utility account submitted ✓{contract?.utilityAccountNumber ? ` · ${contract.utilityAccountNumber}` : ''}</p>
               ) : (
                 <>
@@ -1660,26 +1605,6 @@ function TenancyJourneyPanel({
                       {utilitySaving ? '…' : 'Submit'}
                     </button>
                   </div>
-                  {/* Proof of payment upload */}
-                  <div className="flex items-center gap-2 pt-1">
-                    {utilityProofUploaded || myDocs?.some(d => d.documentKey === 'utility_proof_of_payment') ? (
-                      <p className="text-[10px] text-[#2e9f82] flex items-center gap-1">
-                        <CheckCircle2 size={10} /> Proof uploaded ✓
-                      </p>
-                    ) : (
-                      <label className={[
-                        'flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg cursor-pointer text-white transition-opacity',
-                        utilityProofUploading ? 'opacity-50 pointer-events-none' : '',
-                        'bg-[#6b6860] hover:bg-[#4a4845]',
-                      ].join(' ')}>
-                        {utilityProofUploading ? <Loader2 size={10} className="animate-spin" /> : <UploadCloud size={10} />}
-                        {utilityProofUploading ? 'Uploading…' : 'Upload proof of payment'}
-                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={e => { const f = e.target.files?.[0]; if (f) handleUtilityProofUpload(f); e.target.value = ''; }} />
-                      </label>
-                    )}
-                    <span className="text-[9px] text-[#b0ada8]">Optional but recommended</span>
-                  </div>
                   {utilityError && <p className="text-[10px] text-red-600">{utilityError}</p>}
                 </>
               )}
@@ -1690,7 +1615,29 @@ function TenancyJourneyPanel({
           )}
         </StepRow>
 
-        <StepRow num={9} label="Active Tenancy" state={s8} last={true}>
+        <StepRow num={9} label="Move-In Inspection" state={s_movein} last={false}>
+          {s_movein === 'current' && (
+            <div className="mt-1 space-y-1.5">
+              {!inspectionSubmitted ? (
+                <p className="text-[10px] text-[#9b9890]">Landlord is preparing the move-in inspection</p>
+              ) : !inspectionSignedByTenant && contract ? (
+                <>
+                  <p className="text-[10px] text-[#c2410c]">Action required — review and counter-sign the inspection</p>
+                  <Link href={`/dashboard/customer/contracts/${contract.id}/inspection?type=move_in`}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white rounded-lg px-3 py-2"
+                    style={{ background: '#c2410c' }}>
+                    Review &amp; Sign <ArrowRight size={11} />
+                  </Link>
+                </>
+              ) : (
+                <p className="text-[10px] text-[#2e9f82] flex items-center gap-1"><CheckCircle2 size={10} /> Counter-signed ✓</p>
+              )}
+            </div>
+          )}
+          {s_movein === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Inspection counter-signed ✓</p>}
+        </StepRow>
+
+        <StepRow num={10} label="Active Tenancy" state={s8} last={true}>
           {s8 === 'current' && (
             <div className="mt-1">
               <p className="text-[10px] text-[#2e9f82] font-medium">Your tenancy is live 🎉</p>
@@ -1879,7 +1826,8 @@ function ExpandedDetail({
 
   const dt = new Date(v.scheduledAt);
   const hourMs = 60 * 60 * 1000;
-  const canModify = v.status === 'scheduled' && (dt.getTime() - Date.now() > hourMs);
+  const canModify = ['scheduled', 'confirmed'].includes(v.status) &&
+    (dt.getTime() - Date.now() > hourMs || dt.getTime() < Date.now());
   const hasVisited = v.status === 'completed' && !['applied','offer_made','approved','converted'].includes(group.leadStage);
 
   async function handleCancel() {
@@ -1915,12 +1863,20 @@ function ExpandedDetail({
                   Renewal Contract details (left, scoped to the renewal CHILD) | Renewal Journey (right) */}
           {renewalContract && contract.renewalAccepted && (
             <>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-                <ContractInlineSection contractId={renewalContract.id} onRefresh={onRefresh} isRenewal />
-                <RenewalJourneyPanel parentContractId={contract.id} onRefresh={onRefresh} layout="journey" />
+              {/* ── RENEWAL IN FLIGHT header ── */}
+              <div className="rounded-2xl border border-[#2e9f82] bg-[#f0faf6] overflow-hidden">
+                <div className="px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[9px] font-bold text-[#1a7a5a] uppercase tracking-widest">Renewal in flight</p>
+                    <p className="text-sm font-semibold text-[#2e9f82] mt-0.5">Two tenancies, one place.</p>
+                  </div>
+                  <div className="w-9 h-9 rounded-xl bg-[#2e9f82] flex items-center justify-center">
+                    <RotateCcw size={16} className="text-white" />
+                  </div>
+                </div>
               </div>
-              {/* Visible separator between the in-flight renewal and the still-active original contract */}
-              <div className="border-t border-[#e8e6e0]" />
+              {/* 01 · Original Lease label */}
+              <p className="text-[9px] font-bold text-[#9b9890] uppercase tracking-widest px-1">01 · Original Lease</p>
             </>
           )}
 
@@ -1948,6 +1904,25 @@ function ExpandedDetail({
             </div>
           </div>
 
+          {/* After ROW 2 */}
+          {renewalContract && contract.renewalAccepted && (
+            <>
+              {/* Bridge */}
+              <div className="flex items-center justify-center py-1">
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-dashed border-[#2e9f82] bg-white text-[11px] text-[#2e9f82] font-semibold">
+                  <RotateCcw size={12} /> rolls over to
+                </div>
+              </div>
+              {/* 02 · Renewal label */}
+              <p className="text-[9px] font-bold text-[#9b9890] uppercase tracking-widest px-1">02 · Renewal</p>
+              {/* Renewal content */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                <ContractInlineSection contractId={renewalContract.id} onRefresh={onRefresh} isRenewal />
+                <RenewalJourneyPanel parentContractId={contract.id} onRefresh={onRefresh} layout="journey" />
+              </div>
+            </>
+          )}
+
           {/* ── BOTTOM: Viewing Appointment ── */}
           <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
             <div className="px-4 py-3 flex items-center gap-2 border-b border-[#f4f3ef] bg-[#fafaf8]">
@@ -1972,6 +1947,19 @@ function ExpandedDetail({
                 </div>
               )}
             </div>
+            {canModify && (
+              <div className="px-4 pb-4 flex gap-2.5">
+                <button onClick={() => setRescheduleOpen(true)}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold border border-[#2e9f82] hover:bg-[#edf7f3] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  style={{ color: '#2e9f82' }}>
+                  <Pencil size={11} /> Reschedule
+                </button>
+                <button disabled={cancelling} onClick={handleCancel}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold border border-[#fee2e2] text-[#b91c1c] hover:bg-red-50 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+                  <X size={11} /> {cancelling ? 'Cancelling…' : 'Cancel'}
+                </button>
+              </div>
+            )}
             {actionError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg mx-4 mb-3 px-3 py-2">{actionError}</div>}
           </div>
         </div>
@@ -3498,6 +3486,19 @@ function ContractInlineSection({
         )}
 
         {/* Move-In Inspection strip — folded into the contract card rather than floating above the page */}
+        {/* RP preparing the inspection (utility + ejari done, RP hasn't submitted yet) — matches the
+            "Step 5 — Move-In Inspection" current state on the RP timeline, so the tenant sees the
+            same stage instead of an empty gap between utility and signing. */}
+        {detailEjariDone && detailUtilityDone && !moveInInspection?.submitted && detail.status !== 'active' && (
+          <div className="flex items-start gap-3 bg-[#fff7ed] border-b border-[#fed7aa] px-5 py-3">
+            <Clock size={15} className="text-[#c2410c] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-[#9a3412]">Move-In Inspection in progress</p>
+              <p className="text-xs text-[#c2410c] mt-0.5">Your rental provider is walking through the unit and preparing the move-in checklist (photos, meter readings, key count). You&apos;ll be notified the moment it&apos;s ready to counter-sign.</p>
+            </div>
+            <span className="shrink-0 self-center px-3 py-1.5 rounded-xl text-xs font-semibold text-[#9a3412] bg-white border border-[#fed7aa]">Awaiting</span>
+          </div>
+        )}
         {moveInInspection?.submitted && !moveInInspection.signedByTenant && (
           <Link
             href={`/dashboard/customer/contracts/${detail.id}/inspection?type=move_in`}
@@ -4052,19 +4053,43 @@ export default function MySpacesPage() {
     const c = row.contract;
     const stage = row.kind === 'viewing' ? row.group.leadStage : row.lead.stage;
     const vstatus = row.kind === 'viewing' ? row.group.primary.status : undefined;
+
+    // 1. Contract-driven states take highest priority — same as before
     if (c) {
       if (c.status === 'active') return { label: 'Active Tenancy', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false };
       const hasUtility = c.utilityStatus === 'submitted' || c.utilityStatus === 'verified';
-      if (c.ejariStatus === 'registered' && hasUtility) return { label: 'Awaiting Activation', bg: 'bg-[#dbeafe]', text: 'text-[#1e40af]', isAction: false };
+      const inspectionSubmitted = !!c.moveInInspection?.submitted;
+      const inspectionSignedByTenant = !!c.moveInInspection?.signedByTenant;
+
+      // Move-in flow — match the RP's step 5 progression
+      if (inspectionSubmitted && !inspectionSignedByTenant) return { label: 'Sign Move-In Inspection', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
+      if (c.ejariStatus === 'registered' && hasUtility && inspectionSignedByTenant) return { label: 'Awaiting Activation', bg: 'bg-[#dbeafe]', text: 'text-[#1e40af]', isAction: false };
+      if (c.ejariStatus === 'registered' && hasUtility) return { label: 'Move-In Inspection in Progress', bg: 'bg-[#fef9c3]', text: 'text-[#854d0e]', isAction: false };
       if (c.ejariStatus === 'registered') return { label: 'Submit Utility Number', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
       if (c.status === 'issued' && !c.tenantSignedAt) return { label: 'Sign Contract', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
       if (c.status === 'issued' && c.tenantSignedAt) return { label: 'Awaiting Ejari', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
       return { label: 'Contract Pending', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
     }
-    if (['approved', 'converted'].includes(stage)) return { label: 'Provider preparing contract', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
-    if (['applied', 'offer_made'].includes(stage)) return { label: 'Reservation under review', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
-    if (vstatus === 'completed') return { label: 'Upload documents to continue', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
-    return { label: 'Attend your viewing', bg: 'bg-[#fef3c7]', text: 'text-[#92400e]', isAction: false };
+
+    // 2. Pre-contract — map every lead stage to a clear label so the card
+    //    advances as the RP moves the lead forward (no stale "upload docs" text).
+    const stageMap: Record<string, { label: string; bg: string; text: string; isAction: boolean }> = {
+      documents_collection: { label: 'Documents in Review',    bg: 'bg-[#f0f9ff]', text: 'text-[#0369a1]', isAction: false },
+      payment_plan_shared:  { label: 'Review Payment Plan',    bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true  },
+      cheques_submitted:    { label: 'Cheques Under Review',   bg: 'bg-[#fef9c3]', text: 'text-[#854d0e]', isAction: false },
+      cheques_collected:    { label: 'Preparing Your Contract', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false },
+      contract_issued:      { label: 'Contract Being Issued',  bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false },
+      approved:             { label: 'Provider Preparing Contract', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false },
+      converted:            { label: 'Provider Preparing Contract', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false },
+      applied:              { label: 'Reservation Under Review', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false },
+      offer_made:           { label: 'Offer Received — Review', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true },
+      contacted:            { label: 'In Discussion',           bg: 'bg-[#ede9fe]', text: 'text-[#6d28d9]', isAction: false },
+    };
+    if (stageMap[stage]) return stageMap[stage];
+
+    // 3. Fallbacks — viewing-state only
+    if (vstatus === 'completed') return { label: 'Awaiting Next Step', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
+    return { label: 'Attend Your Viewing', bg: 'bg-[#fef3c7]', text: 'text-[#92400e]', isAction: false };
   }
   function rowContextualDate(row: SpaceRow): string {
     const fmtShort = (iso: string) => new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' });
@@ -4091,81 +4116,206 @@ export default function MySpacesPage() {
 
   return (
     <div className="p-6 w-full">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">My Spaces</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">Track your property journey — from viewing to contract.</p>
-      </div>
+      {(() => {
+        const firstName = (user?.name ?? '').trim().split(/\s+/)[0] || 'there';
+        const activeCount = activeRows.filter(r => r.contract?.status === 'active').length;
+        const renewingCount = activeRows.filter(r => !!r.renewalContract).length;
+        const inProgressCount = activeRows.filter(r => !r.contract || r.contract.status !== 'active').length;
+        const chips = [
+          { label: 'Active',      value: activeCount,     bg: 'bg-[#1f5a3f]',   fg: 'text-white' },
+          { label: 'In progress', value: inProgressCount, bg: 'bg-[#fbe5dc]',   fg: 'text-[#c8492c]' },
+          { label: 'Renewing',    value: renewingCount,   bg: 'bg-[#fbebcc]',   fg: 'text-[#a0641b]' },
+        ];
+        return (
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9b9890]">
+                Hello {firstName}
+              </p>
+              <h1 className="text-3xl font-bold text-[#1a1916] mt-1.5 leading-[1.1] tracking-tight">
+                Your <span className="text-[#1f5a3f]">spaces</span>
+              </h1>
+              <p className="text-sm text-[#6b6860] mt-2 max-w-md">
+                Everything in motion — current leases, applications, viewings on the calendar. Tap any card to drill in.
+              </p>
+            </div>
+            <div className="flex gap-2.5 flex-wrap">
+              {chips.map(c => (
+                <div key={c.label} className={`px-4 py-2.5 rounded-2xl min-w-[92px] ${c.bg} ${c.fg}`}>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.1em] opacity-90">{c.label}</p>
+                  <p className="text-2xl font-bold leading-none mt-1 tabular-nums">{c.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {error && <div className="mb-5 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200 flex items-start gap-2"><AlertCircle size={15} className="mt-0.5 shrink-0" />{error}</div>}
 
-      {/* Active rows */}
+      {/* Action-required animations — applied only to cards where sc.isAction is true */}
+      <style>{`
+        @keyframes actionRing {
+          0%   { box-shadow: 0 0 0 0   rgba(200, 73, 44, 0.55); }
+          70%  { box-shadow: 0 0 0 10px rgba(200, 73, 44, 0);    }
+          100% { box-shadow: 0 0 0 0   rgba(200, 73, 44, 0);    }
+        }
+        .upnow-action-dot { animation: actionRing 1.8s ease-out infinite; }
+
+        @keyframes arrowNudge {
+          0%, 100% { transform: translateX(0); }
+          50%      { transform: translateX(4px); }
+        }
+        .upnow-action-arrow { animation: arrowNudge 1.4s ease-in-out infinite; }
+
+        @keyframes pillBlink {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.65; }
+        }
+        .upnow-action-pill { animation: pillBlink 2s ease-in-out infinite; }
+      `}</style>
+
+      {/* Active rows — card grid */}
       {!loading && activeRows.length > 0 && (
-        <div className="space-y-3 mb-6">
-          {activeRows.map((row) => {
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+          {activeRows.map((row, idx) => {
             const sc = rowStatusConfig(row);
-            const viewingIso = row.kind === 'viewing' ? row.group.primary.scheduledAt : null;
-            const isActive = row.contract?.status === 'active';
+            const v2Url = `/dashboard/customer/spaces/v2/${row.key}`;
+            const unit = row.kind === 'viewing' ? row.group.unit : row.lead.unit;
+            const c = row.contract;
+            const isActive = c?.status === 'active';
+            const community = unit?.property?.community?.name ?? null;
+            const emirate = unit?.property?.emirate?.name ?? null;
+            const location = [community, emirate].filter(Boolean).join(', ') || null;
+            const bedrooms = unit?.bedrooms;
+            // Fallback chain: contract rent → unit rental price → unit market price.
+            // Means pre-contract rows still show the asking rent so the card isn't blank.
+            const annual = c?.annualRent ?? unit?.rentalPrice ?? unit?.marketPrice ?? null;
+            const annualIsAsking = !c?.annualRent && annual != null;
+            const fmtShort = (iso: string) => new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'Asia/Dubai' });
+            // Period column adapts: contract dates → viewing date → applied date.
+            const periodLabel = c?.startDate && c?.endDate
+              ? { label: 'Period', value: `${fmtShort(c.startDate)} → ${fmtShort(c.endDate)}` }
+              : row.kind === 'viewing'
+                ? { label: 'Viewing', value: fmtShort(row.group.primary.scheduledAt) }
+                : { label: 'Applied', value: fmtShort(row.lead.createdAt) };
+            const buildingName = rowBuilding(row);
+            const unitLabel = rowLabel(row);
+
+            // Rotating dummy apartment photos (Unsplash) — keyed by index for stability
+            const DUMMY_PHOTOS = [
+              'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=900&q=80',
+              'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=900&q=80',
+              'https://images.unsplash.com/photo-1582407947304-fd86f028f716?w=900&q=80',
+              'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=900&q=80',
+            ];
+            const photo = DUMMY_PHOTOS[idx % DUMMY_PHOTOS.length];
+
+            // Tone for the action chip — derived from the SAME sc.label as the status pill,
+            // so card and detail-view show consistent state.
+            const tone: 'action' | 'waiting' | 'settled' = sc.isAction ? 'action' : isActive ? 'settled' : 'waiting';
+            const toneCfg = {
+              action:  { bg: 'bg-[#fbe5dc]', border: 'border-[#f3c4b3]', dot: 'bg-[#c8492c]', label: 'text-[#c8492c]', icon: <AlertCircle size={14} className="text-white" />, eyebrow: 'Action required' },
+              waiting: { bg: 'bg-[#fbebcc]', border: 'border-[#f0d68f]', dot: 'bg-[#a0641b]', label: 'text-[#a0641b]', icon: <Clock size={14} className="text-white" />,        eyebrow: 'In progress' },
+              settled: { bg: 'bg-[#e0eddE]', border: 'border-[#bdd9b8]', dot: 'bg-[#1f5a3f]', label: 'text-[#1f5a3f]', icon: <CheckCircle2 size={14} className="text-white" />, eyebrow: 'Active' },
+            }[tone];
+
             return (
               <button
                 key={row.key}
                 onClick={() => openSpaceDetail(row.key)}
-                className={`w-full text-left bg-white rounded-2xl border shadow-sm transition-all hover:shadow-md hover:border-[#c5e8df] cursor-pointer overflow-hidden ${
-                  sc.isAction ? 'border-[#fed7aa]' : 'border-[#e8e6e0]'
-                }`}
+                className="text-left bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-lg hover:border-[#1a1916]/30 cursor-pointer flex flex-col"
               >
-                {/* Action banner */}
-                {sc.isAction && (
-                  <div className="flex items-center gap-2 px-4 py-2 bg-[#fff7ed] border-b border-[#fed7aa]">
-                    <AlertCircle size={12} className="text-[#c2410c] shrink-0" />
-                    <span className="text-xs font-semibold text-[#c2410c]">Action required — {sc.label}</span>
-                  </div>
-                )}
+                {/* Hero — apartment photo with status pill + renewal pin overlay */}
+                <div className="relative h-44 overflow-hidden bg-[#f4f3ef]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={photo}
+                    alt={buildingName || unitLabel || 'Apartment'}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                  {/* Darkening gradient for badge legibility */}
+                  <div className="absolute inset-0 pointer-events-none" style={{
+                    background: 'linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0) 45%, rgba(0,0,0,0) 60%, rgba(26,23,20,0.55) 100%)',
+                  }} />
 
-                <div className="flex items-center gap-4 px-5 py-4">
-                  {/* Icon */}
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
-                    isActive ? 'bg-[#d8f2e8]' : sc.isAction ? 'bg-[#fff3cd]' : 'bg-[#f4f3ef]'
-                  }`}>
-                    {isActive
-                      ? <CheckCircle2 size={18} className="text-[#2e9f82]" />
-                      : sc.isAction
-                      ? <AlertCircle size={18} className="text-[#c2410c]" />
-                      : <Home size={18} className="text-[#9b9890]" />}
-                  </div>
+                  {/* Renewal pin top-right — only when renewal is actually in flight */}
+                  {c?.renewalAccepted === 'pending' && (
+                    <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[#1a1916] text-white inline-flex items-center gap-1 backdrop-blur-sm">
+                      <RotateCcw size={10} /> Renewal — Action
+                    </span>
+                  )}
+                  {c?.renewalAccepted === 'accepted' && (
+                    <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[#1f5a3f] text-white inline-flex items-center gap-1 backdrop-blur-sm">
+                      <RotateCcw size={10} /> Renewing
+                    </span>
+                  )}
 
-                  {/* Main content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-[#1a1916] truncate">{rowLabel(row)}</p>
-                    <p className="text-xs text-[#9b9890] truncate mt-0.5">
-                      {rowBuilding(row) ? `${rowBuilding(row)} · ` : ''}
-                      {viewingIso
-                        ? (row.contract ? rowContextualDate(row) : `Viewing ${new Date(viewingIso).toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Dubai' })}`)
-                        : rowContextualDate(row)
-                      }
-                    </p>
+                  {/* Single status pill — bottom-left, sourced from sc.label (same as detail view) */}
+                  <span className={`absolute bottom-3 left-3 text-[11px] font-semibold rounded-full px-3 py-1.5 ${sc.bg} ${sc.text} shadow-sm ${sc.isAction ? 'upnow-action-pill' : ''}`}>
+                    {sc.isAction && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1.5 align-middle" />}
+                    {sc.label}
+                  </span>
+                </div>
 
-                  </div>
-
-                  {/* Status badge */}
-                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                    {/* Renewal indicator — surfaces in the list so the tenant doesn't have to open the tile to see it */}
-                    {row.contract?.renewalAccepted === 'pending' && (
-                      <span className="text-[11px] font-semibold rounded-full px-3 py-1 whitespace-nowrap bg-[#fdf3e3] text-[#a85b15] border border-[#f3d08a] inline-flex items-center gap-1">
-                        <RotateCcw size={10} /> Renewal — Action Required
-                      </span>
+                {/* Body */}
+                <div className="p-5 flex flex-col gap-4 flex-1">
+                  <div>
+                    {location && (
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9890] mb-1">
+                        {location}
+                      </p>
                     )}
-                    {row.contract?.renewalAccepted === 'accepted' && (
-                      <span className="text-[11px] font-semibold rounded-full px-3 py-1 whitespace-nowrap bg-[#e7f5f0] text-[#1f7e66] border border-[#c5e8df] inline-flex items-center gap-1">
-                        <RotateCcw size={10} /> Renewal in Progress
-                      </span>
-                    )}
-                    {!sc.isAction && row.contract?.renewalAccepted == null && (
-                      <span className={`text-[11px] font-semibold rounded-full px-3 py-1 whitespace-nowrap ${sc.bg} ${sc.text}`}>
-                        {sc.label}
-                      </span>
-                    )}
-                    <ChevronRight size={15} className="text-[#c8c6c0]" />
+                    <h3 className="text-lg font-bold text-[#1a1916] leading-tight tracking-tight">
+                      {buildingName || unitLabel}
+                      {buildingName && unitLabel && (
+                        <>, <span className="font-semibold text-[#1f5a3f]">{unitLabel}</span></>
+                      )}
+                    </h3>
                   </div>
+
+                  {/* Stats strip */}
+                  <div className="grid grid-cols-3 gap-3 py-3 border-y border-[#f0ede8]">
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#9b9890]">Beds</p>
+                      <p className="text-sm font-semibold text-[#1a1916] mt-0.5">{bedrooms != null ? (bedrooms === 0 ? 'Studio' : `${bedrooms} BR`) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#9b9890]">
+                        {annualIsAsking ? 'Asking' : 'Annual'}
+                      </p>
+                      <p className="text-sm font-semibold text-[#1a1916] mt-0.5 tabular-nums">
+                        {annual != null ? `AED ${(annual / 1000).toFixed(0)}K` : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#9b9890]">{periodLabel.label}</p>
+                      <p className="text-sm font-semibold text-[#1a1916] mt-0.5">{periodLabel.value}</p>
+                    </div>
+                  </div>
+
+                  {/* Action chip — answers "what now" (not duplicating the status pill) */}
+                  <div className={`mt-auto flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border ${toneCfg.bg} ${toneCfg.border}`}>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${toneCfg.dot} ${sc.isAction ? 'upnow-action-dot' : ''}`}>
+                        {toneCfg.icon}
+                      </span>
+                      <p className={`text-xs font-semibold ${toneCfg.label}`}>{toneCfg.eyebrow}</p>
+                    </div>
+                    <span className="text-xs font-semibold text-[#1a1916] inline-flex items-center gap-1">
+                      Open <ChevronRight size={14} className={sc.isAction ? 'upnow-action-arrow' : ''} />
+                    </span>
+                  </div>
+
+                  {/* v2 quick link — opens this space in the new Quest layout */}
+                  <Link
+                    href={v2Url}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-[11px] font-semibold text-[#1f5a3f] hover:text-[#1a1916] inline-flex items-center gap-1 self-end transition-colors"
+                  >
+                    ✨ Try the new view →
+                  </Link>
                 </div>
               </button>
             );

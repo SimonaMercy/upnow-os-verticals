@@ -18,6 +18,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2 } from 'lucide-react';
+import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,7 @@ export default function NewContractPage() {
   // Track whether end date was auto-set so we can re-auto when start changes
   const autoEndDateRef = useRef(true);
 
+  const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoaded, setPropertiesLoaded] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -179,6 +181,19 @@ export default function NewContractPage() {
     modeOfPayment: 'cheque',
     notes: '',
   });
+
+  // Load preferred start days from RP profile
+  useEffect(() => {
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { preferredStartDays?: number[] | null } } | null) => {
+        if (Array.isArray(data?.profile?.preferredStartDays)) {
+          setPreferredStartDays(data!.profile!.preferredStartDays!);
+        }
+      })
+      .catch(() => undefined);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load properties + tenants on mount; pre-fill if query params present
   useEffect(() => {
@@ -275,13 +290,13 @@ export default function NewContractPage() {
   }, [form.propertyId, qUnitId]);
 
   // When start date changes and end date was auto-set, recalculate end date
-  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newStart = e.target.value;
+  const applyStartDate = (newStart: string) => {
     setForm(f => {
       const newEnd = autoEndDateRef.current && newStart ? addMonths(newStart, 12) : f.contractEndDate;
       return { ...f, contractStartDate: newStart, contractEndDate: newEnd };
     });
   };
+  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => applyStartDate(e.target.value);
 
   const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     autoEndDateRef.current = false; // user manually set end date
@@ -683,12 +698,12 @@ export default function NewContractPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Start Date *</label>
-                  <input
-                    type="date"
+                  <PreferredDayPicker
                     value={form.contractStartDate}
-                    onChange={handleStartDateChange}
-                    required
-                    className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
+                    preferredDays={preferredStartDays}
+                    onChange={applyStartDate}
+                    placeholder="Pick start date"
+                    inputClassName="rounded-xl border-[#e8e6e0] bg-[#f7f6f2] py-2.5 text-sm focus:ring-2 focus:ring-[#2e9f82]"
                   />
                 </div>
                 <div>

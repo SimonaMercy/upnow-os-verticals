@@ -22,6 +22,7 @@ import {
   BadgeCheck, Eye, Download, CreditCard, ClipboardList,
   ChevronRight,
 } from 'lucide-react';
+import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -485,6 +486,9 @@ export default function TenantContractDetailPage() {
 
       {/* ── Body ── */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+        {/* Addendums — tenant can review + sign each. RP attaches/removes on their side. */}
+        <AddendumsPanel contractId={contract.id} role="tenant" contractStatus={contract.status} />
 
         {/* Action required banner */}
         {canSign && (
