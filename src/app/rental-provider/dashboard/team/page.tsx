@@ -78,7 +78,7 @@ const PERM_GROUPS = [
     label: 'Admin',
     perms: [
       { key: 'canManageDocuments',   label: 'Manage documents' },
-      { key: 'canCommunicateTenants', label: 'Communicate with tenants' },
+      { key: 'canCommunicateTenants', label: 'Communicate with customers' },
       { key: 'canEscalateToAdmin',   label: 'Escalate to admin' },
       { key: 'canInviteManager',     label: 'Invite other managers' },
     ],

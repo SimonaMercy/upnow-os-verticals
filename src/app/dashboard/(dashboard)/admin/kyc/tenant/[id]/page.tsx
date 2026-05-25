@@ -267,7 +267,7 @@ export default function TenantKycDetailPage() {
   }
 
   async function rerequestDoc(docId: number) {
-    if (!confirm("Mark this document as rejected and ask the tenant to re-upload?")) return;
+    if (!confirm("Mark this document as rejected and ask the customer to re-upload?")) return;
     setRerequestingId(docId);
     try {
       await apiPost(`/documents/${docId}/reject`, { reason: "Document has expired — please upload a renewed copy" });
@@ -290,13 +290,13 @@ export default function TenantKycDetailPage() {
   if (error || !detail) {
     return (
       <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-        {error ?? "Tenant not found"}
+        {error ?? "Customer not found"}
       </div>
     );
   }
 
   const { profile, uploadedDocs } = detail;
-  const name = profile.user ? `${profile.user.firstName} ${profile.user.lastName}` : `Tenant #${profile.id}`;
+  const name = profile.user ? `${profile.user.firstName} ${profile.user.lastName}` : `Customer #${profile.id}`;
   const expiredDocs = uploadedDocs.filter((d) => expiryLevel(d.expiryDate) === "expired");
   const soonDocs = uploadedDocs.filter((d) => expiryLevel(d.expiryDate) === "soon");
 
@@ -375,7 +375,7 @@ export default function TenantKycDetailPage() {
           <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-4">
               <User className="h-4 w-4 text-gray-400" />
-              Tenant Profile
+              Customer Profile
             </h2>
             <InfoRow label="Entity Type" value={profile.entityType?.replace(/_/g, " ")} />
             <InfoRow label="Document Status" value={profile.documentStatus} />
@@ -443,11 +443,11 @@ export default function TenantKycDetailPage() {
                     dewaDoc ? "bg-gray-500 hover:bg-gray-600" : "bg-yellow-500 hover:bg-yellow-600",
                   ].join(" ")}>
                     {utilityUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
-                    {utilityUploading ? "Uploading…" : dewaDoc ? "Replace file" : "Upload on behalf of tenant"}
+                    {utilityUploading ? "Uploading…" : dewaDoc ? "Replace file" : "Upload on behalf of customer"}
                     <input ref={utilityFileRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUtilityUpload(f); e.target.value = ""; }} />
                   </label>
-                  <p className="text-[11px] text-gray-400">Accepts PDF, JPG, PNG · This will be visible to the tenant</p>
+                  <p className="text-[11px] text-gray-400">Accepts PDF, JPG, PNG · This will be visible to the customer</p>
                 </div>
 
                 {utilityError && <p className="mt-2 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{utilityError}</p>}

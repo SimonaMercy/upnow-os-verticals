@@ -130,7 +130,7 @@ const QUICK_LINKS = [
   { label: 'Leads',          desc: 'Review pipeline',         href: '/rental-provider/dashboard/leads',                Icon: Users },
   { label: 'Receivables',    desc: 'Collect rent',            href: '/rental-provider/dashboard/receivables',          Icon: CreditCard },
   { label: 'Deposits',       desc: 'Security held',           href: '/rental-provider/dashboard/deposits',             Icon: Wallet },
-  { label: 'Tenants',        desc: 'Active tenants',          href: '/rental-provider/dashboard/tenants',              Icon: FileText },
+  { label: 'Customers',      desc: 'Active customers',        href: '/rental-provider/dashboard/tenants',              Icon: FileText },
   { label: 'Portfolio',      desc: 'Units & properties',      href: '/rental-provider/dashboard/portfolio',            Icon: Building2 },
   { label: 'Reports',        desc: 'Financials & exports',    href: '/rental-provider/dashboard/reports',              Icon: BarChart3 },
 ];
@@ -624,7 +624,7 @@ export default function RentalProviderDashboard() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-bold text-[var(--neutral-900)] truncate">{r.unitLabel}</div>
-                      <div className="text-[12px] text-[var(--neutral-400)] mt-0.5 truncate">{r.tenantName ?? 'No tenant'}</div>
+                      <div className="text-[12px] text-[var(--neutral-400)] mt-0.5 truncate">{r.tenantName ?? 'No customer'}</div>
                     </div>
                     <span
                       className={`flex-shrink-0 text-[12px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${

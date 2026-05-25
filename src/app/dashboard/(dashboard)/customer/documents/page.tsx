@@ -517,7 +517,7 @@ export default function CustomerDocumentsPage() {
       <SectionCard
         icon={ShieldCheck}
         title="Identity & KYC"
-        subtitle="Required for all tenants regardless of property type"
+        subtitle="Required for all customers regardless of property type"
         badge={
           loading ? <Loader2 size={14} className="animate-spin text-[#9b9890]" /> :
           kycUploaded === kycRequired

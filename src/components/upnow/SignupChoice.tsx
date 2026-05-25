@@ -59,7 +59,7 @@ export function SignupChoice() {
           className="mt-3 max-w-2xl mx-auto"
           style={{ color: "var(--neutral-500)", fontSize: 18, lineHeight: 1.6 }}
         >
-          Tenants, rental providers, and service providers each get a dedicated workspace.
+          Customers, rental providers, and service providers each get a dedicated workspace.
           Manager and Technician accounts are invite-only.
         </p>
 

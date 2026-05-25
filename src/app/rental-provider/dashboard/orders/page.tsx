@@ -213,7 +213,7 @@ export default function OrdersPage() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
           <input
             type="text"
-            placeholder="Search by ref, tenant or unit…"
+            placeholder="Search by ref, customer or unit…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
@@ -271,7 +271,7 @@ export default function OrdersPage() {
               <table className="w-full text-left min-w-[1100px]">
                 <thead>
                   <tr className="bg-[#f4f3ef]">
-                    {['Ref', 'Unit', 'Property', 'Tenant', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
+                    {['Ref', 'Unit', 'Property', 'Customer', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
                       <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
                     ))}
                   </tr>

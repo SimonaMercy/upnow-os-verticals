@@ -344,7 +344,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
           {/* Total card */}
           <div className="mt-1.5 p-3.5 bg-[#e7f5f0] rounded-[10px] grid grid-cols-[1fr_auto] items-baseline gap-2.5">
             <div>
-              <span className="text-[12px] font-bold uppercase tracking-[.06em] text-[#1f7e66]">Total billed to tenant</span>
+              <span className="text-[12px] font-bold uppercase tracking-[.06em] text-[#1f7e66]">Total billed to customer</span>
               <span className="block text-[11px] text-[#1f7e66] opacity-85 mt-0.5 font-medium">
                 {refundable > 0 ? `Incl. AED ${fmtN(refundable)} refundable deposit` : 'No refundable amount'}
               </span>
@@ -902,7 +902,7 @@ export default function SettingsPage() {
             <div className="mb-4">
               <h2 className="font-semibold text-base text-[#1a1916]">Contract Start Days</h2>
               <p className="text-xs text-[#9b9890] mt-0.5">
-                Select the days of the month when contracts can start. Tenants will only be able to pick these days in the booking calendar. Leave empty to allow any date.
+                Select the days of the month when contracts can start. Customers will only be able to pick these days in the booking calendar. Leave empty to allow any date.
               </p>
             </div>
 

@@ -309,7 +309,7 @@ export default function CustomerProfilePage() {
               </div>
               <div className={s.avatarNm}>{displayName}</div>
               <div className={s.avatarEm}>{user?.email}</div>
-              <span className={s.rolePill}>Tenant</span>
+              <span className={s.rolePill}>Customer</span>
               {avatarError && (
                 <p className={s.fieldErr} style={{ marginTop: 10, justifyContent: 'center' }}>
                   <AlertCircle size={12} /> {avatarError}

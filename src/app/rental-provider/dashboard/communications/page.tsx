@@ -61,7 +61,7 @@ export default function CommunicationsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Communications</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Messaging threads with tenants and managers.</p>
+          <p className="text-sm text-[#6b6860] mt-0.5">Messaging threads with customers and managers.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-800">
@@ -84,7 +84,7 @@ export default function CommunicationsPage() {
           </div>
           <h3 className="font-semibold text-[#1a1916] mb-1">No messages yet</h3>
           <p className="text-sm text-[#6b6860] max-w-xs">
-            Communication threads with tenants and asset managers will appear here once the messaging feature launches in Sprint 6.
+            Communication threads with customers and asset managers will appear here once the messaging feature launches in Sprint 6.
           </p>
         </div>
       ) : (

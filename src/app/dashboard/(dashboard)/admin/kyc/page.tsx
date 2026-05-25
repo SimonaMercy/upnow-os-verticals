@@ -313,7 +313,7 @@ function TenantLeftPanel({ tenant, onBack }: { tenant: Tenant; onBack: () => voi
         <div className="rounded-xl p-3 text-center"
           style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}>
           <Users size={20} style={{ color: "#2563eb", margin: "0 auto 6px" }} />
-          <p className="text-xs font-bold" style={{ color: "#1d4ed8" }}>Tenant</p>
+          <p className="text-xs font-bold" style={{ color: "#1d4ed8" }}>Customer</p>
           <p className="text-xs mt-0.5" style={{ color: "#1e40af" }}>
             {tenant.entityType?.replace(/_/g, " ") ?? "—"}
           </p>
@@ -625,7 +625,7 @@ function SpContentPanel({ sp }: { sp: ServiceProvider }) {
 // ─── RIGHT panel: Tenant content ─────────────────────────────────────────────
 
 function TenantContentPanel({ tenant }: { tenant: Tenant }) {
-  const name = providerName(tenant, `Tenant #${tenant.id}`);
+  const name = providerName(tenant, `Customer #${tenant.id}`);
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4">
@@ -771,7 +771,7 @@ export default function AdminKycPage() {
         {([
           { id: "rental"  as Tab, label: "Rental Providers",  Icon: Building2, count: rps.length },
           { id: "service" as Tab, label: "Service Providers", Icon: Wrench,    count: sps.length },
-          { id: "tenants" as Tab, label: "Tenants",           Icon: Users,     count: tenants.length },
+          { id: "tenants" as Tab, label: "Customers",         Icon: Users,     count: tenants.length },
         ]).map(({ id, label, Icon, count }) => (
           <button key={id} onClick={() => handleTabChange(id)}
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-[9px] transition-colors"
@@ -901,7 +901,7 @@ export default function AdminKycPage() {
                   ))}
                   {tab === "tenants" && filteredTenants.map((t) => (
                     <KycCard key={t.id}
-                      name={providerName(t, `Tenant #${t.id}`)}
+                      name={providerName(t, `Customer #${t.id}`)}
                       email={t.user?.email}
                       status={"pending_review"}
                       score={t.documentStatus === "complete" ? 100 : 40}

@@ -190,7 +190,7 @@ interface StateDef {
 const STATE_DEFS: Record<StateKey, StateDef> = {
   viewing:                       { label: 'Viewing scheduled',           sub: 'Step 1–2 of 10', mode: 'new',     currentIndex: 1, tone: 'waiting',  headline: 'See the place. Then we’ll set you up.',                body: 'Your viewing is confirmed. Once you’ve seen it and you’re ready to move forward, the rest of the journey kicks off automatically.',                 timing: 'See your scheduled time' },
   application_review:            { label: 'Application under review',    sub: 'Step 2 of 10',   mode: 'new',     currentIndex: 1, tone: 'waiting',  headline: 'Your application is with the landlord.',               body: 'Your landlord is reviewing your application. They’ll either approve and request documents next, or reach out with an offer.',                          timing: 'Usually 1–2 business days' },
-  documents:                     { label: 'Documents required',          sub: 'Step 3 of 10',   mode: 'new',     currentIndex: 2, tone: 'action',   headline: 'Almost there. Let’s gather your paperwork.',           body: 'Upload a few documents so your landlord can prepare the contract. Most tenants finish in under 5 minutes.',                                            timing: 'Takes ~5 min' },
+  documents:                     { label: 'Documents required',          sub: 'Step 3 of 10',   mode: 'new',     currentIndex: 2, tone: 'action',   headline: 'Almost there. Let’s gather your paperwork.',           body: 'Upload a few documents so your landlord can prepare the contract. Most customers finish in under 5 minutes.',                                            timing: 'Takes ~5 min' },
   documents_submitted:           { label: 'Documents under review',      sub: 'Step 3 of 10',   mode: 'new',     currentIndex: 2, tone: 'waiting',  headline: 'Your documents are in. Landlord is reviewing.',        body: 'All your required paperwork has been uploaded. Your landlord is verifying them and preparing the payment plan.',                                       timing: 'Usually 1 business day' },
   payment_plan:                  { label: 'Payment plan ready',          sub: 'Step 4 of 10',   mode: 'new',     currentIndex: 3, tone: 'action',   headline: 'Your payment plan is ready.',                          body: 'Your landlord shared a cheque plan. Prepare the cheques, then confirm they’re ready and we’ll move on to signing.',                                    timing: 'Confirm when ready' },
   cheques_submitted:             { label: 'Cheques being collected',     sub: 'Step 4 of 10',   mode: 'new',     currentIndex: 3, tone: 'waiting',  headline: 'Cheques confirmed. Landlord is collecting them.',      body: 'You’ve confirmed your cheques are ready. Your landlord will record each one and then issue your contract — usually within 24 hours.',                  timing: 'Usually within 1 business day' },
@@ -935,7 +935,7 @@ function DocumentsAction({
   const [uploadError,  setUploadError]  = useState<string | null>(null);
 
   async function handleUpload(req: DocReq, file: File) {
-    if (!resolved.tenantProfileId) { setUploadError('Tenant profile missing.'); return; }
+    if (!resolved.tenantProfileId) { setUploadError('Customer profile missing.'); return; }
     setDocUploading(req.key); setUploadError(null);
     try {
       const urlRes = await fetch('/api/documents/upload-url', {
@@ -1553,7 +1553,7 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
   }
 
   async function uploadProof(file: File) {
-    if (!resolved.tenantProfileId) { setErr('Tenant profile missing.'); return; }
+    if (!resolved.tenantProfileId) { setErr('Customer profile missing.'); return; }
     setProofBusy(true); setErr(null);
     try {
       const urlRes = await fetch('/api/documents/upload-url', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },

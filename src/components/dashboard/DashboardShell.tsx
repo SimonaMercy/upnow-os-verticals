@@ -45,7 +45,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Communications', href: '/rental-provider/dashboard/communications',  icon: MessageSquare },
     { label: 'Reports',        href: '/rental-provider/dashboard/reports',         icon: BarChart2 },
     { label: 'Team',           href: '/rental-provider/dashboard/team',            icon: Users },
-    { label: 'Tenants',        href: '/rental-provider/dashboard/tenants',         icon: UserCheck },
+    { label: 'Customers',      href: '/rental-provider/dashboard/tenants',         icon: UserCheck },
     { divider: true },
     { label: 'Settings',       href: '/rental-provider/dashboard/settings',        icon: Settings },
   ],

@@ -494,7 +494,7 @@ export default function RentalProviderOnboardingPage() {
     const stages = [
       { key: "submitted", label: "Application submitted",        sub: "We&rsquo;ve received your details and documents.",             done: true  },
       { key: "review",    label: "Under compliance review",      sub: "Our team is verifying your identity and licences.",            done: false, current: true },
-      { key: "approved",  label: "Approved &mdash; account active",   sub: "You&rsquo;ll be able to list properties and accept tenants.", done: false },
+      { key: "approved",  label: "Approved &mdash; account active",   sub: "You&rsquo;ll be able to list properties and accept customers.", done: false },
     ];
 
     return (

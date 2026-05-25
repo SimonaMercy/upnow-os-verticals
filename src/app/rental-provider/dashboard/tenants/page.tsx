@@ -95,7 +95,7 @@ export default function TenantsPage() {
   const renewalSoon = tenants.filter(t => t.renewalDays !== null && t.renewalDays >= 0 && t.renewalDays <= 90).length;
 
   const SUMMARY = [
-    { label: 'Total Tenants',       value: loading ? '…' : String(tenants.length) },
+    { label: 'Total Customers',     value: loading ? '…' : String(tenants.length) },
     { label: 'Active Contracts',     value: loading ? '…' : String(tenants.filter(t => t.contractStatus === 'active').length) },
     { label: 'Total Active Rent',    value: loading ? '…' : `AED ${totalRent.toLocaleString('en-AE')}` },
     { label: 'Renewals Within 90d', value: loading ? '…' : String(renewalSoon) },
@@ -106,8 +106,8 @@ export default function TenantsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Tenants</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">All current and past tenants across your units.</p>
+          <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
+          <p className="text-sm text-[#6b6860] mt-0.5">All current and past customers across your units.</p>
         </div>
       </div>
 
@@ -147,20 +147,20 @@ export default function TenantsPage() {
       </div>
 
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">{filtered.length} tenant{filtered.length !== 1 ? 's' : ''} found</span>
+        <span className="text-sm text-[#6b6860]">{filtered.length} customer{filtered.length !== 1 ? 's' : ''} found</span>
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-[#9b9890]">Loading tenants…</div>
+          <div className="flex items-center justify-center py-16 text-sm text-[#9b9890]">Loading customers…</div>
         ) : tenants.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
               <Users size={24} className="text-[#2e9f82]" />
             </div>
-            <p className="text-sm text-[#6b6860] mb-1">No tenants yet</p>
-            <p className="text-xs text-[#9b9890]">Tenants will appear here once you have active rental agreements</p>
+            <p className="text-sm text-[#6b6860] mb-1">No customers yet</p>
+            <p className="text-xs text-[#9b9890]">Customers will appear here once you have active rental agreements</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

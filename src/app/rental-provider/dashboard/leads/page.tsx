@@ -618,7 +618,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
 </style></head>
 <body>
 <div class="btnrow noprint"><button class="btn" onclick="window.print()">Print / Save as PDF</button><button class="btn alt" onclick="window.close()">Close</button></div>
-<h1>Payment Plan — Tenant Preview</h1>
+<h1>Payment Plan — Customer Preview</h1>
 <p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'}) : '—'}</p>
 <h2>Contract &amp; Cheque Details</h2>
 <div class="grid">
@@ -642,7 +642,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
 <tfoot><tr><td colspan="2">Total</td><td style="text-align:right">${aed(plan.totalAmountFils)}</td><td></td></tr></tfoot>
 </table>
 ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.notes.replace(/</g, '&lt;')}</p>` : ''}
-<div class="footer">UpNow · Tenant preview · ${new Date().toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'})}</div>
+<div class="footer">UpNow · Customer preview · ${new Date().toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'})}</div>
 </body></html>`;
     const w = window.open('', '_blank', 'width=820,height=900');
     if (!w) { alert('Please allow pop-ups to preview the plan.'); return; }
@@ -771,7 +771,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       const unitStr = unitLabel ?? 'the unit';
       const bldgStr = building ? `, ${building}` : '';
       const timeStr = fmtDateTime(viewing.scheduledAt);
-      setGuardMsg(`Hi,\n\nPlease be advised that a tenant viewing has been scheduled at ${unitStr}${bldgStr} on ${timeStr}.\n\nKindly ensure you are available at the building entrance during this time to assist the tenant with access to the property.\n\nThank you.`);
+      setGuardMsg(`Hi,\n\nPlease be advised that a customer viewing has been scheduled at ${unitStr}${bldgStr} on ${timeStr}.\n\nKindly ensure you are available at the building entrance during this time to assist the customer with access to the property.\n\nThank you.`);
     }
   }
 
@@ -1153,7 +1153,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         <div className="border-t border-[#e8e6e0] bg-[#fafaf8] px-5 py-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold text-[#3d3b35] flex items-center gap-1.5">
-              <FileText size={12} className="text-[#2e9f82]" /> Tenant Documents
+              <FileText size={12} className="text-[#2e9f82]" /> Customer Documents
             </p>
             <div className="flex items-center gap-2">
               {tenantDocs && tenantDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 && (
@@ -1293,7 +1293,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               Request Additional Documents
             </p>
             <p className="text-[10px] text-[#9b9890] mb-3">
-              Each document appears as an individual upload slot in the tenant's journey.
+              Each document appears as an individual upload slot in the customer's journey.
             </p>
 
             {/* Existing items */}
@@ -1396,7 +1396,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-start gap-2 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg px-3 py-2.5">
                 <CreditCard size={12} className="text-[#16a34a] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] text-[#15803d] uppercase font-semibold tracking-wide mb-1">Tenant Requested</p>
+                  <p className="text-[10px] text-[#15803d] uppercase font-semibold tracking-wide mb-1">Customer Requested</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                     {anyViewing.desiredMoveIn && (
                       <p className="text-xs font-semibold text-[#1a1916]">
@@ -1421,7 +1421,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-start gap-2">
                 <MessageSquare size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Tenant Notes & Occupancy</p>
+                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Customer Notes & Occupancy</p>
                   <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">{anyViewing.notes}</p>
                 </div>
               </div>
@@ -1454,7 +1454,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-start gap-2">
                 <User size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Tenant Contact</p>
+                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Customer Contact</p>
                   <div className="flex flex-wrap gap-3">
                     {email && (
                       <a href={`mailto:${email}`} className="flex items-center gap-1 text-xs text-[#2e9f82] hover:underline">
@@ -1546,7 +1546,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-center gap-2 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg px-3 py-2 mb-4">
                 <BadgeCheck size={13} className="text-[#16a34a] shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-semibold text-[#15803d] mb-0.5">Tenant Requested</p>
+                  <p className="text-[10px] font-semibold text-[#15803d] mb-0.5">Customer Requested</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                     {_latestViewing.desiredMoveIn && (
                       <span className="text-[10px] text-[#1a1916]">
@@ -1779,7 +1779,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
             <div className="mb-3">
               <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                Cheques payable to <span className="font-normal normal-case text-[#9b9890]">(name tenant writes on cheques)</span>
+                Cheques payable to <span className="font-normal normal-case text-[#9b9890]">(name customer writes on cheques)</span>
               </label>
               <input
                 type="text"
@@ -1805,7 +1805,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             {/* ── Rental Index Report attachment ── */}
             <div className="mb-3">
               <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                Rental Index Report <span className="font-normal normal-case text-[#9b9890]">(optional — visible to tenant)</span>
+                Rental Index Report <span className="font-normal normal-case text-[#9b9890]">(optional — visible to customer)</span>
               </label>
               {rentalIndexUrl ? (
                 <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#2e9f82] rounded-lg px-3 py-2">
@@ -1911,11 +1911,11 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-semibold text-[#0369a1] flex items-center gap-1.5">
                 <ClipboardList size={10} />
-                {lead.stage === 'payment_plan_shared' ? 'Payment Plan Shared — waiting for tenant' : 'Payment Plan'}
+                {lead.stage === 'payment_plan_shared' ? 'Payment Plan Shared — waiting for customer' : 'Payment Plan'}
               </p>
               <div className="flex items-center gap-3">
                 <button onClick={handlePreviewPlan} className="text-[10px] text-[#0369a1] hover:text-[#0284c7] font-semibold flex items-center gap-1 cursor-pointer">
-                  <Eye size={10} /> Preview as tenant
+                  <Eye size={10} /> Preview as customer
                 </button>
                 <button onClick={handlePreviewPlan} className="text-[10px] text-[#0369a1] hover:text-[#0284c7] font-semibold flex items-center gap-1 cursor-pointer">
                   <Printer size={10} /> Print / Download
@@ -2213,7 +2213,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </div>
             </div>
             <label className="block text-[11px] font-semibold text-[#3d3b35] mb-1.5">
-              Reason <span className="font-normal text-[#9b9890]">(optional — tenant will see this)</span>
+              Reason <span className="font-normal text-[#9b9890]">(optional — customer will see this)</span>
             </label>
             <textarea
               value={rejectReason}
@@ -2581,7 +2581,7 @@ export default function LeadsPage() {
             <User size={22} className="text-[#2e9f82]" />
           </div>
           <p className="font-semibold text-[#1a1916] text-sm mb-1">No leads yet</p>
-          <p className="text-xs text-[#9b9890]">Leads appear when tenants book viewings on your units.</p>
+          <p className="text-xs text-[#9b9890]">Leads appear when customers book viewings on your units.</p>
         </div>
       )}
 

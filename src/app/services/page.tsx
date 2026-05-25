@@ -152,7 +152,7 @@ export default function ServicesPage({
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h2 className="text-2xl font-bold">Are you a service provider?</h2>
-            <p className="mt-2 opacity-80">Join UpNow and reach thousands of property owners and tenants.</p>
+            <p className="mt-2 opacity-80">Join UpNow and reach thousands of property owners and customers.</p>
           </div>
           <Link
             href="/register/service-provider"

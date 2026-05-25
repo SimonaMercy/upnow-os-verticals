@@ -342,7 +342,7 @@ export default function NewContractPage() {
     setError(null);
 
     if (!form.unitId) { setError('Please select a unit.'); return; }
-    if (!form.tenantId) { setError('Please select a tenant.'); return; }
+    if (!form.tenantId) { setError('Please select a customer.'); return; }
     if (!form.contractStartDate || !form.contractEndDate) {
       setError('Please fill in contract dates.'); return;
     }
@@ -587,11 +587,11 @@ export default function NewContractPage() {
             {/* Tenant */}
             <div className="bg-white rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-sm text-[#1a1916]">Tenant</h2>
+                <h2 className="font-semibold text-sm text-[#1a1916]">Customer</h2>
                 {!qTenantId && (
                   <Link href="/rental-provider/dashboard/tenants" target="_blank"
                     className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
-                    <PlusCircle size={12} /> Add Tenant
+                    <PlusCircle size={12} /> Add Customer
                   </Link>
                 )}
               </div>
@@ -660,7 +660,7 @@ export default function NewContractPage() {
               {/* Active tenants quick list */}
               {!form.tenantId && activeTenants.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[11px] font-medium text-[#9b9890] mb-2">Active tenants — click to select</p>
+                  <p className="text-[11px] font-medium text-[#9b9890] mb-2">Active customers — click to select</p>
                   <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                     {activeTenants
                       .filter(t =>
@@ -1072,7 +1072,7 @@ export default function NewContractPage() {
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-[#1a1916]">{form.tenantName}</p>
-                  <p className="text-[10px] text-[#9b9890]">Tenant selected</p>
+                  <p className="text-[10px] text-[#9b9890]">Customer selected</p>
                 </div>
               </div>
             )}
@@ -1081,7 +1081,7 @@ export default function NewContractPage() {
             <div className="bg-[#fffbeb] border border-amber-200 rounded-xl px-4 py-3">
               <p className="text-xs font-semibold text-amber-800 mb-1">New contract only</p>
               <p className="text-[10px] text-amber-700 leading-relaxed">
-                Renewals are automatically offered to tenants 90 days before the contract expires, not created manually.
+                Renewals are automatically offered to customers 90 days before the contract expires, not created manually.
               </p>
             </div>
           </div>

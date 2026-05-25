@@ -76,7 +76,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     endpoint: '/api/reports/receivables',
     columns: [
       { key: 'contractRef', label: 'Contract' },
-      { key: 'tenantName', label: 'Tenant' },
+      { key: 'tenantName', label: 'Customer' },
       { key: 'unitLabel', label: 'Unit' },
       { key: 'buildingName', label: 'Property' },
       { key: 'description', label: 'Description' },
@@ -103,7 +103,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     controlKey: 'leaseExpiryWindow',
     columns: [
       { key: 'contractRef', label: 'Contract' },
-      { key: 'tenantName', label: 'Tenant' },
+      { key: 'tenantName', label: 'Customer' },
       { key: 'unitLabel', label: 'Unit' },
       { key: 'buildingName', label: 'Property' },
       { key: 'startDate', label: 'Start', type: 'date' },
@@ -127,7 +127,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     columns: [
       { key: 'parentRef', label: 'Original' },
       { key: 'childRef', label: 'Renewal' },
-      { key: 'tenantName', label: 'Tenant' },
+      { key: 'tenantName', label: 'Customer' },
       { key: 'unitLabel', label: 'Unit' },
       { key: 'buildingName', label: 'Property' },
       { key: 'originalEndDate', label: 'Original ends', type: 'date' },

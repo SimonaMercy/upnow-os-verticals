@@ -1792,7 +1792,7 @@ export default function ContractDetailPage() {
                               {/* Visibility toggle */}
                               <button
                                 type="button"
-                                title={doc.isVisibleToTenant ? 'Click to make Internal' : 'Click to make visible to Tenant'}
+                                title={doc.isVisibleToTenant ? 'Click to make Internal' : 'Click to make visible to Customer'}
                                 onClick={async () => {
                                   const res = await fetch(`/api/documents/${doc.id}`, {
                                     method: 'PATCH',
@@ -1811,7 +1811,7 @@ export default function ContractDetailPage() {
                                     : 'bg-[#f4f3ef] text-[#6b6860] hover:bg-[#e8e6e0]'
                                 }`}
                               >
-                                {doc.isVisibleToTenant ? <><Eye size={10} /> Tenant</> : <>🔒 Internal</>}
+                                {doc.isVisibleToTenant ? <><Eye size={10} /> Customer</> : <>🔒 Internal</>}
                               </button>
                               {expired && (
                                 <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
@@ -1891,7 +1891,7 @@ export default function ContractDetailPage() {
                                 onChange={() => setUploadVisible(true)}
                                 className="accent-[#2e9f82]"
                               />
-                              <span className="text-[#4a4844]">👁 Visible to tenant</span>
+                              <span className="text-[#4a4844]">👁 Visible to customer</span>
                             </label>
                           </div>
                         </div>
@@ -1981,7 +1981,7 @@ export default function ContractDetailPage() {
                       <div className="space-y-4">
                         {/* Uploaded docs */}
                         {(!tenantKycDocs || tenantKycDocs.filter(d => d.status !== 'pending').length === 0) ? (
-                          <p className="text-xs text-[#9b9890] text-center py-2">No documents uploaded by tenant yet.</p>
+                          <p className="text-xs text-[#9b9890] text-center py-2">No documents uploaded by customer yet.</p>
                         ) : (
                           <ul className="space-y-2">
                             {tenantKycDocs.filter(d => d.status !== 'pending').map(doc => {
@@ -2031,7 +2031,7 @@ export default function ContractDetailPage() {
                                   {/* Inline rejection reason form */}
                                   {isRejectOpen && (
                                     <div className="px-4 pb-3 pt-0 space-y-2 border-t border-[#fecaca]">
-                                      <p className="text-[10px] font-semibold text-[#b91c1c] pt-2">Reason for rejection (shown to tenant)</p>
+                                      <p className="text-[10px] font-semibold text-[#b91c1c] pt-2">Reason for rejection (shown to customer)</p>
                                       <input
                                         type="text"
                                         value={rejectionReason}
@@ -2064,7 +2064,7 @@ export default function ContractDetailPage() {
                         {/* RP-requested pending docs (awaiting tenant upload) */}
                         {tenantKycDocs && tenantKycDocs.filter(d => d.status === 'pending').length > 0 && (
                           <div>
-                            <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-1.5">Awaiting tenant upload</p>
+                            <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-1.5">Awaiting customer upload</p>
                             <ul className="space-y-1.5">
                               {tenantKycDocs.filter(d => d.status === 'pending').map(doc => (
                                 <li key={doc.id} className="flex items-center gap-3 rounded-xl px-4 py-2.5 bg-[#fff7ed] border border-[#fed7aa]">
@@ -2094,7 +2094,7 @@ export default function ContractDetailPage() {
                             type="text"
                             value={docRequestNotes}
                             onChange={e => setDocRequestNotes(e.target.value)}
-                            placeholder="Instructions for tenant (optional)"
+                            placeholder="Instructions for customer (optional)"
                             className="w-full text-xs px-3 py-2 border border-[#e8e6e0] rounded-xl bg-[#f9f8f6] focus:outline-none focus:border-[#2e9f82] placeholder:text-[#c0bdb8]"
                           />
                           <button
@@ -2104,7 +2104,7 @@ export default function ContractDetailPage() {
                             style={{ background: '#2e9f82' }}
                           >
                             {docRequesting ? <Loader2 size={12} className="animate-spin" /> : null}
-                            Send Request to Tenant
+                            Send Request to Customer
                           </button>
                         </div>
                       </div>
@@ -2214,7 +2214,7 @@ export default function ContractDetailPage() {
                   )}
                   <p className="text-[11px] text-[#b0ada8] flex items-center gap-1.5">
                     <BadgeCheck size={12} className="text-[#2e9f82]" />
-                    Contract sent to tenant — clauses are locked.
+                    Contract sent to customer — clauses are locked.
                   </p>
                 </div>
               )}
@@ -2354,18 +2354,18 @@ export default function ContractDetailPage() {
                     <StepRow num={1} label="Contract Issued" state={state} last={false}>
                       {state === 'current' && (
                         <div className="mt-2">
-                          <p className="text-[10px] text-[#9b9890] mb-2">Review the contract in the left panel, then issue it to the tenant to begin the signing process.</p>
+                          <p className="text-[10px] text-[#9b9890] mb-2">Review the contract in the left panel, then issue it to the customer to begin the signing process.</p>
                           <button
                             onClick={doIssueContract}
                             disabled={markingStep === 'issue'}
                             className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1">
                             {markingStep === 'issue' ? <Loader2 size={10} className="animate-spin" /> : <FileSignature size={10} />}
-                            Issue Contract to Tenant
+                            Issue Contract to Customer
                           </button>
                         </div>
                       )}
                       {state === 'done' && (
-                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued to tenant ✓</p>
+                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued to customer ✓</p>
                       )}
                     </StepRow>
                     );})()}
@@ -2380,7 +2380,7 @@ export default function ContractDetailPage() {
                           <div className="flex items-center gap-1.5">
                             <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
                             <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
-                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting tenant — they sign via their portal)</span>}
+                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting customer — they sign via their portal)</span>}
                           </div>
                           {/* Landlord countersigns only after tenant has signed */}
                           <div className="flex items-center justify-between">
@@ -2458,7 +2458,7 @@ export default function ContractDetailPage() {
                     {(()=>{ const state: TLStep = stepState(st4Done, stUtilityDone); return (
                     <StepRow num={4} label="Utility Account" state={state} last={false}>
                       <p className="text-[10px] text-[#9b9890] mt-0.5">
-                        DEWA / utility proof — tenant can upload from their portal, or you can attach it here.
+                        DEWA / utility proof — customer can upload from their portal, or you can attach it here.
                       </p>
 
                       {/* Utility upload — shown when step is current OR when doc exists */}
@@ -2622,14 +2622,14 @@ export default function ContractDetailPage() {
                          contract before signatures can proceed. */}
                     {(()=>{ const state: TLStep = stepState(true, st2Done); return (
                     <StepRow num={2} label="Payment Collection" state={state} last={false}>
-                      <p className="text-[10px] text-[#9b9890] mt-0.5">Tenant brings PDC cheques — record each and confirm receipt.</p>
+                      <p className="text-[10px] text-[#9b9890] mt-0.5">Customer brings PDC cheques — record each and confirm receipt.</p>
                       {/* Tenant submission status — mirrors the lead's CHEQUES_SUBMITTED stage.
                           The tenant signals readiness from their portal before the RP records. */}
                       {state === 'current' && contract.tenantChequesSubmittedAt && (
                         <div className="mt-2 flex items-start gap-1.5 text-[10px] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5">
                           <CheckCircle size={11} className="text-[#854d0e] shrink-0 mt-0.5" />
                           <div className="flex-1">
-                            <p className="font-semibold text-[#854d0e]">Tenant confirmed cheques submitted</p>
+                            <p className="font-semibold text-[#854d0e]">Customer confirmed cheques submitted</p>
                             <p className="text-[9px] text-[#854d0e] opacity-80">
                               {new Date(contract.tenantChequesSubmittedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                               {' '}— record each cheque below and confirm receipt.
@@ -2638,7 +2638,7 @@ export default function ContractDetailPage() {
                         </div>
                       )}
                       {state === 'current' && !contract.tenantChequesSubmittedAt && (
-                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting tenant to confirm cheques handed over.</p>
+                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting customer to confirm cheques handed over.</p>
                       )}
                       {state === 'current' && (
                         <div className="mt-2 space-y-1.5">
@@ -2717,7 +2717,7 @@ export default function ContractDetailPage() {
                           <div className="flex items-center gap-1.5">
                             <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
                             <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
-                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting tenant — they sign via their portal)</span>}
+                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting customer — they sign via their portal)</span>}
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
@@ -3114,7 +3114,7 @@ export default function ContractDetailPage() {
               <div>
                 <p className="text-sm font-bold text-[#1a1916]">Request termination</p>
                 <p className="text-xs text-[#6b6860] mt-1">
-                  The tenant must accept this request before the contract terminates.
+                  The customer must accept this request before the contract terminates.
                 </p>
               </div>
             </div>
