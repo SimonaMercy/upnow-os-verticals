@@ -31,7 +31,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, Loader2, AlertCircle, Clock, MapPin, FileText, Pen, Stamp,
   Zap, Key, BadgeCheck, Mail, Phone, Wallet, Binoculars, Calendar, ChevronRight,
-  Info, Check, ChevronDown,
+  Info, Check, ChevronDown, ChevronLeft,
   X, CheckCircle2, UploadCloud, ExternalLink, Printer,
   Sparkles, ArrowRight, Camera, Trash2,
 } from 'lucide-react';
@@ -361,6 +361,13 @@ function deriveStateKey(r: Resolved): StateKey {
   // and either the payment plan exists or RP review is pending.
   if (stage === 'cheques_submitted' || stage === 'cheques_collected') return 'awaiting_rp_confirm';
   if (stage === 'payment_plan_shared' || stage === 'approved' || stage === 'converted' || r.paymentPlan) return 'payment_review';
+
+  // Once the customer expresses interest (Step 1 popup), we move past
+  // `booked`. Land on `docs_required` if anything's still missing, else
+  // straight to `payment_review`.
+  if (stage === 'interested') {
+    return r.allRequiredDocsUploaded ? 'payment_review' : 'docs_required';
+  }
 
   // Step 2 (docs_required) when the lead is in documents_collection AND some
   // required docs are missing. Otherwise the customer is past docs and into
@@ -753,8 +760,7 @@ function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey
  */
 function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; resolved: Resolved; onRefresh: () => void }) {
   switch (stateKey) {
-    // PHASE 2 → replace with new BookedAction (payment summary + Interested popup)
-    case 'booked':                        return <ViewingAction resolved={resolved} onRefresh={onRefresh} />;
+    case 'booked':                        return <BookedAction resolved={resolved} onRefresh={onRefresh} />;
     // PHASE 3 → conditional hide + KYC recommendation; reuses existing DocumentsAction
     case 'docs_required':                 return <DocumentsAction resolved={resolved} onRefresh={onRefresh} />;
     // PHASE 4 → replace with new PaymentReviewAction (cheque photos + AI extraction)
@@ -784,28 +790,359 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
   }
 }
 
-/* ─── VIEWING ──────────────────────────────────────────────────────── */
-function ViewingAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
-  const [modal, setModal] = useState<'reschedule' | 'not_interested' | null>(null);
+/* ─── STEP 1 — BOOKED CARD (viewing + payment summary + "I'm Interested") ─ */
+
+/**
+ * Step 1 action body. Mounted when `deriveStateKey` returns `'booked'`.
+ *
+ * Shows the customer:
+ *  - Their scheduled viewing (date / time / property location)
+ *  - A full payment summary computed via POST /leads/my-viewings/:id/plan-preview
+ *    using the customer's saved preferences (or defaults: 4 cheques, +30 days)
+ *  - Reschedule / Not Interested secondary actions
+ *  - "I'm Interested" primary CTA → opens InterestedPopup
+ *
+ * Notes:
+ *  - Doesn't gate on `viewing.status === 'completed'` — per the locked design
+ *    the customer can commit before they attend (speeds the funnel).
+ *  - All currency renders in AED (fils ÷ 100 with en-AE locale).
+ */
+function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const v = resolved.viewing;
+  const unit = resolved.unit;
+  const [modal, setModal] = useState<'reschedule' | 'not_interested' | 'interested' | null>(null);
+  const [plan, setPlan] = useState<ApiPaymentPlan | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+  const [planError, setPlanError] = useState<string | null>(null);
+
+  // Defaults align with what the InterestedPopup pre-fills, so the on-screen
+  // summary matches what the customer will commit to if they tap through.
+  const defaultStart = (() => {
+    if (v?.desiredMoveIn) return v.desiredMoveIn.slice(0, 10);
+    const d = new Date(); d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  })();
+  const defaultPayments = v?.preferredChequeCount ?? 4;
+
+  useEffect(() => {
+    if (!v?.id) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlanLoading(true); setPlanError(null);
+    fetch(`/api/leads/my-viewings/${v.id}/plan-preview`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contractStartDate: defaultStart, paymentsCount: defaultPayments }),
+    })
+      .then(async r => {
+        if (!r.ok) {
+          const b = await r.json().catch(() => ({} as { message?: string }));
+          throw new Error(b?.message ?? `Error ${r.status}`);
+        }
+        return r.json() as Promise<ApiPaymentPlan>;
+      })
+      .then(p => setPlan(p))
+      .catch((e: Error) => setPlanError(e.message))
+      .finally(() => setPlanLoading(false));
+  }, [v?.id, defaultStart, defaultPayments]);
+
   if (!v) return null;
+
   const when = new Date(v.scheduledAt);
   const dateStr = when.toLocaleDateString('en-AE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Dubai' });
   const timeStr = when.toLocaleTimeString('en-AE', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dubai' });
+  const buildingName = unit?.property?.buildingName ?? null;
+  const fullAddress = unit?.property?.fullAddress ?? null;
+
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '18px 20px' }}>
+    <div style={{ display: 'grid', gap: 16 }}>
+      {/* Viewing summary */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 20px' }}>
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 600 }}>Your viewing</p>
         <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', margin: '6px 0 2px' }}>{dateStr}</p>
-        <p style={{ fontSize: 14, color: 'var(--ink-2)', margin: 0 }}>{timeStr}</p>
+        <p style={{ fontSize: 14, color: 'var(--ink-2)', margin: '0 0 8px' }}>{timeStr}</p>
+        {(buildingName || fullAddress) && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, color: 'var(--ink-2)', fontSize: 13 }}>
+            <MapPin size={14} style={{ marginTop: 2, flexShrink: 0, color: 'var(--mute)' }} />
+            <div>
+              {buildingName && <p style={{ margin: 0, fontWeight: 600 }}>{buildingName}{unit?.unitNumber ? ` · Unit ${unit.unitNumber}` : ''}</p>}
+              {fullAddress && <p style={{ margin: '2px 0 0', color: 'var(--mute)', fontSize: 12 }}>{fullAddress}</p>}
+            </div>
+          </div>
+        )}
       </div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <SecondaryBtn onClick={() => setModal('reschedule')}>Reschedule viewing</SecondaryBtn>
+
+      {/* Cost summary — totals only. The customer hasn't picked a payment
+          frequency yet, so we deliberately omit the cheque schedule + count.
+          The breakdown by cheques renders inside the InterestedPopup once
+          they actually choose Annual / Quarterly / Monthly etc. */}
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost summary</p>
+
+        {planLoading ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--mute)', fontSize: 13 }}>
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : planError ? (
+          <ErrorBox msg={planError} />
+        ) : plan ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <PaymentRow label="Annual rent" amountFils={plan.rentFils} />
+            <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
+            <PaymentRow label="Admin fee" amountFils={plan.adminFeeFils ?? 0} />
+            <PaymentRow label="Ejari fee" amountFils={plan.ejariFils ?? 0} />
+            <PaymentRow label="Commission" amountFils={plan.commissionFils ?? 0} />
+            <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
+            <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
+            <p style={{ fontSize: 11, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
+              You&rsquo;ll pick a payment frequency (annual, semi-annual, quarterly, etc.) when you tap <b>I&rsquo;m Interested</b> — the full cheque schedule appears before you confirm.
+            </p>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <PrimaryBtn onClick={() => setModal('interested')}>
+          <CheckCircle2 size={16} /> I&rsquo;m Interested
+        </PrimaryBtn>
+        <SecondaryBtn onClick={() => setModal('reschedule')}>Reschedule</SecondaryBtn>
         <SecondaryBtn onClick={() => setModal('not_interested')}>Not interested</SecondaryBtn>
       </div>
-      {modal === 'reschedule' && v && <RescheduleModal viewing={v} onClose={() => setModal(null)} onSuccess={() => { setModal(null); onRefresh(); }} />}
-      {modal === 'not_interested' && v && <NotInterestedModal viewing={v} onClose={() => setModal(null)} onSuccess={() => { setModal(null); onRefresh(); }} />}
+
+      {modal === 'interested' && <InterestedPopup
+        viewing={v}
+        rpPreferredDays={(unit?.property?.rentalProvider ?? unit?.property?.rental_provider)?.preferredStartDays ?? []}
+        defaultStart={defaultStart}
+        defaultPayments={defaultPayments}
+        defaultOccupants={v.occupantsAdults ?? 1}
+        onClose={() => setModal(null)}
+        onSuccess={() => { setModal(null); onRefresh(); }}
+      />}
+      {modal === 'reschedule' && <RescheduleModal viewing={v} onClose={() => setModal(null)} onSuccess={() => { setModal(null); onRefresh(); }} />}
+      {modal === 'not_interested' && <NotInterestedModal viewing={v} onClose={() => setModal(null)} onSuccess={() => { setModal(null); onRefresh(); }} />}
     </div>
+  );
+}
+
+function PaymentRow({ label, amountFils, bold }: { label: string; amountFils: number; bold?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: bold ? 14 : 13 }}>
+      <span style={{ color: bold ? 'var(--ink)' : 'var(--ink-2)', fontWeight: bold ? 700 : 500 }}>{label}</span>
+      <span style={{ color: 'var(--ink)', fontWeight: bold ? 700 : 600, fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(amountFils)}</span>
+    </div>
+  );
+}
+
+/**
+ * Step 1 commit popup. Asks the 3 questions the locked design specifies —
+ * occupants, preferred move-in (RP-restricted), payment frequency — and
+ * shows a live total that updates as the customer flips between options.
+ *
+ * Submit → POST /api/leads/my-viewings/:id/express-interest. Backend KYC
+ * gate may reject with 400; we surface the message inline (Phase 3 will
+ * convert this to a "Complete KYC" deep link with returnTo=).
+ */
+function InterestedPopup({
+  viewing, rpPreferredDays, defaultStart, defaultPayments, defaultOccupants,
+  onClose, onSuccess,
+}: {
+  viewing: ApiViewing;
+  rpPreferredDays: number[];
+  defaultStart: string;
+  defaultPayments: number;
+  defaultOccupants: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [occupants, setOccupants] = useState<number>(defaultOccupants);
+  const [paymentsCount, setPaymentsCount] = useState<number>(defaultPayments);
+  const [moveIn, setMoveIn] = useState<string>(defaultStart);
+  const [calOpen, setCalOpen] = useState(false);
+  const calRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const today = new Date();
+  const [calYear, setCalYear] = useState(parseInt(moveIn.slice(0, 4)) || today.getFullYear());
+  const [calMonth, setCalMonth] = useState((parseInt(moveIn.slice(5, 7)) || (today.getMonth() + 1)) - 1);
+
+  useEffect(() => {
+    if (!calOpen) return;
+    const close = (e: MouseEvent) => {
+      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [calOpen]);
+
+  // Live plan preview as the customer flips payments / move-in.
+  const [preview, setPreview] = useState<ApiPaymentPlan | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/leads/my-viewings/${viewing.id}/plan-preview`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contractStartDate: moveIn, paymentsCount }),
+    })
+      .then(r => r.ok ? r.json() as Promise<ApiPaymentPlan> : null)
+      .then(p => { if (!cancelled) setPreview(p); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [viewing.id, moveIn, paymentsCount]);
+
+  const dayAllowed = (day: number) => rpPreferredDays.length === 0 || rpPreferredDays.includes(day);
+  const calFirstDow = new Date(calYear, calMonth, 1).getDay();
+  const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const calMonthLabel = new Date(calYear, calMonth, 1).toLocaleString('en-AE', { month: 'long', year: 'numeric' });
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  function calPrev() { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); } else setCalMonth(m => m - 1); }
+  function calNext() { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); } else setCalMonth(m => m + 1); }
+
+  async function submit() {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/leads/my-viewings/${viewing.id}/express-interest`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contractStartDate: moveIn,
+          paymentsCount,
+          paymentMethod: 'postdated_cheque',
+          occupantsAdults: occupants,
+        }),
+      });
+      const body = await res.json().catch(() => ({} as { message?: string }));
+      if (!res.ok) {
+        throw new Error(body?.message ?? `Error ${res.status}`);
+      }
+      onSuccess();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const niceMoveIn = new Date(moveIn + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  return (
+    <Modal title="Let&rsquo;s set up your lease" onClose={onClose} footer={
+      <>
+        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+        <PrimaryBtn onClick={submit} disabled={busy}>
+          {busy ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <>Confirm interest <ArrowRight size={14} /></>}
+        </PrimaryBtn>
+      </>
+    }>
+      <div style={{ display: 'grid', gap: 16 }}>
+        {/* Occupants */}
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Number of occupants</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button type="button" onClick={() => setOccupants(c => Math.max(1, c - 1))} disabled={occupants <= 1}
+              style={{ width: 36, height: 36, borderRadius: 10, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink-2)', fontFamily: 'inherit', fontWeight: 700, fontSize: 18, cursor: occupants <= 1 ? 'not-allowed' : 'pointer', opacity: occupants <= 1 ? 0.4 : 1 }}>−</button>
+            <span style={{ minWidth: 36, textAlign: 'center', fontSize: 18, fontWeight: 700, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{occupants}</span>
+            <button type="button" onClick={() => setOccupants(c => c + 1)}
+              style={{ width: 36, height: 36, borderRadius: 10, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink-2)', fontFamily: 'inherit', fontWeight: 700, fontSize: 18, cursor: 'pointer' }}>+</button>
+            <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--mute)' }}>
+              {occupants === 1 ? 'Just me' : `Including ${occupants - 1} additional`}
+            </span>
+          </div>
+          {occupants > 1 && (
+            <p style={{ fontSize: 11, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
+              Each additional occupant will need their Emirates ID + Passport + Visa uploaded in Step 2.
+            </p>
+          )}
+        </div>
+
+        {/* Move-in date */}
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Preferred move-in date</p>
+          <div style={{ position: 'relative' }} ref={calRef}>
+            <button type="button" onClick={() => setCalOpen(o => !o)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '11px 14px', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer', background: 'var(--paper)', border: '1px solid var(--jade)', color: 'var(--ink)', fontFamily: 'inherit' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Calendar size={14} color="var(--jade-deep)" /> {niceMoveIn}
+              </span>
+              <ChevronDown size={14} color="var(--mute)" style={{ transition: 'transform 0.15s', transform: calOpen ? 'rotate(180deg)' : 'none' }} />
+            </button>
+            {calOpen && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--paper)', borderRadius: 12, border: '1px solid var(--mist-strong)', boxShadow: '0 10px 25px rgba(0,0,0,0.12)', zIndex: 30, padding: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <button type="button" onClick={calPrev} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer' }}><ChevronLeft size={16} /></button>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{calMonthLabel}</span>
+                  <button type="button" onClick={calNext} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer' }}><ChevronRight size={16} /></button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: 4 }}>
+                  {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 700, color: 'var(--mute)', padding: '4px 0' }}>{d}</div>)}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', rowGap: 2 }}>
+                  {Array.from({ length: calFirstDow }, (_, i) => <div key={`e${i}`} />)}
+                  {Array.from({ length: calDaysInMonth }, (_, i) => {
+                    const day = i + 1;
+                    const isActive = dayAllowed(day);
+                    const isPast = new Date(calYear, calMonth, day) < todayMidnight;
+                    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const isSelected = dateStr === moveIn;
+                    if (!isActive) return <div key={day} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, fontSize: 11, color: 'var(--mist-strong)' }}>{day}</div>;
+                    return (
+                      <button key={day} type="button" disabled={isPast}
+                        onClick={() => { setMoveIn(dateStr); setCalOpen(false); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, borderRadius: 8,
+                          fontSize: 12, fontWeight: 700, border: 'none', fontFamily: 'inherit',
+                          background: isSelected ? 'var(--jade)' : isPast ? 'transparent' : 'rgba(46,159,130,0.12)',
+                          color: isSelected ? 'var(--paper)' : isPast ? 'var(--mist-strong)' : 'var(--jade-deep)',
+                          cursor: isPast ? 'not-allowed' : 'pointer',
+                        }}>
+                        {day}
+                      </button>
+                    );
+                  })}
+                </div>
+                {rpPreferredDays.length > 0 && (
+                  <p style={{ fontSize: 10, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
+                    Only days highlighted by the landlord can be selected as a contract start date.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Payments count */}
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Payment frequency</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {([[ 1,'Annual'],[2,'Semi-annual'],[4,'Quarterly'],[6,'Bi-monthly'],[12,'Monthly']] as const).map(([n, label]) => (
+              <button key={n} type="button" onClick={() => setPaymentsCount(n)}
+                style={{
+                  padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  border: `1px solid ${paymentsCount === n ? 'var(--jade)' : 'var(--mist-strong)'}`,
+                  background: paymentsCount === n ? 'var(--jade)' : 'var(--paper)',
+                  color: paymentsCount === n ? 'var(--paper)' : 'var(--ink-2)', fontFamily: 'inherit',
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Live total */}
+        {preview && (
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <div>
+              <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, fontWeight: 600 }}>Total payable</p>
+              <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{preview.chequeCount} cheque{preview.chequeCount === 1 ? '' : 's'}</p>
+            </div>
+            <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(preview.totalAmountFils)}</p>
+          </div>
+        )}
+
+        {err && <ErrorBox msg={err} />}
+      </div>
+    </Modal>
   );
 }
 
