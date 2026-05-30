@@ -230,7 +230,7 @@ function getPendingViewing(lead: ApiLead) {
 type PrimaryAction =
   | { kind: 'stage'; label: string; target: LeadStage; cls: string }
   | { kind: 'mark_visited'; label: string; cls: string }
-  | { kind: 'issue_plan'; label: string; cls: string }
+  | { kind: 'approve_docs'; label: string; cls: string }
   | { kind: 'record_cheques'; label: string; cls: string }
   | { kind: 'confirm_collected'; label: string; cls: string }
   | { kind: 'convert'; label: string; cls: string };
@@ -260,15 +260,19 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
       return lead.unit?.id && lead.convertedTenant?.id
         ? { kind: 'convert', label: 'Convert', cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' }
         : null;
-    // New pipeline stages
+    // New pipeline stages — `interested` and `documents_collection` both
+    // sit at "customer has uploaded their docs and is waiting for RP to
+    // confirm". The payment plan was already auto-generated when the
+    // customer expressed interest, so RP just needs a one-click "looks
+    // good" action — no modal, no re-entry of plan fields. Approving
+    // flips the lead to `payment_plan_shared` and unlocks Step 3 on the
+    // customer side (cheque upload / ready-to-collect).
     case 'documents_collection':
-      return { kind: 'issue_plan', label: 'Issue Payment Plan',
-        cls: 'bg-[#f0f9ff] text-[#0369a1] hover:bg-[#e0f2fe]' };
-    case 'payment_plan_shared':
-      return null; // waiting for tenant to confirm cheques ready
     case 'interested':
-      return { kind: 'record_cheques', label: 'Review Cheques',
-        cls: 'bg-[#d8f2e8] text-[#1f5a3f] hover:bg-[#b6e8d0]' };
+      return { kind: 'approve_docs', label: 'Approve Documents',
+        cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' };
+    case 'payment_plan_shared':
+      return null; // waiting for customer to upload cheques
     case 'cheques_submitted':
       return { kind: 'record_cheques', label: 'Approve Cheques',
         cls: 'bg-[#fef9c3] text-[#854d0e] hover:bg-[#fef08a]' };
@@ -474,6 +478,8 @@ function LeadRow({
   const [chequeSuggestions, setChequeSuggestions] = useState<Record<number, string>>({});
   const [chequeError, setChequeError]   = useState<string | null>(null);
   const [confirmingCollection, setConfirmingCollection] = useState(false);
+  const [approvingDocs, setApprovingDocs] = useState(false);
+  const [approveDocsError, setApproveDocsError] = useState<string | null>(null);
   const [tenantDocs, setTenantDocs]   = useState<TenantDoc[] | null>(null);
   const [docsLoading, setDocsLoading] = useState(false);
   const [viewAllOpen, setViewAllOpen]   = useState(false);
@@ -730,6 +736,20 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (res.ok) setCheques(prev => prev.filter(c => c.id !== chequeId));
   }
 
+  async function handleApproveDocs() {
+    setApprovingDocs(true); setApproveDocsError(null);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/approve-documents`, {
+        method: 'PATCH', credentials: 'include',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setApproveDocsError(body.message ?? 'Failed to approve'); return; }
+      setLeads(prev => prev.map(l =>
+        l.id !== lead.id ? l : { ...l, stage: 'payment_plan_shared' as LeadStage },
+      ));
+    } finally { setApprovingDocs(false); }
+  }
+
   async function handleConfirmCollected() {
     setConfirmingCollection(true); setChequeError(null);
     try {
@@ -870,7 +890,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (primary.kind === 'stage') { onMoveStage(lead.id, primary.target); return; }
     if (primary.kind === 'convert') { onConvert(lead); return; }
     if (primary.kind === 'mark_visited') { openPanel('visited'); return; }
-    if (primary.kind === 'issue_plan') { openPanel('plan'); return; }
+    if (primary.kind === 'approve_docs') { handleApproveDocs(); return; }
     if (primary.kind === 'record_cheques') { openPanel('cheques'); return; }
     if (primary.kind === 'confirm_collected') { handleConfirmCollected(); return; }
   }
@@ -976,12 +996,13 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
           {primary && (
             <button
-              disabled={moving}
+              disabled={moving || approvingDocs}
               onClick={handlePrimary}
+              title={approveDocsError ?? undefined}
               className={`flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap ${primary.cls}`}
             >
               {primary.kind === 'convert' ? <ArrowRight size={12} /> : <CheckCircle2 size={12} />}
-              {primary.label}
+              {primary.kind === 'approve_docs' && approvingDocs ? 'Approving…' : primary.label}
             </button>
           )}
 

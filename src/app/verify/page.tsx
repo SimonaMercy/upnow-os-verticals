@@ -104,8 +104,11 @@ function VerifyOtpInner() {
         router.push(dashboardPath(freshUser?.role ?? res.user?.role ?? "customer"));
       } else {
         const res = await verifyOtp(code);
-        await refresh();
-        router.push(dashboardPath(res.user?.role ?? "customer"));
+        const me = await refresh();
+        const role = me?.role ?? res.user?.role ?? "customer";
+        // Phase 3c — recommend KYC right after phone-OTP verify for new
+        // customers. /welcome is always-skippable.
+        router.push(role === "customer" ? "/welcome" : dashboardPath(role));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed");

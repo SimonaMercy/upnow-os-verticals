@@ -119,36 +119,18 @@ test.describe('Phase 2 — plan-preview returns the full payment breakdown', () 
   });
 });
 
-// ─── 2. KYC gate on express-interest ────────────────────────────────────────
+// ─── 2. (REMOVED) KYC gate on express-interest ──────────────────────────────
 //
-// The seeded `phone_97145768483@upnow.internal` customer has
-// `kycStatus = unverified`, so calling express-interest must be rejected
-// with a friendly "complete your KYC" message. This is the exact gate
-// Phase 3 will surface as a "Complete KYC" deep link in the UI.
+// The mid-Phase-2 design call removed the backend KYC gate from
+// express-interest. Customers can now commit their preferences without
+// KYC; the 8-step state machine routes them to `docs_required` (Step 2)
+// where the KYC documents are collected as part of the natural journey.
 //
-// Once Phase 3 lands a fixture that auto-verifies KYC for a dedicated
-// test customer, we'll add a happy-path test that asserts
-// stage = 'interested' after a successful call.
-
-test.describe('Phase 2 — express-interest enforces the KYC gate', () => {
-  test('rejects with a KYC message when customer is unverified', async ({ request }) => {
-    const token = await loginOtp(request, CUSTOMER_EMAIL);
-    const viewing = await getFirstViewing(request, token);
-
-    const res = await request.post(
-      `${BACKEND}/leads/my-viewings/${viewing.id}/express-interest`,
-      {
-        headers: authHdr(token),
-        data: {
-          contractStartDate: '2026-08-15',
-          paymentsCount: 4,
-          paymentMethod: 'postdated_cheque',
-          occupantsAdults: 2,
-        },
-      },
-    );
-    expect(res.status(), `expected 400, got ${res.status()}`).toBe(400);
-    const body = await res.json().catch(() => ({} as { message?: string }));
-    expect((body.message ?? '').toLowerCase()).toContain('kyc');
-  });
-});
+// Phase 3 will add a happy-path test asserting:
+//   1. POST express-interest succeeds for a KYC-unverified customer
+//   2. Lead stage transitions to 'interested'
+//   3. deriveStateKey returns 'docs_required' on the next render
+//
+// That test needs a dedicated fixture customer (not the manual-test
+// account `phone_97145768483@upnow.internal` the operator uses for
+// visual verification), so it lands with the rest of Phase 3.

@@ -87,6 +87,10 @@ function VerifyEmailInner() {
             router.replace("/dashboard/rental-provider/onboarding");
           } else if (verifiedUser.role === "service_provider") {
             router.replace("/dashboard/service-provider/onboarding");
+          } else if (verifiedUser.role === "customer") {
+            // Phase 3c — recommend KYC upload before dropping the customer
+            // into the marketplace. /welcome is always-skippable.
+            router.replace("/welcome");
           } else {
             router.replace(dashboardPath(verifiedUser.role));
           }

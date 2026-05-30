@@ -36,7 +36,7 @@ import {
   Sparkles, ArrowRight, Camera, Trash2,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
-import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getOccupantDocs, deriveOccupantCount } from '@/lib/docRequirements';
+import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -97,6 +97,9 @@ interface ApiPaymentPlanItem {
 }
 interface ApiPaymentPlan {
   chequeCount: number;
+  /** Rent-only installment count (Annual=1, Semi-annual=2, Quarterly=4, etc.).
+   *  Distinct from `chequeCount` which includes the security-deposit cheque. */
+  installmentCount?: number;
   totalAmountFils: number;
   rentFils: number;
   originalRentFils?: number;
@@ -184,6 +187,7 @@ interface ApiContract {
 type StateKey =
   | 'booked'
   | 'docs_required'
+  | 'docs_under_review'
   | 'payment_review'
   | 'awaiting_rp_confirm'
   | 'signature' | 'ejari' | 'utility'
@@ -209,7 +213,8 @@ interface StateDef {
 const STATE_DEFS: Record<StateKey, StateDef> = {
   booked:                        { label: 'Viewing booked',                sub: 'Step 1 of 8',                     mode: 'new',     currentIndex: 0,  tone: 'action',    headline: 'Your viewing is confirmed.',                              body: 'Review the full payment summary below. When you are ready to move forward on this unit, tap “I’m Interested” and we will collect your preferences.',                                          timing: null },
   docs_required:                 { label: 'Documents required',            sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'action',    headline: 'Almost there. Let us gather your paperwork.',             body: 'Upload the missing identity and supporting documents so we can issue your contract. Most customers finish in under 5 minutes.',                                                                timing: 'Takes ~5 min' },
-  payment_review:                { label: 'Payment & cheques',             sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and upload your cheque photos.',         body: 'Take a clear photo of each cheque. We will read the numbers automatically — you only verify and submit.',                                                                                       timing: 'Takes ~5 min' },
+  docs_under_review:             { label: 'Documents under review',        sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'waiting',   headline: 'Your documents are with our team.',                       body: 'Thanks for uploading. We are reviewing your KYC and any supporting documents you sent. Once approved, your payment summary and contract preview will unlock and you can prepare your cheques.', timing: 'Usually within 1 business day' },
+  payment_review:                { label: 'Payment & cheques',             sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your cheques.',              body: 'Your documents are approved. Review the payment summary and contract preview, then upload photos of each cheque so the landlord can confirm collection.',                                       timing: 'Takes ~5 min' },
   awaiting_rp_confirm:           { label: 'Cheques under review',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your landlord is reviewing your cheques.',                body: 'Cheques uploaded. Your landlord is checking the extracted details against your contract before issuing it for signature.',                                                                       timing: 'Usually within 1 business day' },
   signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'One signature stands between you and the keys.',          body: 'Review the final contract, then add your signature below.',                                                                                                                                       timing: 'Takes ~2 min' },
   ejari:                         { label: 'Ejari in progress',             sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your landlord is registering Ejari.',                     body: 'The Dubai Land Department typically takes 2-5 business days. Your Ejari certificate will appear here for download the moment your landlord uploads it.',                                          timing: '2-5 business days' },
@@ -356,37 +361,98 @@ function deriveStateKey(r: Resolved): StateKey {
   if (viewing?.outcome === 'not_interested') return 'rejected';
   if (viewing?.status === 'no_show' || viewing?.status === 'cancelled') return 'rejected';
 
-  // ── 5. Steps 1–3 (pre-contract).
-  // Step 3 (payment_review + awaiting_rp_confirm) is reached once docs are in
-  // and either the payment plan exists or RP review is pending.
-  if (stage === 'cheques_submitted' || stage === 'cheques_collected') return 'awaiting_rp_confirm';
-  if (stage === 'payment_plan_shared' || stage === 'approved' || stage === 'converted' || r.paymentPlan) return 'payment_review';
+  // ── 5. Steps 1–3 (pre-contract). Order matters here.
 
-  // Once the customer expresses interest (Step 1 popup), we move past
-  // `booked`. Land on `docs_required` if anything's still missing, else
-  // straight to `payment_review`.
+  // 5a. Cheques flow always wins — once the customer has submitted them,
+  // they're past Steps 1 and 2 by definition.
+  if (stage === 'cheques_submitted' || stage === 'cheques_collected') return 'awaiting_rp_confirm';
+
+  // 5b. Once the customer expresses interest, check docs FIRST. The
+  // backend auto-generates a payment plan on express-interest, so
+  // `r.paymentPlan` is truthy from the moment they confirm — but we
+  // still owe a manual admin/RP review before unlocking Step 3.
+  //
+  //   docs missing       → docs_required
+  //   docs uploaded      → docs_under_review (admin/RP review gate)
+  //   stage `payment_plan_shared` / approved / converted
+  //                      → payment_review (review complete, unlocked)
+  //
+  // The RP/admin issues the payment plan via /leads/:id/issue-payment-plan
+  // (or marks the lead approved) which flips lead.stage. On the next
+  // customer refresh we drop into the `payment_plan_shared` branch
+  // below and Step 3 unlocks.
   if (stage === 'interested') {
-    return r.allRequiredDocsUploaded ? 'payment_review' : 'docs_required';
+    return r.allRequiredDocsUploaded ? 'docs_under_review' : 'docs_required';
   }
 
-  // Step 2 (docs_required) when the lead is in documents_collection AND some
-  // required docs are missing. Otherwise the customer is past docs and into
-  // payment_review (handled above) — falling through here means they're still
-  // pre-interest.
-  if (stage === 'documents_collection' && !r.allRequiredDocsUploaded) return 'docs_required';
-  if (stage === 'documents_collection') return 'payment_review';
+  // 5c. Documents-collection stage (legacy path before the 'interested'
+  // stage existed) — same gate as above.
+  if (stage === 'documents_collection') {
+    return r.allRequiredDocsUploaded ? 'docs_under_review' : 'docs_required';
+  }
+
+  // 5d. Plan-issued / approved — RP has explicitly shared the plan or
+  // accepted the application; review is complete. Customer unlocks
+  // Step 3 (`payment_review`) with the cheque schedule + contract
+  // preview.
+  if (stage === 'payment_plan_shared' || stage === 'approved' || stage === 'converted') return 'payment_review';
+
+  // 5e. Stale auto-generated plan with no stage transition — we still
+  // hold the customer at docs_under_review until RP/admin signals
+  // approval explicitly. Avoids the previous bug where the auto-plan
+  // alone teleported the customer past the review gate.
+  if (r.paymentPlan && r.allRequiredDocsUploaded) return 'docs_under_review';
+  if (r.paymentPlan) return 'docs_required';
 
   // ── 6. Step 1 — booked. Customer hasn't expressed Interest yet (or hasn't
   // attended the viewing). The Booked card carries the "I'm Interested" CTA.
   return 'booked';
 }
 
-function stepsFor(stateKey: StateKey): { steps: (Step & { state: 'done' | 'current' | 'future' | 'declined' })[]; mode: Mode } {
+/**
+ * Map state-machine state → timeline step key so we can compute which
+ * step is "current" after filtering. Anything not in this map (renewal
+ * / termination / dead-end states) falls back to STATE_DEFS.currentIndex
+ * since those flows render their own dedicated step list anyway.
+ */
+const STATE_TO_STEP_KEY: Partial<Record<StateKey, string>> = {
+  booked:               'booked',
+  docs_required:        'documents',
+  docs_under_review:    'documents',
+  payment_review:       'payment',
+  awaiting_rp_confirm:  'payment',
+  signature:            'sign',
+  ejari:                'ejari',
+  utility:              'utility',
+  move_in:              'move_in',
+  active:               'active',
+};
+
+/**
+ * Decide which timeline steps this particular customer needs to walk
+ * through. The 8-step journey is fixed for new tenancies — every pin
+ * stays visible from Booked → Active so the static "Step N of 8" labels
+ * in STATE_DEFS line up with the timeline highlight (previous attempts
+ * to hide the Docs pin once uploaded caused exactly that mismatch).
+ */
+function getVisibleSteps(_resolved: Resolved | null, currentStateKey: StateKey): Step[] {
+  const def = STATE_DEFS[currentStateKey];
+  return def.mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
+}
+
+function stepsFor(stateKey: StateKey, resolved?: Resolved | null):
+  { steps: (Step & { state: 'done' | 'current' | 'future' | 'declined' })[]; mode: Mode; currentIndex: number } {
   const def = STATE_DEFS[stateKey];
-  const baseSteps = def.mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
+  const visibleSteps = getVisibleSteps(resolved ?? null, stateKey);
+  // Recompute currentIndex against the (possibly filtered) step list so
+  // the highlight stays anchored to the right step after hiding Docs.
+  const stepKey = STATE_TO_STEP_KEY[stateKey];
+  const computedIdx = stepKey ? visibleSteps.findIndex(s => s.key === stepKey) : -1;
+  const currentIndex = computedIdx >= 0 ? computedIdx : def.currentIndex;
   return {
     mode: def.mode,
-    steps: baseSteps.map((s, i) => ({
+    currentIndex,
+    steps: visibleSteps.map((s, i) => ({
       ...s,
       state: def.mode === 'rejected'
         ? 'declined'
@@ -394,8 +460,8 @@ function stepsFor(stateKey: StateKey): { steps: (Step & { state: 'done' | 'curre
         // mark every step including the final one as 'done' (green), not 'current' (red).
         // The brick "now" indicator only makes sense while there's still an action to take.
         : def.tone === 'celebrate'
-          ? (i <= def.currentIndex ? 'done' : 'future')
-          : i < def.currentIndex ? 'done' : i === def.currentIndex ? 'current' : 'future',
+          ? (i <= currentIndex ? 'done' : 'future')
+          : i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'future',
     })),
   };
 }
@@ -723,8 +789,8 @@ function SignatureCanvas({ onChange }: { onChange: (dataUrl: string | null) => v
 /* ─── Action card shell ────────────────────────────────────────────── */
 function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey; resolved: Resolved; onRefresh: () => void }) {
   const def = STATE_DEFS[stateKey];
-  const { steps } = stepsFor(stateKey);
-  const currentStep = steps[def.currentIndex];
+  const { steps, currentIndex } = stepsFor(stateKey, resolved);
+  const currentStep = steps[currentIndex];
   const iconName = currentStep?.icon ?? 'document';
 
   return (
@@ -763,6 +829,7 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'booked':                        return <BookedAction resolved={resolved} onRefresh={onRefresh} />;
     // PHASE 3 → conditional hide + KYC recommendation; reuses existing DocumentsAction
     case 'docs_required':                 return <DocumentsAction resolved={resolved} onRefresh={onRefresh} />;
+    case 'docs_under_review':             return <DocsUnderReviewAction resolved={resolved} />;
     // PHASE 4 → replace with new PaymentReviewAction (cheque photos + AI extraction)
     case 'payment_review':                return <PaymentPlanAction resolved={resolved} onRefresh={onRefresh} />;
     case 'awaiting_rp_confirm':           return <ChequesReviewWaitAction resolved={resolved} />;
@@ -1129,14 +1196,59 @@ function InterestedPopup({
           </div>
         </div>
 
-        {/* Live total */}
+        {/* Live total + full cheque schedule — updates every time the
+            customer flips occupants, move-in or frequency. Shows the
+            mental-model breakdown (e.g. "Semi-annual = 2 rent cheques
+            + 1 security deposit cheque") and then the per-cheque
+            amounts and due dates so the customer sees exactly what
+            they're committing to before tapping Confirm. */}
         {preview && (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <div>
-              <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, fontWeight: 600 }}>Total payable</p>
-              <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{preview.chequeCount} cheque{preview.chequeCount === 1 ? '' : 's'}</p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div>
+                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, fontWeight: 600 }}>Total payable</p>
+                {(() => {
+                  const rent = preview.installmentCount ?? Math.max(1, preview.chequeCount - 1);
+                  const hasDeposit = (preview.securityDepositFils ?? 0) > 0;
+                  return (
+                    <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>
+                      {rent} rent {rent === 1 ? 'cheque' : 'cheques'}
+                      {hasDeposit ? ' + 1 security deposit cheque' : ''}
+                    </p>
+                  );
+                })()}
+              </div>
+              <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(preview.totalAmountFils)}</p>
             </div>
-            <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(preview.totalAmountFils)}</p>
+
+            {preview.items && preview.items.length > 0 && (
+              <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
+                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px', fontWeight: 600 }}>Cheque schedule</p>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {sortPlanItems(preview.items).map((it, i) => {
+                    const isDeposit = it.type === 'security_deposit';
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: isDeposit ? 'var(--saffron)' : 'var(--jade-deep)', background: isDeposit ? 'var(--saffron-soft)' : 'var(--jade-soft)', borderRadius: 6, padding: '2px 6px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                            #{i + 1}
+                          </span>
+                          <span style={{ color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {it.description ?? (isDeposit ? 'Security deposit' : `Installment ${i + 1}`)}
+                          </span>
+                        </div>
+                        <span style={{ color: 'var(--mute)', fontSize: 11, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                          {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short' }) : '—'}
+                        </span>
+                        <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', minWidth: 90, textAlign: 'right' }}>
+                          {fmtAedFils(it.amountFils)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1243,6 +1355,156 @@ function KycSection({ title, accent, allDone, children }: { title: string; accen
   );
 }
 
+/**
+ * Editable grid of the 5 fields the Emirates ID OCR populates. Each
+ * field auto-saves on blur via PATCH /auth/me. Customer can correct
+ * any OCR mistake inline — they don't need a separate "edit" mode.
+ *
+ * Per-field "Saving…" and "Saved" indicators sit next to the label so
+ * the customer can see exactly what was just persisted.
+ *
+ * The User object passed in is from useAuth; refreshing it after the
+ * patch reads the canonical value back from the server so we don't
+ * trust the local state alone.
+ */
+type AuthUser = ReturnType<typeof useAuth>['user'];
+function PersonalDetailsEditor({ user, onSaved }: { user: AuthUser; onSaved: () => Promise<unknown> | void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+      <PersonalEditField label="First name" initial={user?.firstName ?? ''} fieldKey="firstName" onSaved={onSaved} />
+      <PersonalEditField label="Last name"  initial={user?.lastName ?? ''}  fieldKey="lastName"  onSaved={onSaved} />
+      <PersonalGenderField initial={user?.gender ?? ''} onSaved={onSaved} />
+      <PersonalEditField label="Nationality" initial={user?.nationality ?? ''} fieldKey="nationality" onSaved={onSaved} />
+      <PersonalEditField label="Emirates ID" initial={user?.emiratesIdNumber ?? ''} fieldKey="emiratesIdNumber" mono onSaved={onSaved} placeholder="784-YYYY-NNNNNNN-D" />
+    </div>
+  );
+}
+
+/** Generic editable field that PATCHes /auth/me on blur. */
+function PersonalEditField({
+  label, initial, fieldKey, mono, placeholder, onSaved,
+}: {
+  label: string;
+  initial: string;
+  fieldKey: 'firstName' | 'lastName' | 'nationality' | 'emiratesIdNumber';
+  mono?: boolean;
+  placeholder?: string;
+  onSaved: () => Promise<unknown> | void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Re-sync when the parent prop changes (e.g. OCR completes mid-edit
+  // for another field) — but only when the user isn't actively typing.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setValue(initial);
+  }, [initial]);
+
+  async function maybeSave() {
+    const next = value.trim();
+    if (next === (initial ?? '').trim()) return;
+    setSaving(true); setErr(null);
+    try {
+      await apiPatch('/auth/me', { [fieldKey]: next || null });
+      setSaved(true);
+      await onSaved();
+      setTimeout(() => setSaved(false), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <label style={{ display: 'grid', gap: 4 }}>
+      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
+        {label}
+        {saving && <span style={{ color: 'var(--saffron)', display: 'inline-flex', alignItems: 'center', gap: 4, textTransform: 'none', letterSpacing: 0 }}><Loader2 size={10} className="animate-spin" /> Saving</span>}
+        {saved && !saving && <span style={{ color: 'var(--jade-deep)', textTransform: 'none', letterSpacing: 0 }}>Saved ✓</span>}
+      </span>
+      <input
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={maybeSave}
+        placeholder={placeholder ?? ''}
+        style={{
+          padding: '8px 10px', borderRadius: 9, border: `1px solid ${err ? 'var(--brick)' : 'var(--mist-strong)'}`,
+          background: 'var(--paper)', fontSize: 13, color: 'var(--ink)', outline: 'none',
+          fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit',
+          fontVariantNumeric: mono ? 'tabular-nums' : undefined,
+        }}
+      />
+      {err && <span style={{ fontSize: 11, color: 'var(--brick)' }}>{err}</span>}
+    </label>
+  );
+}
+
+/** Gender is a fixed 3-way enum — show a segmented control instead of free text. */
+function PersonalGenderField({ initial, onSaved }: { initial: string; onSaved: () => Promise<unknown> | void }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setValue(initial);
+  }, [initial]);
+
+  async function setAndSave(next: string) {
+    if (next === value) return;
+    setValue(next);
+    setSaving(true);
+    try {
+      await apiPatch('/auth/me', { gender: next || null });
+      setSaved(true);
+      await onSaved();
+      setTimeout(() => setSaved(false), 1500);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
+        Gender
+        {saving && <span style={{ color: 'var(--saffron)', display: 'inline-flex', alignItems: 'center', gap: 4, textTransform: 'none', letterSpacing: 0 }}><Loader2 size={10} className="animate-spin" /> Saving</span>}
+        {saved && !saving && <span style={{ color: 'var(--jade-deep)', textTransform: 'none', letterSpacing: 0 }}>Saved ✓</span>}
+      </span>
+      <div style={{ display: 'flex', gap: 4, background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 9, padding: 3 }}>
+        {(['male', 'female'] as const).map(opt => (
+          <button key={opt} type="button" onClick={() => setAndSave(opt)}
+            style={{
+              flex: 1, padding: '6px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: value === opt ? 'var(--jade)' : 'transparent',
+              color: value === opt ? 'var(--paper)' : 'var(--ink-2)',
+              fontSize: 12, fontWeight: 600, textTransform: 'capitalize', fontFamily: 'inherit',
+            }}>
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Read-only chip used inside the "Personal details" status card on
+ *  Step 2. Each chip is a small key/value tile (label on top, value
+ *  below). `mono` switches the value font to a tabular monospace —
+ *  used for the Emirates ID number so digits line up. */
+function PersonalChip({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '8px 11px', display: 'grid', gap: 2, alignContent: 'start' }}>
+      <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, margin: 0 }}>{label}</p>
+      <p style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 600, margin: 0, fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit', fontVariantNumeric: mono ? 'tabular-nums' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</p>
+    </div>
+  );
+}
+
 function KycContactChip({ icon, value, verified }: { icon: React.ReactNode; value: string; verified: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '8px 11px', borderRadius: 9, background: verified ? 'rgba(46,159,130,0.06)' : 'var(--mist)', border: `1px solid ${verified ? 'rgba(46,159,130,0.3)' : 'var(--mist-strong)'}` }}>
@@ -1273,7 +1535,12 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
         {uploaded ? <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} /> : <FileText size={18} style={{ color: 'var(--mute)' }} />}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
+          {req.required
+            ? <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--brick)', background: 'var(--brick-soft)', padding: '2px 7px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Required</span>
+            : <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--mute)', background: 'var(--mist)', padding: '2px 7px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Optional</span>}
+        </div>
         {req.hint && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{req.hint}</p>}
         {previewUrl && (
           <div style={{ marginTop: 6 }}>
@@ -1306,15 +1573,10 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const showEmailEdit  = phoneVerified && (!emailVerified || isAutoEmail);
   const showPhoneEdit  = emailVerified && !phoneVerified;
 
-  // Personal info
-  const initName = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
-  const [fullName,    setFullName]    = useState(initName);
-  const [emailInput,  setEmailInput]  = useState(user?.email ?? '');
-  const [phoneInput,  setPhoneInput]  = useState(user?.phone ?? '');
-  const [savingInfo,  setSavingInfo]  = useState(false);
-  const [infoErr,     setInfoErr]     = useState<string | null>(null);
-  const [infoConfirmed, setInfoConfirmed] = useState(!!(user?.firstName));
-  const [editingInfo,   setEditingInfo]   = useState(!user?.firstName);
+  // Email + phone inputs only — name / gender / nationality / Emirates ID
+  // are extracted from the Emirates ID upload (Phase 4 wires the OCR).
+  const [emailInput, setEmailInput] = useState(user?.email ?? '');
+  const [phoneInput, setPhoneInput] = useState(user?.phone ?? '');
 
   // Email OTP verification
   const [emailOtpStep, setEmailOtpStep] = useState<'idle' | 'verifying'>('idle');
@@ -1348,21 +1610,43 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
     finally { setEmailOtpBusy(false); }
   }
 
-  async function saveInfo() {
-    const nameParts = fullName.trim().split(/\s+/);
-    if (!nameParts[0]) { setInfoErr('Full name is required.'); return; }
-    const firstName = nameParts[0];
-    const lastName  = nameParts.slice(1).join(' ') || nameParts[0];
-    setSavingInfo(true); setInfoErr(null);
+  // Phone OTP verification — mirrors the email flow. The auth/me PATCH
+  // writes the new phone and resets phoneVerified=false; /auth/otp/request
+  // then sends a 6-digit code to that phone; /auth/otp/verify confirms it.
+  const [phoneOtpStep, setPhoneOtpStep] = useState<'idle' | 'verifying'>('idle');
+  const [phoneOtp,     setPhoneOtp]     = useState('');
+  const [phoneDevOtp,  setPhoneDevOtp]  = useState<string | null>(null);
+  const [phoneOtpBusy, setPhoneOtpBusy] = useState(false);
+  const [phoneOtpErr,  setPhoneOtpErr]  = useState<string | null>(null);
+
+  async function sendPhoneOtp() {
+    const value = phoneInput.trim();
+    if (!/^\+?\d{8,16}$/.test(value)) { setPhoneOtpErr('Enter a valid phone number'); return; }
+    setPhoneOtpBusy(true); setPhoneOtpErr(null); setPhoneDevOtp(null);
     try {
-      const patch: Record<string, string> = { firstName, lastName };
-      if (showPhoneEdit && phoneInput.trim()) patch.phone = phoneInput.trim();
-      await apiPatch('/auth/me', patch);
+      await apiPatch('/auth/me', { phone: value });
+      const res = await apiPost<{ sent: boolean; devOtp?: string }>('/auth/otp/request', {});
+      if (res?.devOtp) setPhoneDevOtp(res.devOtp);
       await refreshUser();
-      setInfoConfirmed(true); setEditingInfo(false);
-    } catch (e) { setInfoErr(e instanceof Error ? e.message : 'Failed to save'); }
-    finally { setSavingInfo(false); }
+      setPhoneOtpStep('verifying');
+    } catch (e) { setPhoneOtpErr(e instanceof Error ? e.message : 'Could not send code'); }
+    finally { setPhoneOtpBusy(false); }
   }
+
+  async function verifyPhoneOtp() {
+    if (phoneOtp.trim().length !== 6) { setPhoneOtpErr('Enter the 6-digit code'); return; }
+    setPhoneOtpBusy(true); setPhoneOtpErr(null);
+    try {
+      await apiPost('/auth/otp/verify', { code: phoneOtp.trim() });
+      await refreshUser();
+      setPhoneOtpStep('idle'); setPhoneOtp(''); setPhoneDevOtp(null);
+    } catch (e) { setPhoneOtpErr(e instanceof Error ? e.message : 'Invalid or expired code'); }
+    finally { setPhoneOtpBusy(false); }
+  }
+
+  // saveInfo() removed — personal-detail fields (firstName / lastName /
+  // gender / nationality / emiratesIdNumber) come from the Emirates ID
+  // OCR pipeline in Phase 4, not from a customer-typed form.
 
   // Upload
   const [docUploading,  setDocUploading]  = useState<string | null>(null);
@@ -1398,145 +1682,233 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   const uploadedKeys = useMemo(() => new Set(resolved.myDocs.map(d => d.documentKey)), [resolved.myDocs]);
   const kycRequired      = KYC_DOCS;
-  const financialReq     = RESIDENTIAL_RENTAL_DOCS.filter(d => d.required);
-  const financialOpt     = RESIDENTIAL_RENTAL_DOCS.filter(d => !d.required);
+  // Supporting documents always include Marriage Certificate alongside the
+  // strictly-required Employment Letter + Bank Statement so families have
+  // a visible slot. It stays non-blocking — `allRequired` below only
+  // counts `required: true` docs for the docs-complete gate.
+  // v1 launch policy: KYC trio is the ONLY mandatory gate. Everything
+  // else (financial/business docs, marriage cert, occupant identity)
+  // is voluntary but still visible so customers know they CAN upload
+  // and admin gets richer context for review.
+
+  // Always render these rows in the Supporting Documents section, even
+  // though `required: false`. The customer's natural mental model is
+  // "Employment Letter + Bank Statement + Marriage Cert" — hiding them
+  // because they're optional would feel like missing UI.
+  const SUPPORTING_SHOWN_KEYS = isRes
+    ? ['employment_letter', 'bank_statement', 'marriage_certificate']
+    : getRentalSectionDocs(unitType).slice(0, 3).map(d => d.key);
+  const financialReq     = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => SUPPORTING_SHOWN_KEYS.includes(d.key));
+  const financialOpt     = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => !SUPPORTING_SHOWN_KEYS.includes(d.key));
   const occupantDocList  = isRes && occupantCount > 1 ? getOccupantDocs(occupantCount) : [];
-  // Mandatory: KYC identity + financial only. Occupants + optional are non-blocking.
-  const allRequired      = [...kycRequired, ...(isRes ? financialReq : getRentalSectionDocs(unitType).filter(d => d.required))];
+
+  // Gate counts only the KYC identity rows. Adding occupant or financial
+  // rows to this list would block submission for customers who upload
+  // their KYC but don't (e.g.) have an employment letter handy.
+  const allRequired      = [...kycRequired];
   const allRequiredDone  = allRequired.every(d => uploadedKeys.has(d.key));
 
   const doneCount = allRequired.filter(d => uploadedKeys.has(d.key)).length;
   const totalCount = allRequired.length;
-  const infoOk    = fullName.trim().length > 0;
+
+  // Per-section completion flags drive the KycSection "Done ✓" collapse
+  // so finished work stays visible (collapsed, with a green pill) instead
+  // of vanishing.
+  const kycAllDone      = kycRequired.every(d => uploadedKeys.has(d.key));
+  const supportingDocs  = financialReq;
+  const supportingAllDone = supportingDocs.every(d => uploadedKeys.has(d.key));
+  const occupantsAllDone  = occupantDocList.length > 0 && occupantDocList.every(d => uploadedKeys.has(d.key));
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {uploadErr && <ErrorBox msg={uploadErr} />}
 
-      {/* Personal details */}
-      <KycSection title="Your details">
-        {infoConfirmed && !editingInfo ? (
-          /* Confirmed — compact summary */
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 20, background: 'var(--jade-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--jade-deep)' }}>{fullName.trim()[0]?.toUpperCase() ?? '?'}</span>
+      {/* Personal Details — for the v1 launch we use an admin-review
+          model instead of auto-OCR:
+            1. Customer uploads their docs (KYC + supporting)
+            2. The UpNow admin reviews the uploaded docs and types in
+               the customer's name / gender / nationality / ID number
+               / DOB on the User row (out-of-band, via the admin tools).
+            3. When that admin update lands the card shows the fields as
+               read-only chips so the customer can confirm them. The
+               customer can still tap any field to correct an admin typo
+               — same PersonalDetailsEditor as before.
+          The auto-OCR pipeline (OcrService + runEmiratesIdOcr) is still
+          in the codebase but gated off via OCR_ENABLED=false. Flip the
+          env back on post-launch to resume auto-extract. */}
+      {(() => {
+        const personal = {
+          firstName: user?.firstName ?? null,
+          lastName: user?.lastName ?? null,
+          gender: user?.gender ?? null,
+          nationality: user?.nationality ?? null,
+          emiratesIdNumber: user?.emiratesIdNumber ?? null,
+        };
+        const populated = !!(personal.firstName || personal.lastName || personal.emiratesIdNumber);
+        return (
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>Personal details</p>
+              {populated
+                ? <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Verified by admin</span>
+                : <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--mute)', background: 'var(--mist)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Awaiting review</span>}
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: '0 0 2px' }}>{fullName.trim()}</p>
-              <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {showEmailEdit ? emailInput || user?.email : user?.email}
-                {(user?.phone || (showPhoneEdit && phoneInput)) && <span style={{ color: 'var(--mute)', margin: '0 4px' }}>·</span>}
-                {showPhoneEdit ? phoneInput || user?.phone : user?.phone}
+            {populated ? (
+              <>
+                <p style={{ fontSize: 11, color: 'var(--mute)', margin: '0 0 10px', lineHeight: 1.4 }}>
+                  An UpNow admin filled these in from your uploaded documents. Tap any field to correct a typo.
+                </p>
+                <PersonalDetailsEditor user={user} onSaved={refreshUser} />
+              </>
+            ) : (
+              <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+                Your details will be auto-filled.
               </p>
-            </div>
-            <button type="button" onClick={() => setEditingInfo(true)}
-              style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6, flexShrink: 0 }}>
-              Edit
-            </button>
+            )}
           </div>
-        ) : (
-          /* Edit form */
-          <>
-            {/* Full name — auto-saves on blur */}
-            <label style={{ display: 'grid', gap: 5 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={KYC_LABEL_STYLE}>Full name</span>
-                {savingInfo && <span style={{ fontSize: 11, color: 'var(--mute)', display: 'flex', alignItems: 'center', gap: 4 }}><Loader2 size={11} className="animate-spin" /> Saving…</span>}
-                {infoErr && !savingInfo && <span style={{ fontSize: 11, color: 'var(--brick)' }}>{infoErr}</span>}
-              </div>
-              <input value={fullName} onChange={e => setFullName(e.target.value)}
-                onBlur={() => { if (fullName.trim()) saveInfo(); }}
-                placeholder="e.g. Muhammad Zeeshan" style={KYC_INPUT_STYLE} />
-            </label>
+        );
+      })()}
 
-            {/* Email + Phone in one row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <div style={{ display: 'grid', gap: 5 }}>
-                <span style={KYC_LABEL_STYLE}>Email</span>
-                {showEmailEdit ? (
-                  <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--mist-strong)', borderRadius: 9, background: 'var(--paper)', overflow: 'hidden' }}>
-                    <input type="email" value={emailInput} onChange={e => setEmailInput(e.target.value)} placeholder="your@email.com"
-                      style={{ flex: 1, border: 'none', outline: 'none', padding: '9px 12px', fontSize: 13, color: 'var(--ink)', background: 'transparent' }} />
-                    <button type="button" onClick={sendEmailOtp} disabled={emailOtpBusy || !emailInput.trim()}
-                      style={{ padding: '0 12px', height: '100%', minHeight: 38, border: 'none', borderLeft: '1px solid var(--mist-strong)', background: emailInput.trim() ? 'var(--jade-soft)' : 'var(--mist)', color: emailInput.trim() ? 'var(--jade-deep)' : 'var(--mute)', fontSize: 12, fontWeight: 700, cursor: emailInput.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 }}>
-                      {emailOtpBusy ? <Loader2 size={12} className="animate-spin" /> : 'Verify'}
-                    </button>
-                  </div>
-                ) : (
-                  <KycContactChip icon={<Mail size={13} />} value={isAutoEmail ? '' : (user?.email ?? '')} verified={emailVerified && !isAutoEmail} />
-                )}
-              </div>
-              <div style={{ display: 'grid', gap: 5 }}>
-                <span style={KYC_LABEL_STYLE}>Phone</span>
-                {showPhoneEdit
-                  ? <input type="tel" value={phoneInput} onChange={e => setPhoneInput(e.target.value)} placeholder="+971 50 000 0000" style={KYC_INPUT_STYLE} />
-                  : <KycContactChip icon={<Phone size={13} />} value={user?.phone ?? ''} verified={phoneVerified} />}
-              </div>
-            </div>
-
-            {/* OTP panel — full width, sits above Save button */}
-            {showEmailEdit && emailOtpStep === 'verifying' && (
-              <div style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'grid', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Mail size={13} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
-                  <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1 }}>Code sent to <strong>{emailInput}</strong></span>
-                  <button type="button" onClick={() => { setEmailOtpStep('idle'); setEmailOtp(''); setEmailOtpErr(null); }}
-                    style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Change</button>
-                </div>
-                {emailDevOtp && (
-                  <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fef3c7', border: '1px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <div>
-                      <p style={{ fontSize: 9, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Dev OTP</p>
-                      <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#1a1916' }}>{emailDevOtp}</p>
-                    </div>
-                    <button type="button" onClick={() => setEmailOtp(emailDevOtp)}
-                      style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input type="text" inputMode="numeric" maxLength={6} placeholder="6-digit code"
-                    value={emailOtp} onChange={e => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    style={{ ...KYC_INPUT_STYLE, letterSpacing: '4px', fontWeight: 700, maxWidth: 150 }} />
-                  <button type="button" onClick={verifyEmailOtp} disabled={emailOtpBusy || emailOtp.length !== 6}
-                    style={{ padding: '9px 20px', borderRadius: 9, background: 'var(--jade)', color: '#fff', border: 'none', fontSize: 13, fontWeight: 600, cursor: emailOtp.length === 6 ? 'pointer' : 'not-allowed', opacity: emailOtp.length < 6 ? 0.5 : 1, fontFamily: 'inherit', flexShrink: 0 }}>
-                    {emailOtpBusy ? <Loader2 size={14} className="animate-spin" /> : 'Verify'}
+      {/* Contact verification — email + phone OTP. Only shown when the
+          account needs either (auto-generated email, or phone-only signup
+          that hasn't added a real email, etc.). Email is NOT on the
+          Emirates ID so we keep this as a customer-driven step. */}
+      {(showEmailEdit || showPhoneEdit) && (
+        <KycSection title="Verify contact details">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ display: 'grid', gap: 5 }}>
+              <span style={KYC_LABEL_STYLE}>Email</span>
+              {showEmailEdit ? (
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--mist-strong)', borderRadius: 9, background: 'var(--paper)', overflow: 'hidden' }}>
+                  <input type="email" value={emailInput} onChange={e => setEmailInput(e.target.value)} placeholder="your@email.com"
+                    style={{ flex: 1, border: 'none', outline: 'none', padding: '9px 12px', fontSize: 13, color: 'var(--ink)', background: 'transparent' }} />
+                  <button type="button" onClick={sendEmailOtp} disabled={emailOtpBusy || !emailInput.trim()}
+                    style={{ padding: '0 12px', height: '100%', minHeight: 38, border: 'none', borderLeft: '1px solid var(--mist-strong)', background: emailInput.trim() ? 'var(--jade-soft)' : 'var(--mist)', color: emailInput.trim() ? 'var(--jade-deep)' : 'var(--mute)', fontSize: 12, fontWeight: 700, cursor: emailInput.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 }}>
+                    {emailOtpBusy ? <Loader2 size={12} className="animate-spin" /> : 'Verify'}
                   </button>
-                  <button type="button" onClick={async () => { try { const r = await apiPost<{ devOtp?: string }>('/auth/email/resend', {}); if (r?.devOtp) setEmailDevOtp(r.devOtp); } catch { /* ignore */ } }}
-                    style={{ fontSize: 12, color: 'var(--mute)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0, flexShrink: 0 }}>Resend</button>
                 </div>
-                {emailOtpErr && <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{emailOtpErr}</p>}
+              ) : (
+                <KycContactChip icon={<Mail size={13} />} value={isAutoEmail ? '' : (user?.email ?? '')} verified={emailVerified && !isAutoEmail} />
+              )}
+            </div>
+            <div style={{ display: 'grid', gap: 5 }}>
+              <span style={KYC_LABEL_STYLE}>Phone</span>
+              {showPhoneEdit ? (
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--mist-strong)', borderRadius: 9, background: 'var(--paper)', overflow: 'hidden' }}>
+                  <input type="tel" value={phoneInput} onChange={e => setPhoneInput(e.target.value)} placeholder="+971 50 000 0000"
+                    style={{ flex: 1, border: 'none', outline: 'none', padding: '9px 12px', fontSize: 13, color: 'var(--ink)', background: 'transparent' }} />
+                  <button type="button" onClick={sendPhoneOtp} disabled={phoneOtpBusy || !phoneInput.trim()}
+                    style={{ padding: '0 12px', height: '100%', minHeight: 38, border: 'none', borderLeft: '1px solid var(--mist-strong)', background: phoneInput.trim() ? 'var(--jade-soft)' : 'var(--mist)', color: phoneInput.trim() ? 'var(--jade-deep)' : 'var(--mute)', fontSize: 12, fontWeight: 700, cursor: phoneInput.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 }}>
+                    {phoneOtpBusy ? <Loader2 size={12} className="animate-spin" /> : 'Verify'}
+                  </button>
+                </div>
+              ) : (
+                <KycContactChip icon={<Phone size={13} />} value={user?.phone ?? ''} verified={phoneVerified} />
+              )}
+            </div>
+          </div>
+
+          {showPhoneEdit && phoneOtpStep === 'verifying' && (
+            <div style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'grid', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Phone size={13} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1 }}>Code sent to <strong>{phoneInput}</strong></span>
+                <button type="button" onClick={() => { setPhoneOtpStep('idle'); setPhoneOtp(''); setPhoneOtpErr(null); }}
+                  style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Change</button>
               </div>
-            )}
-            {emailOtpErr && emailOtpStep === 'idle' && showEmailEdit && (
-              <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{emailOtpErr}</p>
-            )}
+              {phoneDevOtp && (
+                <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fef3c7', border: '1px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <p style={{ fontSize: 9, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Dev OTP</p>
+                    <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#1a1916' }}>{phoneDevOtp}</p>
+                  </div>
+                  <button type="button" onClick={() => setPhoneOtp(phoneDevOtp)}
+                    style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="text" inputMode="numeric" maxLength={6} placeholder="6-digit code"
+                  value={phoneOtp} onChange={e => setPhoneOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  style={{ ...KYC_INPUT_STYLE, letterSpacing: '4px', fontWeight: 700, maxWidth: 150 }} />
+                <button type="button" onClick={verifyPhoneOtp} disabled={phoneOtpBusy || phoneOtp.length !== 6}
+                  style={{ padding: '9px 20px', borderRadius: 9, background: 'var(--jade)', color: '#fff', border: 'none', fontSize: 13, fontWeight: 600, cursor: phoneOtp.length === 6 ? 'pointer' : 'not-allowed', opacity: phoneOtp.length < 6 ? 0.5 : 1, fontFamily: 'inherit', flexShrink: 0 }}>
+                  {phoneOtpBusy ? <Loader2 size={14} className="animate-spin" /> : 'Verify'}
+                </button>
+                <button type="button" onClick={async () => { try { const r = await apiPost<{ devOtp?: string }>('/auth/otp/request', {}); if (r?.devOtp) setPhoneDevOtp(r.devOtp); } catch { /* ignore */ } }}
+                  style={{ fontSize: 12, color: 'var(--mute)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0, flexShrink: 0 }}>Resend</button>
+              </div>
+              {phoneOtpErr && <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{phoneOtpErr}</p>}
+            </div>
+          )}
+          {phoneOtpErr && phoneOtpStep === 'idle' && showPhoneEdit && (
+            <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{phoneOtpErr}</p>
+          )}
 
-          </>
-        )}
-      </KycSection>
+          {showEmailEdit && emailOtpStep === 'verifying' && (
+            <div style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'grid', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Mail size={13} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1 }}>Code sent to <strong>{emailInput}</strong></span>
+                <button type="button" onClick={() => { setEmailOtpStep('idle'); setEmailOtp(''); setEmailOtpErr(null); }}
+                  style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Change</button>
+              </div>
+              {emailDevOtp && (
+                <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fef3c7', border: '1px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <p style={{ fontSize: 9, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Dev OTP</p>
+                    <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#1a1916' }}>{emailDevOtp}</p>
+                  </div>
+                  <button type="button" onClick={() => setEmailOtp(emailDevOtp)}
+                    style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="text" inputMode="numeric" maxLength={6} placeholder="6-digit code"
+                  value={emailOtp} onChange={e => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  style={{ ...KYC_INPUT_STYLE, letterSpacing: '4px', fontWeight: 700, maxWidth: 150 }} />
+                <button type="button" onClick={verifyEmailOtp} disabled={emailOtpBusy || emailOtp.length !== 6}
+                  style={{ padding: '9px 20px', borderRadius: 9, background: 'var(--jade)', color: '#fff', border: 'none', fontSize: 13, fontWeight: 600, cursor: emailOtp.length === 6 ? 'pointer' : 'not-allowed', opacity: emailOtp.length < 6 ? 0.5 : 1, fontFamily: 'inherit', flexShrink: 0 }}>
+                  {emailOtpBusy ? <Loader2 size={14} className="animate-spin" /> : 'Verify'}
+                </button>
+                <button type="button" onClick={async () => { try { const r = await apiPost<{ devOtp?: string }>('/auth/email/resend', {}); if (r?.devOtp) setEmailDevOtp(r.devOtp); } catch { /* ignore */ } }}
+                  style={{ fontSize: 12, color: 'var(--mute)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0, flexShrink: 0 }}>Resend</button>
+              </div>
+              {emailOtpErr && <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{emailOtpErr}</p>}
+            </div>
+          )}
+          {emailOtpErr && emailOtpStep === 'idle' && showEmailEdit && (
+            <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{emailOtpErr}</p>
+          )}
+        </KycSection>
+      )}
 
-      {/* Identity documents */}
-      <KycSection title="Identity documents" allDone={kycRequired.every(d => uploadedKeys.has(d.key))}>
+      {/* Identity documents (KYC). Always rendered; the KycSection
+          auto-collapses with a "Done ✓" pill when every required KYC
+          doc is uploaded, so finished work stays visible instead of
+          disappearing on the customer. */}
+      <KycSection title="Identity documents (KYC)" accent allDone={kycAllDone}>
         {kycRequired.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
       </KycSection>
 
-      {/* Financial documents */}
-      {(() => { const docs = isRes ? financialReq : getRentalSectionDocs(unitType).filter(d => d.required); return (
-        <KycSection title={isRes ? 'Financial documents' : 'Business documents'} allDone={docs.every(d => uploadedKeys.has(d.key))}>
-          {docs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
-        </KycSection>
-      ); })()}
+      {/* Supporting / business documents. Same persistent-Done pattern. */}
+      <KycSection title={isRes ? 'Supporting documents' : 'Business documents'} allDone={supportingAllDone}>
+        {supportingDocs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
+      </KycSection>
 
-      {/* Optional documents */}
-      {isRes && financialOpt.length > 0 && (
+      {/* Optional documents — only surface them once the mandatory work
+          is done, so they don't clutter the screen while the customer
+          still has required uploads to finish. */}
+      {isRes && financialOpt.length > 0 && allRequiredDone && (
         <KycSection title="Optional documents" allDone={financialOpt.every(d => uploadedKeys.has(d.key))}>
           {financialOpt.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
         </KycSection>
       )}
 
-      {/* Additional occupants */}
+      {/* Additional occupants — always rendered when occupantCount > 1.
+          Collapses with "Done ✓" once every occupant's required identity
+          docs are uploaded. */}
       {occupantDocList.length > 0 && (
-        <KycSection title={`Additional occupants (${occupantCount - 1} more)`} allDone={occupantDocList.every(d => uploadedKeys.has(d.key))}>
+        <KycSection title={`Additional occupants (${occupantCount - 1} more)`} allDone={occupantsAllDone}>
           {occupantDocList.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
         </KycSection>
       )}
@@ -1836,6 +2208,84 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
   w.document.close();
 }
 
+/* ─── DOCS UNDER REVIEW ───────────────────────────────────────────────
+ * Mounted between Step 2 (docs_required) and Step 3 (payment_review).
+ * The customer has uploaded KYC + any supporting docs; admin/RP now
+ * reviews them. When admin issues the payment plan (or marks the lead
+ * approved) lead.stage flips to `payment_plan_shared` and the next
+ * customer refresh routes them into payment_review.
+ *
+ * Card layout: waiting badge at the top, payment plan summary below
+ * (lump-sum fee breakdown + cheque schedule) so the customer can see
+ * what they're committing to while admin processes their paperwork.
+ */
+function DocsUnderReviewAction({ resolved }: { resolved: Resolved }) {
+  const plan = resolved.paymentPlan;
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <WaitingBadge />
+      {plan && <PaymentPlanSummary plan={plan} />}
+    </div>
+  );
+}
+
+/** Reusable summary card showing the lump-sum fee breakdown + the full
+ *  cheque schedule from a PaymentPlan. Used by DocsUnderReviewAction
+ *  and (later) the contract-preview block on Step 3 (payment_review). */
+function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
+  const items = plan.items ?? [];
+  const installments = plan.installmentCount ?? Math.max(1, plan.chequeCount - 1);
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+      <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Payment plan summary</p>
+
+      <div style={{ display: 'grid', gap: 6, marginBottom: items.length ? 14 : 0 }}>
+        <PaymentRow label="Annual rent" amountFils={plan.rentFils} />
+        <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
+        <PaymentRow label="Admin fee" amountFils={plan.adminFeeFils ?? 0} />
+        <PaymentRow label="Ejari fee" amountFils={plan.ejariFils ?? 0} />
+        <PaymentRow label="Commission" amountFils={plan.commissionFils ?? 0} />
+        <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
+        <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
+      </div>
+
+      {items.length > 0 && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '0 0 8px' }}>
+            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 600 }}>Cheque schedule</p>
+            <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0 }}>
+              {installments} rent {installments === 1 ? 'cheque' : 'cheques'}{(plan.securityDepositFils ?? 0) > 0 ? ' + 1 deposit cheque' : ''}
+            </p>
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {sortPlanItems(items).map((it, i) => {
+              const isDeposit = it.type === 'security_deposit';
+              return (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: isDeposit ? 'var(--saffron)' : 'var(--jade-deep)', background: isDeposit ? 'var(--saffron-soft)' : 'var(--jade-soft)', borderRadius: 6, padding: '2px 6px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                      #{i + 1}
+                    </span>
+                    <span style={{ color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {it.description ?? (isDeposit ? 'Security deposit' : `Installment ${i + 1}`)}
+                    </span>
+                  </div>
+                  <span style={{ color: 'var(--mute)', fontSize: 11, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                    {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short' }) : '—'}
+                  </span>
+                  <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', minWidth: 90, textAlign: 'right' }}>
+                    {fmtAedFils(it.amountFils)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ─── PAYMENT PLAN ─────────────────────────────────────────────────── */
 function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const { user } = useAuth();
@@ -1843,6 +2293,22 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const [err, setErr] = useState<string | null>(null);
   const plan = resolved.paymentPlan;
   const leadId = resolved.lead?.id ?? resolved.viewing?.lead?.id ?? resolved.viewing?.leadId ?? null;
+  const viewingId = resolved.viewing?.id ?? null;
+
+  // Cheque uploads — customer attaches photos of their physical cheques so
+  // the landlord knows which ones to collect. Optional but encouraged.
+  const [uploads, setUploads] = useState<CustomerCheque[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState(0);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const chequeFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!viewingId) return;
+    fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: CustomerCheque[]) => setUploads(data))
+      .catch(() => {});
+  }, [viewingId]);
 
   if (!plan) {
     return (
@@ -1853,6 +2319,60 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
         </p>
       </div>
     );
+  }
+
+  async function uploadOneCheque(file: File, index: number) {
+    if (!resolved.tenantProfileId || !viewingId) return;
+    const urlRes = await fetch('/api/documents/upload-url', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ownerType: 'customer', ownerId: resolved.tenantProfileId,
+        documentKey: 'cheque_upload', originalName: file.name, mimeType: file.type,
+      }),
+    });
+    if (!urlRes.ok) throw new Error('Failed to start upload');
+    const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey: string };
+    const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+    const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+    if (!putRes.ok) throw new Error('File upload failed');
+    const regRes = await fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl: fileUrl, fileKey, label: `Cheque ${index}` }),
+    });
+    if (!regRes.ok) {
+      const b = await regRes.json().catch(() => ({}));
+      throw new Error(b?.message ?? 'Cheque registration failed');
+    }
+    return (await regRes.json()) as CustomerCheque;
+  }
+
+  async function handleChequeFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploadErr(null);
+    setUploadingFiles(files.length);
+    let nextIndex = uploads.length + 1;
+    try {
+      for (const file of Array.from(files)) {
+        const saved = await uploadOneCheque(file, nextIndex);
+        if (saved) setUploads(prev => [...prev, saved]);
+        nextIndex++;
+      }
+    } catch (e) {
+      setUploadErr(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploadingFiles(0);
+      if (chequeFileInputRef.current) chequeFileInputRef.current.value = '';
+    }
+  }
+
+  async function removeUpload(chequeId: number) {
+    if (!viewingId) return;
+    const res = await fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads/${chequeId}`, {
+      method: 'DELETE', credentials: 'include',
+    });
+    if (res.ok) setUploads(prev => prev.filter(c => c.id !== chequeId));
   }
 
   async function confirm() {
@@ -1948,13 +2468,83 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{plan.notes}</p>
         </div>
       )}
+      {/* ── Cheque uploads — attach photos of your physical cheques so the landlord knows what to collect ── */}
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Attach your cheques (optional)</p>
+          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{uploads.length} uploaded</span>
+        </div>
+        <label style={{
+          marginTop: 12,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)',
+          background: 'var(--surface)', cursor: uploadingFiles ? 'progress' : 'pointer',
+          fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)',
+        }}>
+          <input
+            ref={chequeFileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            multiple
+            disabled={uploadingFiles > 0}
+            onChange={(e) => handleChequeFiles(e.target.files)}
+            style={{ display: 'none' }}
+          />
+          {uploadingFiles > 0
+            ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploadingFiles} file{uploadingFiles === 1 ? '' : 's'}…</>
+            : <><UploadCloud size={14} /> Choose cheque photos</>}
+        </label>
+
+        {uploadErr && <div style={{ marginTop: 10 }}><ErrorBox msg={uploadErr} /></div>}
+
+        {uploads.length > 0 && (
+          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {uploads.map((c, i) => (
+              <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
+                {c.imageUrl ? (
+                  <a href={c.imageUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={c.imageUrl} alt="cheque" style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                  </a>
+                ) : null}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Cheque ${i + 1}`}</p>
+                  {c.bankName && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{c.bankName}{c.amountFils ? ` · AED ${(c.amountFils / 100).toLocaleString('en-AE')}` : ''}</p>}
+                </div>
+                {c.imageUrl && (
+                  <a
+                    href={c.imageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none' }}
+                  >
+                    <ExternalLink size={12} /> View
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeUpload(c.id)}
+                  style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+                  aria-label="Remove cheque upload"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {err && <ErrorBox msg={err} />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <PrimaryBtn onClick={confirm} disabled={busy}>
+        <PrimaryBtn onClick={confirm} disabled={busy || uploadingFiles > 0}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          {busy ? 'Confirming…' : 'Confirm plan'}
+          {busy ? 'Marking…' : 'Ready to collect'}
         </PrimaryBtn>
       </div>
+      <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0, lineHeight: 1.5 }}>
+        Tap “Ready to collect” when your cheques are prepared. Your landlord will pick them up in person and confirm receipt — your contract is then issued automatically.
+      </p>
     </div>
   );
 }
@@ -3066,9 +3656,12 @@ export default function CustomerSpaceV2Page() {
       const allForUnit = contracts.filter(c => c.unit?.id === unit?.id);
       const contract = allForUnit.find(c => !c.parentContractId) ?? null;
       const renewalContract = contract ? (allForUnit.find(c => c.parentContractId === contract.id) ?? null) : null;
-      const requiredKeys = getRentalSectionDocs(unit.unitType).filter(d => d.required).map(d => d.key);
+      // Docs-complete gate combines KYC identity + financial/business docs.
+      // Use getRequiredDocs (which prepends KYC_DOCS to the rental section)
+      // so a customer who's uploaded financials but skipped KYC still gets
+      // routed to docs_required, not payment_review.
+      const requiredKeys = getRequiredDocs(unit.unitType).filter(d => d.required).map(d => d.key);
       const uploadedKeys = new Set(docs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
-      // Mandatory gate: KYC identity + financial only. Occupants are optional.
       const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => uploadedKeys.has(k));
       const paymentPlan = lead?.paymentPlan ?? viewing?.lead?.paymentPlan ?? null;
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
@@ -3126,7 +3719,7 @@ export default function CustomerSpaceV2Page() {
   }
 
   const stateKey = deriveStateKey(resolved);
-  const { steps } = stepsFor(stateKey);
+  const { steps, currentIndex } = stepsFor(stateKey, resolved);
   const def = STATE_DEFS[stateKey];
 
   return (
@@ -3134,7 +3727,7 @@ export default function CustomerSpaceV2Page() {
       <TopBar resolved={resolved} />
       <div style={{ maxWidth: 1240, margin: '0 auto', padding: '28px 24px 60px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
-          <QuestMap steps={steps} currentIndex={def.currentIndex} mode={def.mode} />
+          <QuestMap steps={steps} currentIndex={currentIndex} mode={def.mode} />
           <QuestActionCard stateKey={stateKey} resolved={resolved} onRefresh={fetchAll} />
         </div>
       </div>
@@ -3148,12 +3741,12 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
   // the original always reads as 'active' (we already verified c.status==='active').
   const resolvedOriginalOnly: Resolved = { ...resolved, renewalContract: null, contract: resolved.contract ? { ...resolved.contract, renewalAccepted: null } : null };
   const originalStateKey: StateKey = 'active';
-  const originalSteps = stepsFor(originalStateKey).steps;
+  const { steps: originalSteps, currentIndex: originalCurrentIdx } = stepsFor(originalStateKey, resolvedOriginalOnly);
   const originalDef = STATE_DEFS[originalStateKey];
 
   // Section 02 — Renewal. Full derivation (renewal-aware).
   const renewalStateKey = deriveStateKey(resolved);
-  const renewalSteps = stepsFor(renewalStateKey).steps;
+  const { steps: renewalSteps, currentIndex: renewalCurrentIdx } = stepsFor(renewalStateKey, resolved);
   const renewalDef = STATE_DEFS[renewalStateKey];
 
   const c = resolved.contract;
@@ -3167,7 +3760,7 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
 
       <DualSection eyebrow="01 · Original lease" title="Your current lease" sub={`Until ${endStr}`} tone="jade">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
-          <QuestMap steps={originalSteps} currentIndex={originalDef.currentIndex} mode={originalDef.mode} />
+          <QuestMap steps={originalSteps} currentIndex={originalCurrentIdx} mode={originalDef.mode} />
           <QuestActionCard stateKey={originalStateKey} resolved={resolvedOriginalOnly} onRefresh={onRefresh} />
         </div>
       </DualSection>
@@ -3176,7 +3769,7 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
 
       <DualSection eyebrow="02 · Renewal" title={renewalDef.label} sub={rc?.endDate ? `Through ${renewalEndStr}` : 'In progress'} tone="brick">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
-          <QuestMap steps={renewalSteps} currentIndex={renewalDef.currentIndex} mode={renewalDef.mode} />
+          <QuestMap steps={renewalSteps} currentIndex={renewalCurrentIdx} mode={renewalDef.mode} />
           <QuestActionCard stateKey={renewalStateKey} resolved={resolved} onRefresh={onRefresh} />
         </div>
       </DualSection>
