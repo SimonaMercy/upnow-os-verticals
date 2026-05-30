@@ -700,3 +700,40 @@ WHERE id = <rp_id>;
 ```
 
 `account_type_confirmed_at` should already be set if the RP completed Step 2 of onboarding; `email_verified` / `phone_verified` flags live on the `users` row.
+
+---
+
+## Session May 30, 2026 — "Tenant" → "Customer" copy rename (text-only)
+
+Commit `05d6c13`. Strict text-only rename across 40 files (27 FE, 13 BE), symmetric diff (+187/−187). Zero API / DB / code-identifier changes — `git grep tenant` will still match plenty of identifiers, that is intentional.
+
+**Why "Customer" wins as the user-facing term**: `UserRole.CUSTOMER = 'customer'` is already the role enum value, frontend dashboard route is already `/dashboard/customer/...`, and `CustomerController` already exists. The DB `tenants` table is really the *profile* table for users whose role is already `customer` — the rename brings copy in line with that reality.
+
+### What was changed (rule of thumb: anything a human reads in the product UI)
+
+- JSX text content, tab/menu labels, page titles, Lucide tooltips
+- Toast / alert / error message strings
+- Backend `throw new ...Exception('...')` message strings (these surface as API errors → UI banners)
+- `@ApiTags('...')`, `@ApiOperation({ summary: '...' })`, `@ApiProperty({ description: '...' })` — render in `/docs` Swagger UI
+- Fallback display defaults like `customerName: name ?? 'Customer'`
+
+### What was preserved — DO NOT flip back on a future "just finish the rename" pass
+
+- **All code identifiers**: `Tenant` class, `tenant.entity.ts`, `tenantId`, `tenant.user`, `TenantContract`, `TenantDoc`, `selectedTenant`, etc.
+- **All TypeORM bindings**: `@Entity('tenants')`, `@Column({ name: 'tenant_id' })`, `@ManyToOne(() => Tenant)`, `relations: ['tenant', 'tenant.user']`
+- **All API routes**: `@Controller('tenants')`, `@Get('tenant/:id')`, frontend `fetch('/api/contracts/tenant/...')`. Renaming any of these breaks deployed clients with no migration window.
+- **Persisted role / actor values**: `'tenant'` stored in `signatures.role`, `audit_log.actorType`, `termination.requestedByRole`. These are data, not copy.
+- **Legal-document text (Tier D)** — preserve as `Tenant`:
+  - Anything under `**/contracts/[id]/print/page.tsx`, `**/contracts/[id]/inspection/page.tsx`, and the addendum coversheet
+  - `Tenant / Lessee` party headers when paired with `Landlord / Lessor`
+  - Contract-signing status labels: `Tenant has signed`, `Tenant signature`, `Awaiting tenant response`, `Tenant has requested termination`
+  - Move-in inspection counter-sign banner
+  - "Cheque Drawer (Tenant)" banking term in the payment-plan printout
+  - The Law No 26 of 2007 citation: "regulating relationship between landlords and tenants"
+
+### Ambiguous calls that landed in the commit (revisit only on explicit ask)
+
+- `<PassField label="Tenant" value={tenantName} />` in v2 spaces (boarding-pass UI paired with Landlord) — kept as **Tenant**.
+- `Contract sent to tenant — clauses are locked.` on RP contract page — changed to **Customer** (action banner, not a legal label).
+- `Customer confirmed cheques submitted` / `Awaiting customer to confirm cheques handed over` — changed to **Customer** (action banner).
+- `data/guide.ts` — "Tenant signs" step name + `actor: 'Tenant'` → **Customer signs** / `actor: 'Customer'` (consistency with surrounding actor labels). The keyword tag `'tenant'` (search term, not displayed) left untouched.
