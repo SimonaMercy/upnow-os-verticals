@@ -59,7 +59,7 @@ type LeadStage =
   | 'new' | 'contacted' | 'viewing_scheduled'
   | 'offer_made' | 'applied' | 'approved'
   | 'documents_collection' | 'payment_plan_shared'
-  | 'cheques_submitted' | 'cheques_collected' | 'contract_issued'
+  | 'interested' | 'cheques_submitted' | 'cheques_collected' | 'contract_issued'
   | 'rejected' | 'converted';
 
 const STAGE_LABELS: Record<LeadStage, string> = {
@@ -71,6 +71,7 @@ const STAGE_LABELS: Record<LeadStage, string> = {
   approved:             'Approved',
   documents_collection: 'Docs Collection',
   payment_plan_shared:  'Plan Shared',
+  interested:           'Interested',
   cheques_submitted:    'Cheques Ready',
   cheques_collected:    'Cheques Collected',
   contract_issued:      'Contract Issued',
@@ -87,6 +88,7 @@ const STAGE_PILL: Record<LeadStage, string> = {
   approved:             'bg-[#d1fae5] text-[#065f46]',
   documents_collection: 'bg-[#fff7ed] text-[#c2410c]',
   payment_plan_shared:  'bg-[#f0f9ff] text-[#0369a1]',
+  interested:           'bg-[#d8f2e8] text-[#1f5a3f]',
   cheques_submitted:    'bg-[#fef9c3] text-[#854d0e]',
   cheques_collected:    'bg-[#d8f2e8] text-[#1a7a5a]',
   contract_issued:      'bg-[#d1fae5] text-[#065f46]',
@@ -101,6 +103,7 @@ const TABS: { key: 'all' | LeadStage; label: string }[] = [
   { key: 'viewing_scheduled',    label: 'Viewing' },
   { key: 'documents_collection', label: 'Docs' },
   { key: 'payment_plan_shared',  label: 'Plan Shared' },
+  { key: 'interested',           label: 'Interested' },
   { key: 'cheques_submitted',    label: 'Cheques Ready' },
   { key: 'cheques_collected',    label: 'Collected' },
   { key: 'contract_issued',      label: 'Contract' },
@@ -158,6 +161,11 @@ interface LeadChequeRecord {
   dueDate: string;
   status: string;
   notes?: string | null;
+  imageUrl?: string | null;
+  payeeName?: string | null;
+  accountNumber?: string | null;
+  ocrStatus?: 'pending' | 'done' | 'failed' | null;
+  isCustomerUpload?: boolean;
 }
 
 interface ApiLead {
@@ -258,8 +266,11 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
         cls: 'bg-[#f0f9ff] text-[#0369a1] hover:bg-[#e0f2fe]' };
     case 'payment_plan_shared':
       return null; // waiting for tenant to confirm cheques ready
+    case 'interested':
+      return { kind: 'record_cheques', label: 'Review Cheques',
+        cls: 'bg-[#d8f2e8] text-[#1f5a3f] hover:bg-[#b6e8d0]' };
     case 'cheques_submitted':
-      return { kind: 'record_cheques', label: 'Record Cheques',
+      return { kind: 'record_cheques', label: 'Approve Cheques',
         cls: 'bg-[#fef9c3] text-[#854d0e] hover:bg-[#fef08a]' };
     case 'cheques_collected':
       return lead.unit?.id && lead.convertedTenant?.id
@@ -534,7 +545,7 @@ function LeadRow({
   const canReject   = !['approved', 'rejected', 'converted'].includes(lead.stage);
   const canDocs     = !!lead.convertedTenant?.id &&
     (lead.viewings?.some(v => ['completed', 'no_show'].includes(v.status)) ?? false);
-  const canCheques  = ['payment_plan_shared', 'cheques_submitted', 'cheques_collected'].includes(lead.stage) && !!lead.paymentPlan;
+  const canCheques  = ['payment_plan_shared', 'cheques_submitted', 'cheques_collected', 'interested'].includes(lead.stage);
   const canEditPlan = lead.stage === 'payment_plan_shared' && !!lead.paymentPlan;
 
   // Timezone-safe month shift on a YYYY-MM-DD string — Date.toISOString() drops a day in UTC+ zones.
@@ -2106,11 +2117,65 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               );
             })()}
 
+            {/* Customer-uploaded cheque images — shown when stage is cheques_submitted */}
+            {lead.stage === 'cheques_submitted' && (() => {
+              const uploads = cheques.filter(c => c.isCustomerUpload);
+              if (uploads.length === 0) return null;
+              return (
+                <div className="border-t border-[#fde68a] pt-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
+                    Customer uploaded cheques
+                    <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{uploads.length}</span>
+                  </p>
+                  {uploads.map((c, i) => (
+                    <div key={c.id} className="bg-white border border-[#fde68a] rounded-xl p-3 space-y-2">
+                      <div className="flex items-start gap-3">
+                        {c.imageUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <a href={c.imageUrl} target="_blank" rel="noopener noreferrer">
+                            <img src={c.imageUrl} alt={`Cheque ${i + 1}`} className="w-24 h-16 object-cover rounded-lg border border-[#fde68a] flex-shrink-0 hover:opacity-80 transition-opacity" />
+                          </a>
+                        )}
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <p className="text-[11px] font-semibold text-[#1a1916]">{c.notes || `Cheque ${i + 1}`}</p>
+                          {c.ocrStatus === 'done' && <p className="text-[10px] text-[#2e9f82]">✓ Details auto-read</p>}
+                          {c.bankName && <p className="text-[10px] text-[#9b9890]">{c.bankName}{c.chequeSerial ? ` · #${c.chequeSerial}` : ''}</p>}
+                          {c.amountFils > 0 && <p className="text-[10px] font-semibold text-[#1a1916]">AED {(c.amountFils / 100).toLocaleString('en-AE')}</p>}
+                          {c.dueDate && <p className="text-[10px] text-[#9b9890]">Due: {c.dueDate}</p>}
+                          {c.payeeName && <p className="text-[10px] text-[#9b9890]">Payee: {c.payeeName}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             {chequeError && (
               <p className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{chequeError}</p>
             )}
 
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-2 pt-1 flex-wrap">
+              {/* Approve customer cheques — only shown in cheques_submitted stage */}
+              {lead.stage === 'cheques_submitted' && (
+                <button
+                  disabled={confirmingCollection}
+                  onClick={async () => {
+                    setConfirmingCollection(true); setChequeError(null);
+                    try {
+                      const res = await fetch(`/api/leads/${lead.id}/approve-cheques`, { method: 'PATCH', credentials: 'include' });
+                      const body = await res.json().catch(() => ({}));
+                      if (!res.ok) { setChequeError(body.message ?? 'Failed'); return; }
+                      setPanel('none');
+                      setLeads(prev => prev.map(l => l.id !== lead.id ? l : { ...l, stage: 'cheques_collected' as LeadStage }));
+                    } finally { setConfirmingCollection(false); }
+                  }}
+                  className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
+                  Approve cheques
+                </button>
+              )}
               <button
                 disabled={confirmingCollection || cheques.length === 0}
                 onClick={handleConfirmCollected}

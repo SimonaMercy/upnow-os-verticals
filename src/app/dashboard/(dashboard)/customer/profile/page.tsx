@@ -16,6 +16,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import {
@@ -23,6 +25,7 @@ import {
   Camera, FileText, ChevronRight, X, Loader2,
 } from 'lucide-react';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
+import { RESIDENTIAL_RENTAL_DOCS } from '@/lib/docRequirements';
 import s from './profile.module.css';
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
@@ -43,6 +46,8 @@ const NATIONALITIES = [
 
 export default function CustomerProfilePage() {
   const { user, refresh } = useAuth();
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
 
   // ── Form state ──
   const [firstName, setFirstName] = useState('');
@@ -263,6 +268,16 @@ export default function CustomerProfilePage() {
   return (
     <div className={s.app}>
       <div className={s.main}>
+
+        {/* ReturnTo banner — shown when arriving from interest flow */}
+        {returnTo && (user?.kycStatus === 'verified' || user?.kycStatus === 'pending_review') && (
+          <div style={{ background: '#d8f2e8', border: '1px solid #2e9f82', borderRadius: 12, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <p style={{ fontSize: 14, color: '#1f5a3f', fontWeight: 600, margin: 0 }}>KYC complete — you can now continue your application.</p>
+            <Link href={returnTo} style={{ fontSize: 13, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap', background: '#2e9f82', color: '#fff', borderRadius: 8, padding: '7px 14px' }}>
+              Continue →
+            </Link>
+          </div>
+        )}
 
         {/* Hero */}
         <div className={s.hero}>
@@ -498,6 +513,17 @@ export default function CustomerProfilePage() {
               </div>
             </div>
 
+            {/* Additional / Rental Documents */}
+            <div className={s.card}>
+              <div className={s.cardH}>
+                <span className={s.cardHIc}><FileText size={15} /></span>
+                <h2>Additional Documents</h2>
+              </div>
+              <div className={s.docsWrap}>
+                <AdditionalDocumentsSection tenantProfileId={tenantProfileId} />
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -522,6 +548,147 @@ export default function CustomerProfilePage() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Additional (rental) documents section ────────────────────────────────────
+
+interface MyDoc { documentKey: string; status: string | null; fileUrl: string | null; mimeType: string | null; }
+
+const ALLOWED_DOC_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+
+function AdditionalDocumentsSection({ tenantProfileId }: { tenantProfileId: number | null }) {
+  const [myDocs, setMyDocs]         = useState<MyDoc[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [uploading, setUploading]   = useState<string | null>(null);
+  const [errors, setErrors]         = useState<Record<string, string>>({});
+  const [previews, setPreviews]     = useState<Record<string, { url: string; mime: string }>>({});
+  const fileRef                     = useRef<HTMLInputElement>(null);
+  const pendingKey                  = useRef<string | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    apiGet<{ documents: MyDoc[] }>('/documents/my')
+      .then(r => setMyDocs(r.documents ?? []))
+      .catch(() => setMyDocs([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const byKey = new Map(myDocs.map(d => [d.documentKey, d]));
+
+  const handleUpload = (key: string) => { pendingKey.current = key; fileRef.current?.click(); };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const key = pendingKey.current;
+    e.target.value = '';
+    if (!file || !key || !tenantProfileId) return;
+    if (!ALLOWED_DOC_MIME.includes(file.type)) {
+      setErrors(p => ({ ...p, [key]: 'Only JPG, PNG, WebP or PDF files are allowed.' }));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setErrors(p => ({ ...p, [key]: 'File must be under 10 MB.' }));
+      return;
+    }
+    setErrors(p => { const n = { ...p }; delete n[key]; return n; });
+    setUploading(key);
+    const localUrl = URL.createObjectURL(file);
+    try {
+      const doc = RESIDENTIAL_RENTAL_DOCS.find(d => d.key === key)!;
+      const { uploadUrl, fileUrl, fileKey } = await apiPost<{ uploadUrl: string; fileUrl: string; fileKey: string }>(
+        '/documents/upload-url',
+        { ownerType: 'customer', ownerId: tenantProfileId, documentKey: key, mimeType: file.type, originalName: file.name },
+      );
+      const target = (() => { try { const u = new URL(uploadUrl); return u.pathname.startsWith('/api/') ? u.pathname + u.search : uploadUrl; } catch { return uploadUrl; } })();
+      const put = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error('Upload to storage failed');
+      await apiPost('/documents', {
+        ownerType: 'customer', ownerId: tenantProfileId,
+        category: doc.category, documentKey: key,
+        displayName: doc.label, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3',
+      });
+      setPreviews(p => ({ ...p, [key]: { url: localUrl, mime: file.type } }));
+      load();
+    } catch (err) {
+      URL.revokeObjectURL(localUrl);
+      setErrors(p => ({ ...p, [key]: err instanceof Error ? err.message : 'Upload failed. Try again.' }));
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '24px 0' }}>
+      <Loader2 size={18} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
+      <span style={{ fontSize: 13, color: 'var(--color-neutral-500)' }}>Loading…</span>
+    </div>
+  );
+
+  const required = RESIDENTIAL_RENTAL_DOCS.filter(d => d.required);
+  const optional = RESIDENTIAL_RENTAL_DOCS.filter(d => !d.required);
+
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" style={{ display: 'none' }} onChange={handleFileChange} />
+      <p style={{ fontSize: 13, color: 'var(--color-neutral-500)', margin: 0 }}>
+        These documents are required to proceed with a rental application.
+      </p>
+
+      {[{ title: 'Required', docs: required }, { title: 'Optional', docs: optional }].map(({ title, docs }) => (
+        <div key={title}>
+          <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-neutral-400)', margin: '0 0 8px' }}>{title}</p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {docs.map(doc => {
+              const existing = byKey.get(doc.key);
+              const uploaded = !!existing?.fileUrl || !!previews[doc.key];
+              const preview = previews[doc.key];
+              const previewUrl = preview?.url ?? existing?.fileUrl;
+              const mime = preview?.mime ?? existing?.mimeType ?? '';
+              const isImg = mime.startsWith('image/');
+              const isUploading = uploading === doc.key;
+
+              return (
+                <div key={doc.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 14,
+                  border: `1.5px solid ${uploaded ? 'rgba(34,197,94,0.35)' : errors[doc.key] ? '#ef4444' : 'var(--color-base-200)'}`,
+                  background: uploaded ? 'rgba(34,197,94,0.04)' : 'white',
+                }}>
+                  {/* Status icon */}
+                  <div style={{ width: 40, height: 40, borderRadius: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: uploaded ? 'rgba(34,197,94,0.12)' : 'var(--color-base-100)' }}>
+                    {uploaded
+                      ? <Check size={18} style={{ color: '#22c55e' }} />
+                      : <FileText size={18} style={{ color: 'var(--color-neutral-400)' }} />}
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-neutral-900)', margin: 0 }}>{doc.label}</p>
+                    {doc.hint && <p style={{ fontSize: 11, color: 'var(--color-neutral-500)', margin: '2px 0 0' }}>{doc.hint}</p>}
+                    {errors[doc.key] && <p style={{ fontSize: 11, color: '#ef4444', margin: '4px 0 0' }}>{errors[doc.key]}</p>}
+                    {previewUrl && (
+                      <div style={{ marginTop: 8 }}>
+                        {isImg
+                          ? <a href={previewUrl} target="_blank" rel="noopener noreferrer"><img src={previewUrl} alt={doc.label} style={{ width: 100, height: 68, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb' }} /></a>
+                          : <a href={previewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={13} /> View PDF</a>}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Upload button */}
+                  <button type="button" onClick={() => handleUpload(doc.key)} disabled={isUploading}
+                    style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', cursor: isUploading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', opacity: isUploading ? 0.6 : 1, background: uploaded ? 'var(--color-base-100)' : 'var(--color-primary)', color: uploaded ? 'var(--color-neutral-600)' : '#fff' }}>
+                    {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                    {uploaded ? 'Replace' : 'Upload'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
