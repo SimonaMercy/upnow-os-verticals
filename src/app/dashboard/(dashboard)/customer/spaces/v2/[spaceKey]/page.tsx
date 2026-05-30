@@ -25,18 +25,18 @@
  */
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Loader2, AlertCircle, Clock, MapPin, FileText, Pen, Stamp,
-  Zap, Key, BadgeCheck, Mail, Wallet, Binoculars, Calendar, ChevronRight,
-  ChevronLeft, ChevronDown, Info,
-  X, CheckCircle2, UploadCloud, ExternalLink, Printer, RotateCcw,
-  Sparkles, Home, ArrowRight,
+  Zap, Key, BadgeCheck, Mail, Phone, Wallet, Binoculars, Calendar, ChevronRight,
+  Info, Check, ChevronDown,
+  X, CheckCircle2, UploadCloud, ExternalLink, Printer,
+  Sparkles, ArrowRight, Camera, Trash2,
 } from 'lucide-react';
-import { apiGet } from '@/lib/api';
-import { getRequiredDocs, getOccupantDocs, deriveOccupantCount } from '@/lib/docRequirements';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getOccupantDocs, deriveOccupantCount } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -76,6 +76,8 @@ interface ApiUnit {
   unitName: string | null;
   unitType?: string | null;
   bedrooms?: number | null;
+  rentalPrice?: number | null;
+  premiseNumber?: string | null;
   property?: {
     buildingName?: string;
     fullAddress?: string | null;
@@ -123,9 +125,13 @@ interface ApiViewing {
   leadStage?: string;
   lead?: ApiNestedLead | null;
   unit?: ApiUnit | null;
-  /** Tenant-chosen preferences captured at Step 3 (Rental Documents). */
   desiredMoveIn?: string | null;
   preferredChequeCount?: number | null;
+  paymentType?: string | null;
+  occupantsAdults?: number | null;
+  occupantsChildren?: number | null;
+  occupantsPets?: number | null;
+  occupantsDetails?: string | null;
 }
 interface ApiLead {
   id: number;
@@ -163,12 +169,25 @@ interface ApiContract {
   termination?: ApiTermination | null;
 }
 
+/**
+ * 8-step customer journey (Phase 1 collapse — May 30, 2026):
+ *   booked → docs_required → payment_review → awaiting_rp_confirm
+ *          → signature → ejari → utility → move_in → active
+ *
+ * `docs_required` is conditional — hidden from the timeline when the customer's
+ *  KYC is complete AND occupants=1 AND no RP-requested extras. `deriveStateKey`
+ *  skips straight to `payment_review` in that case.
+ *
+ * Cross-cutting states (termination, rejected, terminated) and the renewal
+ *  journey are preserved as-is from the previous machine.
+ */
 type StateKey =
-  | 'viewing' | 'application_review'
-  | 'documents' | 'documents_submitted'
-  | 'payment_plan' | 'cheques_submitted'
-  | 'contract_issued' | 'signature' | 'ejari' | 'utility'
-  | 'awaiting_movein_inspection' | 'move_in' | 'awaiting_activation' | 'active'
+  | 'booked'
+  | 'docs_required'
+  | 'payment_review'
+  | 'awaiting_rp_confirm'
+  | 'signature' | 'ejari' | 'utility'
+  | 'move_in' | 'active'
   | 'termination_request_received' | 'termination_request_sent'
   | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques'
   | 'renewal_progress' | 'renewal_ejari' | 'renewal_active'
@@ -188,57 +207,66 @@ interface StateDef {
 }
 
 const STATE_DEFS: Record<StateKey, StateDef> = {
-  viewing:                       { label: 'Viewing scheduled',           sub: 'Step 1–2 of 10', mode: 'new',     currentIndex: 1, tone: 'waiting',  headline: 'See the place. Then we’ll set you up.',                body: 'Your viewing is confirmed. Once you’ve seen it and you’re ready to move forward, the rest of the journey kicks off automatically.',                 timing: 'See your scheduled time' },
-  application_review:            { label: 'Application under review',    sub: 'Step 2 of 10',   mode: 'new',     currentIndex: 1, tone: 'waiting',  headline: 'Your application is with the landlord.',               body: 'Your landlord is reviewing your application. They’ll either approve and request documents next, or reach out with an offer.',                          timing: 'Usually 1–2 business days' },
-  documents:                     { label: 'Documents required',          sub: 'Step 3 of 10',   mode: 'new',     currentIndex: 2, tone: 'action',   headline: 'Almost there. Let’s gather your paperwork.',           body: 'Upload a few documents so your landlord can prepare the contract. Most customers finish in under 5 minutes.',                                            timing: 'Takes ~5 min' },
-  documents_submitted:           { label: 'Documents under review',      sub: 'Step 3 of 10',   mode: 'new',     currentIndex: 2, tone: 'waiting',  headline: 'Your documents are in. Landlord is reviewing.',        body: 'All your required paperwork has been uploaded. Your landlord is verifying them and preparing the payment plan.',                                       timing: 'Usually 1 business day' },
-  payment_plan:                  { label: 'Payment plan ready',          sub: 'Step 4 of 10',   mode: 'new',     currentIndex: 3, tone: 'action',   headline: 'Your payment plan is ready.',                          body: 'Your landlord shared a cheque plan. Prepare the cheques, then confirm they’re ready and we’ll move on to signing.',                                    timing: 'Confirm when ready' },
-  cheques_submitted:             { label: 'Cheques being collected',     sub: 'Step 4 of 10',   mode: 'new',     currentIndex: 3, tone: 'waiting',  headline: 'Cheques confirmed. Landlord is collecting them.',      body: 'You’ve confirmed your cheques are ready. Your landlord will record each one and then issue your contract — usually within 24 hours.',                  timing: 'Usually within 1 business day' },
-  contract_issued:               { label: 'Contract being prepared',     sub: 'Step 5 of 10',   mode: 'new',     currentIndex: 4, tone: 'waiting',  headline: 'Your contract is being finalised.',                    body: 'Your landlord is finalising the contract and confirming all cheques. You’ll be able to sign as soon as PDC collection is confirmed.',                  timing: 'Usually same day' },
-  signature:                     { label: 'Awaiting your signature',     sub: 'Step 6 of 10',   mode: 'new',     currentIndex: 5, tone: 'action',   headline: 'One signature stands between you and the keys.',       body: 'Review the final contract, then add your signature below.',                                                                                              timing: 'Takes ~2 min' },
-  ejari:                         { label: 'Ejari in progress',           sub: 'Step 7 of 10',   mode: 'new',     currentIndex: 6, tone: 'waiting',  headline: 'Your landlord is registering Ejari.',                  body: 'The Dubai Land Department typically takes 2–5 business days. We’ll notify you the moment it’s registered.',                                            timing: '2–5 business days' },
-  utility:                       { label: 'Add utility account',         sub: 'Step 8 of 10',   mode: 'new',     currentIndex: 7, tone: 'action',   headline: 'Add your utility account number.',                     body: 'Ejari is done. Add your DEWA / utility account number so the activation can be linked to your tenancy.',                                                timing: 'Takes ~1 min' },
-  awaiting_movein_inspection:    { label: 'Move-in inspection — landlord', sub: 'Step 9 of 10', mode: 'new',     currentIndex: 8, tone: 'waiting',  headline: 'Landlord is preparing your move-in inspection.',       body: 'Your landlord is walking through the unit and recording its current state — every room, meter reading and key photographed. We’ll notify you the moment it’s submitted so you can review and counter-sign.', timing: 'Usually scheduled within 1–2 business days' },
-  move_in:                       { label: 'Sign move-in inspection',     sub: 'Step 9 of 10',   mode: 'new',     currentIndex: 8, tone: 'action',   headline: 'Review the inspection. Then collect your keys.',       body: 'Your landlord submitted the move-in inspection — every room, meter reading and key photographed. Review and counter-sign so the record is official.', timing: 'Takes ~3 min' },
-  awaiting_activation:           { label: 'Awaiting activation',         sub: 'Step 10 of 10',  mode: 'new',     currentIndex: 9, tone: 'waiting',  headline: 'Everything’s in. Landlord is activating your tenancy.', body: 'Utility submitted, inspection counter-signed, Ejari live. Your landlord just needs to flip the switch.',                                              timing: 'Usually within hours' },
-  active:                        { label: 'Active tenancy',              sub: 'Step 10 of 10 — tenancy is live', mode: 'new', currentIndex: 9, tone: 'celebrate', headline: 'Your tenancy is live.',                              body: 'Manage payments, raise issues, or start a renewal request from here any time.',                                                                    timing: null },
-  termination_request_received:  { label: 'Landlord requested termination', sub: 'Respond required', mode: 'new', currentIndex: 9, tone: 'action',  headline: 'Your landlord wants to end the contract early.',       body: 'Your landlord submitted a termination request. Review the reason and effective date, then accept (lease ends on that date) or reject.',                timing: 'Awaiting your response' },
-  termination_request_sent:      { label: 'Your termination request',    sub: 'Awaiting landlord', mode: 'new', currentIndex: 9, tone: 'waiting',  headline: 'Your request is with the landlord.',                   body: 'You asked to end the tenancy. Your contract stays active until your landlord accepts. We’ll notify you the moment they respond.',                       timing: 'Awaiting landlord response' },
+  booked:                        { label: 'Viewing booked',                sub: 'Step 1 of 8',                     mode: 'new',     currentIndex: 0,  tone: 'action',    headline: 'Your viewing is confirmed.',                              body: 'Review the full payment summary below. When you are ready to move forward on this unit, tap “I’m Interested” and we will collect your preferences.',                                          timing: null },
+  docs_required:                 { label: 'Documents required',            sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'action',    headline: 'Almost there. Let us gather your paperwork.',             body: 'Upload the missing identity and supporting documents so we can issue your contract. Most customers finish in under 5 minutes.',                                                                timing: 'Takes ~5 min' },
+  payment_review:                { label: 'Payment & cheques',             sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and upload your cheque photos.',         body: 'Take a clear photo of each cheque. We will read the numbers automatically — you only verify and submit.',                                                                                       timing: 'Takes ~5 min' },
+  awaiting_rp_confirm:           { label: 'Cheques under review',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your landlord is reviewing your cheques.',                body: 'Cheques uploaded. Your landlord is checking the extracted details against your contract before issuing it for signature.',                                                                       timing: 'Usually within 1 business day' },
+  signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'One signature stands between you and the keys.',          body: 'Review the final contract, then add your signature below.',                                                                                                                                       timing: 'Takes ~2 min' },
+  ejari:                         { label: 'Ejari in progress',             sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your landlord is registering Ejari.',                     body: 'The Dubai Land Department typically takes 2-5 business days. Your Ejari certificate will appear here for download the moment your landlord uploads it.',                                          timing: '2-5 business days' },
+  utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your DEWA / utility account.',                    body: 'We have pre-filled the premises number from this unit. Just review, add your DEWA account number, and submit.',                                                                                  timing: 'Takes ~1 min' },
+  move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Open the move-in inspection report, review every room and meter reading, then counter-sign so the record is official.',                                                                          timing: 'Takes ~3 min' },
+  active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: 'Manage payments, raise issues, or start a renewal request from here any time.',                                                                                                                 timing: null },
+  termination_request_received:  { label: 'Landlord requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your landlord wants to end the contract early.',          body: 'Your landlord submitted a termination request. Review the reason and effective date, then accept or reject.',                                                                                   timing: 'Awaiting your response' },
+  termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting landlord',               mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the landlord.',                      body: "You asked to end the tenancy. Your contract stays active until your landlord accepts. We'll notify you the moment they respond.",                                                              timing: 'Awaiting landlord response' },
 
-  renewal_offered:   { label: 'Renewal offered',     sub: 'Renewal step 1 of 6',         mode: 'renewal',  currentIndex: 0, tone: 'action',    headline: 'Stay another year? Here are the new terms.',         body: 'Your landlord proposed renewal terms. Review and accept, or reject and propose changes.',                                          timing: 'Awaiting your decision' },
-  renewal_documents: { label: 'Renewal documents',   sub: 'Renewal step 2 of 6',         mode: 'renewal',  currentIndex: 1, tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',           body: 'Renewals need fresh copies of your Emirates ID and visa — old ones don’t carry over.',                                              timing: 'Takes ~3 min' },
-  renewal_cheques:   { label: 'Renewal cheques',     sub: 'Renewal step 3 of 6',         mode: 'renewal',  currentIndex: 2, tone: 'action',    headline: 'New year, new cheques.',                              body: 'Your landlord prepared the renewal schedule. Prepare the cheques, then confirm.',                                                   timing: 'Confirm when ready' },
-  renewal_progress:  { label: 'Sign your renewal',   sub: 'Renewal step 4 of 6',         mode: 'renewal',  currentIndex: 3, tone: 'action',    headline: 'Last bit — sign your renewal.',                       body: 'Your landlord has signed. Add your signature to lock in the renewed lease.',                                                        timing: 'Takes ~2 min' },
-  renewal_ejari:     { label: 'Renewing Ejari',      sub: 'Renewal step 5 of 6',         mode: 'renewal',  currentIndex: 4, tone: 'waiting',   headline: 'Your landlord is renewing Ejari.',                    body: 'The Dubai Land Department is updating your Ejari record. Usually 2–5 business days.',                                              timing: '2–5 business days' },
-  renewal_active:    { label: 'Renewal active',      sub: 'Renewal step 6 of 6 — done',  mode: 'renewal', currentIndex: 5, tone: 'celebrate', headline: 'Your renewal is live.',                       body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                               timing: null },
+  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 6',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Your landlord proposed renewal terms. Review and accept, or reject and propose changes.',                                                                                                       timing: 'Awaiting your decision' },
+  renewal_documents:             { label: 'Renewal documents',             sub: 'Renewal step 2 of 6',             mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',               body: "Renewals need fresh copies of your Emirates ID and visa — old ones don't carry over.",                                                                                                         timing: 'Takes ~3 min' },
+  renewal_cheques:               { label: 'Renewal cheques',               sub: 'Renewal step 3 of 6',             mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'New year, new cheques.',                                  body: 'Your landlord prepared the renewal schedule. Prepare the cheques, then confirm.',                                                                                                               timing: 'Confirm when ready' },
+  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 4 of 6',             mode: 'renewal', currentIndex: 3,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Your landlord has signed. Add your signature to lock in the renewed lease.',                                                                                                                    timing: 'Takes ~2 min' },
+  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your landlord is renewing Ejari.',                        body: 'The Dubai Land Department is updating your Ejari record. Usually 2-5 business days.',                                                                                                           timing: '2-5 business days' },
+  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
-  rejected:          { label: 'Application declined', sub: 'This unit',                  mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your landlord declined this application.',          body: 'Sometimes it’s the landlord, sometimes it’s timing. We’ll help you find a place that fits.',                                         timing: null },
-  terminated:        { label: 'Tenancy terminated',   sub: 'Contract closed',            mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                          body: 'The contract was terminated. Final settlements processed; security deposit return pending move-out inspection.',                    timing: null },
-  renewal_rejected:  { label: 'Renewal declined',     sub: 'Renewal closed',             mode: 'renewal',  currentIndex: -1, tone: 'declined', headline: 'You declined this renewal offer.',                 body: 'Your landlord can propose new terms, or your tenancy will end as scheduled.',                                                       timing: null },
+  rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your landlord declined this application.',               body: "Sometimes it's the landlord, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
+  terminated:                    { label: 'Tenancy terminated',            sub: 'Contract closed',                 mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                                body: 'The contract was terminated. Final settlements processed; security deposit return pending move-out inspection.',                                                                                timing: null },
+  renewal_rejected:              { label: 'Renewal declined',              sub: 'Renewal closed',                  mode: 'renewal',  currentIndex: -1, tone: 'declined', headline: 'You declined this renewal offer.',                       body: 'Your landlord can propose new terms, or your tenancy will end as scheduled.',                                                                                                                   timing: null },
 };
 
 interface Step { key: string; label: string; short: string; icon: string }
 
 const STEPS_NEW: Step[] = [
-  { key: 'viewing_book',    label: 'Viewing booked',     short: 'Booked',   icon: 'calendar' },
-  { key: 'viewing_attend',  label: 'Attend viewing',     short: 'Visit',    icon: 'binoculars' },
-  { key: 'documents',       label: 'Rental documents',   short: 'Docs',     icon: 'document' },
-  { key: 'payment_plan',    label: 'Payment plan',       short: 'Plan',     icon: 'wallet' },
-  { key: 'contract_issued', label: 'Contract issued',    short: 'Issued',   icon: 'scroll' },
-  { key: 'sign',            label: 'Sign contract',      short: 'Sign',     icon: 'pen' },
-  { key: 'ejari',           label: 'Ejari registration', short: 'Ejari',    icon: 'stamp' },
-  { key: 'utility',         label: 'Utility account',    short: 'Utility',  icon: 'bolt' },
-  { key: 'move_in',         label: 'Move-in inspection', short: 'Move-in',  icon: 'key' },
-  { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active' },
+  { key: 'booked',          label: 'Booked',             short: 'Booked',   icon: 'calendar' },
+  { key: 'documents',       label: 'Documents',          short: 'Docs',     icon: 'document' },
+  { key: 'payment',         label: 'Payment & cheques',  short: 'Payment',  icon: 'wallet'   },
+  { key: 'sign',            label: 'Sign contract',      short: 'Sign',     icon: 'pen'      },
+  { key: 'ejari',           label: 'Ejari',              short: 'Ejari',    icon: 'stamp'    },
+  { key: 'utility',         label: 'Utility',            short: 'Utility',  icon: 'bolt'     },
+  { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
+  { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
 ];
 const STEPS_RENEWAL: Step[] = [
   { key: 'terms_offered',   label: 'Terms offered',      short: 'Terms',    icon: 'envelope' },
   { key: 'documents',       label: 'Renewal documents',  short: 'Docs',     icon: 'document' },
-  { key: 'payment_plan',    label: 'Cheques',            short: 'Cheques',  icon: 'wallet' },
-  { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen' },
-  { key: 'ejari',           label: 'Ejari renewal',      short: 'Ejari',    icon: 'stamp' },
-  { key: 'active',          label: 'Renewal active',     short: 'Active',   icon: 'active' },
+  { key: 'payment_plan',    label: 'Cheques',            short: 'Cheques',  icon: 'wallet'   },
+  { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen'      },
+  { key: 'ejari',           label: 'Ejari renewal',      short: 'Ejari',    icon: 'stamp'    },
+  { key: 'active',          label: 'Renewal active',     short: 'Active',   icon: 'active'   },
 ];
+
+/** A single uploaded cheque photo with its AI-extracted fields. The
+ *  full schema is built out in Phase 4 (Step 3 — AI cheque extraction);
+ *  this minimal shape is what the ChequesReviewWaitAction list renders. */
+interface CustomerCheque {
+  id: number;
+  index: number;
+  chequeNumber?: string | null;
+  amountFils?: number | null;
+  dueDate?: string | null;
+  drawerName?: string | null;
+  bankName?: string | null;
+  imageUrl?: string | null;
+  notes?: string | null;
+  status?: 'pending' | 'approved' | 'rejected';
+}
 
 interface TenantDoc {
   id?: number;
@@ -262,20 +290,29 @@ interface Resolved {
   myDocs: TenantDoc[];
 }
 
+/**
+ * Map current backend state (contract + lead.stage + viewing + docs + payment plan)
+ * to one of the 8 customer-visible steps (plus cross-cutting states).
+ *
+ * Order matters: termination wins over active, renewal-pending wins over the
+ * child contract's own state, terminated/rejected dead-ends short-circuit
+ * everything else.
+ *
+ * `pending`-status contracts are treated as "no contract yet" so the customer
+ * still sees Steps 1–3 instead of Step 4. The contract object is only consulted
+ * once the RP has actually issued it.
+ */
 function deriveStateKey(r: Resolved): StateKey {
-  const c = r.contract;
+  const c = r.contract?.status === 'pending' ? null : r.contract;
   const rc = r.renewalContract;
   const viewing = r.viewing;
+  const stage = r.stage;
 
-  // 1. Renewal proposal status on the original contract — wins over child state.
-  //    When the RP just proposed, the child contract exists in 'pending' state
-  //    BUT the tenant hasn't accepted yet → must show the Terms-Offered screen
-  //    (renewal step 1), not the cheques screen. Only after `renewalAccepted` is
-  //    `'accepted'` do we walk through the child contract's progress.
+  // ── 1. Renewal proposal status on the original contract wins over child state.
   if (c?.renewalAccepted === 'pending') return 'renewal_offered';
   if (c?.renewalAccepted === 'rejected') return 'renewal_rejected';
 
-  // 2. Renewal child in flight — only consulted AFTER tenant has accepted.
+  // ── 2. Renewal child in flight — only consulted AFTER customer accepted.
   if (rc) {
     if (rc.status === 'terminated') return 'renewal_rejected';
     if (rc.status === 'active') return 'renewal_active';
@@ -285,11 +322,10 @@ function deriveStateKey(r: Resolved): StateKey {
     return 'renewal_cheques';
   }
 
-  // 3. Original contract
+  // ── 3. Original contract drives Steps 4–8.
   if (c) {
     if (c.status === 'terminated') return 'terminated';
 
-    // Termination request in flight on an active/issued contract
     const t = c.termination;
     if (t?.response === 'pending') {
       if (t.requestedByRole === 'rental_provider') return 'termination_request_received';
@@ -297,49 +333,45 @@ function deriveStateKey(r: Resolved): StateKey {
     }
 
     if (c.status === 'active') return 'active';
+
     const hasUtility = c.utilityStatus === 'submitted' || c.utilityStatus === 'verified';
     const inspectionSubmitted = !!c.moveInInspection?.submitted;
     const inspectionSignedByTenant = !!c.moveInInspection?.signedByTenant;
-    const moveInSubmittedNeedsSig = inspectionSubmitted && !inspectionSignedByTenant;
 
-    // Move-in flow:
-    //  1. inspection submitted + not yet signed by tenant → tenant action (move_in)
-    //  2. inspection signed by tenant, contract not yet active → awaiting_activation
-    //  3. utility + ejari done but inspection NOT submitted yet → awaiting_movein_inspection
-    //     (this is what the customer was previously missing — RP is between step 4
-    //     and step 5 on their timeline, customer should see the same).
-    if (moveInSubmittedNeedsSig) return 'move_in';
-    if (c.ejariStatus === 'registered' && hasUtility && inspectionSignedByTenant) return 'awaiting_activation';
-    if (c.ejariStatus === 'registered' && hasUtility) return 'awaiting_movein_inspection';
+    // Step 7 (move_in) covers both halves of the inspection flow — waiting
+    // for the landlord to submit AND awaiting the customer's counter-sign.
+    // The MoveInAction component decides which sub-UI to render based on
+    // `inspectionSubmitted` + `inspectionSignedByTenant`.
+    if (c.ejariStatus === 'registered' && hasUtility) return 'move_in';
     if (c.ejariStatus === 'registered') return 'utility';
     if (c.status === 'issued' && c.tenantSignedAt) return 'ejari';
     if (c.status === 'issued' && !c.tenantSignedAt) return 'signature';
-    return 'contract_issued';
+    // Contract is `issued` but tenantSignedAt is null and we haven't matched
+    // anything else — still Step 4 (signature). Customer needs to sign.
+    return 'signature';
   }
 
-  // 4. Real-data signal: payment plan exists overrides stale stage flags
-  const stage = r.stage;
+  // ── 4. Dead-end states (no contract yet).
   if (stage === 'rejected') return 'rejected';
-  if (r.paymentPlan && (!stage || ['documents_collection', 'payment_plan_shared', 'applied', 'offer_made', 'approved', 'converted'].includes(stage))) {
-    return 'payment_plan';
-  }
+  if (viewing?.outcome === 'not_interested') return 'rejected';
+  if (viewing?.status === 'no_show' || viewing?.status === 'cancelled') return 'rejected';
 
-  // 5. Lead stage
-  if (stage === 'contract_issued') return 'contract_issued';
-  if (stage === 'cheques_collected') return 'contract_issued';
-  if (stage === 'cheques_submitted') return 'cheques_submitted';
-  if (stage === 'payment_plan_shared') return 'payment_plan';
-  if (stage === 'documents_collection') return r.allRequiredDocsUploaded ? 'documents_submitted' : 'documents';
-  if (stage === 'approved' || stage === 'converted') return 'contract_issued';
-  if (stage === 'applied' || stage === 'offer_made') return 'application_review';
+  // ── 5. Steps 1–3 (pre-contract).
+  // Step 3 (payment_review + awaiting_rp_confirm) is reached once docs are in
+  // and either the payment plan exists or RP review is pending.
+  if (stage === 'cheques_submitted' || stage === 'cheques_collected') return 'awaiting_rp_confirm';
+  if (stage === 'payment_plan_shared' || stage === 'approved' || stage === 'converted' || r.paymentPlan) return 'payment_review';
 
-  // 6. Viewing-derived
-  if (viewing) {
-    if (viewing.outcome === 'not_interested') return 'rejected';
-    if (viewing.status === 'no_show' || viewing.status === 'cancelled') return 'rejected';
-    if (viewing.status === 'completed') return r.allRequiredDocsUploaded ? 'documents_submitted' : 'documents';
-  }
-  return 'viewing';
+  // Step 2 (docs_required) when the lead is in documents_collection AND some
+  // required docs are missing. Otherwise the customer is past docs and into
+  // payment_review (handled above) — falling through here means they're still
+  // pre-interest.
+  if (stage === 'documents_collection' && !r.allRequiredDocsUploaded) return 'docs_required';
+  if (stage === 'documents_collection') return 'payment_review';
+
+  // ── 6. Step 1 — booked. Customer hasn't expressed Interest yet (or hasn't
+  // attended the viewing). The Booked card carries the "I'm Interested" CTA.
+  return 'booked';
 }
 
 function stepsFor(stateKey: StateKey): { steps: (Step & { state: 'done' | 'current' | 'future' | 'declined' })[]; mode: Mode } {
@@ -687,6 +719,7 @@ function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey
   const { steps } = stepsFor(stateKey);
   const currentStep = steps[def.currentIndex];
   const iconName = currentStep?.icon ?? 'document';
+
   return (
     <div style={{ background: 'var(--paper)', borderRadius: 22, border: '1px solid var(--mist-strong)', padding: '32px 36px', display: 'grid', gap: 22, boxShadow: '0 24px 60px -32px rgba(26,23,20,0.18)' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
@@ -699,7 +732,7 @@ function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey
         </div>
         <Pill tone={def.tone}>{def.label}</Pill>
       </div>
-      <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.6, margin: 0 }}>{def.body}</p>
+      {def.body && <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.6, margin: 0 }}>{def.body}</p>}
       <ActionBody stateKey={stateKey} resolved={resolved} onRefresh={onRefresh} />
       {def.timing && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px dashed var(--mist-strong)', flexWrap: 'wrap', gap: 8 }}>
@@ -713,21 +746,28 @@ function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey
 }
 
 /* ─── ACTION BODIES ────────────────────────────────────────────────── */
+/**
+ * Maps the 8-step state machine to the action component shown in the
+ * QuestActionCard. Components prefixed `// PHASE n →` are placeholders that
+ * will be replaced (or replaced in part) in the listed phase.
+ */
 function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; resolved: Resolved; onRefresh: () => void }) {
   switch (stateKey) {
-    case 'viewing':                       return <ViewingAction resolved={resolved} onRefresh={onRefresh} />;
-    case 'application_review':            return <WaitingBadge />;
-    case 'documents':                     return <DocumentsAction resolved={resolved} onRefresh={onRefresh} />;
-    case 'documents_submitted':           return <WaitingBadge />;
-    case 'payment_plan':                  return <PaymentPlanAction resolved={resolved} onRefresh={onRefresh} />;
-    case 'cheques_submitted':             return <WaitingBadge />;
-    case 'contract_issued':               return <WaitingBadge />;
+    // PHASE 2 → replace with new BookedAction (payment summary + Interested popup)
+    case 'booked':                        return <ViewingAction resolved={resolved} onRefresh={onRefresh} />;
+    // PHASE 3 → conditional hide + KYC recommendation; reuses existing DocumentsAction
+    case 'docs_required':                 return <DocumentsAction resolved={resolved} onRefresh={onRefresh} />;
+    // PHASE 4 → replace with new PaymentReviewAction (cheque photos + AI extraction)
+    case 'payment_review':                return <PaymentPlanAction resolved={resolved} onRefresh={onRefresh} />;
+    case 'awaiting_rp_confirm':           return <ChequesReviewWaitAction resolved={resolved} />;
     case 'signature':                     return <SignatureAction resolved={resolved} onRefresh={onRefresh} />;
+    // PHASE 6 → add Ejari certificate download once RP uploads
     case 'ejari':                         return <WaitingBadge />;
+    // PHASE 6 → prefill premise number into the utility form
     case 'utility':                       return <UtilityAction resolved={resolved} onRefresh={onRefresh} />;
-    case 'awaiting_movein_inspection':    return <AwaitingMoveInAction />;
+    // PHASE 6 → MoveInAction handles both halves (awaiting submit + counter-sign);
+    //          dispute / reject flow lands here too.
     case 'move_in':                       return <MoveInAction resolved={resolved} />;
-    case 'awaiting_activation':           return <WaitingBadge />;
     case 'active':                        return <ActiveAction resolved={resolved} onRefresh={onRefresh} />;
     case 'termination_request_sent':      return <TerminationSentAction resolved={resolved} />;
     case 'termination_request_received':  return <TerminationReceivedAction resolved={resolved} onRefresh={onRefresh} />;
@@ -835,7 +875,7 @@ function NotInterestedModal({ viewing, onClose, onSuccess }: { viewing: ApiViewi
         <PrimaryBtn onClick={submit} disabled={busy} danger>{busy ? 'Sending…' : 'Mark as not interested'}</PrimaryBtn>
       </>
     }>
-      <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 0 }}>We’ll close this lead and remove it from your active spaces. Adding a brief reason helps us recommend better next time.</p>
+      <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 0 }}>We&rsquo;ll close this lead and remove it from your active spaces. Adding a brief reason helps us recommend better next time.</p>
       <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional — e.g. wrong neighbourhood, found another place…" rows={3}
         style={{ width: '100%', padding: '12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }} />
       {err && <ErrorBox msg={err} />}
@@ -843,16 +883,342 @@ function NotInterestedModal({ viewing, onClose, onSuccess }: { viewing: ApiViewi
   );
 }
 
-/* ─── DOCUMENTS ────────────────────────────────────────────────────────
- * Inline Step 3: contract preferences (start date + payment schedule) +
- * required-doc uploads + submit. Mirrors the v1 panel exactly so the two
- * pages stay behaviourally identical.
- *
- *   PATCH /api/leads/my-viewings/:viewingId/preferences  →  saves desiredMoveIn + preferredChequeCount
- *   POST  /api/documents/upload-url                      →  3-step upload of each required doc
- *   POST  /api/documents
- *
- * The Document Hub link is kept as a secondary action for KYC and ad-hoc files.
+/* ─── INLINE KYC + DOCS FORM (new application flow) ────────────────── */
+const COMMERCIAL_UNIT_TYPES = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue','warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
+
+const KYC_INPUT_STYLE: React.CSSProperties = { border: '1px solid var(--mist-strong)', borderRadius: 9, padding: '9px 12px', fontSize: 13, color: 'var(--ink)', background: 'var(--paper)', outline: 'none', width: '100%' };
+const KYC_LABEL_STYLE: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em' };
+
+function KycSection({ title, accent, allDone, children }: { title: string; accent?: boolean; allDone?: boolean; children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  React.useEffect(() => { if (allDone) setCollapsed(true); }, [allDone]);
+  return (
+    <div style={{ background: 'var(--surface)', border: `1px solid ${allDone && collapsed ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`, borderRadius: 14, overflow: 'hidden' }}>
+      <button type="button" onClick={() => setCollapsed(c => !c)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '9px 14px', background: allDone && collapsed ? 'rgba(46,159,130,0.06)' : accent ? 'var(--jade-soft)' : 'var(--mist)', border: 'none', borderBottom: collapsed ? 'none' : '1px solid var(--mist-strong)', cursor: 'pointer', gap: 8, fontFamily: 'inherit' }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: accent ? 'var(--jade-deep)' : 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1, textAlign: 'left' }}>{title}</p>
+        {allDone && collapsed && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Done</span>}
+        <ChevronDown size={14} style={{ color: 'var(--mute)', flexShrink: 0, transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.2s' }} />
+      </button>
+      {!collapsed && <div style={{ padding: '12px 14px', display: 'grid', gap: 8 }}>{children}</div>}
+    </div>
+  );
+}
+
+function KycContactChip({ icon, value, verified }: { icon: React.ReactNode; value: string; verified: boolean }) {
+  return (
+    <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '8px 11px', borderRadius: 9, background: verified ? 'rgba(46,159,130,0.06)' : 'var(--mist)', border: `1px solid ${verified ? 'rgba(46,159,130,0.3)' : 'var(--mist-strong)'}` }}>
+      <span style={{ color: verified ? 'var(--jade-deep)' : 'var(--mute)', flexShrink: 0, display: 'flex' }}>{icon}</span>
+      <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value || '—'}</span>
+      {verified && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.06em', background: 'var(--jade-soft)', padding: '2px 7px', borderRadius: 999, flexShrink: 0 }}>Verified</span>}
+    </div>
+  );
+}
+
+function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
+  req: DocReq;
+  myDocs: Resolved['myDocs'];
+  localPreviews: Record<string, { url: string; mime: string }>;
+  docUploading: string | null;
+  onUpload: (req: DocReq, file: File) => void;
+}) {
+  const existing   = myDocs.find(d => d.documentKey === req.key);
+  const local      = localPreviews[req.key];
+  const uploaded   = !!existing || !!local;
+  const previewUrl = local?.url ?? (existing?.fileUrl ?? null);
+  const mime       = local?.mime ?? (existing as { mimeType?: string } | undefined)?.mimeType ?? '';
+  const isImg      = mime.startsWith('image/');
+  const isUp       = docUploading === req.key;
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, background: uploaded ? 'rgba(46,159,130,0.06)' : 'var(--paper)', border: `1.5px solid ${uploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`, cursor: isUp ? 'progress' : 'pointer' }}>
+      <div style={{ width: 38, height: 38, borderRadius: 10, background: uploaded ? 'rgba(46,159,130,0.12)' : 'var(--mist)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        {uploaded ? <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} /> : <FileText size={18} style={{ color: 'var(--mute)' }} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
+        {req.hint && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{req.hint}</p>}
+        {previewUrl && (
+          <div style={{ marginTop: 6 }}>
+            {isImg
+              ? <a href={previewUrl} target="_blank" rel="noopener noreferrer"><img src={previewUrl} alt={req.label} style={{ width: 80, height: 54, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--mist-strong)' }} /></a>
+              : <a href={previewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--jade-deep)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={12} /> View PDF</a>}
+          </div>
+        )}
+      </div>
+      {isUp
+        ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+        : <UploadCloud size={16} style={{ color: uploaded ? 'var(--jade-deep)' : 'var(--mute)', flexShrink: 0 }} />}
+      <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={isUp}
+        onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(req, f); }} />
+    </label>
+  );
+}
+
+function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
+  const { user, refresh: refreshUser } = useAuth();
+  const tenantProfileId = resolved.tenantProfileId;
+  const viewing = resolved.viewing;
+  const unitType = resolved.unit?.unitType ?? null;
+  const isRes = !unitType || !COMMERCIAL_UNIT_TYPES.includes(unitType);
+  const occupantCount = Math.max(viewing?.occupantsAdults ?? 1, 1);
+
+  const emailVerified  = user?.emailVerified ?? false;
+  const phoneVerified  = user?.phoneVerified ?? false;
+  const isAutoEmail    = /@upnow\.local$/i.test(user?.email ?? '') || /^phone-/.test(user?.email ?? '') || /@upnow\.internal$/i.test(user?.email ?? '');
+  const showEmailEdit  = phoneVerified && (!emailVerified || isAutoEmail);
+  const showPhoneEdit  = emailVerified && !phoneVerified;
+
+  // Personal info
+  const initName = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+  const [fullName,    setFullName]    = useState(initName);
+  const [emailInput,  setEmailInput]  = useState(user?.email ?? '');
+  const [phoneInput,  setPhoneInput]  = useState(user?.phone ?? '');
+  const [savingInfo,  setSavingInfo]  = useState(false);
+  const [infoErr,     setInfoErr]     = useState<string | null>(null);
+  const [infoConfirmed, setInfoConfirmed] = useState(!!(user?.firstName));
+  const [editingInfo,   setEditingInfo]   = useState(!user?.firstName);
+
+  // Email OTP verification
+  const [emailOtpStep, setEmailOtpStep] = useState<'idle' | 'verifying'>('idle');
+  const [emailOtp,     setEmailOtp]     = useState('');
+  const [emailDevOtp,  setEmailDevOtp]  = useState<string | null>(null);
+  const [emailOtpBusy, setEmailOtpBusy] = useState(false);
+  const [emailOtpErr,  setEmailOtpErr]  = useState<string | null>(null);
+
+  async function sendEmailOtp() {
+    const value = emailInput.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) { setEmailOtpErr('Enter a valid email address'); return; }
+    setEmailOtpBusy(true); setEmailOtpErr(null); setEmailDevOtp(null);
+    try {
+      await apiPatch('/auth/me', { email: value });
+      const res = await apiPost<{ sent: boolean; devOtp?: string }>('/auth/email/resend', {});
+      if (res?.devOtp) setEmailDevOtp(res.devOtp);
+      await refreshUser();
+      setEmailOtpStep('verifying');
+    } catch (e) { setEmailOtpErr(e instanceof Error ? e.message : 'Could not send code'); }
+    finally { setEmailOtpBusy(false); }
+  }
+
+  async function verifyEmailOtp() {
+    if (emailOtp.trim().length !== 6) { setEmailOtpErr('Enter the 6-digit code'); return; }
+    setEmailOtpBusy(true); setEmailOtpErr(null);
+    try {
+      await apiPost('/auth/email/verify-otp', { email: emailInput.trim().toLowerCase(), code: emailOtp.trim() });
+      await refreshUser();
+      setEmailOtpStep('idle'); setEmailOtp(''); setEmailDevOtp(null);
+    } catch (e) { setEmailOtpErr(e instanceof Error ? e.message : 'Invalid or expired code'); }
+    finally { setEmailOtpBusy(false); }
+  }
+
+  async function saveInfo() {
+    const nameParts = fullName.trim().split(/\s+/);
+    if (!nameParts[0]) { setInfoErr('Full name is required.'); return; }
+    const firstName = nameParts[0];
+    const lastName  = nameParts.slice(1).join(' ') || nameParts[0];
+    setSavingInfo(true); setInfoErr(null);
+    try {
+      const patch: Record<string, string> = { firstName, lastName };
+      if (showPhoneEdit && phoneInput.trim()) patch.phone = phoneInput.trim();
+      await apiPatch('/auth/me', patch);
+      await refreshUser();
+      setInfoConfirmed(true); setEditingInfo(false);
+    } catch (e) { setInfoErr(e instanceof Error ? e.message : 'Failed to save'); }
+    finally { setSavingInfo(false); }
+  }
+
+  // Upload
+  const [docUploading,  setDocUploading]  = useState<string | null>(null);
+  const [uploadErr,     setUploadErr]     = useState<string | null>(null);
+  const [localPreviews, setLocalPreviews] = useState<Record<string, { url: string; mime: string }>>({});
+
+  async function uploadDoc(req: DocReq, file: File) {
+    if (!tenantProfileId) { setUploadErr('Profile not ready.'); return; }
+    if (file.size > 10 * 1024 * 1024) { setUploadErr('File must be under 10 MB.'); return; }
+    setDocUploading(req.key); setUploadErr(null);
+    const localUrl = URL.createObjectURL(file);
+    try {
+      const { uploadUrl, fileUrl, fileKey } = await fetch('/api/documents/upload-url', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'customer', ownerId: tenantProfileId, documentKey: req.key, mimeType: file.type, originalName: file.name }),
+      }).then(r => r.ok ? r.json() : r.json().then((b: { message?: string }) => Promise.reject(b?.message ?? 'Upload URL failed'))) as { uploadUrl: string; fileUrl: string; fileKey: string };
+      const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+      const put = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error('File upload failed');
+      await fetch('/api/documents', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'customer', ownerId: tenantProfileId, documentKey: req.key, category: req.category, displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3' }),
+      });
+      setLocalPreviews(p => ({ ...p, [req.key]: { url: localUrl, mime: file.type } }));
+      onRefresh();
+    } catch (e) {
+      URL.revokeObjectURL(localUrl);
+      setUploadErr(typeof e === 'string' ? e : e instanceof Error ? e.message : 'Upload failed');
+    } finally { setDocUploading(null); }
+  }
+
+  const uploadedKeys = useMemo(() => new Set(resolved.myDocs.map(d => d.documentKey)), [resolved.myDocs]);
+  const kycRequired      = KYC_DOCS;
+  const financialReq     = RESIDENTIAL_RENTAL_DOCS.filter(d => d.required);
+  const financialOpt     = RESIDENTIAL_RENTAL_DOCS.filter(d => !d.required);
+  const occupantDocList  = isRes && occupantCount > 1 ? getOccupantDocs(occupantCount) : [];
+  // Mandatory: KYC identity + financial only. Occupants + optional are non-blocking.
+  const allRequired      = [...kycRequired, ...(isRes ? financialReq : getRentalSectionDocs(unitType).filter(d => d.required))];
+  const allRequiredDone  = allRequired.every(d => uploadedKeys.has(d.key));
+
+  const doneCount = allRequired.filter(d => uploadedKeys.has(d.key)).length;
+  const totalCount = allRequired.length;
+  const infoOk    = fullName.trim().length > 0;
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      {uploadErr && <ErrorBox msg={uploadErr} />}
+
+      {/* Personal details */}
+      <KycSection title="Your details">
+        {infoConfirmed && !editingInfo ? (
+          /* Confirmed — compact summary */
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 20, background: 'var(--jade-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--jade-deep)' }}>{fullName.trim()[0]?.toUpperCase() ?? '?'}</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: '0 0 2px' }}>{fullName.trim()}</p>
+              <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {showEmailEdit ? emailInput || user?.email : user?.email}
+                {(user?.phone || (showPhoneEdit && phoneInput)) && <span style={{ color: 'var(--mute)', margin: '0 4px' }}>·</span>}
+                {showPhoneEdit ? phoneInput || user?.phone : user?.phone}
+              </p>
+            </div>
+            <button type="button" onClick={() => setEditingInfo(true)}
+              style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6, flexShrink: 0 }}>
+              Edit
+            </button>
+          </div>
+        ) : (
+          /* Edit form */
+          <>
+            {/* Full name — auto-saves on blur */}
+            <label style={{ display: 'grid', gap: 5 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={KYC_LABEL_STYLE}>Full name</span>
+                {savingInfo && <span style={{ fontSize: 11, color: 'var(--mute)', display: 'flex', alignItems: 'center', gap: 4 }}><Loader2 size={11} className="animate-spin" /> Saving…</span>}
+                {infoErr && !savingInfo && <span style={{ fontSize: 11, color: 'var(--brick)' }}>{infoErr}</span>}
+              </div>
+              <input value={fullName} onChange={e => setFullName(e.target.value)}
+                onBlur={() => { if (fullName.trim()) saveInfo(); }}
+                placeholder="e.g. Muhammad Zeeshan" style={KYC_INPUT_STYLE} />
+            </label>
+
+            {/* Email + Phone in one row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div style={{ display: 'grid', gap: 5 }}>
+                <span style={KYC_LABEL_STYLE}>Email</span>
+                {showEmailEdit ? (
+                  <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--mist-strong)', borderRadius: 9, background: 'var(--paper)', overflow: 'hidden' }}>
+                    <input type="email" value={emailInput} onChange={e => setEmailInput(e.target.value)} placeholder="your@email.com"
+                      style={{ flex: 1, border: 'none', outline: 'none', padding: '9px 12px', fontSize: 13, color: 'var(--ink)', background: 'transparent' }} />
+                    <button type="button" onClick={sendEmailOtp} disabled={emailOtpBusy || !emailInput.trim()}
+                      style={{ padding: '0 12px', height: '100%', minHeight: 38, border: 'none', borderLeft: '1px solid var(--mist-strong)', background: emailInput.trim() ? 'var(--jade-soft)' : 'var(--mist)', color: emailInput.trim() ? 'var(--jade-deep)' : 'var(--mute)', fontSize: 12, fontWeight: 700, cursor: emailInput.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 }}>
+                      {emailOtpBusy ? <Loader2 size={12} className="animate-spin" /> : 'Verify'}
+                    </button>
+                  </div>
+                ) : (
+                  <KycContactChip icon={<Mail size={13} />} value={isAutoEmail ? '' : (user?.email ?? '')} verified={emailVerified && !isAutoEmail} />
+                )}
+              </div>
+              <div style={{ display: 'grid', gap: 5 }}>
+                <span style={KYC_LABEL_STYLE}>Phone</span>
+                {showPhoneEdit
+                  ? <input type="tel" value={phoneInput} onChange={e => setPhoneInput(e.target.value)} placeholder="+971 50 000 0000" style={KYC_INPUT_STYLE} />
+                  : <KycContactChip icon={<Phone size={13} />} value={user?.phone ?? ''} verified={phoneVerified} />}
+              </div>
+            </div>
+
+            {/* OTP panel — full width, sits above Save button */}
+            {showEmailEdit && emailOtpStep === 'verifying' && (
+              <div style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'grid', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Mail size={13} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1 }}>Code sent to <strong>{emailInput}</strong></span>
+                  <button type="button" onClick={() => { setEmailOtpStep('idle'); setEmailOtp(''); setEmailOtpErr(null); }}
+                    style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Change</button>
+                </div>
+                {emailDevOtp && (
+                  <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fef3c7', border: '1px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <p style={{ fontSize: 9, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Dev OTP</p>
+                      <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#1a1916' }}>{emailDevOtp}</p>
+                    </div>
+                    <button type="button" onClick={() => setEmailOtp(emailDevOtp)}
+                      style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="text" inputMode="numeric" maxLength={6} placeholder="6-digit code"
+                    value={emailOtp} onChange={e => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    style={{ ...KYC_INPUT_STYLE, letterSpacing: '4px', fontWeight: 700, maxWidth: 150 }} />
+                  <button type="button" onClick={verifyEmailOtp} disabled={emailOtpBusy || emailOtp.length !== 6}
+                    style={{ padding: '9px 20px', borderRadius: 9, background: 'var(--jade)', color: '#fff', border: 'none', fontSize: 13, fontWeight: 600, cursor: emailOtp.length === 6 ? 'pointer' : 'not-allowed', opacity: emailOtp.length < 6 ? 0.5 : 1, fontFamily: 'inherit', flexShrink: 0 }}>
+                    {emailOtpBusy ? <Loader2 size={14} className="animate-spin" /> : 'Verify'}
+                  </button>
+                  <button type="button" onClick={async () => { try { const r = await apiPost<{ devOtp?: string }>('/auth/email/resend', {}); if (r?.devOtp) setEmailDevOtp(r.devOtp); } catch { /* ignore */ } }}
+                    style={{ fontSize: 12, color: 'var(--mute)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0, flexShrink: 0 }}>Resend</button>
+                </div>
+                {emailOtpErr && <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{emailOtpErr}</p>}
+              </div>
+            )}
+            {emailOtpErr && emailOtpStep === 'idle' && showEmailEdit && (
+              <p style={{ fontSize: 12, color: 'var(--brick)', margin: 0 }}>{emailOtpErr}</p>
+            )}
+
+          </>
+        )}
+      </KycSection>
+
+      {/* Identity documents */}
+      <KycSection title="Identity documents" allDone={kycRequired.every(d => uploadedKeys.has(d.key))}>
+        {kycRequired.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
+      </KycSection>
+
+      {/* Financial documents */}
+      {(() => { const docs = isRes ? financialReq : getRentalSectionDocs(unitType).filter(d => d.required); return (
+        <KycSection title={isRes ? 'Financial documents' : 'Business documents'} allDone={docs.every(d => uploadedKeys.has(d.key))}>
+          {docs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
+        </KycSection>
+      ); })()}
+
+      {/* Optional documents */}
+      {isRes && financialOpt.length > 0 && (
+        <KycSection title="Optional documents" allDone={financialOpt.every(d => uploadedKeys.has(d.key))}>
+          {financialOpt.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
+        </KycSection>
+      )}
+
+      {/* Additional occupants */}
+      {occupantDocList.length > 0 && (
+        <KycSection title={`Additional occupants (${occupantCount - 1} more)`} allDone={occupantDocList.every(d => uploadedKeys.has(d.key))}>
+          {occupantDocList.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
+        </KycSection>
+      )}
+
+      {/* Continue */}
+      <PrimaryBtn onClick={onRefresh} disabled={!allRequiredDone}>
+        {allRequiredDone ? <CheckCircle2 size={16} /> : <Info size={16} />}
+        {allRequiredDone ? 'Continue to plan setup' : `Upload all required docs (${doneCount}/${totalCount} done)`}
+      </PrimaryBtn>
+    </div>
+  );
+}
+
+/* ─── DOCUMENTS ─────────────────────────────────────────────────────── */
+/**
+ * Step 2 entry point — dispatches to either the new-lease inline KYC form
+ * or the renewal-only doc refresh component. Split because each branch has
+ * its own hook footprint; the Rules of Hooks forbid an early return before
+ * hook calls.
  */
 function DocumentsAction({
   resolved,
@@ -863,22 +1229,35 @@ function DocumentsAction({
   onRefresh: () => void;
   renewal?: boolean;
 }) {
+  return renewal
+    ? <RenewalDocumentsAction resolved={resolved} onRefresh={onRefresh} />
+    : <InlineKycDocsForm resolved={resolved} onRefresh={onRefresh} />;
+}
+
+function RenewalDocumentsAction({
+  resolved,
+  onRefresh,
+}: {
+  resolved: Resolved;
+  onRefresh: () => void;
+}) {
   const viewing = resolved.viewing;
-  const viewingId = viewing?.id;
   const unit = resolved.unit;
   const unitType = unit?.unitType ?? null;
-  const rp = unit?.property?.rentalProvider ?? unit?.property?.rental_provider ?? null;
-  const rpPreferredDays: number[] = rp?.preferredStartDays ?? [];
+  const renewal = true;
 
-  const requiredDocs: DocReq[] = useMemo(() => getRequiredDocs(unitType).filter(d => d.required), [unitType]);
+  const requiredDocs: DocReq[] = useMemo(() => getRentalSectionDocs(unitType).filter(d => d.required), [unitType]);
   const uploadedKeys = useMemo(() => new Set(resolved.myDocs.map(d => d.documentKey)), [resolved.myDocs]);
   // Occupants — only meaningful for residential. We don't persist count in
   // the DB; the uploaded `occupant_N_*` doc keys are the source of truth.
   const RESIDENTIAL_BLOCKLIST = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue','warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
   const isResidential = !unitType || !RESIDENTIAL_BLOCKLIST.includes(unitType);
   const initialOccupantCount = useMemo(
-    () => deriveOccupantCount(resolved.myDocs.map(d => d.documentKey)),
-    [resolved.myDocs],
+    () => Math.max(
+      viewing?.occupantsAdults ?? 1,
+      deriveOccupantCount(resolved.myDocs.map(d => d.documentKey)),
+    ),
+    [viewing?.occupantsAdults, resolved.myDocs],
   );
   const [occupantCount, setOccupantCount] = useState<number>(initialOccupantCount);
   useEffect(() => {
@@ -896,39 +1275,8 @@ function DocumentsAction({
   ];
   const docsOk = requiredMissing.length === 0;
 
-  // ── Contract preferences (start date, instalments) ─────────────────────
-  const _init = (viewing?.desiredMoveIn ?? '').slice(0, 10);
-  const _initDay = _init ? parseInt(_init.slice(8, 10)) || 1 : 1;
-  const [prefMonth, setPrefMonth] = useState<string>(_init.slice(0, 7) || '');
-  const [prefDay,   setPrefDay]   = useState<number>(_init ? _initDay : (rpPreferredDays[0] ?? 1));
-  const [prefCheques, setPrefCheques] = useState<number>(viewing?.preferredChequeCount ?? 4);
-  const prefMoveIn = prefMonth ? `${prefMonth}-${String(prefDay).padStart(2, '0')}` : '';
   const [prefSaving, setPrefSaving] = useState(false);
-  const [prefSaved,  setPrefSaved]  = useState(false);
   const [prefError,  setPrefError]  = useState<string | null>(null);
-
-  // ── Calendar dropdown ──────────────────────────────────────────────────
-  const today = new Date();
-  const [calOpen, setCalOpen] = useState(false);
-  const [calYear, setCalYear] = useState(_init ? parseInt(_init.slice(0, 4)) : today.getFullYear());
-  const [calMonth, setCalMonth] = useState(_init ? parseInt(_init.slice(5, 7)) - 1 : today.getMonth());
-  const calRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!calOpen) return;
-    const close = (e: MouseEvent) => {
-      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [calOpen]);
-  function calPrev() {
-    if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
-    else setCalMonth(m => m - 1);
-  }
-  function calNext() {
-    if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
-    else setCalMonth(m => m + 1);
-  }
 
   // ── Inline upload ──────────────────────────────────────────────────────
   const [docUploading, setDocUploading] = useState<string | null>(null);
@@ -971,256 +1319,72 @@ function DocumentsAction({
   }
 
   async function handleSubmit() {
-    if (!viewingId) return;
-    setPrefSaving(true); setPrefError(null); setPrefSaved(false);
-    try {
-      const res = await fetch(`/api/leads/my-viewings/${viewingId}/preferences`, {
-        method: 'PATCH', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          desiredMoveIn: prefMoveIn || undefined,
-          preferredChequeCount: prefCheques,
-          paymentType: 'postdated_cheque',
-        }),
-      });
-      if (!res.ok) { setPrefError('Failed to save preferences'); return; }
-      setPrefSaved(true);
-      onRefresh();
-    } finally { setPrefSaving(false); }
+    setPrefSaving(true); setPrefError(null);
+    try { onRefresh(); }
+    finally { setPrefSaving(false); }
   }
 
-  // Once submitted, collapse to a single status line — Step 4 takes focus.
-  if (prefSaved) {
+  const allDocs: DocReq[] = [...requiredDocs, ...occupantDocs];
+
+  function DocRow({ req }: { req: DocReq }) {
+    const rec = resolved.myDocs.find(d => d.documentKey === req.key);
+    const isUploaded = !!rec;
+    const isUploading = docUploading === req.key;
     return (
-      <div style={{ background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 12, padding: '12px 14px', display: 'inline-flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start' }}>
-        <CheckCircle2 size={14} color="var(--jade-deep)" />
-        <span style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600 }}>
-          Documents &amp; preferences submitted — landlord will issue the payment plan.
-        </span>
-      </div>
+      <label style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
+        background: isUploaded ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
+        border: `1px solid ${isUploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
+        cursor: isUploading ? 'progress' : 'pointer',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
+          <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>
+            {isUploaded ? (rec.displayName ?? 'Uploaded') : (req.hint ?? 'Tap to upload')}
+          </p>
+        </div>
+        {isUploading ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+          : isUploaded ? <CheckCircle2 size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+          : <UploadCloud size={16} style={{ color: 'var(--mute)', flexShrink: 0 }} />}
+        <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+          disabled={isUploading}
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(req, f); }} />
+      </label>
     );
   }
-
-  const calFirstDow = new Date(calYear, calMonth, 1).getDay();
-  const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-  const calMonthLabel = new Date(calYear, calMonth, 1).toLocaleString('en-AE', { month: 'long', year: 'numeric' });
-  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dayAllowed = (day: number) => rpPreferredDays.length === 0 || rpPreferredDays.includes(day);
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {uploadError && <ErrorBox msg={uploadError} />}
-      {prefError   && <ErrorBox msg={prefError} />}
+      {prefError && <ErrorBox msg={prefError} />}
 
-      {/* Contract Start Date */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>
-          Contract Start Date <span style={{ color: 'var(--brick)' }}>*</span>
-        </p>
-        <div style={{ position: 'relative' }} ref={calRef}>
-          <button type="button" onClick={() => setCalOpen(o => !o)}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-              padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              background: 'var(--paper)', border: `1px solid ${prefMoveIn ? 'var(--jade)' : 'var(--mist-strong)'}`,
-              color: prefMoveIn ? 'var(--ink)' : 'var(--mute)', fontFamily: 'inherit',
-            }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Calendar size={13} color={prefMoveIn ? 'var(--jade-deep)' : 'var(--mute)'} />
-              {prefMoveIn ? new Date(`${prefMoveIn}T00:00:00`).toLocaleDateString('en-AE', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Choose start date'}
-            </span>
-            <ChevronDown size={13} color="var(--mute)" style={{ transition: 'transform 0.15s', transform: calOpen ? 'rotate(180deg)' : 'none' }} />
-          </button>
-          {calOpen && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--paper)', borderRadius: 12, border: '1px solid var(--mist-strong)', boxShadow: '0 10px 25px rgba(0,0,0,0.12)', zIndex: 30, padding: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <button type="button" onClick={calPrev} style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer' }}><ChevronLeft size={14} /></button>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)' }}>{calMonthLabel}</span>
-                <button type="button" onClick={calNext} style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer' }}><ChevronRight size={14} /></button>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: 4 }}>
-                {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => <div key={d} style={{ textAlign: 'center', fontSize: 9, fontWeight: 700, color: 'var(--mute)', padding: '2px 0' }}>{d}</div>)}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', rowGap: 2 }}>
-                {Array.from({ length: calFirstDow }, (_, i) => <div key={`e${i}`} />)}
-                {Array.from({ length: calDaysInMonth }, (_, i) => {
-                  const day = i + 1;
-                  const isActive = dayAllowed(day);
-                  const isPast = new Date(calYear, calMonth, day) < todayMidnight;
-                  const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                  const isSelected = dateStr === prefMoveIn;
-                  if (!isActive) return <div key={day} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 28, fontSize: 10, color: 'var(--mist-strong)' }}>{day}</div>;
-                  return (
-                    <button key={day} type="button" disabled={isPast}
-                      onClick={() => {
-                        const mm = `${calYear}-${String(calMonth + 1).padStart(2, '0')}`;
-                        setPrefMonth(mm); setPrefDay(day); setCalOpen(false);
-                      }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', height: 28, borderRadius: 8,
-                        fontSize: 11, fontWeight: 700, border: 'none', fontFamily: 'inherit',
-                        background: isSelected ? 'var(--jade)' : isPast ? 'transparent' : 'rgba(46,159,130,0.12)',
-                        color: isSelected ? 'var(--paper)' : isPast ? 'var(--mist-strong)' : 'var(--jade-deep)',
-                        cursor: isPast ? 'not-allowed' : 'pointer',
-                      }}>
-                      {day}
-                    </button>
-                  );
-                })}
-              </div>
-              {rpPreferredDays.length > 0 && (
-                <p style={{ fontSize: 9, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
-                  Only days highlighted by the landlord can be selected as a start date.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Number of Payments */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>Number of Payments</p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {([[ 1,'Annual'],[2,'Semi-Annual'],[4,'Quarterly'],[6,'Bi-Monthly'],[12,'Monthly']] as const).map(([n, label]) => (
-            <button key={n} type="button" onClick={() => setPrefCheques(n)}
-              style={{
-                padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                border: `1px solid ${prefCheques === n ? 'var(--jade)' : 'var(--mist-strong)'}`,
-                background: prefCheques === n ? 'var(--jade)' : 'var(--paper)',
-                color: prefCheques === n ? 'var(--paper)' : 'var(--ink-2)', fontFamily: 'inherit',
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Number of Occupants (residential only) */}
-      {isResidential && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>Number of Occupants</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button type="button" onClick={() => setOccupantCount(c => Math.max(1, c - 1))}
-              disabled={occupantCount <= 1}
-              style={{
-                width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 8, border: '1px solid var(--mist-strong)', background: 'var(--paper)',
-                color: 'var(--ink-2)', fontFamily: 'inherit', fontWeight: 700,
-                cursor: occupantCount <= 1 ? 'not-allowed' : 'pointer', opacity: occupantCount <= 1 ? 0.4 : 1,
-              }}>−</button>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', minWidth: 20, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{occupantCount}</span>
-            <button type="button" onClick={() => setOccupantCount(c => c + 1)}
-              style={{
-                width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 8, border: '1px solid var(--mist-strong)', background: 'var(--paper)',
-                color: 'var(--ink-2)', fontFamily: 'inherit', fontWeight: 700, cursor: 'pointer',
-              }}>+</button>
-            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--mute)' }}>
-              {occupantCount === 1 ? 'Just me' : `${occupantCount - 1} additional ${occupantCount === 2 ? 'occupant' : 'occupants'}`}
-            </span>
-          </div>
-          {occupantCount > 1 && (
-            <p style={{ fontSize: 10, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
-              Each additional occupant needs Emirates ID, Passport, and UAE Visa uploaded below.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Required documents — inline upload */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'grid', gap: 8 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>
+      {/* All documents — tenant + occupants in one flat list */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px', display: 'grid', gap: 8 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px' }}>
           {renewal ? 'Renewal documents' : 'Required documents'}
+          <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--mute)', textTransform: 'none', letterSpacing: 0 }}>
+            {allDocs.filter(d => resolved.myDocs.some(u => u.documentKey === d.key)).length}/{allDocs.length} uploaded
+          </span>
         </p>
-        {requiredDocs.length === 0 && occupantDocs.length === 0 ? (
-          <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>No documents required for this unit type.</p>
-        ) : (
-          <>
-            {requiredDocs.map(req => {
-              const rec = resolved.myDocs.find(d => d.documentKey === req.key);
-              const isUploaded = !!rec;
-              const isUploading = docUploading === req.key;
-              return (
-                <label key={req.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10,
-                  background: isUploaded ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
-                  border: `1px solid ${isUploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
-                  cursor: isUploading ? 'progress' : 'pointer',
-                }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
-                    <p style={{ fontSize: 10, color: 'var(--mute)', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {isUploaded ? (rec.displayName ?? 'Uploaded') : 'Tap to upload'}
-                    </p>
-                  </div>
-                  {isUploading ? <Loader2 size={14} className="animate-spin" color="var(--jade-deep)" />
-                    : isUploaded ? <CheckCircle2 size={14} color="var(--jade-deep)" />
-                    : <UploadCloud size={14} color="var(--mute)" />}
-                  <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                    disabled={isUploading}
-                    onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(req, f); }} />
-                </label>
-              );
-            })}
-            {occupantDocs.length > 0 && (
-              <>
-                <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '6px 0 0', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <Info size={11} /> Identity documents for additional occupants
-                </p>
-                {occupantDocs.map(req => {
-                  const rec = resolved.myDocs.find(d => d.documentKey === req.key);
-                  const isUploaded = !!rec;
-                  const isUploading = docUploading === req.key;
-                  return (
-                    <label key={req.key} style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10,
-                      background: isUploaded ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
-                      border: `1px solid ${isUploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
-                      cursor: isUploading ? 'progress' : 'pointer',
-                    }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
-                        <p style={{ fontSize: 10, color: 'var(--mute)', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {isUploaded ? (rec.displayName ?? 'Uploaded') : 'Tap to upload'}
-                        </p>
-                      </div>
-                      {isUploading ? <Loader2 size={14} className="animate-spin" color="var(--jade-deep)" />
-                        : isUploaded ? <CheckCircle2 size={14} color="var(--jade-deep)" />
-                        : <UploadCloud size={14} color="var(--mute)" />}
-                      <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                        disabled={isUploading}
-                        onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(req, f); }} />
-                    </label>
-                  );
-                })}
-              </>
-            )}
-          </>
-        )}
+        {allDocs.length === 0
+          ? <p style={{ fontSize: 13, color: 'var(--mute)', margin: 0 }}>No documents required for this unit type.</p>
+          : allDocs.map(req => <DocRow key={req.key} req={req} />)
+        }
       </div>
 
-      {/* Submit + checklist */}
+      {/* Submit */}
       <div style={{ display: 'grid', gap: 8 }}>
-        {(!prefMoveIn || !docsOk) && (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '8px 12px', display: 'grid', gap: 4 }}>
-            <p style={{ fontSize: 9, fontWeight: 700, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Complete before submitting</p>
-            <p style={{ fontSize: 11, color: prefMoveIn ? 'var(--jade-deep)' : 'var(--mute)', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {prefMoveIn ? <CheckCircle2 size={11} /> : <span style={{ width: 10, height: 10, borderRadius: 999, border: '1px solid var(--mist-strong)' }} />}
-              Contract start date
-            </p>
-            <p style={{ fontSize: 11, color: docsOk ? 'var(--jade-deep)' : 'var(--mute)', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {docsOk ? <CheckCircle2 size={11} /> : <span style={{ width: 10, height: 10, borderRadius: 999, border: '1px solid var(--mist-strong)' }} />}
-              All required documents uploaded
-            </p>
-          </div>
+        {!docsOk && (
+          <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Info size={13} /> Upload all required documents to continue
+          </p>
         )}
-        <PrimaryBtn onClick={handleSubmit} disabled={!prefMoveIn || !docsOk || prefSaving || !viewingId}>
+        <PrimaryBtn onClick={handleSubmit} disabled={!docsOk || prefSaving}>
           {prefSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          {prefSaving ? 'Submitting…' : 'Submit'}
+          {prefSaving ? 'Saving…' : 'Continue to payment plan'}
         </PrimaryBtn>
         <SecondaryBtn href="/dashboard/customer/documents">
-          <Info size={14} /> Manage KYC &amp; other documents
+          <Info size={14} /> Manage all KYC documents
         </SecondaryBtn>
       </div>
     </div>
@@ -1367,10 +1531,10 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const items = sortPlanItems(plan.items ?? []);
   const firstDue = items.find(i => i.dueDate)?.dueDate ?? null;
   const typeMeta = (t?: string) => {
-    if (t === 'security_deposit') return { label: 'Deposit',  bg: 'var(--mist)',         fg: 'var(--ink-2)' };
+    if (t === 'security_deposit') return { label: 'Deposit',  bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
     if (t === 'first_bundle')     return { label: 'Move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
     if (t === 'extra_installment')return { label: 'Extra',    bg: 'var(--jade-soft)',    fg: 'var(--jade-deep)' };
-    return                            { label: 'Rent',     bg: 'var(--surface)',      fg: 'var(--mute)' };
+    return                               { label: 'Rent',     bg: 'var(--surface)',      fg: 'var(--mute)'      };
   };
 
   const payeeName = plan.chequesPayableTo
@@ -1451,7 +1615,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <PrimaryBtn onClick={confirm} disabled={busy}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          {busy ? 'Confirming…' : 'Confirm cheques are ready'}
+          {busy ? 'Confirming…' : 'Confirm plan'}
         </PrimaryBtn>
       </div>
     </div>
@@ -1535,7 +1699,8 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
 /* ─── UTILITY ──────────────────────────────────────────────────────── */
 function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const c = resolved.contract;
-  const [acc, setAcc] = useState(c?.utilityAccountNumber ?? '');
+  const premiseNumber = resolved.unit?.premiseNumber ?? '';
+  const [acc, setAcc] = useState(c?.utilityAccountNumber ?? premiseNumber);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [proofBusy, setProofBusy] = useState(false);
@@ -1593,57 +1758,6 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
   );
 }
 
-/* ─── MOVE-IN — waiting for RP to submit the inspection ─────────── */
-// Shown before the landlord submits the move-in inspection record. Walks
-// the tenant through what's happening on the RP side and what to expect
-// next, so the wait feels intentional rather than empty.
-function AwaitingMoveInAction() {
-  const checklistItems = [
-    'Walking through every room with you (or your representative)',
-    'Photographing the unit’s current condition — walls, floors, fittings, appliances',
-    'Recording DEWA electricity and water meter readings',
-    'Counting keys, fobs, and parking remotes before handover',
-  ];
-  return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 14, padding: '16px 18px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <Clock size={18} style={{ color: 'var(--saffron-deep)', flexShrink: 0, marginTop: 2 }} />
-          <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 13, color: 'var(--ink)', margin: 0, lineHeight: 1.5, fontWeight: 600 }}>
-              Your landlord is on-site preparing the move-in inspection.
-            </p>
-            <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '6px 0 0', lineHeight: 1.5 }}>
-              The full inspection record is what protects your security deposit at move-out, so they take their time to document everything thoroughly.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
-        <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: '0 0 10px' }}>
-          What the landlord is doing
-        </p>
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
-          {checklistItems.map((item, i) => (
-            <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{
-                width: 18, height: 18, borderRadius: '50%', background: 'var(--surface)',
-                border: '1px solid var(--mist-strong)', display: 'grid', placeItems: 'center',
-                fontSize: 10, fontWeight: 700, color: 'var(--mute)', flexShrink: 0, marginTop: 1,
-              }}>{i + 1}</span>
-              <span style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>{item}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0, fontStyle: 'italic', textAlign: 'center' }}>
-        You&apos;ll get a notification the moment the inspection is ready to counter-sign.
-      </p>
-    </div>
-  );
-}
 
 /* ─── MOVE-IN — inspection summary (LIVE data) + counter-sign deep link ─── */
 // Pulls the full inspection record from /api/contracts/tenant/:id/inspection
@@ -1885,6 +1999,61 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+
+
+
+/* ─── CHEQUES REVIEW WAIT ───────────────────────────────────────────── */
+function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
+  const viewing = resolved.viewing;
+  const [cheques, setCheques] = useState<CustomerCheque[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!viewing) return;
+    fetch(`/api/leads/my-viewings/${viewing.id}/cheque-uploads`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: CustomerCheque[]) => setCheques(data))
+      .finally(() => setLoading(false));
+  }, [viewing]);
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <Clock size={18} style={{ color: 'var(--jade-deep)', flexShrink: 0, marginTop: 2 }} />
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 4px' }}>Cheques submitted — landlord is reviewing</p>
+          <p style={{ fontSize: 13, color: 'var(--jade-deep)', margin: 0, lineHeight: 1.5 }}>
+            Your landlord will verify the cheque details and confirm collection. This usually takes 1 business day.
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', gap: 8, color: 'var(--mute)', fontSize: 13, alignItems: 'center' }}>
+          <Loader2 size={14} className="animate-spin" /> Loading your cheques…
+        </div>
+      ) : cheques.length > 0 && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Your uploaded cheques</p>
+          {cheques.map((c, i) => (
+            <div key={c.id} style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '10px 14px', background: 'var(--paper)', display: 'flex', gap: 12, alignItems: 'center' }}>
+              {c.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={c.imageUrl} alt="cheque" style={{ width: 56, height: 36, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Cheque ${i + 1}`}</p>
+                {c.bankName && <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0' }}>{c.bankName}{c.amountFils ? ` · AED ${(c.amountFils / 100).toLocaleString('en-AE')}` : ''}</p>}
+              </div>
+              <span style={{ fontSize: 11, background: 'var(--jade-soft)', color: 'var(--jade-deep)', borderRadius: 6, padding: '3px 8px', fontWeight: 600 }}>Submitted</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2326,7 +2495,7 @@ function TerminationReceivedAction({ resolved, onRefresh }: { resolved: Resolved
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 14, padding: '16px 18px' }}>
-        <p style={{ fontSize: 10, color: 'var(--brick)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Landlord’s request</p>
+        <p style={{ fontSize: 10, color: 'var(--brick)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Landlord&rsquo;s request</p>
         <p style={{ fontSize: 14, color: 'var(--ink)', margin: '6px 0 2px', fontWeight: 600 }}>Effective {t?.effectiveDate ? fmtDateLong(t.effectiveDate) : '—'}</p>
         {t?.reason && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>{t.reason}</p>}
       </div>
@@ -2481,7 +2650,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-          Your landlord prepared the renewal cheque schedule on the renewal contract. Once you’ve prepared your cheques, confirm here and we’ll let your landlord collect them.
+          Your landlord prepared the renewal cheque schedule on the renewal contract. Once you&rsquo;ve prepared your cheques, confirm here and we&rsquo;ll let your landlord collect them.
         </p>
       </div>
       {err && <ErrorBox msg={err} />}
@@ -2560,8 +2729,9 @@ export default function CustomerSpaceV2Page() {
       const allForUnit = contracts.filter(c => c.unit?.id === unit?.id);
       const contract = allForUnit.find(c => !c.parentContractId) ?? null;
       const renewalContract = contract ? (allForUnit.find(c => c.parentContractId === contract.id) ?? null) : null;
-      const requiredKeys = getRequiredDocs(unit.unitType).filter(d => d.required).map(d => d.key);
+      const requiredKeys = getRentalSectionDocs(unit.unitType).filter(d => d.required).map(d => d.key);
       const uploadedKeys = new Set(docs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
+      // Mandatory gate: KYC identity + financial only. Occupants are optional.
       const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => uploadedKeys.has(k));
       const paymentPlan = lead?.paymentPlan ?? viewing?.lead?.paymentPlan ?? null;
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
