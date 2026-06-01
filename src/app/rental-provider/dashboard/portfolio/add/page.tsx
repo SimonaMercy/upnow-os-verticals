@@ -15,7 +15,8 @@ import {
 import { MapPicker } from '@/components/upnow/MapPicker';
 import {
   RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
-  FURNISHING_OPTIONS, AMENITIES,
+  WORKSPACES_UNIT_TYPES, VENUES_UNIT_TYPES,
+  FURNISHING_OPTIONS, AMENITIES, UNIT_TYPE_LABELS,
 } from '@/components/upnow/UnitFormModal';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
@@ -72,6 +73,9 @@ interface UnitRow {
   commission: string;
   view: string;
   amenities: string[];
+  minLeaseMonths: string;
+  noticePeriodDays: string;
+  rentEscalationPct: string;
   description: string;
   stagedPhotos: StagedPhoto[];
 }
@@ -84,7 +88,8 @@ function emptyRow(expanded = true): UnitRow {
     floor: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '',
     furnishing: 'Unfurnished', rentalPrice: '',
     securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
-    view: '', amenities: [], description: '', stagedPhotos: [],
+    view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
+    rentEscalationPct: '', description: '', stagedPhotos: [],
   };
 }
 
@@ -99,10 +104,13 @@ const EMPTY_PROP: PropertyFormData = {
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────────── */
 const CSV_TEMPLATE = [
-  'building_name,category,emirate,address,unit_name,unit_type,unit_number,floor,bedrooms,bathrooms,size_sqft,annual_rent_aed,security_deposit_aed,admin_fee_aed,ejari_fee_aed,commission_aed,furnishing,view,description',
-  'Marina Heights,residential,Dubai,Dubai Marina Building 5,Sea View Suite,apartment,101,1,2,1,1200,120000,6000,6000,220,6000,Unfurnished,Sea View,Corner unit with balcony',
-  'Marina Heights,residential,Dubai,Dubai Marina Building 5,,apartment,102,1,1,1,800,85000,4250,4250,220,4250,Semi-Furnished,,',
-  'Business Bay Tower,commercial,Dubai,Business Bay,,office_fitted,Office-5A,5,,,1500,200000,10000,10000,220,10000,,City View,Fitted office space',
+  'building_name,category,emirate,address,unit_name,unit_type,unit_number,floor,bedrooms,bathrooms,size_sqft,annual_rent_aed,security_deposit_aed,admin_fee_aed,ejari_fee_aed,commission_aed,furnishing,view,min_lease_months,notice_period_days,rent_escalation_pct,description',
+  'Marina Heights,residential,Dubai,Dubai Marina Building 5,Sea View Suite,apartment,101,1,2,1,1200,120000,6000,6000,220,6000,Unfurnished,Sea View,12,60,,Corner unit with balcony',
+  'Marina Heights,residential,Dubai,Dubai Marina Building 5,,apartment,102,1,1,1,800,85000,4250,4250,220,4250,Semi-Furnished,,12,60,,',
+  'Business Bay Tower,commercial,Dubai,Business Bay,,office_fitted,Office-5A,5,,,1500,200000,10000,10000,,10000,,City View,12,90,5,Fitted office space',
+  'Dubai Industrial City,industrial,Dubai,DIC Phase 2,,warehouse,WH-01,G,,,25000,350000,17500,17500,,17500,,Road View,24,90,5,Climate-controlled warehouse with dock',
+  'Creative Hub JLT,workspaces,Dubai,JLT Cluster X,,coworking_desk,Desk-22,3,,,80,18000,900,900,,900,,City View,1,30,,Hot desk in vibrant coworking space',
+  'Grand Ballroom Palace,venues,Dubai,Al Quoz,,event_hall,Main Hall,G,,,8000,500000,25000,25000,,25000,,,,0,14,,Premier event hall with full AV setup',
 ].join('\n');
 
 interface CsvRow {
@@ -112,7 +120,9 @@ interface CsvRow {
   annual_rent_aed: string;
   security_deposit_aed: string; admin_fee_aed: string;
   ejari_fee_aed: string; commission_aed: string;
-  furnishing: string; view: string; description: string;
+  furnishing: string; view: string;
+  min_lease_months: string; notice_period_days: string; rent_escalation_pct: string;
+  description: string;
   _error?: string;
 }
 
@@ -153,8 +163,10 @@ const VIEW_OPTIONS = [
 ];
 
 function unitTypesFor(cat: string) {
-  if (cat === 'commercial') return COMMERCIAL_UNIT_TYPES;
-  if (cat === 'industrial') return INDUSTRIAL_UNIT_TYPES;
+  if (cat === 'commercial')  return COMMERCIAL_UNIT_TYPES;
+  if (cat === 'industrial')  return INDUSTRIAL_UNIT_TYPES;
+  if (cat === 'workspaces')  return WORKSPACES_UNIT_TYPES;
+  if (cat === 'venues')      return VENUES_UNIT_TYPES;
   return RESIDENTIAL_UNIT_TYPES;
 }
 
@@ -444,22 +456,25 @@ export default function AddListingPage() {
         setSaveProgress({ phase: `Creating units… (${i + 1}/${rows.length})`, done: i, total: rows.length });
         try {
           const created = await apiPost<{ id: number }>(`/properties/${propId}/units`, {
-            unitName:        r.unitName        || undefined,
-            unitType:        r.unitType,
-            unitNumber:      r.unitNumber,
-            floor:           r.floor           || undefined,
-            bedrooms:        r.bedrooms && r.bedrooms !== 'Studio' ? Number(r.bedrooms) : undefined,
-            bathrooms:       r.bathrooms       ? Number(r.bathrooms)       : undefined,
-            unitSizeSqft:    r.unitSizeSqft    ? Number(r.unitSizeSqft)    : undefined,
-            rentalPrice:     r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
-            securityDeposit: r.securityDeposit ? Number(r.securityDeposit) : undefined,
-            adminFee:        r.adminFee        ? Number(r.adminFee)        : undefined,
-            ejariFeeFils:    r.ejariFeeFils    ? Number(r.ejariFeeFils)    : undefined,
-            commission:      r.commission      ? Number(r.commission)      : undefined,
-            view:            r.view            || undefined,
-            furnishing:      r.furnishing      || undefined,
-            amenities:       r.amenities.length ? r.amenities : undefined,
-            description:     r.description     || undefined,
+            unitName:         r.unitName        || undefined,
+            unitType:         r.unitType,
+            unitNumber:       r.unitNumber,
+            floor:            r.floor           || undefined,
+            bedrooms:         r.bedrooms && r.bedrooms !== 'Studio' ? Number(r.bedrooms) : undefined,
+            bathrooms:        r.bathrooms       ? Number(r.bathrooms)       : undefined,
+            unitSizeSqft:     r.unitSizeSqft    ? Number(r.unitSizeSqft)    : undefined,
+            rentalPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
+            securityDeposit:  r.securityDeposit ? Number(r.securityDeposit) : undefined,
+            adminFee:         r.adminFee        ? Number(r.adminFee)        : undefined,
+            ejariFeeFils:     r.ejariFeeFils    ? Number(r.ejariFeeFils)    : undefined,
+            commission:       r.commission      ? Number(r.commission)      : undefined,
+            minLeaseMonths:   r.minLeaseMonths   ? Number(r.minLeaseMonths)   : undefined,
+            noticePeriodDays: r.noticePeriodDays ? Number(r.noticePeriodDays) : undefined,
+            rentEscalationPct: r.rentEscalationPct ? Number(r.rentEscalationPct) : undefined,
+            view:             r.view            || undefined,
+            furnishing:       r.furnishing      || undefined,
+            amenities:        r.amenities.length ? r.amenities : undefined,
+            description:      r.description     || undefined,
           });
           unitIds.push({ rowId: r.id, unitId: created.id });
         } catch (e) {
@@ -550,25 +565,29 @@ export default function AddListingPage() {
         const rent = row.annual_rent_aed ? Number(row.annual_rent_aed) : 0;
         const secDep  = row.security_deposit_aed ? Number(row.security_deposit_aed) : (rent > 0 ? Math.round(rent * 0.05) : undefined);
         const adminFee = row.admin_fee_aed       ? Number(row.admin_fee_aed)        : (rent > 0 ? Math.round(rent * 0.05) : undefined);
-        const ejari   = row.ejari_fee_aed        ? Number(row.ejari_fee_aed)        : 220;
+        const isResi  = RESIDENTIAL_UNIT_TYPES.includes(row.unit_type) || row.category === 'residential';
+        const ejari   = row.ejari_fee_aed ? Number(row.ejari_fee_aed) : (isResi ? 220 : undefined);
         const commission = row.commission_aed    ? Number(row.commission_aed)       : (rent > 0 ? Math.round(rent * 0.05) : undefined);
         try {
           await apiPost(`/properties/${pid}/units`, {
-            unitName:        row.unit_name    || undefined,
-            unitType:        row.unit_type    || 'apartment',
-            unitNumber:      row.unit_number,
-            floor:           row.floor        || undefined,
-            bedrooms:        row.bedrooms     ? Number(row.bedrooms)  : undefined,
-            bathrooms:       row.bathrooms    ? Number(row.bathrooms) : undefined,
-            unitSizeSqft:    row.size_sqft    ? Number(row.size_sqft) : undefined,
-            rentalPrice:     rent > 0         ? rent                  : undefined,
-            securityDeposit: secDep,
+            unitName:         row.unit_name    || undefined,
+            unitType:         row.unit_type    || 'apartment',
+            unitNumber:       row.unit_number,
+            floor:            row.floor        || undefined,
+            bedrooms:         row.bedrooms     ? Number(row.bedrooms)  : undefined,
+            bathrooms:        row.bathrooms    ? Number(row.bathrooms) : undefined,
+            unitSizeSqft:     row.size_sqft    ? Number(row.size_sqft) : undefined,
+            rentalPrice:      rent > 0         ? rent                  : undefined,
+            securityDeposit:  secDep,
             adminFee,
-            ejariFeeFils:    ejari,
+            ejariFeeFils:     ejari,
             commission,
-            furnishing:      row.furnishing   || undefined,
-            view:            row.view         || undefined,
-            description:     row.description  || undefined,
+            minLeaseMonths:   row.min_lease_months   ? Number(row.min_lease_months)   : undefined,
+            noticePeriodDays: row.notice_period_days ? Number(row.notice_period_days) : undefined,
+            rentEscalationPct: row.rent_escalation_pct ? Number(row.rent_escalation_pct) : undefined,
+            furnishing:       row.furnishing   || undefined,
+            view:             row.view         || undefined,
+            description:      row.description  || undefined,
           });
         } catch (e) {
           errs.push(`Unit "${row.unit_number}" in "${row.building_name}": ${e instanceof Error ? e.message : 'error'}`);
@@ -992,6 +1011,7 @@ export default function AddListingPage() {
                   row={r}
                   index={i}
                   unitTypes={unitTypesFor(propCategory)}
+                  propCategory={propCategory}
                   errors={rowErrors[r.id] ?? {}}
                   onUpdate={(patch) => updRow(r.id, patch)}
                   onDelete={() => delRow(r.id)}
@@ -1135,11 +1155,12 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 /* ─── UnitCard ────────────────────────────────────────────────────────────── */
 function UnitCard({
-  row, index, unitTypes, errors, onUpdate, onDelete, onDuplicate, onToggle, onStagePhotos, onRemovePhoto, canDelete,
+  row, index, unitTypes, propCategory, errors, onUpdate, onDelete, onDuplicate, onToggle, onStagePhotos, onRemovePhoto, canDelete,
 }: {
   row: UnitRow;
   index: number;
   unitTypes: string[];
+  propCategory: string;
   errors: Partial<Record<keyof UnitRow, string>>;
   onUpdate: (patch: Partial<UnitRow>) => void;
   onDelete: () => void;
@@ -1151,6 +1172,7 @@ function UnitCard({
 }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const showBedBath = !row.unitType || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
+  const isResidentialUnit = propCategory === 'residential' || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
 
   const INPUT_C  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
   const INPUT_ERR = 'w-full border border-red-400 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-red-400';
@@ -1214,7 +1236,7 @@ function UnitCard({
                 value={row.unitType}
                 onChange={e => onUpdate({ unitType: e.target.value })}>
                 <option value="">Select type</option>
-                {unitTypes.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                {unitTypes.map(t => <option key={t} value={t}>{UNIT_TYPE_LABELS[t] ?? t.replace(/_/g, ' ')}</option>)}
               </select>
               {errors.unitType && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitType}</p>}
             </div>
@@ -1289,7 +1311,7 @@ function UnitCard({
                   if (!isNaN(rent) && rent > 0) {
                     patch.securityDeposit = String(Math.round(rent * 0.05));
                     patch.adminFee        = String(Math.round(rent * 0.05));
-                    patch.ejariFeeFils    = '220';
+                    patch.ejariFeeFils    = isResidentialUnit ? '220' : '';
                     patch.commission      = String(Math.round(rent * 0.05));
                   }
                   onUpdate(patch);

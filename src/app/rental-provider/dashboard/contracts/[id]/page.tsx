@@ -92,9 +92,21 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
-  // Renewal fields (SCRUM-272/273)
+  // Renewal fields (SCRUM-272/273 + Phase 6c reject reason)
   renewalAccepted: 'pending' | 'accepted' | 'rejected' | null;
   renewalStatus: string | null;
+  renewalRejectionReason?: string | null;
+  parentContractId?: number | null;
+  /** Phase 6c — when this contract is a DECLINED renewal child and the RP has
+   *  subsequently proposed a fresh renewal on the same parent, the backend
+   *  inlines the active sibling here so the declined detail page can link
+   *  forward to "the proposal that replaced this one". */
+  successorProposal?: {
+    id: number;
+    status: 'pending' | 'issued' | 'active' | 'expired' | 'terminated';
+    contractActive: boolean;
+    createdAt: string;
+  } | null;
   termination: {
     requestedByRole: 'tenant' | 'rental_provider' | null;
     requestedAt: string | null;
@@ -112,6 +124,20 @@ interface ContractDetail {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+/** Map a unit type (apartment / villa / retail_shop / warehouse / …) to the
+ *  space category used by the RP's fee rule settings. Mirrors the backend
+ *  classifier in fee-rules.service so the renewal modal auto-fills from the
+ *  correct rule set. Unknown types default to residential. */
+function spaceCategoryFromUnitType(unitType: string | null): string {
+  if (!unitType) return 'residential';
+  const t = unitType.toLowerCase();
+  if (['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'].includes(t)) return 'industrial';
+  if (['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical',
+       'coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue',
+       'conference_hall','private_dining','outdoor_venue'].includes(t)) return 'commercial';
+  return 'residential';
+}
 
 function fmtAed(fils: number) {
   return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(fils);
@@ -459,7 +485,17 @@ export default function ContractDetailPage() {
     chequePayeeName: '',
     adminFee: '',
     ejariFee: '',
+    commission: '',
   });
+
+  // Phase 6 — RP's saved fee rules, fetched when the modal opens. Used to
+  // auto-compute admin / ejari / commission from the typed annual rent so the
+  // renewal proposal mirrors the RP's settings instead of just copying the
+  // previous contract's numbers. Each fee carries a "touched" flag — once the
+  // RP edits a field by hand, auto-recompute stops touching it.
+  type FeeRule = { feeType: string; valueType: 'fixed_aed' | 'percentage'; value: number; isActive: boolean };
+  const [feeRules, setFeeRules] = useState<Record<string, FeeRule[]> | null>(null);
+  const [feesTouched, setFeesTouched] = useState({ adminFee: false, ejariFee: false, commission: false });
   const [renewalExtras, setRenewalExtras] = useState<Array<{ description: string; amount: string; dueDate: string }>>([]);
   type TenantKycDoc = { id: number; documentKey: string; displayName: string | null; fileUrl: string; mimeType: string | null; status: string; notes: string | null };
   const [tenantKycDocs, setTenantKycDocs] = useState<TenantKycDoc[] | null>(null);
@@ -541,6 +577,29 @@ export default function ContractDetailPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [params?.id]);
+
+  // Phase 6 — auto-fill admin / ejari / commission from the RP's saved fee
+  // rules whenever the renewal rent changes, unless the RP has manually
+  // touched that specific field. Keeps the modal aligned with /settings/fees
+  // and removes the "remember to blank the field" trick.
+  useEffect(() => {
+    if (!showRenewalModal || !feeRules || !contract) return;
+    const cat = spaceCategoryFromUnitType(contract.unit?.type ?? null);
+    const rules = feeRules[cat] ?? feeRules['residential'] ?? [];
+    const rent = parseFloat(renewalForm.newAnnualRent) || 0;
+    const applyRule = (feeType: string): string => {
+      const r = rules.find(x => x.feeType === feeType && x.isActive !== false);
+      if (!r) return '';
+      const v = r.valueType === 'percentage' ? rent * Number(r.value) / 100 : Number(r.value);
+      return v > 0 ? String(Math.round(v)) : '';
+    };
+    setRenewalForm(f => ({
+      ...f,
+      adminFee:   feesTouched.adminFee   ? f.adminFee   : applyRule('admin_fee'),
+      ejariFee:   feesTouched.ejariFee   ? f.ejariFee   : applyRule('ejari_fee'),
+      commission: feesTouched.commission ? f.commission : applyRule('commission'),
+    }));
+  }, [showRenewalModal, feeRules, renewalForm.newAnnualRent, feesTouched, contract]);
 
   // Load tenant rental documents when the Documents drawer opens.
   // For RENEWAL contracts the tenant uploads to ownerType='tenancy_contract', ownerId=<child id>
@@ -892,6 +951,54 @@ export default function ContractDetailPage() {
     }
   }
 
+  /**
+   * Phase 6c — opens the Propose Renewal modal pre-filled from the current
+   * (parent) contract. Reused by:
+   *   - the header "Propose Renewal" button (active, never-proposed)
+   *   - the "Customer declined this renewal" banner's CTA (re-propose after
+   *     a rejection — backend already allows re-proposing on REJECTED parents)
+   */
+  function openProposeRenewalModal() {
+    if (!contract) return;
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const newStart = new Date(contract.endDate);
+    newStart.setDate(newStart.getDate() + 1);
+    const newEnd = new Date(newStart);
+    newEnd.setFullYear(newStart.getFullYear() + 1);
+    newEnd.setDate(newEnd.getDate() - 1);
+    setRenewalForm({
+      newAnnualRent: String(contract.annualRent ?? ''),
+      newStartDate: fmt(newStart),
+      newEndDate: fmt(newEnd),
+      numberOfInstallments: String(contract.numberOfInstallments ?? 4),
+      modeOfPayment: contract.modeOfPayment ?? 'cheque',
+      samePayee: true,
+      chequePayeeName: '',
+      adminFee: '',
+      ejariFee: '',
+      commission: '',
+    });
+    setFeesTouched({ adminFee: false, ejariFee: false, commission: false });
+    setRenewalExtras([]);
+    setRenewalError(null);
+    setShowRenewalModal(true);
+    fetch('/api/fee-rules', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: Record<string, FeeRule[]> | null) => setFeeRules(data))
+      .catch(() => setFeeRules(null));
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { renewalRentIncrementPct?: number | string | null } } | null) => {
+        const raw = data?.profile?.renewalRentIncrementPct;
+        const pct = raw == null ? 0 : Number(raw);
+        if (pct > 0 && contract.annualRent) {
+          const bumped = Math.round(contract.annualRent * (1 + pct / 100));
+          setRenewalForm(f => ({ ...f, newAnnualRent: String(bumped) }));
+        }
+      })
+      .catch(() => undefined);
+  }
+
   async function submitProposeRenewal() {
     if (!contract) return;
     setRenewalError(null);
@@ -917,10 +1024,12 @@ export default function ContractDetailPage() {
       if (!renewalForm.samePayee && renewalForm.chequePayeeName.trim()) {
         body.chequePayeeName = renewalForm.chequePayeeName.trim();
       }
-      const adminFeeNum = parseFloat(renewalForm.adminFee);
-      const ejariFeeNum = parseFloat(renewalForm.ejariFee);
-      if (Number.isFinite(adminFeeNum) && adminFeeNum >= 0) body.adminFee = adminFeeNum;
-      if (Number.isFinite(ejariFeeNum) && ejariFeeNum >= 0) body.ejariFee = ejariFeeNum;
+      const adminFeeNum  = parseFloat(renewalForm.adminFee);
+      const ejariFeeNum  = parseFloat(renewalForm.ejariFee);
+      const commissionN  = parseFloat(renewalForm.commission);
+      if (Number.isFinite(adminFeeNum) && adminFeeNum >= 0)   body.adminFee   = adminFeeNum;
+      if (Number.isFinite(ejariFeeNum) && ejariFeeNum >= 0)   body.ejariFee   = ejariFeeNum;
+      if (Number.isFinite(commissionN) && commissionN >= 0)   body.commission = commissionN;
       const cleanExtras = renewalExtras
         .map(e => ({
           description: e.description.trim(),
@@ -1118,6 +1227,11 @@ export default function ContractDetailPage() {
   }
 
   const isRenewalContract = contract.contractType === 'renewal';
+  /** Phase 6c — a renewal proposal the customer declined. The child row is
+   *  archived (`contractActive=false`), so we suppress the payment-collection
+   *  drawer, the activation timeline, and the Sign Contract CTA, leaving
+   *  only the declined banner + a routing card pointing back to the parent. */
+  const isDeclinedRenewalChild = isRenewalContract && contract.contractActive === false;
 
   // Derived from payment records — used in timeline + sidebar
   const hasAdminFeePaid = payments.some(
@@ -1229,33 +1343,7 @@ export default function ContractDetailPage() {
             {/* Propose Renewal CTA — shown on active, NEW (non-renewal) contracts when no proposal is in flight */}
             {contract.status === 'active' && contract.contractType !== 'renewal' && !contract.renewalAccepted && (
               <button
-                onClick={() => {
-                  // Prefill renewal terms from current contract
-                  const today = new Date();
-                  const oneYear = new Date(today);
-                  oneYear.setFullYear(today.getFullYear() + 1);
-                  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-                  // Default to the day after current contract ends
-                  const newStart = new Date(contract.endDate);
-                  newStart.setDate(newStart.getDate() + 1);
-                  const newEnd = new Date(newStart);
-                  newEnd.setFullYear(newStart.getFullYear() + 1);
-                  newEnd.setDate(newEnd.getDate() - 1);
-                  setRenewalForm({
-                    newAnnualRent: String(contract.annualRent ?? ''),
-                    newStartDate: fmt(newStart),
-                    newEndDate: fmt(newEnd),
-                    numberOfInstallments: String(contract.numberOfInstallments ?? 4),
-                    modeOfPayment: contract.modeOfPayment ?? 'cheque',
-                    samePayee: true,
-                    chequePayeeName: '',
-                    adminFee: String(contract.adminFeeFils ?? ''),
-                    ejariFee: String(contract.ejariFeeFils ?? ''),
-                  });
-                  setRenewalExtras([]);
-                  setRenewalError(null);
-                  setShowRenewalModal(true);
-                }}
+                onClick={openProposeRenewalModal}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors bg-white"
               >
                 <RotateCcw size={14} /> Propose Renewal
@@ -1284,7 +1372,7 @@ export default function ContractDetailPage() {
                 <X size={14} /> Request Termination
               </button>
             )}
-            {signedMode ? (
+            {isDeclinedRenewalChild ? null : signedMode ? (
               <span className="flex items-center gap-1.5 text-xs text-[#2e9f82] font-semibold bg-[#f0faf6] px-3 py-1.5 rounded-full border border-[#c5e8df]">
                 <BadgeCheck size={13} /> Signed Online
               </span>
@@ -1306,6 +1394,86 @@ export default function ContractDetailPage() {
 
         {/* Addendums — visible at all times. Attach/remove gated to draft state inside the component. */}
         <AddendumsPanel contractId={contract.id} role="landlord" contractStatus={contract.status} />
+
+        {/* ── Renewal declined banner (Phase 6c). Shown when either:
+             - the RP is on the PARENT contract and the customer rejected
+               (`renewalAccepted === 'rejected'`); or
+             - the RP opened the renewal CHILD directly and its parent
+               carries the rejection (renewalAccepted mirrored from parent).
+             The backend inlines the parent's `renewalRejectionReason` on
+             child responses so this banner works on either page. */}
+        {(contract.renewalAccepted === 'rejected') && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+            <X size={18} className="text-red-700 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-red-900">Customer declined this renewal</p>
+              <p className="text-xs text-red-800 mt-0.5">
+                The proposal is archived. The original lease keeps running until{' '}
+                <b>{fmtDate(contract.contractType === 'renewal' && contract.parentContractId ? contract.endDate : contract.endDate)}</b>.
+                You can propose new terms anytime.
+              </p>
+              {contract.renewalRejectionReason ? (
+                <div className="mt-2 bg-white border border-red-200 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-red-700 uppercase tracking-wide mb-1">Reason from customer</p>
+                  <p className="text-xs text-[#1a1916] whitespace-pre-wrap">“{contract.renewalRejectionReason}”</p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-red-700 italic mt-2">No reason provided.</p>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5 shrink-0">
+              {/* If a fresh proposal has already been created on the same
+                  parent (Phase 6c successor), link straight to it. Otherwise
+                  offer the re-propose CTA — routed via the parent contract
+                  when we're viewing a child, so the modal targets the right id. */}
+              {contract.successorProposal ? (
+                <Link
+                  href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}`}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> View new proposal · CID-{contract.successorProposal.id}
+                </Link>
+              ) : contract.contractType === 'renewal' && contract.parentContractId ? (
+                <Link
+                  href={`/rental-provider/dashboard/contracts/${contract.parentContractId}`}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> Open original lease to re-propose
+                </Link>
+              ) : (
+                <button
+                  onClick={openProposeRenewalModal}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> Propose new renewal
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 6c — when the RP is viewing a declined renewal child and a
+             successor proposal exists, render an informational strip so the
+             RP knows the lifecycle continued: this row was rejected, the
+             follow-up is the row they should act on. */}
+        {isDeclinedRenewalChild && contract.successorProposal && (
+          <div className="bg-[#f0faf6] border border-[#c5e8df] rounded-2xl p-4 flex items-start gap-3">
+            <RotateCcw size={18} className="text-[#2e9f82] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-[#1a1916]">A new renewal has been proposed</p>
+              <p className="text-xs text-[#4b4a44] mt-0.5">
+                After this proposal was declined, you proposed a fresh renewal on{' '}
+                <b>{fmtDate(contract.successorProposal.createdAt)}</b>. The customer's decision is tracked there.
+              </p>
+            </div>
+            <Link
+              href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}`}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center gap-1.5 shrink-0"
+            >
+              Open CID-{contract.successorProposal.id}
+            </Link>
+          </div>
+        )}
 
         {/* ── Termination request banner (only shows when one is in flight) ── */}
         {contract.termination?.response === 'pending' && contract.termination.requestedByRole === 'tenant' && (
@@ -1385,7 +1553,7 @@ export default function ContractDetailPage() {
             <>
               <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
               <div>
-                <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Cheques</p>
+                <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Payments</p>
                 <p className="text-sm font-semibold text-[#1a1916]">{contract.numberOfInstallments}</p>
               </div>
             </>
@@ -1504,15 +1672,15 @@ export default function ContractDetailPage() {
                   </div>
                   <div className={activeDrawer !== 'payments' ? 'hidden' : 'p-5 space-y-4'}>
 
-                  {/* Security Deposit */}
-                  <SectionCard title="Security Deposit" icon={DollarSign}>
+                  {/* Security Deposit Payment */}
+                  <SectionCard title="Security Deposit Payment" icon={DollarSign}>
                     {depositPayment ? (
                       <div className="overflow-x-auto -mx-1">
                         <table className="w-full text-xs min-w-[400px]">
                           <thead>
                             <tr className="text-left text-[10px] text-[#9b9890] uppercase border-b border-[#f4f3ef]">
                               <th className="px-2 py-2 font-medium">Amount</th>
-                              <th className="px-2 py-2 font-medium">Cheque No.</th>
+                              <th className="px-2 py-2 font-medium">Reference</th>
                               <th className="px-2 py-2 font-medium">Due Date</th>
                               <th className="px-2 py-2 font-medium">Status</th>
                             </tr>
@@ -1559,16 +1727,16 @@ export default function ContractDetailPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <p className="text-xs text-[#9b9890]">Amount: <strong className="text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</strong> — enter the cheque details to record receipt.</p>
+                        <p className="text-xs text-[#9b9890]">Amount: <strong className="text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</strong> — enter the payment details to record receipt.</p>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Cheque No.</label>
+                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Reference</label>
                             <input type="text" value={depChequeNo} onChange={e => setDepChequeNo(e.target.value)}
-                              placeholder="e.g. 001234"
+                              placeholder="Cheque #, transfer ID, auth code…"
                               className="w-full font-mono text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
                           </div>
                           <div>
-                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Cheque Date</label>
+                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Date</label>
                             <input type="date" value={depDate} onChange={e => setDepDate(e.target.value)}
                               className="w-full text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none text-[#6b6860]" />
                           </div>
@@ -1577,20 +1745,20 @@ export default function ContractDetailPage() {
                         <button onClick={addDepositCheque} disabled={recordingDeposit}
                           className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1a7a63] disabled:opacity-50 transition-colors">
                           {recordingDeposit ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
-                          Record Deposit Cheque
+                          Record Deposit Payment
                         </button>
                       </div>
                     )}
                   </SectionCard>
 
-                  {/* Rental Instalments — includes the first-bundle cheque (Admin + Ejari + Commission + Installment 1)
+                  {/* Rental Instalments — includes the first-bundle payment (Admin + Ejari + Commission + Installment 1)
                        and any extra plan items (Tax, VAT, etc.). Security deposit is rendered separately above. */}
                   <SectionCard
-                    title={`Rental Instalments (${rentChequePayments.length} cheques)`}
+                    title={`Rental Instalments (${rentChequePayments.length} payment${rentChequePayments.length === 1 ? '' : 's'})`}
                     icon={CreditCard}
                   >
               {rentChequePayments.length === 0 && !showAddInstalment && (
-                <p className="text-xs text-[#9b9890] text-center py-4">No instalments recorded yet.</p>
+                <p className="text-xs text-[#9b9890] text-center py-4">No payments recorded yet.</p>
               )}
 
               {rentChequePayments.length > 0 && (
@@ -1601,7 +1769,7 @@ export default function ContractDetailPage() {
                         <th className="px-2 py-2 font-medium">#</th>
                         <th className="px-2 py-2 font-medium">Description</th>
                         <th className="px-2 py-2 font-medium">Amount</th>
-                        <th className="px-2 py-2 font-medium">Cheque No.</th>
+                        <th className="px-2 py-2 font-medium">Reference</th>
                         <th className="px-2 py-2 font-medium">Due Date</th>
                         <th className="px-2 py-2 font-medium">Status</th>
                       </tr>
@@ -1675,9 +1843,9 @@ export default function ContractDetailPage() {
                         placeholder="0.00" className="w-full text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
                     </div>
                     <div>
-                      <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Cheque No.</label>
+                      <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Reference</label>
                       <input type="text" value={newInstalment.chequeNumber} onChange={e => setNewInstalment(v => ({ ...v, chequeNumber: e.target.value }))}
-                        placeholder="optional" className="w-full font-mono text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
+                        placeholder="Cheque #, transfer ID…" className="w-full font-mono text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
                     </div>
                     <div>
                       <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Due Date</label>
@@ -2258,7 +2426,7 @@ export default function ContractDetailPage() {
                             </div>
                             {totalCheques > 0 && (
                               <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                                <span className="text-xs text-[#9b9890]">Total Cheques</span>
+                                <span className="text-xs text-[#9b9890]">Total Payments</span>
                                 <span className="text-xs font-semibold text-[#1a1916]">{totalCheques}</span>
                               </div>
                             )}
@@ -2286,7 +2454,13 @@ export default function ContractDetailPage() {
           </>
         )}
 
-        {/* ── grid: nav (3) + timeline (9) ── */}
+        {/* ── grid: nav (3) + timeline (9) ──
+             Hidden on declined renewal children — the proposal is archived,
+             so payment collection drawers, the activation timeline, and the
+             Sign Contract CTA would all be misleading. The red declined
+             banner + quick-glance strip above already give the RP everything
+             they need; the re-propose CTA routes them back to the parent. */}
+        {!isDeclinedRenewalChild && (
         <div className="grid grid-cols-12 gap-5 items-start">
 
           {/* Contract Details vertical nav */}
@@ -2585,7 +2759,7 @@ export default function ContractDetailPage() {
                       {tl_isActive && (
                         <div className="mt-1 space-y-2">
                           <p className="text-[10px] text-[#2e9f82] font-medium">Contract is live</p>
-                          <p className="text-[10px] text-[#9b9890]">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
+                          <p className="text-[10px] text-[#9b9890]">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} payments</p>
                           <div className="flex gap-2 pt-1">
                             <Link
                               href={`/rental-provider/dashboard/contracts/${contract.id}/print`}
@@ -2617,28 +2791,28 @@ export default function ContractDetailPage() {
                     </StepRow>
                     );})()}
 
-                    {/* Step 2: Payment Collection — tenant brings PDC cheques, RP records them.
-                         For renewals there's no upstream lead, so cheques are collected on this
+                    {/* Step 2: Payment Collection — customer submits payment references, RP records them.
+                         For renewals there's no upstream lead, so payments are collected on this
                          contract before signatures can proceed. */}
                     {(()=>{ const state: TLStep = stepState(true, st2Done); return (
                     <StepRow num={2} label="Payment Collection" state={state} last={false}>
-                      <p className="text-[10px] text-[#9b9890] mt-0.5">Customer brings PDC cheques — record each and confirm receipt.</p>
-                      {/* Tenant submission status — mirrors the lead's CHEQUES_SUBMITTED stage.
-                          The tenant signals readiness from their portal before the RP records. */}
+                      <p className="text-[10px] text-[#9b9890] mt-0.5">Customer prepares the payments — record each one and confirm receipt.</p>
+                      {/* Customer submission status — mirrors the lead's CHEQUES_SUBMITTED stage.
+                          The customer signals readiness from their portal before the RP records. */}
                       {state === 'current' && contract.tenantChequesSubmittedAt && (
                         <div className="mt-2 flex items-start gap-1.5 text-[10px] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5">
                           <CheckCircle size={11} className="text-[#854d0e] shrink-0 mt-0.5" />
                           <div className="flex-1">
-                            <p className="font-semibold text-[#854d0e]">Customer confirmed cheques submitted</p>
+                            <p className="font-semibold text-[#854d0e]">Customer confirmed payments submitted</p>
                             <p className="text-[9px] text-[#854d0e] opacity-80">
                               {new Date(contract.tenantChequesSubmittedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                              {' '}— record each cheque below and confirm receipt.
+                              {' '}— record each one below and confirm receipt.
                             </p>
                           </div>
                         </div>
                       )}
                       {state === 'current' && !contract.tenantChequesSubmittedAt && (
-                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting customer to confirm cheques handed over.</p>
+                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting customer to confirm payments.</p>
                       )}
                       {state === 'current' && (
                         <div className="mt-2 space-y-1.5">
@@ -2665,7 +2839,7 @@ export default function ContractDetailPage() {
                           <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
                             <div>
                               <p className="text-[10px] font-semibold text-[#1a1916]">Rental Instalments</p>
-                              <p className="text-[9px] text-[#9b9890]">{expectedCheques} cheques (PDC)</p>
+                              <p className="text-[9px] text-[#9b9890]">{expectedCheques} payment{expectedCheques === 1 ? '' : 's'}</p>
                             </div>
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
                               allChequesRecorded ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef9c3] text-[#854d0e]'
@@ -2677,7 +2851,7 @@ export default function ContractDetailPage() {
                           <button
                             onClick={() => setActiveDrawer('payments')}
                             className="w-full text-[10px] font-semibold py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-white flex items-center justify-center gap-1.5">
-                            <CreditCard size={10} /> Manage Cheques
+                            <CreditCard size={10} /> Manage Payments
                             <ChevronRight size={9} className="ml-auto opacity-50" />
                           </button>
                           {/* Confirm PDC Received button */}
@@ -2818,7 +2992,8 @@ export default function ContractDetailPage() {
             </p>
           </div>{/* end timeline col */}
 
-        </div>{/* end grid */}
+        </div>
+        )}{/* end grid */}
       </div>
 
       {/* Sign modal */}
@@ -2858,24 +3033,16 @@ export default function ContractDetailPage() {
                   <div><span className="text-[#9b9890]">Unit </span><span className="font-semibold text-[#1a1916]">{contract.unit.number ?? '—'}</span></div>
                   <div><span className="text-[#9b9890]">Location </span><span className="font-semibold text-[#1a1916]">{[contract.property.community, contract.property.emirate].filter(Boolean).join(', ') || '—'}</span></div>
                   <div><span className="text-[#9b9890]">Annual Rent </span><span className="font-semibold text-[#1a1916]">{fmtAed(contract.annualRent)}</span></div>
+                  <div><span className="text-[#9b9890]">Installments </span><span className="font-semibold text-[#1a1916]">{contract.numberOfInstallments ?? '—'} payment{contract.numberOfInstallments === 1 ? '' : 's'}</span></div>
+                  <div><span className="text-[#9b9890]">Security Deposit </span><span className="font-semibold text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</span></div>
                   <div className="col-span-2"><span className="text-[#9b9890]">Cheques payable to </span><span className="font-semibold text-[#1a1916]">{contract.landlord.companyName ?? contract.landlord.name ?? '—'}</span></div>
                 </div>
               </div>
 
-              {/* New renewal terms */}
+              {/* Renewal period — start / end / installments / method */}
               <div>
-                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">New Renewal Terms</p>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Renewal Period</p>
                 <div className="space-y-3">
-                  <div>
-                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">New annual rent (AED)</label>
-                    <input
-                      type="number"
-                      value={renewalForm.newAnnualRent}
-                      onChange={e => setRenewalForm(f => ({ ...f, newAnnualRent: e.target.value }))}
-                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                      placeholder="90000"
-                    />
-                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Start date</label>
@@ -2938,58 +3105,144 @@ export default function ContractDetailPage() {
                       type="text"
                       value={renewalForm.chequePayeeName}
                       onChange={e => setRenewalForm(f => ({ ...f, chequePayeeName: e.target.value }))}
-                      placeholder="New payee name on cheques"
+                      placeholder="New payee name (used when payment method is cheque)"
                       className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
                     />
                   )}
                 </div>
               </div>
 
-              {/* Fees */}
+              {/* Rent & Fees — single grouped block (admin + ejari + commission bundle into payment 1; deposit carries forward) */}
               <div>
-                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Fees (AED)</p>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Rent &amp; Fees (AED)</p>
                 <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">New annual rent</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewalForm.newAnnualRent}
+                      onChange={e => setRenewalForm(f => ({ ...f, newAnnualRent: e.target.value }))}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="90000"
+                    />
+                  </div>
                   <div>
-                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Admin fee</label>
+                    <label className="text-[11px] font-medium text-[#6b6860] flex items-center justify-between mb-1">
+                      <span>Admin fee</span>
+                      {feesTouched.adminFee && (
+                        <button
+                          type="button"
+                          onClick={() => setFeesTouched(t => ({ ...t, adminFee: false }))}
+                          className="text-[10px] text-[#2e9f82] hover:underline cursor-pointer"
+                        >Reset to rule</button>
+                      )}
+                    </label>
                     <input
                       type="number"
                       min={0}
                       value={renewalForm.adminFee}
-                      onChange={e => setRenewalForm(f => ({ ...f, adminFee: e.target.value }))}
+                      onChange={e => { setFeesTouched(t => ({ ...t, adminFee: true })); setRenewalForm(f => ({ ...f, adminFee: e.target.value })); }}
                       className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                      placeholder="1000"
+                      placeholder="From your fee rule"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Ejari fee</label>
+                    <label className="text-[11px] font-medium text-[#6b6860] flex items-center justify-between mb-1">
+                      <span>Ejari fee</span>
+                      {feesTouched.ejariFee && (
+                        <button
+                          type="button"
+                          onClick={() => setFeesTouched(t => ({ ...t, ejariFee: false }))}
+                          className="text-[10px] text-[#2e9f82] hover:underline cursor-pointer"
+                        >Reset to rule</button>
+                      )}
+                    </label>
                     <input
                       type="number"
                       min={0}
                       value={renewalForm.ejariFee}
-                      onChange={e => setRenewalForm(f => ({ ...f, ejariFee: e.target.value }))}
+                      onChange={e => { setFeesTouched(t => ({ ...t, ejariFee: true })); setRenewalForm(f => ({ ...f, ejariFee: e.target.value })); }}
                       className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                      placeholder="250"
+                      placeholder="From your fee rule"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] flex items-center justify-between mb-1">
+                      <span>Commission</span>
+                      {feesTouched.commission && (
+                        <button
+                          type="button"
+                          onClick={() => setFeesTouched(t => ({ ...t, commission: false }))}
+                          className="text-[10px] text-[#2e9f82] hover:underline cursor-pointer"
+                        >Reset to rule</button>
+                      )}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewalForm.commission}
+                      onChange={e => { setFeesTouched(t => ({ ...t, commission: true })); setRenewalForm(f => ({ ...f, commission: e.target.value })); }}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="From your fee rule"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Security deposit (carried forward)</label>
+                    <input
+                      type="number"
+                      value={contract.securityDepositAmount ?? 0}
+                      disabled
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-[#f7f6f2] text-[#6b6860] cursor-not-allowed"
                     />
                   </div>
                 </div>
-                <p className="text-[10px] text-[#9b9890] mt-1.5">Prefilled from the current contract. Adjust if your fee rules have changed.</p>
+                <p className="text-[10px] text-[#9b9890] mt-1.5">
+                  Admin, ejari and commission auto-fill from your <a href="/rental-provider/dashboard/settings/fees" target="_blank" rel="noreferrer" className="text-[#2e9f82] hover:underline">fee rules</a> against the new annual rent — edit any value to override. They bundle into the first installment. Security deposit stays the same and is not re-collected.
+                </p>
               </div>
 
-              {/* Installment preview */}
+              {/* Planned Installments preview — mirrors the new-lease auto-plan:
+                  payment #1 wraps admin + ejari + commission + first rent installment,
+                  payments 2..N are rent-only at month-stepped due dates. */}
               {(() => {
-                const n = parseInt(renewalForm.numberOfInstallments, 10) || 0;
-                const rent = parseFloat(renewalForm.newAnnualRent) || 0;
-                const start = renewalForm.newStartDate ? new Date(renewalForm.newStartDate) : null;
-                const end = renewalForm.newEndDate ? new Date(renewalForm.newEndDate) : null;
+                const n      = parseInt(renewalForm.numberOfInstallments, 10) || 0;
+                const rent   = parseFloat(renewalForm.newAnnualRent) || 0;
+                const admin  = Math.max(0, parseFloat(renewalForm.adminFee)   || 0);
+                const ejari  = Math.max(0, parseFloat(renewalForm.ejariFee)   || 0);
+                const comm   = Math.max(0, parseFloat(renewalForm.commission) || 0);
+                const start  = renewalForm.newStartDate ? new Date(renewalForm.newStartDate) : null;
+                const end    = renewalForm.newEndDate   ? new Date(renewalForm.newEndDate)   : null;
                 if (!n || !rent || !start || !end) return null;
                 const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000));
-                const stepDays = Math.max(1, Math.floor(totalDays / n));
-                const each = Math.round(rent / n);
-                const rows = Array.from({ length: n }, (_, i) => {
-                  const d = new Date(start);
-                  d.setDate(d.getDate() + i * stepDays);
-                  return { idx: i + 1, due: d, amount: each };
-                });
+                const stepDays  = Math.max(1, Math.floor(totalDays / n));
+                const base      = Math.floor(rent / n);
+                const last      = rent - base * (n - 1);
+                const firstRent = n === 1 ? last : base;
+                const bundleAmount = admin + ejari + comm + firstRent;
+                const bundleParts: string[] = [];
+                if (admin > 0) bundleParts.push('Admin');
+                if (ejari > 0) bundleParts.push('Ejari');
+                if (comm  > 0) bundleParts.push('Commission');
+                bundleParts.push(n === 1 ? 'Annual Rent' : 'Installment 1');
+                const bundleLabel = bundleParts.length > 1
+                  ? `${bundleParts.join(' + ')} (Payment 1/${n})`
+                  : `Rent — Payment 1/${n}`;
+                const rows = [
+                  { idx: 1, due: new Date(start), description: bundleLabel, amount: bundleAmount, bundled: bundleParts.length > 1 },
+                  ...Array.from({ length: Math.max(0, n - 1) }, (_, i) => {
+                    const d = new Date(start);
+                    d.setDate(d.getDate() + (i + 1) * stepDays);
+                    return {
+                      idx: i + 2,
+                      due: d,
+                      description: `Rent — Payment ${i + 2}/${n}`,
+                      amount: i === n - 2 ? last : base,
+                      bundled: false,
+                    };
+                  }),
+                ];
+                const total = rows.reduce((s, r) => s + r.amount, 0);
                 return (
                   <div>
                     <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Planned Installments</p>
@@ -3005,17 +3258,23 @@ export default function ContractDetailPage() {
                         </thead>
                         <tbody>
                           {rows.map(r => (
-                            <tr key={r.idx} style={{ borderTop: '1px solid #f0ede8' }}>
+                            <tr key={r.idx} style={{ borderTop: '1px solid #f0ede8', background: r.bundled ? '#fef9ed' : undefined }}>
                               <td className="px-3 py-2 text-[#9b9890]">{r.idx}</td>
-                              <td className="px-3 py-2 text-[#1a1916]">Rent — Cheque {r.idx}/{n}</td>
+                              <td className="px-3 py-2 text-[#1a1916]">{r.description}</td>
                               <td className="px-3 py-2 text-[#1a1916] tabular-nums">{fmtDate(r.due.toISOString())}</td>
                               <td className="px-3 py-2 text-right text-[#1a1916] font-semibold tabular-nums">{r.amount.toLocaleString('en-AE')}</td>
                             </tr>
                           ))}
+                          <tr style={{ borderTop: '2px solid #e8e6e0' }} className="bg-[#f7f6f2]">
+                            <td className="px-3 py-2 text-[10px] text-[#9b9890] uppercase font-semibold" colSpan={3}>Total</td>
+                            <td className="px-3 py-2 text-right text-[#1a1916] font-bold tabular-nums">{total.toLocaleString('en-AE')}</td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-[10px] text-[#9b9890] mt-1.5">Even-split based on annual rent ÷ {n}. You can add extra one-off charges below.</p>
+                    <p className="text-[10px] text-[#9b9890] mt-1.5">
+                      Payment 1 bundles admin + ejari + commission + rent installment 1. Subsequent payments are rent-only, month-stepped to the renewal end date.
+                    </p>
                   </div>
                 );
               })()}

@@ -15,7 +15,7 @@
  *   GET   /profiles/customer/me → { profile, checklist } — feeds KycDocumentsPanel
  */
 
-import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
@@ -61,6 +61,55 @@ export default function CustomerProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved]   = useState(false);
   const [error, setError]   = useState<string | null>(null);
+
+  // ── OCR scanning state ──
+  const [ocrScanning, setOcrScanning] = useState(false);
+  const [ocrExtracted, setOcrExtracted] = useState(false);
+  const ocrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startOcrPolling = () => {
+    setOcrScanning(true);
+    setOcrExtracted(false);
+    let attempts = 0;
+    const MAX_ATTEMPTS = 12; // 24s max
+    ocrPollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        await refresh();
+      } catch { /* ignore */ }
+      // Check if user data has been populated by OCR (accessed via closure — stale, so we re-read from auth)
+      if (attempts >= MAX_ATTEMPTS) {
+        clearInterval(ocrPollRef.current!);
+        setOcrScanning(false);
+      }
+    }, 2000);
+  };
+
+  // When `user` changes (refresh returned new data) while OCR is scanning → auto-fill + stop
+  const prevOcrUserRef = useRef<typeof user>(null);
+  useEffect(() => {
+    if (!ocrScanning) return;
+    if (!user) return;
+    const prev = prevOcrUserRef.current;
+    const hasNewData =
+      (user.firstName && user.firstName !== prev?.firstName) ||
+      (user.emiratesIdNumber && user.emiratesIdNumber !== prev?.emiratesIdNumber);
+    if (hasNewData) {
+      clearInterval(ocrPollRef.current!);
+      setOcrScanning(false);
+      setOcrExtracted(true);
+      // Auto-fill form fields that are currently empty
+      if (user.firstName  && !firstName)   setFirstName(user.firstName);
+      if (user.lastName   && !lastName)    setLastName(user.lastName);
+      if (user.nationality && !nationality) setNationality(user.nationality);
+      if (user.emiratesIdNumber && !emiratesId) setEmiratesId(user.emiratesIdNumber);
+      if (user.gender && !gender) setGender(user.gender as 'male' | 'female' | 'other');
+      setTimeout(() => setOcrExtracted(false), 5000);
+    }
+    prevOcrUserRef.current = user;
+  }, [user, ocrScanning]);
+
+  useEffect(() => () => { if (ocrPollRef.current) clearInterval(ocrPollRef.current); }, []);
 
   // ── Avatar upload ──
   const [avatarUrl, setAvatarUrl]       = useState<string | null>(null);
@@ -182,7 +231,7 @@ export default function CustomerProfilePage() {
     }
   }
 
-  async function onSubmit(e?: FormEvent) {
+  async function onSubmit(e?: React.FormEvent) {
     e?.preventDefault();
     if (!firstName.trim() || !lastName.trim()) {
       setError('First name and last name are required.');
@@ -506,9 +555,23 @@ export default function CustomerProfilePage() {
                 <h2>KYC Documents</h2>
               </div>
               <div className={s.docsWrap}>
+                {ocrScanning && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: 'rgba(46,159,130,0.08)', border: '1px solid rgba(46,159,130,0.3)', marginBottom: 12 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--color-primary, #2e9f82)', flexShrink: 0, animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                    <span style={{ fontSize: 13, color: '#1a6b57', fontWeight: 500 }}>Scanning Emirates ID — extracting your details…</span>
+                    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                  </div>
+                )}
+                {ocrExtracted && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: 'rgba(46,159,130,0.08)', border: '1px solid rgba(46,159,130,0.3)', marginBottom: 12 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--color-primary, #2e9f82)', flexShrink: 0 }}><path d="M20 6 9 17l-5-5" /></svg>
+                    <span style={{ fontSize: 13, color: '#1a6b57', fontWeight: 500 }}>Details extracted — your form has been filled in automatically.</span>
+                  </div>
+                )}
                 <KycDocumentsPanel
                   profileApiPath="/profiles/customer/me"
                   ownerType="customer"
+                  onAfterUpload={key => { if (key === 'emirates_id') startOcrPolling(); }}
                 />
               </div>
             </div>

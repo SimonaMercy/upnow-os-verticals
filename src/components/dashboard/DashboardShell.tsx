@@ -33,6 +33,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Dashboard',       href: '/rental-provider/dashboard',                icon: LayoutDashboard },
     { label: 'My Properties',  href: '/rental-provider/dashboard/portfolio',       icon: Building2 },
     { section: 'Leasing' },
+    { label: 'Pipeline',       href: '/rental-provider/dashboard/pipeline',        icon: Layers },
     { label: 'Leads',          href: '/rental-provider/dashboard/leads',           icon: TrendingUp },
     { label: 'Contracts',      href: '/rental-provider/dashboard/orders',          icon: FileText },
     { label: 'Templates',      href: '/rental-provider/dashboard/templates',       icon: FileText },

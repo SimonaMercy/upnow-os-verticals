@@ -95,10 +95,16 @@ interface ApiPaymentPlanItem {
   description?: string;
   type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
 }
+/** Method classifier for an individual payment (per-cheque on the RP side
+ *  in Phase 5b). The customer never picks this — they just attach the
+ *  reference (cheque photo, transfer screenshot, card slip, cash receipt);
+ *  the landlord tags each one on approval. */
+export type PaymentMethodKind = 'cheque' | 'bank_transfer' | 'card' | 'cash';
+
 interface ApiPaymentPlan {
   chequeCount: number;
   /** Rent-only installment count (Annual=1, Semi-annual=2, Quarterly=4, etc.).
-   *  Distinct from `chequeCount` which includes the security-deposit cheque. */
+   *  Distinct from `chequeCount` which includes the security-deposit row. */
   installmentCount?: number;
   totalAmountFils: number;
   rentFils: number;
@@ -151,12 +157,25 @@ interface ApiTermination {
   effectiveDate: string | null;
   response: 'pending' | 'accepted' | 'rejected' | null;
 }
+interface ApiContractPayment {
+  id: number;
+  paymentType: string | null;
+  description: string | null;
+  amountPaid: number;
+  transactionDate: string | null;
+  chequeStatus?: string | null;
+}
+
 interface ApiContract {
   id: number;
   ref?: string | null;
   status: string;
   contractType?: string | null;
   parentContractId?: number | null;
+  /** Soft-archive flag (docs/CONTRACT_LIFECYCLE.md §3.2). For new-lease rows
+   *  this becomes false when the unit was leased to a different customer
+   *  before this draft activated — the customer sees the "superseded" state. */
+  contractActive?: boolean;
   ejariStatus: string | null;
   utilityStatus: string | null;
   utilityAccountNumber: string | null;
@@ -165,11 +184,18 @@ interface ApiContract {
   endDate: string | null;
   annualRent: number;
   contractValue?: number | null;
+  securityDepositAmount?: number | null;
+  adminFeeFils?: number | null;
+  ejariFeeFils?: number | null;
   tenantSignedAt: string | null;
   unit: { id: number | null };
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   moveInInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
   termination?: ApiTermination | null;
+  /** Per-installment schedule. Populated for any contract that has Payment
+   *  rows; for proposed renewals this drives the inline schedule preview on
+   *  the renewal_offered action card. */
+  payments?: ApiContractPayment[];
 }
 
 /**
@@ -195,7 +221,8 @@ type StateKey =
   | 'termination_request_received' | 'termination_request_sent'
   | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques'
   | 'renewal_progress' | 'renewal_ejari' | 'renewal_active'
-  | 'rejected' | 'terminated' | 'renewal_rejected';
+  | 'rejected' | 'terminated' | 'renewal_rejected'
+  | 'superseded' | 'terminating';
 
 type Mode = 'new' | 'renewal' | 'rejected';
 
@@ -210,30 +237,46 @@ interface StateDef {
   timing: string | null;
 }
 
+// Copy guideline: headline carries the state, body adds the next action or
+// new context — never restates what the headline already says. Keep both
+// short; the timing row carries the "how long" beat.
 const STATE_DEFS: Record<StateKey, StateDef> = {
-  booked:                        { label: 'Viewing booked',                sub: 'Step 1 of 8',                     mode: 'new',     currentIndex: 0,  tone: 'action',    headline: 'Your viewing is confirmed.',                              body: 'Review the full payment summary below. When you are ready to move forward on this unit, tap “I’m Interested” and we will collect your preferences.',                                          timing: null },
-  docs_required:                 { label: 'Documents required',            sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'action',    headline: 'Almost there. Let us gather your paperwork.',             body: 'Upload the missing identity and supporting documents so we can issue your contract. Most customers finish in under 5 minutes.',                                                                timing: 'Takes ~5 min' },
-  docs_under_review:             { label: 'Documents under review',        sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'waiting',   headline: 'Your documents are with our team.',                       body: 'Thanks for uploading. We are reviewing your KYC and any supporting documents you sent. Once approved, your payment summary and contract preview will unlock and you can prepare your cheques.', timing: 'Usually within 1 business day' },
-  payment_review:                { label: 'Payment & cheques',             sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your cheques.',              body: 'Your documents are approved. Review the payment summary and contract preview, then upload photos of each cheque so the landlord can confirm collection.',                                       timing: 'Takes ~5 min' },
-  awaiting_rp_confirm:           { label: 'Cheques under review',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your landlord is reviewing your cheques.',                body: 'Cheques uploaded. Your landlord is checking the extracted details against your contract before issuing it for signature.',                                                                       timing: 'Usually within 1 business day' },
-  signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'One signature stands between you and the keys.',          body: 'Review the final contract, then add your signature below.',                                                                                                                                       timing: 'Takes ~2 min' },
-  ejari:                         { label: 'Ejari in progress',             sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your landlord is registering Ejari.',                     body: 'The Dubai Land Department typically takes 2-5 business days. Your Ejari certificate will appear here for download the moment your landlord uploads it.',                                          timing: '2-5 business days' },
-  utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your DEWA / utility account.',                    body: 'We have pre-filled the premises number from this unit. Just review, add your DEWA account number, and submit.',                                                                                  timing: 'Takes ~1 min' },
-  move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Open the move-in inspection report, review every room and meter reading, then counter-sign so the record is official.',                                                                          timing: 'Takes ~3 min' },
+  booked:                        { label: 'Viewing booked',                sub: 'Step 1 of 8',                     mode: 'new',     currentIndex: 0,  tone: 'action',    headline: 'Your viewing is confirmed.',                              body: 'Look over the cost summary below. Tap “I’m Interested” when you’re ready to commit to this unit.',                                                                                              timing: null },
+  docs_required:                 { label: 'Documents required',            sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'action',    headline: 'Almost there. Let us gather your paperwork.',             body: 'Add the missing identity and supporting documents below. Most customers finish in under 5 minutes.',                                                                                            timing: 'Takes ~5 min' },
+  docs_under_review:             { label: 'Documents under review',        sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'waiting',   headline: 'Your documents are with our team.',                       body: 'Once approved, your payment summary and contract preview unlock so you can prepare payments.',                                                                                                  timing: 'Usually within 1 business day' },
+  payment_review:                { label: 'Payment & references',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your payments accordingly.', body: 'Attach a reference for each one — cheque photo, transfer screenshot, card slip or cash receipt — so it can be verified.',                                                                       timing: 'Takes ~5 min' },
+  awaiting_rp_confirm:           { label: 'Payments under review',         sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is reviewing your payments.',       body: 'Each reference is being verified against your contract before it’s issued for signature.',                                                                                                       timing: 'Usually within 1 business day' },
+  signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'One signature stands between you and the keys.',          body: 'Open the final contract, then add your signature below.',                                                                                                                                         timing: 'Takes ~2 min' },
+  ejari:                         { label: 'Ejari in progress',             sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is registering Ejari.',              body: 'The certificate will appear here for download the moment it’s uploaded.',                                                                                                                       timing: '2-5 business days' },
+  utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your DEWA / utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
+  move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Walk through every room and meter reading, then counter-sign so the record is official.',                                                                                                       timing: 'Takes ~3 min' },
   active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: 'Manage payments, raise issues, or start a renewal request from here any time.',                                                                                                                 timing: null },
-  termination_request_received:  { label: 'Landlord requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your landlord wants to end the contract early.',          body: 'Your landlord submitted a termination request. Review the reason and effective date, then accept or reject.',                                                                                   timing: 'Awaiting your response' },
-  termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting landlord',               mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the landlord.',                      body: "You asked to end the tenancy. Your contract stays active until your landlord accepts. We'll notify you the moment they respond.",                                                              timing: 'Awaiting landlord response' },
+  termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
+  termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting rental provider',        mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the rental provider.',               body: "Your contract stays active until they accept. We'll notify you the moment they respond.",                                                                                                       timing: 'Awaiting rental provider response' },
 
-  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 6',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Your landlord proposed renewal terms. Review and accept, or reject and propose changes.',                                                                                                       timing: 'Awaiting your decision' },
-  renewal_documents:             { label: 'Renewal documents',             sub: 'Renewal step 2 of 6',             mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',               body: "Renewals need fresh copies of your Emirates ID and visa — old ones don't carry over.",                                                                                                         timing: 'Takes ~3 min' },
-  renewal_cheques:               { label: 'Renewal cheques',               sub: 'Renewal step 3 of 6',             mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'New year, new cheques.',                                  body: 'Your landlord prepared the renewal schedule. Prepare the cheques, then confirm.',                                                                                                               timing: 'Confirm when ready' },
-  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 4 of 6',             mode: 'renewal', currentIndex: 3,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Your landlord has signed. Add your signature to lock in the renewed lease.',                                                                                                                    timing: 'Takes ~2 min' },
-  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your landlord is renewing Ejari.',                        body: 'The Dubai Land Department is updating your Ejari record. Usually 2-5 business days.',                                                                                                           timing: '2-5 business days' },
-  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
+  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 4',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, confirm your payments are ready, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
+  // Kept defined so the state map stays exhaustive, but no longer rendered
+  // as a default timeline step. Routing only lands here if a future phase
+  // turns the renewal docs step back on for expired KYC.
+  renewal_documents:             { label: 'Renewal documents',             sub: 'Renewal step — documents',           mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',               body: "Old Emirates ID and visa copies don't carry over — please re-upload.",                                                                                                                         timing: 'Takes ~3 min' },
+  // Defined for back-compat with old proposed renewals that never went
+  // through accept; new renewals skip this state entirely.
+  renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step — payments',            mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
+  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 2 of 4',             mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
+  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 3 of 4',             mode: 'renewal', currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is renewing Ejari.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
+  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 4 of 4 — done',      mode: 'renewal', currentIndex: 3,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
-  rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your landlord declined this application.',               body: "Sometimes it's the landlord, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
-  terminated:                    { label: 'Tenancy terminated',            sub: 'Contract closed',                 mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                                body: 'The contract was terminated. Final settlements processed; security deposit return pending move-out inspection.',                                                                                timing: null },
-  renewal_rejected:              { label: 'Renewal declined',              sub: 'Renewal closed',                  mode: 'renewal',  currentIndex: -1, tone: 'declined', headline: 'You declined this renewal offer.',                       body: 'Your landlord can propose new terms, or your tenancy will end as scheduled.',                                                                                                                   timing: null },
+  rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
+  terminated:                    { label: 'Tenancy terminated',            sub: 'Contract closed',                 mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                                body: 'Final settlements processed; security deposit return pending move-out inspection.',                                                                                                             timing: null },
+  renewal_rejected:              { label: 'Renewal declined',              sub: 'Renewal closed',                  mode: 'renewal',  currentIndex: -1, tone: 'declined', headline: 'You declined this renewal offer.',                       body: 'New terms can still be proposed, or your tenancy will end as scheduled.',                                                                                                                       timing: null },
+  // Phase 6c — a stale draft that the RP archived because the unit was
+  // leased to another customer before this draft could activate. The
+  // customer journey dead-ends here; we route them to the listings.
+  superseded:                    { label: 'Unit no longer available',      sub: 'Browse other listings',           mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'This unit has been leased to another customer.',         body: "Your draft contract has been archived. Browse other listings to find a new home — we've kept your documents on file to speed up the next booking.",                                            timing: null },
+  // Phase 6c — accepted termination, contract still ACTIVE until the
+  // move-out date. Wind-down view: no renewals, no money flow changes,
+  // just a count-down to the effective date.
+  terminating:                    { label: 'Move-out scheduled',           sub: 'Tenancy winding down',            mode: 'new',      currentIndex: 7,  tone: 'waiting',  headline: 'Move-out is scheduled.',                                  body: 'Your tenancy stays active until the effective date. Get your move-out checklist ready and arrange the final inspection.',                                                                       timing: 'Until effective date' },
 };
 
 interface Step { key: string; label: string; short: string; icon: string }
@@ -248,10 +291,13 @@ const STEPS_NEW: Step[] = [
   { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
   { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
 ];
+// Renewal journey trimmed in Phase 6 to 4 steps. The customer confirms
+// payment readiness via a checkbox on the Terms card itself, so the
+// dedicated "Cheques" step is gone. Document refresh is handled as a
+// conditional gate inside the renewal flow (only fires when KYC has
+// actually expired) — so we don't show it as a default step either.
 const STEPS_RENEWAL: Step[] = [
   { key: 'terms_offered',   label: 'Terms offered',      short: 'Terms',    icon: 'envelope' },
-  { key: 'documents',       label: 'Renewal documents',  short: 'Docs',     icon: 'document' },
-  { key: 'payment_plan',    label: 'Cheques',            short: 'Cheques',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen'      },
   { key: 'ejari',           label: 'Ejari renewal',      short: 'Ejari',    icon: 'stamp'    },
   { key: 'active',          label: 'Renewal active',     short: 'Active',   icon: 'active'   },
@@ -313,6 +359,22 @@ function deriveStateKey(r: Resolved): StateKey {
   const viewing = r.viewing;
   const stage = r.stage;
 
+  // ── 0. Lifecycle dead-ends that override everything below
+  //   (docs/CONTRACT_LIFECYCLE.md §3.2 + §4.3).
+  //
+  // A new-lease draft whose unit was leased to another customer before it
+  // could activate is marked contractActive=false. We dead-end the journey
+  // here so the customer is steered back to /listings instead of staring at
+  // a half-finished step they can't complete.
+  if (
+    r.contract &&
+    r.contract.contractActive === false &&
+    r.contract.contractType !== 'renewal' &&
+    (r.contract.status === 'pending' || r.contract.status === 'issued')
+  ) {
+    return 'superseded';
+  }
+
   // ── 1. Renewal proposal status on the original contract wins over child state.
   if (c?.renewalAccepted === 'pending') return 'renewal_offered';
   if (c?.renewalAccepted === 'rejected') return 'renewal_rejected';
@@ -336,6 +398,9 @@ function deriveStateKey(r: Resolved): StateKey {
       if (t.requestedByRole === 'rental_provider') return 'termination_request_received';
       if (t.requestedByRole === 'tenant') return 'termination_request_sent';
     }
+    // Deferred-end termination (docs/CONTRACT_LIFECYCLE.md §4.3): both
+    // parties have agreed, contract stays ACTIVE until effective date.
+    if (t?.response === 'accepted' && c.status === 'active') return 'terminating';
 
     if (c.status === 'active') return 'active';
 
@@ -853,6 +918,11 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'rejected':                      return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
     case 'terminated':                    return <EndStateAction primaryLabel="Find a new place" primaryHref="/listings" />;
     case 'renewal_rejected':              return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
+    case 'superseded':                    return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
+    // Wind-down window — same active body, just labeled differently in the
+    // headline + timing copy (handled by STATE_DEFS). Reusing ActiveAction
+    // keeps payment history + move-out CTAs in view.
+    case 'terminating':                   return <ActiveAction resolved={resolved} onRefresh={onRefresh} />;
     default:                              return null;
   }
 }
@@ -1170,7 +1240,7 @@ function InterestedPopup({
                 </div>
                 {rpPreferredDays.length > 0 && (
                   <p style={{ fontSize: 10, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
-                    Only days highlighted by the landlord can be selected as a contract start date.
+                    Only days highlighted by the rental provider can be selected as a contract start date.
                   </p>
                 )}
               </div>
@@ -1196,12 +1266,14 @@ function InterestedPopup({
           </div>
         </div>
 
-        {/* Live total + full cheque schedule — updates every time the
+        {/* Live total + full payment schedule — updates every time the
             customer flips occupants, move-in or frequency. Shows the
-            mental-model breakdown (e.g. "Semi-annual = 2 rent cheques
-            + 1 security deposit cheque") and then the per-cheque
-            amounts and due dates so the customer sees exactly what
-            they're committing to before tapping Confirm. */}
+            mental-model breakdown (e.g. "Semi-annual = 2 rent payments
+            + 1 security deposit payment") and then the per-row amounts
+            and due dates so the customer sees exactly what they're
+            committing to before tapping Confirm. Method (cheque / bank
+            transfer / card / cash) is picked later on Step 3 — the
+            preview here intentionally stays method-neutral. */}
         {preview && (
           <div style={{ display: 'grid', gap: 8 }}>
             <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -1212,8 +1284,8 @@ function InterestedPopup({
                   const hasDeposit = (preview.securityDepositFils ?? 0) > 0;
                   return (
                     <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>
-                      {rent} rent {rent === 1 ? 'cheque' : 'cheques'}
-                      {hasDeposit ? ' + 1 security deposit cheque' : ''}
+                      {rent} rent {rent === 1 ? 'payment' : 'payments'}
+                      {hasDeposit ? ' + 1 security deposit payment' : ''}
                     </p>
                   );
                 })()}
@@ -1223,7 +1295,7 @@ function InterestedPopup({
 
             {preview.items && preview.items.length > 0 && (
               <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
-                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px', fontWeight: 600 }}>Cheque schedule</p>
+                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px', fontWeight: 600 }}>Payment schedule</p>
                 <div style={{ display: 'grid', gap: 6 }}>
                   {sortPlanItems(preview.items).map((it, i) => {
                     const isDeposit = it.type === 'security_deposit';
@@ -2252,9 +2324,9 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
       {items.length > 0 && (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '0 0 8px' }}>
-            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 600 }}>Cheque schedule</p>
+            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 600 }}>Payment schedule</p>
             <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0 }}>
-              {installments} rent {installments === 1 ? 'cheque' : 'cheques'}{(plan.securityDepositFils ?? 0) > 0 ? ' + 1 deposit cheque' : ''}
+              {installments} rent {installments === 1 ? 'payment' : 'payments'}{(plan.securityDepositFils ?? 0) > 0 ? ' + 1 deposit payment' : ''}
             </p>
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
@@ -2315,7 +2387,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       <div style={{ background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 14, padding: '16px 18px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <Clock size={18} style={{ color: 'var(--saffron-deep)', flexShrink: 0, marginTop: 2 }} />
         <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-          Your landlord is preparing the payment plan. We&apos;ll notify you the moment it&apos;s ready to review.
+          Your rental provider is preparing the payment plan. We&apos;ll notify you the moment it&apos;s ready to review.
         </p>
       </div>
     );
@@ -2394,49 +2466,23 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     return                               { label: 'Rent',     bg: 'var(--surface)',      fg: 'var(--mute)'      };
   };
 
-  const payeeName = plan.chequesPayableTo
-    || resolved.unit?.property?.rentalProvider?.companyName
-    || resolved.unit?.property?.rentalProvider?.user?.name
-    || null;
+  // Note: the plan is intentionally method-agnostic on the customer side.
+  // The customer just declares "here are my payment references" — cheque
+  // photos, transfer screenshots, card slips, cash receipts. The landlord
+  // classifies each one (cheque / bank transfer / card / cash) when they
+  // approve it on the RP side.
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {payeeName && (
-        <div style={{ background: 'var(--saffron-soft, #fef9c3)', border: '1px solid #fde68a', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>✏️</span>
-          <div>
-            <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: '#854d0e', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Write on your cheques — Payable to</p>
-            <p style={{ margin: '4px 0 0', fontSize: 15, fontWeight: 700, color: '#1a1916' }}>{payeeName}</p>
-          </div>
-        </div>
-      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
         <Stat label="Annual rent" value={fmtAedFils(plan.rentFils)} />
         <Stat label="Total contract value" value={fmtAedFils(plan.totalAmountFils)} accent />
         <Stat label="First payment" value={firstDue ? fmtDateShort(firstDue) : '—'} />
       </div>
 
-      {/* Cheque payee — visible without opening the print view */}
-      <div style={{
-        background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 12,
-        padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 16, flexWrap: 'wrap',
-      }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <p style={{ fontSize: 10, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>
-            Cheque payee (landlord)
-          </p>
-          <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', margin: '4px 0 0', letterSpacing: '-0.01em' }}>
-            {resolveChequePayee(resolved.unit)}
-          </p>
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--jade-deep)', margin: 0, fontStyle: 'italic', maxWidth: 240 }}>
-          Write your cheques out to this name exactly as shown.
-        </p>
-      </div>
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cheque schedule · {plan.chequeCount} cheques</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payment schedule · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>Issued {fmtDateShort(plan.issuedAt)}</span>
             <button type="button" onClick={() => printPaymentPlan(resolved, (user?.name ?? '').trim() || '—')}
@@ -2446,14 +2492,14 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           </div>
         </div>
         {items.length === 0 ? (
-          <p style={{ padding: '14px 16px', fontSize: 12, color: 'var(--mute)', margin: 0 }}>No cheque items listed.</p>
+          <p style={{ padding: '14px 16px', fontSize: 12, color: 'var(--mute)', margin: 0 }}>No payment items listed.</p>
         ) : items.map((ch, i) => {
           const meta = typeMeta(ch.type);
           return (
             <div key={ch.index} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)' }}>
               <span style={{ fontSize: 12, color: 'var(--mute)', fontWeight: 600 }}>#{ch.index}</span>
               <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{ch.description ?? (ch.type === 'security_deposit' ? 'Security deposit' : `Cheque ${ch.index}`)}</p>
+                <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{ch.description ?? (ch.type === 'security_deposit' ? 'Security deposit' : `Payment ${ch.index}`)}</p>
                 <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{ch.dueDate ? fmtDateLong(ch.dueDate) : 'No due date'}</p>
               </div>
               <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(ch.amountFils)}</span>
@@ -2464,14 +2510,16 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       </div>
       {plan.notes && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
-          <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, fontWeight: 600 }}>Notes from your landlord</p>
+          <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, fontWeight: 600 }}>Notes from your rental provider</p>
           <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{plan.notes}</p>
         </div>
       )}
-      {/* ── Cheque uploads — attach photos of your physical cheques so the landlord knows what to collect ── */}
+      {/* ── Payment references — cheque photos, transfer screenshots, card slips, cash receipts ── */}
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Attach your cheques (optional)</p>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
+            Attach payment references (optional)
+          </p>
           <span style={{ fontSize: 11, color: 'var(--mute)' }}>{uploads.length} uploaded</span>
         </div>
         <label style={{
@@ -2492,7 +2540,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           />
           {uploadingFiles > 0
             ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploadingFiles} file{uploadingFiles === 1 ? '' : 's'}…</>
-            : <><UploadCloud size={14} /> Choose cheque photos</>}
+            : <><UploadCloud size={14} /> Choose files</>}
         </label>
 
         {uploadErr && <div style={{ marginTop: 10 }}><ErrorBox msg={uploadErr} /></div>}
@@ -2508,7 +2556,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
                   </a>
                 ) : null}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Cheque ${i + 1}`}</p>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Payment ${i + 1}`}</p>
                   {c.bankName && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{c.bankName}{c.amountFils ? ` · AED ${(c.amountFils / 100).toLocaleString('en-AE')}` : ''}</p>}
                 </div>
                 {c.imageUrl && (
@@ -2525,7 +2573,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
                   type="button"
                   onClick={() => removeUpload(c.id)}
                   style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
-                  aria-label="Remove cheque upload"
+                  aria-label="Remove payment proof"
                 >
                   Remove
                 </button>
@@ -2539,11 +2587,11 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <PrimaryBtn onClick={confirm} disabled={busy || uploadingFiles > 0}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          {busy ? 'Marking…' : 'Ready to collect'}
+          {busy ? 'Marking…' : 'I’ve made the payments'}
         </PrimaryBtn>
       </div>
       <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0, lineHeight: 1.5 }}>
-        Tap “Ready to collect” when your cheques are prepared. Your landlord will pick them up in person and confirm receipt — your contract is then issued automatically.
+        Tap when you’ve sent or prepared your payments. Your rental provider will verify each one (cheque, bank transfer, card or cash) and confirm receipt — your contract is then issued automatically.
       </p>
     </div>
   );
@@ -2632,10 +2680,20 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
   const [err, setErr] = useState<string | null>(null);
   const [proofBusy, setProofBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Locally tracked upload — flips true on a successful POST so the Submit
+  // button unlocks immediately, without waiting for a Resolved refresh.
+  const [proofJustUploaded, setProofJustUploaded] = useState<{ name: string; fileUrl: string } | null>(null);
+  // Existing proof on file from a previous attempt (if any).
+  const existingProof = resolved.myDocs.find(d => d.documentKey === 'utility_proof_of_payment');
+  const proofUploaded = !!proofJustUploaded || !!existingProof;
+  const proofDisplayName = proofJustUploaded?.name ?? existingProof?.displayName ?? 'Utility proof on file';
+
   if (!c) return <ErrorBox msg="Contract not found." />;
 
   async function submit() {
     if (!acc.trim()) { setErr('Enter your utility account number.'); return; }
+    if (!proofUploaded) { setErr('Upload your utility proof before submitting.'); return; }
     setBusy(true); setErr(null);
     try {
       const res = await fetch(`/api/contracts/tenant/${c!.id}/utility`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ utilityAccountNumber: acc.trim() }) });
@@ -2655,8 +2713,10 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
       const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
       const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
       if (!putRes.ok) throw new Error('File upload failed');
-      await fetch('/api/documents', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      const regRes = await fetch('/api/documents', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ownerType: 'customer', ownerId: resolved.tenantProfileId, documentKey: 'utility_proof_of_payment', category: 'payment', displayName: 'Utility Proof of Payment', fileUrl, mimeType: file.type, s3Key: fileKey, isVisibleToTenant: true }) });
+      if (!regRes.ok) throw new Error('Failed to register proof');
+      setProofJustUploaded({ name: file.name, fileUrl });
     } catch (e) { setErr(e instanceof Error ? e.message : 'Upload failed'); } finally { setProofBusy(false); }
   }
 
@@ -2668,16 +2728,28 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
           style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 14, fontFamily: 'inherit' }} />
       </div>
       <div>
-        <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Proof of payment (optional)</label>
+        <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span>Proof of payment (required)</span>
+          {proofUploaded && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--jade-deep)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <CheckCircle2 size={12} /> Uploaded
+            </span>
+          )}
+        </label>
         <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) uploadProof(f); }} />
         <SecondaryBtn onClick={() => fileRef.current?.click()}>
           {proofBusy ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
-          {proofBusy ? 'Uploading…' : 'Upload proof file'}
+          {proofBusy ? 'Uploading…' : (proofUploaded ? 'Replace proof file' : 'Upload proof file')}
         </SecondaryBtn>
+        {proofUploaded && (
+          <p style={{ fontSize: 11, color: 'var(--mute)', margin: '6px 0 0' }}>
+            On file: <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{proofDisplayName}</span>
+          </p>
+        )}
       </div>
       {err && <ErrorBox msg={err} />}
-      <PrimaryBtn onClick={submit} disabled={busy}>
+      <PrimaryBtn onClick={submit} disabled={busy || proofBusy || !proofUploaded || !acc.trim()}>
         {busy ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
         {busy ? 'Submitting…' : 'Submit utility account'}
       </PrimaryBtn>
@@ -2765,11 +2837,30 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
 
   if (!c) return <ErrorBox msg="Contract not found." />;
 
+  // Phase 6 — the RP must submit the inspection before the customer can
+  // counter-sign. Earlier rendering jumped straight to the signature canvas
+  // even when no inspection had been generated; show an explicit waiting
+  // card instead so the customer understands what's blocking them.
+  const inspectionReady = !!c.moveInInspection?.submitted || (!!insp && (insp.areas?.length ?? 0) > 0);
+  if (!loadingInsp && !inspectionReady) {
+    return (
+      <div style={{ background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 14, padding: '16px 18px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <Clock size={18} style={{ color: 'var(--saffron-deep)', flexShrink: 0, marginTop: 2 }} />
+        <div style={{ display: 'grid', gap: 4 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Inspection not ready yet</p>
+          <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+            Your rental provider is preparing the move-in inspection report. Once they submit it, the report and a counter-signature panel will unlock here.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const inspectionUrl = `/dashboard/customer/contracts/${c.id}/inspection?type=move_in`;
   const submittedAt = insp?.reportGeneratedDate ?? insp?.inspectionDate ?? c.moveInInspection?.signedAt ?? null;
   const submittedLabel = submittedAt
     ? `Submitted ${new Date(submittedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', timeZone: 'Asia/Dubai' })}`
-    : 'Submitted by landlord';
+    : 'Submitted by rental provider';
   const areas = insp?.areas ?? [];
   const photoCount = insp?.photos?.length ?? 0;
 
@@ -2881,7 +2972,7 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
             )}
             {insp?.generalNotes && (
               <div>
-                <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Landlord notes</p>
+                <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Rental provider notes</p>
                 <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>{insp.generalNotes}</p>
               </div>
             )}
@@ -2952,9 +3043,9 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
       <div style={{ background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <Clock size={18} style={{ color: 'var(--jade-deep)', flexShrink: 0, marginTop: 2 }} />
         <div>
-          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 4px' }}>Cheques submitted — landlord is reviewing</p>
+          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 4px' }}>Payments submitted — rental provider is reviewing</p>
           <p style={{ fontSize: 13, color: 'var(--jade-deep)', margin: 0, lineHeight: 1.5 }}>
-            Your landlord will verify the cheque details and confirm collection. This usually takes 1 business day.
+            Your rental provider will verify each payment and confirm receipt. This usually takes 1 business day.
           </p>
         </div>
       </div>
@@ -3016,7 +3107,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const emirate   = u?.property?.emirate?.name ?? '';
   const location  = [community, emirate].filter(Boolean).join(', ') || '—';
   const rp = u?.property?.rentalProvider ?? u?.property?.rental_provider;
-  const landlordName = rp?.user?.name?.trim() || rp?.companyName?.trim() || 'Your landlord';
+  const landlordName = rp?.user?.name?.trim() || rp?.companyName?.trim() || 'Your rental provider';
   const tenantName   = ''; // not on Resolved; omit rather than guess
 
   const today = new Date();
@@ -3210,43 +3301,28 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
       {section === 'documents' && (
         <div style={{ display: 'grid', gap: 12 }}>
 
-          {/* Your documents — fetched from /api/documents/my */}
+          {/* Your documents — fetched from /api/documents/my.
+              Status display intentionally suppressed once the tenancy is
+              active — the customer has already finished the verification
+              loop, so the per-doc "Approved / Rejected / In review" pills
+              and the X/Y counter only add noise on this view. */}
           <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: 18 }}>
             {(() => {
               const visible = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
-              const approved = visible.filter(d => d.status === 'processed' || d.status === 'complete').length;
               return (
                 <>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-                    <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.015em' }}>Your documents</p>
-                    {!false && visible.length > 0 && (
-                      <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0 }}>{approved}/{visible.length} approved</p>
-                    )}
-                  </div>
-                  {false ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'var(--mute)', fontSize: 13 }}>
-                      <Loader2 size={14} className="animate-spin" /> Loading…
-                    </div>
-                  ) : visible.length === 0 ? (
+                  <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '0 0 14px', letterSpacing: '-0.015em' }}>Your documents</p>
+                  {visible.length === 0 ? (
                     <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>No documents uploaded yet.</p>
                   ) : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                       {visible.map((d, i) => {
-                        const isDone = d.status === 'processed' || d.status === 'complete';
-                        const isRejected = d.status === 'rejected';
-                        const isPending = d.status === 'pending' || d.status === 'attached';
                         const label = d.displayName || DOC_LABELS[d.documentKey] || d.documentKey.replace(/_/g, ' ');
-                        const statusLabel = isDone ? 'Approved' : isRejected ? 'Rejected' : isPending ? 'In Review' : 'Uploaded';
-                        const statusBg = isDone ? 'var(--jade-soft)' : isRejected ? 'var(--brick-soft)' : '#fff7ed';
-                        const statusFg = isDone ? 'var(--jade-deep)' : isRejected ? 'var(--brick)' : 'var(--saffron-deep)';
                         const inner = (
-                          <>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <CheckCircle2 size={14} color={isDone ? 'var(--jade-deep)' : isRejected ? 'var(--brick)' : 'var(--saffron)'} />
-                              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-                            </div>
-                            <span style={{ padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 600, background: statusBg, color: statusFg, whiteSpace: 'nowrap' }}>{statusLabel}</span>
-                          </>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <FileText size={14} color="var(--jade-deep)" />
+                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                          </div>
                         );
                         const tileStyle: React.CSSProperties = {
                           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
@@ -3288,20 +3364,11 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             </div>
           </div>
 
-          {/* Manage + upload */}
-          <Link href="/dashboard/customer/documents" style={{
-            display: 'flex', alignItems: 'center', gap: 14,
-            padding: '16px 18px',
-            background: 'var(--jade-soft)', border: '1.5px dashed var(--jade)',
-            borderRadius: 12, textDecoration: 'none',
-          }}>
-            <UploadCloud size={20} color="var(--jade-deep)" />
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--jade-deep)', margin: 0 }}>Manage &amp; upload documents</p>
-              <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>KYC, rental docs and more</p>
-            </div>
-            <ArrowRight size={14} color="var(--jade-deep)" style={{ marginLeft: 'auto' }} />
-          </Link>
+          {/* "Manage & upload documents" link removed on the active-tenancy
+              Documents tab — the customer has finished onboarding by this
+              point and shouldn't be nudged back into the upload flow here.
+              Uploads still happen during the pre-contract steps and from the
+              customer's own profile page. */}
         </div>
       )}
 
@@ -3373,7 +3440,7 @@ function TerminationRequestModal({ contract, onClose, onSuccess }: { contract: A
         <PrimaryBtn onClick={submit} disabled={busy} danger>{busy ? 'Sending…' : 'Send request'}</PrimaryBtn>
       </>
     }>
-      <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 0 }}>Your landlord must accept the request before the contract terminates. Until then, your lease stays active.</p>
+      <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 0 }}>Your rental provider must accept the request before the contract terminates. Until then, your lease stays active.</p>
       <div style={{ display: 'grid', gap: 16 }}>
         <div>
           <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Effective date</label>
@@ -3422,7 +3489,7 @@ function TerminationReceivedAction({ resolved, onRefresh }: { resolved: Resolved
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 14, padding: '16px 18px' }}>
-        <p style={{ fontSize: 10, color: 'var(--brick)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Landlord&rsquo;s request</p>
+        <p style={{ fontSize: 10, color: 'var(--brick)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Rental provider&rsquo;s request</p>
         <p style={{ fontSize: 14, color: 'var(--ink)', margin: '6px 0 2px', fontWeight: 600 }}>Effective {t?.effectiveDate ? fmtDateLong(t.effectiveDate) : '—'}</p>
         {t?.reason && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>{t.reason}</p>}
       </div>
@@ -3446,13 +3513,122 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const child = resolved.renewalContract;
   const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Phase 6 — payment-readiness checkbox replaces the dedicated cheques
+  // step. The customer can't accept the renewal until they tick this; their
+  // confirmation is captured alongside the accept call below.
+  const [paymentReady, setPaymentReady] = useState(false);
+  // Phase 6c — reject confirm modal. Reject no longer fires on a single tap;
+  // we open this panel, capture an optional reason, then PATCH. The reason
+  // is persisted on the parent contract so the RP sees it when deciding
+  // whether to re-propose with updated terms.
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+
+  // Phase 6 — same "Attach payment references" experience as the new-lease
+  // payment_review step. The customer drops in cheque photos, transfer
+  // screenshots, card slips, or cash receipts so the RP can verify them
+  // before collection. Uploads attach to the renewal CHILD contract via
+  // ownerType=tenancy_contract; no lead exists at this stage so we can't
+  // reuse the lead-cheque-uploads endpoint.
+  type RenewalProof = { id: number; displayName?: string | null; fileUrl?: string | null; mimeType?: string | null; documentKey?: string };
+  const [renewalProofs, setRenewalProofs] = useState<RenewalProof[]>([]);
+  const [uploadingProofs, setUploadingProofs] = useState(0);
+  const [proofErr, setProofErr] = useState<string | null>(null);
+  const proofFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!child?.id) return;
+    fetch(`/api/documents?ownerType=tenancy_contract&ownerId=${child.id}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: RenewalProof[]) => {
+        if (!Array.isArray(rows)) return;
+        setRenewalProofs(rows.filter(d => d.documentKey === 'renewal_payment_proof'));
+      })
+      .catch(() => {});
+  }, [child?.id]);
+
+  async function uploadRenewalProof(file: File) {
+    if (!child?.id) throw new Error('Renewal contract not ready');
+    const urlRes = await fetch('/api/documents/upload-url', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ownerType: 'tenancy_contract', ownerId: child.id,
+        documentKey: 'renewal_payment_proof',
+        originalName: file.name, mimeType: file.type,
+      }),
+    });
+    if (!urlRes.ok) throw new Error('Failed to start upload');
+    const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey: string };
+    const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+    const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+    if (!putRes.ok) throw new Error('File upload failed');
+    const regRes = await fetch('/api/documents', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ownerType: 'tenancy_contract', ownerId: child.id,
+        documentKey: 'renewal_payment_proof', category: 'payment',
+        displayName: file.name, fileUrl, mimeType: file.type, s3Key: fileKey,
+        isVisibleToTenant: true,
+      }),
+    });
+    if (!regRes.ok) {
+      const b = await regRes.json().catch(() => ({}));
+      throw new Error(b?.message ?? 'Reference registration failed');
+    }
+    return (await regRes.json()) as RenewalProof;
+  }
+
+  async function handleRenewalProofFiles(files: FileList | null) {
+    if (!files || files.length === 0 || !child?.id) return;
+    setProofErr(null);
+    setUploadingProofs(files.length);
+    try {
+      for (const file of Array.from(files)) {
+        const saved = await uploadRenewalProof(file);
+        setRenewalProofs(prev => [...prev, saved]);
+      }
+    } catch (e) {
+      setProofErr(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploadingProofs(0);
+      if (proofFileInputRef.current) proofFileInputRef.current.value = '';
+    }
+  }
+
+  async function removeRenewalProof(docId: number) {
+    const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) setRenewalProofs(prev => prev.filter(d => d.id !== docId));
+  }
+
   if (!parent) return <ErrorBox msg="Parent contract not found." />;
 
   async function act(verb: 'accept' | 'reject') {
+    if (verb === 'accept' && !paymentReady) {
+      setErr('Please confirm your payments are ready to proceed.');
+      return;
+    }
     setBusy(verb); setErr(null);
     try {
-      const res = await fetch(`/api/contracts/${parent!.id}/renewal/${verb}`, { method: 'PATCH', credentials: 'include' });
+      const init: RequestInit = { method: 'PATCH', credentials: 'include' };
+      if (verb === 'reject') {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = JSON.stringify({ reason: rejectReason.trim() || undefined });
+      }
+      const res = await fetch(`/api/contracts/${parent!.id}/renewal/${verb}`, init);
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
+      // Capture the payment-readiness ack on the child contract so the RP
+      // sees the customer agreed at accept time. Best-effort — if it errors
+      // (e.g. no child fetched yet) we don't block the user; the timeline
+      // still routes them to the signature step.
+      if (verb === 'accept' && child?.id) {
+        await fetch(`/api/contracts/tenant/${child.id}/cheques-submitted`, { method: 'PATCH', credentials: 'include' }).catch(() => undefined);
+      }
+      if (verb === 'reject') {
+        setRejectOpen(false);
+        setRejectReason('');
+      }
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(null); }
   }
@@ -3463,15 +3639,66 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const rentDelta = newRent != null && currentRent ? newRent - currentRent : null;
   const rentDeltaPct = newRent != null && currentRent ? Math.round(((newRent - currentRent) / currentRent) * 1000) / 10 : null;
 
-  const newPeriod = child?.startDate && child?.endDate ? `${fmtDateLong(child.startDate)} → ${fmtDateLong(child.endDate)}` : '—';
   const newCheques = child?.numberOfInstallments ?? null;
   const newContractValue = child?.contractValue ?? null;
-  const oldEnd = parent.endDate ? fmtDateLong(parent.endDate) : '—';
+  const securityDeposit = parent.securityDepositAmount ?? null;
+
+  // Renewal payment schedule comes straight from the renewal contract's
+  // Payment rows (built by proposeRenewal — first row bundles admin + ejari
+  // + commission + rent installment 1). Mirrors the new-lease payment_review
+  // step so the customer sees identical detail before they accept.
+  const payments = (child?.payments ?? []).slice().sort((a, b) => {
+    const ad = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+    const bd = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+    return ad - bd;
+  });
+  const totalScheduled = payments.reduce((s, p) => s + (p.amountPaid ?? 0), 0);
 
   const fmt = (v: number | null | undefined) => v != null ? fmtAed(v) : '—';
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {/* Contract preview — pinned to the top of the renewal card so the
+          customer can read the full contract before any of the cost details.
+          Same UX as the new-lease signature step's "Step 1 — review" card:
+          pulsing jade ring, eyebrow label, filled icon — keeps the two
+          flows visually consistent so customers learn the pattern once. */}
+      {child?.id && (
+        <>
+          <style>{`
+            @keyframes renewalReviewPulse {
+              0%, 100% { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 0 rgba(46,159,130,0.45); }
+              50%      { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 10px rgba(46,159,130,0); }
+            }
+            .renewal-review-pulse { animation: renewalReviewPulse 1.8s ease-out infinite; }
+          `}</style>
+          <a
+            href={`/dashboard/customer/contracts/${child.id}/print`}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="renewal-preview-contract"
+            className="renewal-review-pulse"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14,
+              padding: '16px 20px', borderRadius: 14,
+              background: 'var(--jade-soft)', border: '2px solid var(--jade)',
+              textDecoration: 'none', color: 'var(--ink)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+              <span style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--jade)', color: 'var(--paper)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <FileText size={18} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 10, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Step 1 — review</p>
+                <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '2px 0 0' }}>Preview your renewal contract before accepting</p>
+              </div>
+            </div>
+            <ExternalLink size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+          </a>
+        </>
+      )}
+
       {/* Headline rent comparison */}
       <div style={{
         background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14,
@@ -3506,56 +3733,258 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
         </div>
       </div>
 
-      {/* Term details grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-        <TermsCell label="New lease period" value={newPeriod} />
-        <TermsCell label="Number of cheques" value={newCheques ? `${newCheques}` : '—'} />
-        <TermsCell label="Total contract value" value={fmt(newContractValue)} />
-        <TermsCell label="Current lease ends" value={oldEnd} />
+      {/* Key stats trio — matches the new-lease payment_review look */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        <Stat label="Total contract value" value={fmt(newContractValue ?? (newRent ?? 0))} accent />
+        <Stat label="Installments" value={newCheques ? `${newCheques}` : '—'} />
+        <Stat label="First payment" value={payments[0]?.transactionDate ? fmtDateShort(payments[0].transactionDate) : '—'} />
       </div>
 
-      {/* Carry-forward note */}
-      <div style={{
-        background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 12,
-        padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10,
-      }}>
-        <CheckCircle2 size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0, marginTop: 1 }} />
-        <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-          <strong style={{ color: 'var(--jade-deep)' }}>Carries over:</strong> your existing security deposit moves to the renewed lease — no extra deposit to pay.
+      {/* Cost breakdown — same lines as PaymentPlanSummary */}
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost breakdown</p>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <PaymentRow label="Annual rent" amountFils={(newRent ?? 0) * 100} />
+          {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
+            <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
+          )}
+          {child?.ejariFeeFils != null && child.ejariFeeFils > 0 && (
+            <PaymentRow label="Ejari fee" amountFils={child.ejariFeeFils * 100} />
+          )}
+          {securityDeposit != null && securityDeposit > 0 && (
+            <PaymentRow label="Security deposit (carries forward)" amountFils={securityDeposit * 100} />
+          )}
+          <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
+          <PaymentRow label="Total scheduled" amountFils={totalScheduled * 100} bold />
         </div>
       </div>
 
-      {/* Cheque schedule link (opens renewal contract for full details) */}
-      {child && (
-        <SecondaryBtn href={`/dashboard/customer/contracts/${child.id}`}>
-          <FileText size={14} /> View full renewal contract + cheque schedule
-        </SecondaryBtn>
+      {/* Per-installment schedule — driven by the renewal contract's Payment rows */}
+      {payments.length > 0 && (
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Payment schedule · {payments.length} payment{payments.length === 1 ? '' : 's'}
+            </span>
+            {newCheques && (
+              <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>{newCheques} rent installments</span>
+            )}
+          </div>
+          {payments.map((p, i) => {
+            const isFirstBundle = i === 0 && (child?.adminFeeFils ?? 0) + (child?.ejariFeeFils ?? 0) > 0;
+            const isDeposit = (p.paymentType ?? '').toLowerCase() === 'security_deposit';
+            return (
+              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)', background: isFirstBundle ? 'var(--saffron-soft)' : undefined }}>
+                <span style={{ fontSize: 12, color: 'var(--mute)', fontWeight: 600 }}>#{i + 1}</span>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{p.description ?? (isDeposit ? 'Security deposit' : `Payment ${i + 1}`)}</p>
+                  <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{p.transactionDate ? fmtDateLong(p.transactionDate) : 'No due date'}</p>
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : 'Rent'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
+
+      {/* Attach payment references — mirrors the new-lease payment_review
+          step. Optional, multi-file, in-page preview via the existing
+          chequePreview lightbox. Hooked to the renewal child contract so
+          the RP can verify each reference before collection. */}
+      {child?.id && (
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
+              Attach payment references (optional)
+            </p>
+            <span style={{ fontSize: 11, color: 'var(--mute)' }}>{renewalProofs.length} uploaded</span>
+          </div>
+          <label style={{
+            marginTop: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)',
+            background: 'var(--surface)', cursor: uploadingProofs ? 'progress' : 'pointer',
+            fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)',
+          }}>
+            <input
+              ref={proofFileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              disabled={uploadingProofs > 0}
+              onChange={(e) => handleRenewalProofFiles(e.target.files)}
+              style={{ display: 'none' }}
+              data-testid="renewal-proof-input"
+            />
+            {uploadingProofs > 0
+              ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploadingProofs} file{uploadingProofs === 1 ? '' : 's'}…</>
+              : <><UploadCloud size={14} /> Choose files</>}
+          </label>
+
+          {proofErr && <div style={{ marginTop: 10 }}><ErrorBox msg={proofErr} /></div>}
+
+          {renewalProofs.length > 0 && (
+            <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+              {renewalProofs.map((d, i) => {
+                const isPdf = (d.mimeType ?? '').includes('pdf') || (d.fileUrl ?? '').toLowerCase().split('?')[0].endsWith('.pdf');
+                return (
+                  <div key={d.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
+                    {d.fileUrl && !isPdf ? (
+                      <a href={d.fileUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={d.fileUrl} alt={d.displayName ?? ''} style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                      </a>
+                    ) : d.fileUrl ? (
+                      <span style={{ width: 44, height: 30, display: 'grid', placeItems: 'center', background: 'var(--mist)', borderRadius: 4, flexShrink: 0 }}>
+                        <FileText size={14} color="var(--ink-2)" />
+                      </span>
+                    ) : null}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.displayName ?? `Payment ${i + 1}`}</p>
+                    </div>
+                    {d.fileUrl && (
+                      <a
+                        href={d.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none' }}
+                      >
+                        <ExternalLink size={12} /> View
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeRenewalProof(d.id)}
+                      style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+                      aria-label="Remove payment reference"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payment-readiness confirmation — replaces the standalone cheques
+          step. The customer ticks this to confirm their payments are ready
+          to be collected; the accept handler then advances them straight to
+          the signature step. */}
+      <label
+        style={{
+          display: 'flex', gap: 12, alignItems: 'flex-start',
+          background: paymentReady ? 'var(--jade-soft)' : 'var(--paper)',
+          border: `1px solid ${paymentReady ? 'var(--jade)' : 'var(--mist-strong)'}`,
+          borderRadius: 12, padding: '12px 14px', cursor: 'pointer', transition: 'all 0.15s ease',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={paymentReady}
+          onChange={(e) => { setPaymentReady(e.target.checked); if (e.target.checked) setErr(null); }}
+          data-testid="renewal-payment-ready"
+          style={{ marginTop: 3, width: 16, height: 16, accentColor: 'var(--jade-deep)', cursor: 'pointer' }}
+        />
+        <div style={{ minWidth: 0, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+          <p style={{ margin: 0, fontWeight: 700, color: 'var(--ink)' }}>I confirm my payments are ready to be collected</p>
+          <p style={{ margin: '2px 0 0' }}>
+            By ticking this, you agree the renewal payments listed above are prepared and your rental provider can collect them after you sign.
+          </p>
+        </div>
+      </label>
 
       {err && <ErrorBox msg={err} />}
 
       {/* Accept / Reject actions */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 4 }}>
-        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy}>
+        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy || !paymentReady}>
           {busy === 'accept' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
           {busy === 'accept' ? 'Accepting…' : 'Accept renewal terms'}
         </PrimaryBtn>
-        <SecondaryBtn onClick={() => act('reject')}>
-          {busy === 'reject' ? 'Rejecting…' : 'Reject terms'}
+        <SecondaryBtn onClick={() => { setRejectOpen(true); setErr(null); }} data-testid="renewal-reject-open">
+          Reject terms
         </SecondaryBtn>
       </div>
-    </div>
-  );
-}
 
-function TermsCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{
-      background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12,
-      padding: '12px 14px',
-    }}>
-      <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, margin: 0 }}>{label}</p>
-      <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+      {/* Reject confirm modal — asks for a reason so the RP knows what
+          to adjust before re-proposing. Reason is optional but strongly
+          encouraged in the copy. Closes on backdrop click + ESC-equivalent
+          Cancel button; the PATCH only fires from the inner Reject button. */}
+      {rejectOpen && (
+        <div
+          onClick={() => !busy && setRejectOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 60,
+            background: 'rgba(20, 18, 14, 0.55)',
+            display: 'grid', placeItems: 'center', padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--paper)', borderRadius: 16, maxWidth: 480, width: '100%',
+              boxShadow: '0 16px 48px -8px rgba(20,18,14,0.35)', overflow: 'hidden',
+              border: '1px solid var(--mist-strong)',
+            }}
+          >
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Reject renewal terms?</p>
+              <button
+                type="button"
+                onClick={() => !busy && setRejectOpen(false)}
+                aria-label="Close"
+                style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', padding: 4, lineHeight: 0 }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ padding: '18px 20px', display: 'grid', gap: 14 }}>
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+                Your current lease continues until <strong>{parent.endDate ? fmtDateLong(parent.endDate) : '—'}</strong>. Telling your rental provider why helps them re-propose with terms that work for you.
+              </p>
+              <div>
+                <label htmlFor="renewal-reject-reason" style={{ fontSize: 11, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Reason (optional but recommended)
+                </label>
+                <textarea
+                  id="renewal-reject-reason"
+                  data-testid="renewal-reject-reason"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={4}
+                  maxLength={600}
+                  placeholder="e.g. The rent increase is too high, payment plan doesn’t suit me, or I need a longer term."
+                  style={{
+                    width: '100%', padding: '10px 12px', borderRadius: 10,
+                    border: '1px solid var(--mist-strong)', fontSize: 13, fontFamily: 'inherit',
+                    resize: 'vertical', minHeight: 96, color: 'var(--ink)', background: 'var(--surface)',
+                  }}
+                />
+                <p style={{ fontSize: 10, color: 'var(--mute)', margin: '4px 0 0', textAlign: 'right' }}>{rejectReason.length} / 600</p>
+              </div>
+              {err && <ErrorBox msg={err} />}
+            </div>
+            <div style={{ padding: '14px 20px', borderTop: '1px solid var(--mist-strong)', display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap', background: 'var(--surface)' }}>
+              <SecondaryBtn onClick={() => !busy && setRejectOpen(false)}>Cancel</SecondaryBtn>
+              <PrimaryBtn
+                onClick={() => act('reject')}
+                disabled={!!busy}
+                data-testid="renewal-reject-submit"
+              >
+                {busy === 'reject' ? <Loader2 size={16} className="animate-spin" /> : null}
+                {busy === 'reject' ? 'Sending…' : 'Reject renewal'}
+              </PrimaryBtn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3577,7 +4006,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-          Your landlord prepared the renewal cheque schedule on the renewal contract. Once you&rsquo;ve prepared your cheques, confirm here and we&rsquo;ll let your landlord collect them.
+          Your rental provider prepared the renewal payment schedule on the renewal contract. Once you&rsquo;ve prepared your payments, confirm here and we&rsquo;ll let your rental provider collect them.
         </p>
       </div>
       {err && <ErrorBox msg={err} />}
@@ -3754,23 +4183,27 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
   const endStr = c?.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : '—';
   const renewalEndStr = rc?.endDate ? new Date(rc.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : '—';
 
+  // Phase 6 — the renewal section moves above the current lease here.
+  // The action lives on the renewal track (accept terms, sign, etc.), so
+  // surfacing it first matches what the customer needs to act on. The
+  // current lease becomes the read-only reference below.
   return (
     <div style={{ display: 'grid', gap: 36 }}>
       <DualHeader />
 
-      <DualSection eyebrow="01 · Original lease" title="Your current lease" sub={`Until ${endStr}`} tone="jade">
+      <DualSection eyebrow="01 · Renewal" title={renewalDef.label} sub={rc?.endDate ? `Through ${renewalEndStr}` : 'In progress'} tone="brick">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
-          <QuestMap steps={originalSteps} currentIndex={originalCurrentIdx} mode={originalDef.mode} />
-          <QuestActionCard stateKey={originalStateKey} resolved={resolvedOriginalOnly} onRefresh={onRefresh} />
+          <QuestMap steps={renewalSteps} currentIndex={renewalCurrentIdx} mode={renewalDef.mode} />
+          <QuestActionCard stateKey={renewalStateKey} resolved={resolved} onRefresh={onRefresh} />
         </div>
       </DualSection>
 
       <DualBridge />
 
-      <DualSection eyebrow="02 · Renewal" title={renewalDef.label} sub={rc?.endDate ? `Through ${renewalEndStr}` : 'In progress'} tone="brick">
+      <DualSection eyebrow="02 · Original lease" title="Your current lease" sub={`Until ${endStr}`} tone="jade">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
-          <QuestMap steps={renewalSteps} currentIndex={renewalCurrentIdx} mode={renewalDef.mode} />
-          <QuestActionCard stateKey={renewalStateKey} resolved={resolved} onRefresh={onRefresh} />
+          <QuestMap steps={originalSteps} currentIndex={originalCurrentIdx} mode={originalDef.mode} />
+          <QuestActionCard stateKey={originalStateKey} resolved={resolvedOriginalOnly} onRefresh={onRefresh} />
         </div>
       </DualSection>
     </div>

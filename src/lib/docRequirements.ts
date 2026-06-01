@@ -6,7 +6,11 @@ export interface DocReq {
   hint?: string;
 }
 
-export const COMMERCIAL_TYPES = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical'];
+export const COMMERCIAL_TYPES = [
+  'retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical',
+  'coworking_desk','private_office','meeting_room','day_office',
+  'event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue',
+];
 export const INDUSTRIAL_TYPES = ['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
 
 /** Shared identity docs — required for every booking type. Emirates ID

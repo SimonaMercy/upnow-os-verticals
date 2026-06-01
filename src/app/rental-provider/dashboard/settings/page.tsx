@@ -429,6 +429,14 @@ export default function SettingsPage() {
   const [daysSaved,        setDaysSaved]        = useState(false);
   const [daysError,        setDaysError]        = useState<string | null>(null);
 
+  // ── Renewal defaults (Phase 6) ──────────────────────────────
+  // Default % bump applied to the previous annual rent when proposing a
+  // renewal. Pre-fills the "New Annual Rent" field on the renewal modal.
+  const [renewalIncPct,    setRenewalIncPct]    = useState<string>('');
+  const [renewalIncSaving, setRenewalIncSaving] = useState(false);
+  const [renewalIncSaved,  setRenewalIncSaved]  = useState(false);
+  const [renewalIncError,  setRenewalIncError]  = useState<string | null>(null);
+
   const [notifs, setNotifs] = useState<Record<NotifKey, boolean>>({
     newInquiry: true, chequeReminder: true, renewalAlert: true,
     maintenanceUpdate: false, promotional: false,
@@ -471,6 +479,7 @@ export default function SettingsPage() {
         if (ct) setCompanyType(ct);
         if (p.parentBrokerageName) setParentBrokerageName(p.parentBrokerageName as string);
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
+        if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
         const matched = EMIRATES_LIST.find(e => addr.endsWith(`, ${e}`) || addr === e);
@@ -587,6 +596,32 @@ export default function SettingsPage() {
       setDaysError('Failed to save. Please try again.');
     } finally {
       setDaysSaving(false);
+    }
+  }
+
+  async function saveRenewalIncrement() {
+    setRenewalIncSaving(true);
+    setRenewalIncError(null);
+    setRenewalIncSaved(false);
+    try {
+      const raw = renewalIncPct.trim();
+      const parsed = raw === '' ? null : Number(raw);
+      if (parsed !== null && (Number.isNaN(parsed) || parsed < 0 || parsed > 100)) {
+        setRenewalIncError('Enter a percentage between 0 and 100.');
+        return;
+      }
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ renewalRentIncrementPct: parsed }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setRenewalIncSaved(true);
+    } catch {
+      setRenewalIncError('Failed to save. Please try again.');
+    } finally {
+      setRenewalIncSaving(false);
     }
   };
 
@@ -1040,6 +1075,58 @@ export default function SettingsPage() {
                   <p className="text-[13px] text-[#76480f] leading-[1.45]">
                     <strong className="text-[#5a3608]">Renewal logic:</strong> the refundable security deposit is collected once on the original contract and carries forward, so it&apos;s excluded here. Update only the fees that should re-charge on renewal.
                   </p>
+                </div>
+              )}
+
+              {/* Phase 6 — Annual rent increment default. Pre-fills the New
+                  Annual Rent field on the Propose Renewal modal. RP can still
+                  override per renewal. Lives here (Fee Rules → Renewal) because
+                  that's where every other renewal-only knob lives. */}
+              {contractType === 'renewal' && (
+                <div className="mx-6 mt-3.5 p-4 rounded-[12px] border border-[#e8e6e0] bg-[#fbfbf8]">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex-1 min-w-[220px]">
+                      <h3 className="text-[13px] font-semibold text-[#1a1916]">Annual rent increment</h3>
+                      <p className="text-[11px] text-[#6b6860] mt-0.5 leading-snug">
+                        When you open Propose Renewal, the New Annual Rent field starts at the previous rent bumped by this percentage.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <input
+                          id="renewal-inc-pct"
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.5"
+                          value={renewalIncPct}
+                          onChange={e => { setRenewalIncPct(e.target.value); setRenewalIncSaved(false); }}
+                          placeholder="0"
+                          className="w-24 text-sm pl-3 pr-8 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#9b9890]">%</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={saveRenewalIncrement}
+                        disabled={renewalIncSaving}
+                        className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
+                        style={{ background: '#2e9f82' }}
+                      >
+                        {renewalIncSaving ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 mt-2 flex-wrap">
+                    {renewalIncPct && !Number.isNaN(Number(renewalIncPct)) && Number(renewalIncPct) > 0 ? (
+                      <p className="text-[11px] text-[#6b6860]">
+                        Preview: AED {previewRent.toLocaleString('en-AE')} →{' '}
+                        <b className="text-[#1a1916]">AED {Math.round(previewRent * (1 + Number(renewalIncPct) / 100)).toLocaleString('en-AE')}</b>
+                      </p>
+                    ) : <span />}
+                    {renewalIncError && <p className="text-[11px] text-red-600">{renewalIncError}</p>}
+                    {renewalIncSaved && !renewalIncSaving && <p className="text-[11px] text-[#2e9f82]">Saved.</p>}
+                  </div>
                 </div>
               )}
 

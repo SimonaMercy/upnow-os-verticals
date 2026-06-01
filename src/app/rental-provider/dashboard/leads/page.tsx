@@ -18,6 +18,7 @@ import 'yet-another-react-lightbox/plugins/captions.css';
 import 'yet-another-react-lightbox/plugins/thumbnails.css';
 import { toast } from 'sonner';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
+import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -133,6 +134,15 @@ interface PaymentPlanItem {
   type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
 }
 
+type PaymentMethodKind = 'cheque' | 'bank_transfer' | 'card' | 'cash';
+
+const PAYMENT_METHOD_LABEL: Record<PaymentMethodKind, string> = {
+  cheque:        'Cheque',
+  bank_transfer: 'Bank transfer',
+  card:          'Card',
+  cash:          'Cash',
+};
+
 interface PaymentPlan {
   chequeCount: number;
   totalAmountFils: number;
@@ -155,7 +165,10 @@ interface PaymentPlan {
 
 interface LeadChequeRecord {
   id: number;
-  chequeSerial: string;
+  /** Generic payment reference. For cheques this is the serial; for bank
+   *  transfers, the transaction id; for cards/cash, any tracking string.
+   *  Nullable for customer-uploaded rows that haven't been tagged yet. */
+  chequeSerial: string | null;
   bankName: string;
   amountFils: number;
   dueDate: string;
@@ -166,6 +179,12 @@ interface LeadChequeRecord {
   accountNumber?: string | null;
   ocrStatus?: 'pending' | 'done' | 'failed' | null;
   isCustomerUpload?: boolean;
+  /** Phase 5b — set by the RP when they verify the customer's reference.
+   *  Null until the landlord taps one of the method pills on review. */
+  paymentMethod?: PaymentMethodKind | null;
+  /** Phase 5b — which PaymentPlan item this upload settles. Null until
+   *  the RP picks one from the dropdown on the customer-uploaded row. */
+  planItemIndex?: number | null;
 }
 
 interface ApiLead {
@@ -274,7 +293,7 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
     case 'payment_plan_shared':
       return null; // waiting for customer to upload cheques
     case 'cheques_submitted':
-      return { kind: 'record_cheques', label: 'Approve Cheques',
+      return { kind: 'record_cheques', label: 'Payment Review & Approve',
         cls: 'bg-[#fef9c3] text-[#854d0e] hover:bg-[#fef08a]' };
     case 'cheques_collected':
       return lead.unit?.id && lead.convertedTenant?.id
@@ -485,6 +504,9 @@ function LeadRow({
   const [viewAllOpen, setViewAllOpen]   = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  // Phase 5b — in-page preview for the customer's payment references.
+  // Stays inside the leads page (no new tab); handles images + PDFs.
+  const [chequePreview, setChequePreview] = useState<{ url: string; label: string } | null>(null);
   const [docActioning, setDocActioning]     = useState<number | null>(null);
   const [docActionError, setDocActionError] = useState<string | null>(null);
   const [rejectingDoc, setRejectingDoc]     = useState<{ id: number; label: string } | null>(null);
@@ -1094,7 +1116,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
                     >
                       <CreditCard size={13} className="text-[#9b9890]" />
-                      {panel === 'cheques' ? 'Hide Cheques' : 'Add / Record Cheques'}
+                      {panel === 'cheques' ? 'Hide Payments' : 'Record Payments'}
                     </button>
                   </>
                 )}
@@ -1971,13 +1993,13 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               {plan.adminFeeFils > 0 && <span>Admin Fee: <b className="text-[#1a1916]">AED {(plan.adminFeeFils / 100).toLocaleString('en-AE')}</b></span>}
               {plan.ejariFils > 0 && <span>Ejari Fee: <b className="text-[#1a1916]">AED {(plan.ejariFils / 100).toLocaleString('en-AE')}</b></span>}
               {plan.commissionFils > 0 && <span>Commission: <b className="text-[#1a1916]">AED {(plan.commissionFils / 100).toLocaleString('en-AE')}</b></span>}
-              <span className="col-span-2 font-semibold text-[#0369a1] mt-0.5">Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} cheques</span>
+              <span className="col-span-2 font-semibold text-[#0369a1] mt-0.5">Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}</span>
             </div>
-            {/* Cheque schedule — sorted by date, deposit lands last on ties; single-line per row */}
+            {/* Payment schedule — sorted by date, deposit lands last on ties; single-line per row */}
             <div className="space-y-1">
               {sorted.map((item, i) => (
                 <p key={item.index} className="text-[10px] py-0.5 border-b border-[#e0f2fe] last:border-0 leading-snug">
-                  <span className="text-[#0369a1]">#{i + 1} {item.description ?? `Cheque ${i + 1}`}</span>
+                  <span className="text-[#0369a1]">#{i + 1} {item.description ?? `Payment ${i + 1}`}</span>
                   <span className="text-[#6b6860]"> — </span>
                   <span className="font-semibold text-[#1a1916]">AED {(item.amountFils / 100).toLocaleString('en-AE')}</span>
                   <span className="text-[#6b6860]"> · {item.dueDate}</span>
@@ -2015,14 +2037,17 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const chequeByDesc = new Map<string, LeadChequeRecord>();
         for (const c of cheques) if (c.notes) chequeByDesc.set(c.notes, c);
 
+        const customerUploads = cheques.filter(c => c.isCustomerUpload);
+        const hasCustomerUploads = customerUploads.length > 0;
+
         return (
           <div className="border-t border-[#fef3c7] bg-[#fffdf0] px-5 py-4 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-[#854d0e] flex items-center gap-1.5">
-                <CreditCard size={12} /> Record Cheques — Series View
+                <CreditCard size={12} /> Record Payments — Series View
                 {plan && (
                   <span className="ml-2 text-[10px] font-normal text-[#92400e]">
-                    {plan.chequeCount} cheques · Total AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')}
+                    {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'} · Total AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')}
                   </span>
                 )}
               </p>
@@ -2039,8 +2064,12 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </p>
             )}
 
-            {/* Series of planned payments — one row per plan item */}
-            {!chequesLoading && plan && (
+            {/* Series of planned payments — one row per plan item. Only
+                shown when the customer hasn't attached references; once they
+                have, the verification flow happens below in the uploads
+                section (one row per uploaded reference, with the RP mapping
+                each to a plan installment + tagging the method). */}
+            {!chequesLoading && plan && !hasCustomerUploads && (
               <div className="space-y-2">
                 {sortedItems.map((it, i) => {
                   const desc = it.description ?? `Cheque ${i + 1}`;
@@ -2114,10 +2143,12 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </p>
             )}
 
-            {/* Any extra cheques that don't match a plan-item description */}
+            {/* Any extra physical cheques that don't match a plan-item description.
+                Customer-uploaded references intentionally don't appear here —
+                they're rendered as a dedicated mapping list below. */}
             {!chequesLoading && plan && (() => {
               const planDescs = new Set(sortedItems.map(it => it.description ?? ''));
-              const orphans = cheques.filter(c => !c.notes || !planDescs.has(c.notes));
+              const orphans = cheques.filter(c => !c.isCustomerUpload && (!c.notes || !planDescs.has(c.notes)));
               if (orphans.length === 0) return null;
               return (
                 <div className="border-t border-[#fde68a] pt-3 space-y-1.5">
@@ -2138,39 +2169,147 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               );
             })()}
 
-            {/* Customer-uploaded cheque images — shown when stage is cheques_submitted */}
-            {lead.stage === 'cheques_submitted' && (() => {
-              const uploads = cheques.filter(c => c.isCustomerUpload);
-              if (uploads.length === 0) return null;
-              return (
-                <div className="border-t border-[#fde68a] pt-3 space-y-2">
-                  <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
-                    Customer uploaded cheques
-                    <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{uploads.length}</span>
-                  </p>
-                  {uploads.map((c, i) => (
-                    <div key={c.id} className="bg-white border border-[#fde68a] rounded-xl p-3 space-y-2">
-                      <div className="flex items-start gap-3">
+            {/* Customer-uploaded references — shown when stage is cheques_submitted.
+                Each row is one upload; RP maps it to a plan installment + tags
+                the verified payment method. This replaces the old Series View
+                for the customer-upload path. */}
+            {lead.stage === 'cheques_submitted' && hasCustomerUploads && (
+              <div className={`pt-3 space-y-2 ${plan ? 'border-t border-[#fde68a]' : ''}`}>
+                <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
+                  Payment references uploaded by customer
+                  <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{customerUploads.length}</span>
+                </p>
+                {customerUploads.map((c, i) => {
+                  const previewLabel = c.notes || `Payment ${i + 1}`;
+                  const openPreview = () => c.imageUrl && setChequePreview({ url: c.imageUrl, label: previewLabel });
+                  return (
+                    <div key={c.id} className="bg-white border border-[#fde68a] rounded-xl overflow-hidden">
+                      {/* Top band: thumbnail + meta — full width, no narrow column squeeze */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-[#fef3c7] bg-[#fffdf0]">
+                        <button
+                          type="button"
+                          onClick={openPreview}
+                          disabled={!c.imageUrl}
+                          className="relative w-14 h-14 rounded-lg border border-[#fde68a] overflow-hidden bg-[#fef9c3] flex items-center justify-center hover:opacity-80 disabled:cursor-default transition-opacity cursor-pointer flex-shrink-0"
+                          aria-label={`Preview ${previewLabel}`}
+                        >
+                          {c.imageUrl
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={c.imageUrl} alt={previewLabel} className="w-full h-full object-cover" />
+                            : <FileText size={16} className="text-[#9b9890]" />
+                          }
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-semibold text-[#1a1916] truncate">{previewLabel}</p>
+                          <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-[#9b9890] mt-0.5">
+                            {c.amountFils > 0 && <span className="text-[#1a1916] font-semibold">AED {(c.amountFils / 100).toLocaleString('en-AE')}</span>}
+                            {c.dueDate && <span>Due {c.dueDate}</span>}
+                            {c.ocrStatus === 'done' && <span className="text-[#2e9f82]">✓ Auto-read</span>}
+                          </div>
+                        </div>
                         {c.imageUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <a href={c.imageUrl} target="_blank" rel="noopener noreferrer">
-                            <img src={c.imageUrl} alt={`Cheque ${i + 1}`} className="w-24 h-16 object-cover rounded-lg border border-[#fde68a] flex-shrink-0 hover:opacity-80 transition-opacity" />
-                          </a>
+                          <button
+                            type="button"
+                            onClick={openPreview}
+                            className="text-[10px] font-semibold text-[#0369a1] hover:underline cursor-pointer flex-shrink-0"
+                          >
+                            View
+                          </button>
                         )}
-                        <div className="flex-1 min-w-0 space-y-0.5">
-                          <p className="text-[11px] font-semibold text-[#1a1916]">{c.notes || `Cheque ${i + 1}`}</p>
-                          {c.ocrStatus === 'done' && <p className="text-[10px] text-[#2e9f82]">✓ Details auto-read</p>}
-                          {c.bankName && <p className="text-[10px] text-[#9b9890]">{c.bankName}{c.chequeSerial ? ` · #${c.chequeSerial}` : ''}</p>}
-                          {c.amountFils > 0 && <p className="text-[10px] font-semibold text-[#1a1916]">AED {(c.amountFils / 100).toLocaleString('en-AE')}</p>}
-                          {c.dueDate && <p className="text-[10px] text-[#9b9890]">Due: {c.dueDate}</p>}
-                          {c.payeeName && <p className="text-[10px] text-[#9b9890]">Payee: {c.payeeName}</p>}
+                      </div>
+
+                      {/* Form rows: aligned label column + control column */}
+                      <div className="px-3 py-2.5 space-y-2">
+                        {plan && sortedItems.length > 0 && (
+                          <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
+                            <label htmlFor={`map-${c.id}`} className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Map to</label>
+                            <select
+                              id={`map-${c.id}`}
+                              value={c.planItemIndex ?? ''}
+                              onChange={async (e) => {
+                                const raw = e.target.value;
+                                const next = raw === '' ? null : Number(raw);
+                                setChequeError(null);
+                                const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
+                                  method: 'PATCH', credentials: 'include',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ planItemIndex: next }),
+                                });
+                                if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
+                                setCheques(prev => prev.map(x => x.id === c.id ? { ...x, planItemIndex: next } : x));
+                              }}
+                              className="w-full text-[11px] px-2 py-1.5 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] cursor-pointer focus:outline-none focus:border-[#2e9f82]"
+                            >
+                              <option value="">— Select payment —</option>
+                              {sortedItems.map((it) => (
+                                <option key={it.index} value={it.index}>
+                                  #{it.index} {it.description ?? `Payment ${it.index}`} · AED {(it.amountFils / 100).toLocaleString('en-AE')}{it.dueDate ? ` · ${it.dueDate}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
+                          <label htmlFor={`ref-${c.id}`} className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Reference</label>
+                          <input
+                            id={`ref-${c.id}`}
+                            type="text"
+                            defaultValue={c.chequeSerial ?? ''}
+                            placeholder="Cheque #, transfer ID, auth code…"
+                            onBlur={async (e) => {
+                              const next = e.currentTarget.value;
+                              if ((c.chequeSerial ?? '') === next) return;
+                              setChequeError(null);
+                              const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
+                                method: 'PATCH', credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ chequeSerial: next }),
+                              });
+                              if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
+                              setCheques(prev => prev.map(x => x.id === c.id ? { ...x, chequeSerial: next.trim() || null } : x));
+                            }}
+                            className="w-full text-[11px] px-2 py-1.5 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82]"
+                          />
+                        </div>
+
+                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
+                          <span className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Method</span>
+                          <div className="flex gap-1 flex-wrap">
+                            {(['cheque','bank_transfer','card','cash'] as PaymentMethodKind[]).map(m => {
+                              const active = c.paymentMethod === m;
+                              return (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={async () => {
+                                    setChequeError(null);
+                                    const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
+                                      method: 'PATCH', credentials: 'include',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ paymentMethod: m }),
+                                    });
+                                    if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
+                                    setCheques(prev => prev.map(x => x.id === c.id ? { ...x, paymentMethod: m } : x));
+                                  }}
+                                  className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors cursor-pointer ${
+                                    active
+                                      ? 'bg-[#2e9f82] text-white border-[#1f6655]'
+                                      : 'bg-white text-[#6b6860] border-[#ede9e3] hover:bg-[#f4f3f0]'
+                                  }`}
+                                >
+                                  {PAYMENT_METHOD_LABEL[m]}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              );
-            })()}
+                  );
+                })}
+              </div>
+            )}
 
             {chequeError && (
               <p className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{chequeError}</p>
@@ -2194,7 +2333,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                   className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
-                  Approve cheques
+                  Payment Review & Approve
                 </button>
               )}
               <button
@@ -2212,6 +2351,40 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           </div>
         );
       })()}
+
+      {/* ── Phase 5b — in-page preview for customer payment references ── */}
+      {chequePreview && (
+        <div
+          onClick={() => setChequePreview(null)}
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#ede9e3]">
+              <p className="text-sm font-semibold text-[#1a1916] truncate">{chequePreview.label}</p>
+              <button
+                onClick={() => setChequePreview(null)}
+                className="text-[#9b9890] hover:text-[#1a1916] transition-colors cursor-pointer"
+                aria-label="Close preview"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto bg-[#f4f3f0] flex items-center justify-center">
+              {chequePreview.url.toLowerCase().split('?')[0].endsWith('.pdf') ? (
+                <iframe src={chequePreview.url} className="w-full h-[80vh]" title={chequePreview.label} />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={chequePreview.url} alt={chequePreview.label} className="max-w-full max-h-[80vh] object-contain" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Notify Guard panel ── */}
       {panel === 'guard' && viewing && (
@@ -2486,6 +2659,7 @@ export default function LeadsPage() {
   const [error, setError]           = useState<string | null>(null);
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
+  const [view, setView]             = useState<'list' | 'calendar'>('list');
   const [movingLead, setMovingLead] = useState<number | null>(null);
   const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
@@ -2584,15 +2758,54 @@ export default function LeadsPage() {
             {leads.length} lead{leads.length !== 1 ? 's' : ''} in pipeline
           </p>
         </div>
-        <button
-          onClick={fetchLeads}
-          disabled={loading}
-          className="flex items-center gap-2 text-sm text-[#2e9f82] border border-[#2e9f82] rounded-lg px-4 py-2 hover:bg-[#f0fdf4] transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="inline-flex bg-[#f4f3ef] rounded-lg p-0.5 border border-[#e8e6e0]">
+            <button
+              onClick={() => setView('list')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
+                view === 'list' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
+              }`}
+            >
+              List
+            </button>
+            <button
+              onClick={() => setView('calendar')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
+                view === 'calendar' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
+              }`}
+            >
+              <Calendar size={12} /> Calendar
+            </button>
+          </div>
+          <button
+            onClick={fetchLeads}
+            disabled={loading}
+            className="flex items-center gap-2 text-sm text-[#2e9f82] border border-[#2e9f82] rounded-lg px-4 py-2 hover:bg-[#f0fdf4] transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
+      {/* Calendar view */}
+      {view === 'calendar' && !loading && (
+        <LeadsCalendarView
+          leads={leads}
+          onOpenLead={(id) => {
+            setView('list');
+            // Scroll the matching lead into view after the list re-renders
+            setTimeout(() => {
+              const el = document.getElementById(`lead-${id}`);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 50);
+          }}
+        />
+      )}
+
+      {/* List view — stage tabs, search, list */}
+      {view === 'list' && (
+      <>
       {/* Stage tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 mb-5 scrollbar-none">
         {TABS.map(tab => {
@@ -2682,18 +2895,21 @@ export default function LeadsPage() {
       {!loading && filtered.length > 0 && (
         <div className="space-y-2">
           {filtered.map(lead => (
-            <LeadRow
-              key={`${lead.id}-${lead.updatedAt}`}
-              lead={lead}
-              onMoveStage={moveStage}
-              moving={movingLead === lead.id}
-              onConvert={handleConvert}
-              setLeads={setLeads}
-              feeRules={feeRules}
-              preferredStartDays={preferredStartDays}
-            />
+            <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`}>
+              <LeadRow
+                lead={lead}
+                onMoveStage={moveStage}
+                moving={movingLead === lead.id}
+                onConvert={handleConvert}
+                setLeads={setLeads}
+                feeRules={feeRules}
+                preferredStartDays={preferredStartDays}
+              />
+            </div>
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );

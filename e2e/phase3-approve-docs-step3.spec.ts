@@ -192,4 +192,52 @@ test.describe.serial('Phase 3 — auto-plan, Approve Docs, Step 3 cheque uploads
     const res = await request.patch(`${BACKEND}/leads/${leadId}/cheques-ready`, { headers: auth(tenantToken) });
     expect(res.status()).toBe(400);
   });
+
+  // ─── 8b. Phase 5b — RP tags each uploaded reference with a method ────────
+
+  test('8b. RP can tag each uploaded reference with a payment method', async ({ request }) => {
+    // Pull the uploaded cheques back as a tenant (RP listing is gated by a
+    // different relation chain in this DB seed; the tenant route is enough
+    // to discover the id).
+    const list = await (await request.get(
+      `${BACKEND}/leads/my-viewings/${viewingId}/cheque-uploads`, { headers: auth(tenantToken) },
+    )).json() as Array<{ id: number }>;
+    expect(list.length).toBeGreaterThan(0);
+    const chequeId = list[0].id;
+
+    const res = await request.patch(`${BACKEND}/leads/${leadId}/cheques/${chequeId}/status`, {
+      headers: auth(rpToken),
+      data: { paymentMethod: 'bank_transfer' },
+    });
+    expect(res.ok(), `Tag method: ${res.status()} ${await res.text()}`).toBeTruthy();
+    const body = await res.json() as { paymentMethod: string };
+    expect(body.paymentMethod).toBe('bank_transfer');
+  });
+
+  test('8c. RP method tag rejects invalid values', async ({ request }) => {
+    const list = await (await request.get(
+      `${BACKEND}/leads/my-viewings/${viewingId}/cheque-uploads`, { headers: auth(tenantToken) },
+    )).json() as Array<{ id: number }>;
+    const chequeId = list[0].id;
+    const res = await request.patch(`${BACKEND}/leads/${leadId}/cheques/${chequeId}/status`, {
+      headers: auth(rpToken),
+      data: { paymentMethod: 'bitcoin' },
+    });
+    expect(res.status()).toBe(400);
+  });
+
+  // ─── 9. Phase 5a — confirm-cheques-collected auto-issues a contract ──────
+
+  test('9. confirm-cheques-collected auto-issues contract → stage contract_issued', async ({ request }) => {
+    const res = await request.patch(`${BACKEND}/leads/${leadId}/confirm-cheques-collected`, { headers: auth(rpToken) });
+    expect(res.ok(), `Confirm collected: ${res.status()}`).toBeTruthy();
+    const body = await res.json() as { confirmed: boolean; contractId: number };
+    expect(body.confirmed).toBe(true);
+    expect(body.contractId, 'contract row must be auto-created').toBeGreaterThan(0);
+
+    // Lead should now be at contract_issued — the customer's state machine
+    // routes that to Step 4 (signature) on the v2 page.
+    const lead = await (await request.get(`${BACKEND}/leads/${leadId}`, { headers: auth(rpToken) })).json() as { stage: string };
+    expect(lead.stage).toBe('contract_issued');
+  });
 });

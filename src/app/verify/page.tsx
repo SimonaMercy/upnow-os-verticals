@@ -46,13 +46,15 @@ function VerifyOtpInner() {
   const [sentTo, setSentTo] = useState<string | null>(maskedPhone);
   const [devOtp, setDevOtp] = useState<string | null>(devOtpFromQuery);
 
-  // Guard logic only applies to registration flow, not login mode
+  // fromRegistration = arrived here from the register form (email/phone in URL, no auth cookie yet)
+  const fromRegistration = !isLoginMode && !!identifierFromQuery;
+
   useEffect(() => {
     if (isLoginMode || loading) return;
-    if (!user) router.replace("/login");
-    else if (user.phoneVerified) router.replace(dashboardPath(user.role));
-    else if (!user.emailVerified) router.replace("/verify-email");
-  }, [isLoginMode, loading, user, router]);
+    // New registrations have no user yet — let them stay and verify
+    if (!user && !fromRegistration) router.replace("/login");
+    else if (user?.phoneVerified) router.replace(dashboardPath(user.role));
+  }, [isLoginMode, loading, user, router, fromRegistration]);
 
   // Auto-send OTP for registration flow when user has phone on file
   useEffect(() => {
@@ -106,9 +108,7 @@ function VerifyOtpInner() {
         const res = await verifyOtp(code);
         const me = await refresh();
         const role = me?.role ?? res.user?.role ?? "customer";
-        // Phase 3c — recommend KYC right after phone-OTP verify for new
-        // customers. /welcome is always-skippable.
-        router.push(role === "customer" ? "/welcome" : dashboardPath(role));
+        router.push(role === "customer" ? "/" : dashboardPath(role));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed");
