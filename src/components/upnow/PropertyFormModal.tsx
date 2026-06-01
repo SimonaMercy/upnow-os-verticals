@@ -744,7 +744,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
         longitude:     r.lng || prev.longitude,
         emirateId:     newEmirateId,
         emirateName,
-        communityId:   r.communityId,
+        communityId:   r.communityId ?? null,
         communityName: '',  // backfilled by cascade after communities load
         googlePlaceId: r.googlePlaceId ?? prev.googlePlaceId,
       }));

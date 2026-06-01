@@ -294,7 +294,7 @@ export default function AddListingPage() {
         longitude:     r.lng || prev.longitude,
         emirateId:     newEmirateId,
         emirateName,
-        communityId:   r.communityId,
+        communityId:   r.communityId ?? null,
         communityName: '',
         googlePlaceId: googlePlaceId ?? prev.googlePlaceId,
       }));

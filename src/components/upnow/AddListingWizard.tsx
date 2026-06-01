@@ -65,6 +65,7 @@ const EMPTY_PROP: PropertyFormData = {
   emirateName: '', communityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
+  googlePlaceId: null,
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
 };
 
