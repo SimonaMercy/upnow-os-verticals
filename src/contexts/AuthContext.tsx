@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   ReactNode,
 } from "react";
 import { apiGet, apiPost } from "@/lib/api";
@@ -130,22 +131,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMaskedPhone(res.maskedPhone ?? null);
   }, []);
 
+  // De-dupe concurrent /auth/me calls. Several components (DashboardShell,
+  // ProfileCompletionBanner) and React StrictMode's double-mount all call
+  // refresh() on mount; without this they'd each fire a separate /auth/me.
+  // Callers within the same tick share one in-flight request.
+  const inFlight = useRef<Promise<AppUser | null> | null>(null);
+
   const refresh = useCallback(async (): Promise<AppUser | null> => {
     if (typeof window === "undefined") return null;
+    if (inFlight.current) return inFlight.current;
     // No localStorage check — session lives in the httpOnly cookie.
     // A 401 from /me means no valid session; the catch handles it.
-    try {
-      const me = await apiGet<AppUser>("/auth/me");
-      setUser(me);
-      const needsEmail = !me.emailVerified;
-      setRequiresVerification(me.status === "pending_verification" || needsEmail);
-      setVerificationStep(needsEmail ? "email" : null);
-      return me;
-    } catch {
-      setUser(null);
-      setVerificationStep(null);
-      return null;
-    }
+    const p = (async () => {
+      try {
+        const me = await apiGet<AppUser>("/auth/me");
+        setUser(me);
+        const needsEmail = !me.emailVerified;
+        setRequiresVerification(me.status === "pending_verification" || needsEmail);
+        setVerificationStep(needsEmail ? "email" : null);
+        return me;
+      } catch {
+        setUser(null);
+        setVerificationStep(null);
+        return null;
+      } finally {
+        inFlight.current = null;
+      }
+    })();
+    inFlight.current = p;
+    return p;
   }, []);
 
   useEffect(() => {

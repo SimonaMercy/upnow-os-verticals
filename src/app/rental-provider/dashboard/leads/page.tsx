@@ -2678,9 +2678,18 @@ export default function LeadsPage() {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  // Re-fetch when the tab regains focus so RP always sees tenant's latest submission
+  // Re-fetch when the tab regains focus so RP always sees tenant's latest
+  // submission — but throttled (≤ once / 10s) and only when actually visible,
+  // so rapid focus/blur churn doesn't hammer /api/leads. Seeded to "now" so it
+  // won't fire right on top of the initial mount fetch.
   useEffect(() => {
-    const onFocus = () => fetchLeads();
+    let last = Date.now();
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - last < 10_000) return;
+      last = Date.now();
+      fetchLeads();
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [fetchLeads]);

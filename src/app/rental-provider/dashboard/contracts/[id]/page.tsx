@@ -534,12 +534,16 @@ export default function ContractDetailPage() {
 
   useEffect(() => {
     if (!params?.id) return;
+    // AbortController guards against StrictMode's double-mount (and fast
+    // navigation) firing duplicate concurrent loads — aborted on cleanup.
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     Promise.all([
-      fetch(`/api/contracts/${params.id}`, { credentials: 'include' }).then(r => {
+      fetch(`/api/contracts/${params.id}`, { credentials: 'include', signal }).then(r => {
         if (!r.ok) throw new Error(`Error ${r.status}`);
         return r.json();
       }),
-      fetch(`/api/contracts/${params.id}/signatures`, { credentials: 'include' }).then(r =>
+      fetch(`/api/contracts/${params.id}/signatures`, { credentials: 'include', signal }).then(r =>
         r.ok ? r.json() : []
       ),
     ])
@@ -555,7 +559,7 @@ export default function ContractDetailPage() {
         if (hasTenantSig)   setHasTenantSigned(true);
 
         // Load move-in inspection signing state for Step 4 status display.
-        fetch(`/api/contracts/${params.id}/inspection?type=move_in`, { credentials: 'include' })
+        fetch(`/api/contracts/${params.id}/inspection?type=move_in`, { credentials: 'include', signal })
           .then(r => r.ok ? r.json() : null)
           .then((insp: { rpSubmittedAt?: string | null; tenantSig?: string | null; rpCounterSig?: string | null; rpCounterSignedAt?: string | null } | null) => {
             if (insp) setMoveInInsp({ rpSubmittedAt: insp.rpSubmittedAt, tenantSig: insp.tenantSig, rpCounterSig: insp.rpCounterSig, rpCounterSignedAt: insp.rpCounterSignedAt });
@@ -565,7 +569,7 @@ export default function ContractDetailPage() {
         // Also check tenant's own documents for utility proof (uploaded by tenant or admin)
         const tenantId = data?.tenant?.id;
         if (tenantId) {
-          fetch(`/api/documents?ownerType=customer&ownerId=${tenantId}`, { credentials: 'include' })
+          fetch(`/api/documents?ownerType=customer&ownerId=${tenantId}`, { credentials: 'include', signal })
             .then(r => r.ok ? r.json() : [])
             .then((tenantDocs: ContractDoc[]) => {
               const utilityDocFound = Array.isArray(tenantDocs) ? tenantDocs.find((d) => d.documentKey === 'utility_proof_of_payment') : null;
@@ -574,8 +578,9 @@ export default function ContractDetailPage() {
             .catch(() => null);
         }
       })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch(e => { if (e?.name !== 'AbortError') setError(e.message); })
+      .finally(() => { if (!signal.aborted) setLoading(false); });
+    return () => ctrl.abort();
   }, [params?.id]);
 
   // Phase 6 — auto-fill admin / ejari / commission from the RP's saved fee

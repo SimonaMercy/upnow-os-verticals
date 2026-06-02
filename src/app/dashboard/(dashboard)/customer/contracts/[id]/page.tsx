@@ -293,12 +293,15 @@ export default function TenantContractDetailPage() {
 
   useEffect(() => {
     if (!params?.id) return;
+    // AbortController guards against StrictMode's double-mount (and fast
+    // navigation) firing two concurrent loads — the first is aborted on cleanup.
+    const ctrl = new AbortController();
     Promise.all([
-      fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include' }).then(r => {
+      fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include', signal: ctrl.signal }).then(r => {
         if (!r.ok) throw new Error(`Error ${r.status}`);
         return r.json() as Promise<ContractDetail>;
       }),
-      fetch(`/api/contracts/${params.id}/signatures`, { credentials: 'include' }).then(r =>
+      fetch(`/api/contracts/${params.id}/signatures`, { credentials: 'include', signal: ctrl.signal }).then(r =>
         r.ok ? r.json() as Promise<Signature[]> : [] as Signature[]
       ),
     ])
@@ -309,8 +312,9 @@ export default function TenantContractDetailPage() {
         setPrefInstallments(data.numberOfInstallments ?? '');
         setPrefPaymentMethod(data.modeOfPayment ?? '');
       })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch(e => { if (e?.name !== 'AbortError') setError(e.message); })
+      .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
+    return () => ctrl.abort();
   }, [params?.id]);
 
   // ── Derived state ─────────────────────────────────────────────────────────

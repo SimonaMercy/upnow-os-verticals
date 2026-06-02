@@ -106,14 +106,13 @@ function getSteps(user: AppUser, rpProfile: RpSpProfile | null): Step[] {
 }
 
 export function ProfileCompletionBanner() {
-  const { user, refresh } = useAuth();
+  const { user } = useAuth();
   const [resendStatus, setResendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [rpProfile, setRpProfile] = useState<RpSpProfile | null>(null);
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Reads `user` from AuthContext (already fetched on app mount). It no longer
+  // calls refresh() on every mount — that fired a redundant /auth/me each time
+  // the banner rendered, on top of AuthContext's own fetch.
 
   // Fetch the RP/SP profile to get accountTypeConfirmedAt (not in the JWT)
   useEffect(() => {

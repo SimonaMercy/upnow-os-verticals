@@ -67,20 +67,26 @@ export function AddendumsPanel({
 
   const canAttach = role === 'landlord' && contractStatus === 'pending';
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setErr(null);
     try {
-      const list = await apiGet<Addendum[]>(`/contracts/${contractId}/addendums`);
+      const list = await apiGet<Addendum[]>(`/contracts/${contractId}/addendums`, { signal });
       setAddendums(list);
     } catch (e) {
+      if ((e as { name?: string })?.name === 'AbortError') return;
       setErr(e instanceof Error ? e.message : 'Failed to load addendums');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [contractId]);
 
+  // AbortController guard so StrictMode's double-mount doesn't double-fetch.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void fetchAll(ctrl.signal);
+    return () => ctrl.abort();
+  }, [fetchAll]);
 
   async function handleDelete(id: number) {
     if (!confirm('Remove this addendum from the contract?')) return;
