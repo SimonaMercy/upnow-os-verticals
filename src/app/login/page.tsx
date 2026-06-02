@@ -416,9 +416,10 @@ function LoginForm() {
               </div>
 
               <form onSubmit={onVerify} className={s.formBody}>
-                {process.env.NODE_ENV !== 'production' && devOtp && (
+                {/* OTP shown in all environments until SMS/email delivery is fully wired. */}
+                {devOtp && (
                   <div className={s.devOtp}>
-                    <span>Dev OTP</span>
+                    <span>Your OTP</span>
                     <b>{devOtp}</b>
                   </div>
                 )}
