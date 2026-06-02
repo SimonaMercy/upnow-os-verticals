@@ -118,6 +118,18 @@ const Field = ({ label, ar, value, half }: { label: string; ar: string; value?: 
     <Text style={S.arLbl}>{ar}</Text>
   </View>
 );
+// Small grey "Incase of a Company / في حال كانت شركة" hint under the License row,
+// mirroring the official DLD form (one half under License No., one under Authority).
+const CompanyCaption = () => (
+  <View style={{ flexDirection: 'row', marginTop: -3, marginBottom: 4 }}>
+    {[0, 1].map((i) => (
+      <View key={i} style={{ width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingRight: i === 0 ? 6 : 0 }}>
+        <Text style={{ fontSize: 6, color: '#999' }}>Incase of a Company</Text>
+        <Text style={{ fontSize: 6, color: '#999', fontFamily: AR }}>في حال كانت شركة</Text>
+      </View>
+    ))}
+  </View>
+);
 const Section = ({ en, ar, children }: { en: string; ar: string; children: React.ReactNode }) => (
   <View style={S.box} wrap={false}><Bar en={en} ar={ar} /><View style={S.pad}>{children}</View></View>
 );
@@ -174,7 +186,8 @@ const Header = ({ date }: { date: string }) => (
   </View>
 );
 const Usage = ({ kind }: { kind: string }) => {
-  const opts: [string, string, string][] = [['Residential', 'سكني', 'residential'], ['Commercial', 'تجاري', 'commercial'], ['Industrial', 'صناعي', 'industrial']];
+  // Order matches the official DLD form: Industrial · Commercial · Residential.
+  const opts: [string, string, string][] = [['Industrial', 'صناعي', 'industrial'], ['Commercial', 'تجاري', 'commercial'], ['Residential', 'سكني', 'residential']];
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
       <Text style={{ fontSize: 7.5, marginRight: 14 }}>Property Usage <Text style={{ fontFamily: AR }}>استخدام العقار</Text></Text>
@@ -214,6 +227,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
             <Field label="License No." ar="رقم الرخصة" value={data.landlord.licenseNumber} half />
             <Field label="Licensing Authority" ar="سلطة الترخيص" value={data.landlord.licenseAuthority} half />
           </View>
+          <CompanyCaption />
           <Field label="Lessor's Email" ar="البريد الإلكتروني للمؤجر" value={data.landlord.email} />
           <Field label="Lessor's Phone" ar="رقم هاتف المؤجر" value={data.landlord.phone} />
         </Section>
@@ -224,6 +238,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
             <Field label="License No." ar="رقم الرخصة" value={data.tenant.licenseNumber} half />
             <Field label="Licensing Authority" ar="سلطة الترخيص" value={data.tenant.licenseAuthority} half />
           </View>
+          <CompanyCaption />
           <Field label="Tenant's Email" ar="البريد الإلكتروني للمستأجر" value={data.tenant.email} />
           <Field label="Tenant's Phone" ar="رقم هاتف المستأجر" value={data.tenant.phone} />
         </Section>
@@ -239,7 +254,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           </View>
           <View style={{ flexDirection: 'row' }}>
             <Field label="Property Type" ar="نوع الوحدة" value={data.unit.type ? data.unit.type[0].toUpperCase() + data.unit.type.slice(1) : ''} half />
-            <Field label="Property Area (s.m)" ar="مساحة العقار" value={data.unit.sizeSqm ? String(data.unit.sizeSqm) : ''} half />
+            <Field label="Property Area (s.m)" ar="مساحة العقار (متر مربع)" value={data.unit.sizeSqm ? String(data.unit.sizeSqm) : ''} half />
           </View>
           <View style={{ flexDirection: 'row' }}>
             <Field label="Location" ar="الموقع" value={data.property.fullAddress || data.property.community || data.property.emirate} half />
@@ -248,9 +263,9 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         </Section>
         <Section en="Contract Information" ar="معلومات العقد">
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4 }}>
-            <Text style={{ fontSize: 7.5 }}>Contract Period <Text style={{ fontFamily: AR }}>فترة العقد</Text> From</Text>
+            <Text style={{ fontSize: 7.5 }}>Contract Period <Text style={{ fontFamily: AR }}>فترة العقد</Text> From <Text style={{ fontFamily: AR }}>من</Text></Text>
             <Text style={{ width: 60, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{fmtDate(data.startDate)}</Text>
-            <Text style={{ fontSize: 7.5 }}>To</Text>
+            <Text style={{ fontSize: 7.5 }}>To <Text style={{ fontFamily: AR }}>الى</Text></Text>
             <Text style={{ width: 60, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{fmtDate(data.endDate)}</Text>
             <Text style={{ fontSize: 7.5, marginLeft: 8 }}>Contract Value <Text style={{ fontFamily: AR }}>قيمة العقد</Text></Text>
             <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{cval > 0 ? `${fmtAed(cval)} (${numWords(cval)})` : ''}</Text>
