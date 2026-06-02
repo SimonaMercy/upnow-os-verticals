@@ -181,8 +181,8 @@ function GalleryModal({
 
 /* ── Inquiry Panel ──────────────────────────────────────────────────────── */
 function InquiryPanel({
-  unit, property, onBook, onInquire,
-}: { unit: PublicUnit; property: PublicProperty; onBook: () => void; onInquire: () => void }) {
+  unit, property, onBook, onInquire, canBook,
+}: { unit: PublicUnit; property: PublicProperty; onBook: () => void; onInquire: () => void; canBook: boolean }) {
   return (
     <>
       {/* Provider */}
@@ -204,23 +204,34 @@ function InquiryPanel({
         </div>
       </div>
 
-      {/* CTA buttons */}
-      <div className="flex flex-col gap-3 mb-5">
-        <button
-          onClick={onInquire}
-          className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ backgroundColor: '#2e9f82' }}
-        >
-          Book Now
-        </button>
-        <button
-          onClick={onBook}
-          className="w-full py-3 rounded-xl text-sm font-semibold border border-[#2e9f82] hover:bg-[#edf7f3] transition-colors"
-          style={{ color: '#2e9f82' }}
-        >
-          Schedule Viewing
-        </button>
-      </div>
+      {/* CTA buttons — hidden for non-tenant roles (rental_provider, manager,
+          admin, super_admin) since those accounts can't lease a unit through
+          this flow. They're shown a contextual note instead so they know
+          why the CTAs are absent. */}
+      {canBook ? (
+        <div className="flex flex-col gap-3 mb-5">
+          <button
+            onClick={onInquire}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: '#2e9f82' }}
+          >
+            Book Now
+          </button>
+          <button
+            onClick={onBook}
+            className="w-full py-3 rounded-xl text-sm font-semibold border border-[#2e9f82] hover:bg-[#edf7f3] transition-colors"
+            style={{ color: '#2e9f82' }}
+          >
+            Schedule Viewing
+          </button>
+        </div>
+      ) : (
+        <div className="bg-[#f4f3ef] border border-[#e8e6e0] rounded-xl p-3 mb-5 text-center">
+          <p className="text-xs text-[#6b6860]">
+            You're browsing listings from your operator account. Sign in with a customer account to book or schedule a viewing.
+          </p>
+        </div>
+      )}
 
       {/* Price breakdown */}
       <div className="bg-[#f4f3ef] rounded-xl p-4 space-y-2.5 text-sm mb-4">
@@ -1355,6 +1366,13 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIdx, setGalleryIdx] = useState(0);
   const [modal, setModal] = useState<'book' | 'inquire' | null>(null);
+  const { user } = useAuth();
+  // Booking CTAs only make sense for customers (or visitors who haven't logged
+  // in yet — they'll be prompted to register as a customer during the flow).
+  // Operator-side accounts (rental_provider, manager, admin, super_admin) can
+  // still browse the listing but the Book Now / Schedule Viewing surfaces
+  // are hidden — those flows aren't wired for non-customer roles.
+  const canBook = !user || user.role === 'customer' || user.role === 'service_provider' || user.role === 'technician';
 
   // Auto-open booking modal if user just returned from login with a saved intent
   useEffect(() => {
@@ -1443,11 +1461,17 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
         </nav>
 
         {/* ── Gallery ─────────────────────────────────────────────────────── */}
-        <div className="mb-8 overflow-hidden rounded-2xl">
+        {/* Frame the whole grid so it stays visually contained on the page
+            even when the underlying images are white / transparent. Each
+            tile gets a cream backdrop (#f4f3ef, same neutral used on the
+            inquiry panel) so white-backed images don't vanish into the
+            page; a hairline border and subtle shadow give the gallery a
+            crisp edge. */}
+        <div className="mb-8 overflow-hidden rounded-2xl border border-[#e8e6e0] shadow-sm bg-[#f4f3ef]">
           {/* Desktop: 60% main + 40% right */}
-          <div className="hidden md:grid gap-2" style={{ gridTemplateColumns: '60% 40%', gridTemplateRows: 'repeat(3, 140px)' }}>
+          <div className="hidden md:grid gap-2 p-2" style={{ gridTemplateColumns: '60% 40%', gridTemplateRows: 'repeat(3, 140px)' }}>
             <div
-              className="relative row-span-3 cursor-pointer overflow-hidden"
+              className="relative row-span-3 cursor-pointer overflow-hidden rounded-xl bg-[#ecebe5]"
               onClick={() => openGallery(0)}
             >
               <img src={images[0]} alt={unitLabel} className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.03]" />
@@ -1459,13 +1483,13 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
               </button>
             </div>
             {images.slice(1, 4).map((img, i) => (
-              <div key={i} className="cursor-pointer overflow-hidden" onClick={() => openGallery(i + 1)}>
+              <div key={i} className="cursor-pointer overflow-hidden rounded-xl bg-[#ecebe5]" onClick={() => openGallery(i + 1)}>
                 <img src={img} alt={`${unitLabel} ${i + 2}`} className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.03]" />
               </div>
             ))}
           </div>
           {/* Mobile */}
-          <div className="md:hidden relative cursor-pointer overflow-hidden rounded-2xl" style={{ height: 260 }} onClick={() => openGallery(0)}>
+          <div className="md:hidden relative cursor-pointer overflow-hidden rounded-xl m-2 bg-[#ecebe5]" style={{ height: 260 }} onClick={() => openGallery(0)}>
             <img src={images[0]} alt={unitLabel} className="w-full h-full object-cover" />
             <button className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 text-xs font-medium text-[#1a1916] shadow-md">
               <ImageIcon size={13} /> {images.length} photos
@@ -1598,35 +1622,40 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
             style={{ width: 360, position: 'sticky', top: 84 }}
           >
             <h2 className="font-semibold text-xl text-[#1a1916] mb-4">Interested in this space?</h2>
-            <InquiryPanel unit={unit} property={property} onBook={() => setModal('book')} onInquire={() => setModal('inquire')} />
+            <InquiryPanel unit={unit} property={property} onBook={() => setModal('book')} onInquire={() => setModal('inquire')} canBook={canBook} />
           </aside>
         </div>
       </div>
 
-      {/* Mobile bottom bar */}
-      <div className="fixed bottom-0 inset-x-0 lg:hidden z-50 flex items-center justify-between bg-white border-t border-[#e8e6e0] px-5 py-4">
-        <div>
-          {unit.rentalPrice != null && (
-            <p className="font-bold text-[#1a1916] text-base">{fmtAed(unit.rentalPrice)}<span className="text-xs font-normal text-[#9b9890]"> /yr</span></p>
-          )}
+      {/* Mobile bottom bar — only rendered when the viewer can actually
+          book. Operator accounts get nothing here so the mobile UX matches
+          the desktop sidebar (which shows a "switch to a customer account"
+          note instead of the CTAs). */}
+      {canBook && (
+        <div className="fixed bottom-0 inset-x-0 lg:hidden z-50 flex items-center justify-between bg-white border-t border-[#e8e6e0] px-5 py-4">
+          <div>
+            {unit.rentalPrice != null && (
+              <p className="font-bold text-[#1a1916] text-base">{fmtAed(unit.rentalPrice)}<span className="text-xs font-normal text-[#9b9890]"> /yr</span></p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setModal('inquire')}
+              className="py-2.5 px-5 rounded-xl text-sm font-semibold text-white"
+              style={{ backgroundColor: '#2e9f82' }}
+            >
+              Book Now
+            </button>
+            <button
+              onClick={() => setModal('book')}
+              className="py-2.5 px-4 rounded-xl text-sm font-semibold border"
+              style={{ borderColor: '#2e9f82', color: '#2e9f82' }}
+            >
+              Schedule Viewing
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setModal('inquire')}
-            className="py-2.5 px-5 rounded-xl text-sm font-semibold text-white"
-            style={{ backgroundColor: '#2e9f82' }}
-          >
-            Book Now
-          </button>
-          <button
-            onClick={() => setModal('book')}
-            className="py-2.5 px-4 rounded-xl text-sm font-semibold border"
-            style={{ borderColor: '#2e9f82', color: '#2e9f82' }}
-          >
-            Schedule Viewing
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Lightbox */}
       {galleryOpen && (
