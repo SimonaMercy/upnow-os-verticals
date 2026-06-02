@@ -36,7 +36,7 @@ export interface EjariContractData {
   unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null };
   signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[];
 }
-export interface EjariAddendum { id: number; name: string; fileUrl: string; mimeType: string; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null }
+export interface EjariAddendum { id: number; name: string; fileUrl: string; mimeType: string; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null; /** Extracted text lines (DOCX), rendered inline across pages. */ lines?: string[] }
 
 const fmtDate = (d?: string | null) => {
   if (!d) return '';
@@ -57,6 +57,9 @@ function numWords(n: number): string {
   if (n < 1e6) return numWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numWords(n % 1000) : '');
   return numWords(Math.floor(n / 1e6)) + ' Million' + (n % 1e6 ? ' ' + numWords(n % 1e6) : '');
 }
+
+/** Treat short ALL-CAPS lines as section headings in extracted addendum text. */
+const isHeading = (s: string) => s.length < 46 && s === s.toUpperCase() && /[A-Z]/.test(s);
 
 const TERMS_EN = [
   'The tenant has inspected the premises and agreed to lease the unit on its current condition.',
@@ -313,22 +316,34 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         </View>
       </Page>
 
-      {addendums.map((a, idx) => (
-        <Page key={a.id} size="A4" style={S.page}>
-          <Header date={date} />
-          <View wrap={false}>
+      {addendums.map((a, idx) => {
+        const hasText = !!(a.lines && a.lines.length);
+        const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
+        return (
+          <Page key={a.id} size="A4" style={S.page}>
+            <Header date={date} />
             <Bar en={`Addendum ${idx + 1} of ${addendums.length} — ${a.name}`} ar="ملحق العقد" />
-            <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 12, minHeight: 320, alignItems: 'center' }}>
-              {a.mimeType && a.mimeType.startsWith('image/')
-                ? <Image src={a.fileUrl} style={{ maxHeight: 460, objectFit: 'contain' }} />
-                : <Text style={{ fontSize: 9, color: '#333' }}>Attached document: {a.fileUrl}</Text>}
-            </View>
-          </View>
-          <Signatures
-            tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
-            landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
-        </Page>
-      ))}
+            {hasText ? (
+              <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
+                {a.lines!.map((l, i) => (
+                  isHeading(l)
+                    ? <Text key={i} style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
+                    : <Text key={i} style={{ fontSize: 8, marginBottom: 3, textAlign: 'justify', lineHeight: 1.3 }}>{l}</Text>
+                ))}
+              </View>
+            ) : (
+              <View wrap={false} style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 12, minHeight: 320, alignItems: 'center' }}>
+                {isImg
+                  ? <Image src={a.fileUrl} style={{ maxHeight: 460, objectFit: 'contain' }} />
+                  : <Text style={{ fontSize: 9, color: '#333' }}>Attached document: {a.fileUrl}</Text>}
+              </View>
+            )}
+            <Signatures
+              tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
+              landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
+          </Page>
+        );
+      })}
     </Document>
   );
 }

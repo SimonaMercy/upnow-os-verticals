@@ -36,18 +36,48 @@ export default function TenantContractPrintPage() {
 
   useEffect(() => {
     if (!params?.id) return;
-    Promise.all([
-      fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include' }).then((r) => {
-        if (!r.ok) throw new Error(`Error ${r.status}`);
-        return r.json();
-      }),
-      fetch(`/api/contracts/${params.id}/addendums`, { credentials: 'include' }).then((r) => (r.ok ? r.json() : [])),
-    ])
-      .then(([c, a]) => {
-        setData(c as EjariContractData);
-        setAddendums(Array.isArray(a) ? (a as EjariAddendum[]) : []);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [c, aRaw] = await Promise.all([
+          fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include' }).then((r) => {
+            if (!r.ok) throw new Error(`Error ${r.status}`);
+            return r.json();
+          }),
+          fetch(`/api/contracts/${params.id}/addendums`, { credentials: 'include' }).then((r) => (r.ok ? r.json() : [])),
+        ]);
+
+        const adds: EjariAddendum[] = Array.isArray(aRaw) ? aRaw : [];
+        // For DOCX addendums, extract the text so it renders inline in the PDF.
+        const enriched = await Promise.all(
+          adds.map(async (a) => {
+            const isDocx = (a.mimeType || '').includes('word') || /\.docx?$/i.test(a.fileUrl || '');
+            if (!isDocx) return a;
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const mod: any = await import('mammoth/mammoth.browser');
+              const mammoth = mod.default ?? mod;
+              const buf = await (await fetch(a.fileUrl)).arrayBuffer();
+              const out = await mammoth.extractRawText({ arrayBuffer: buf });
+              const lines = String(out.value || '').split(/\n+/).map((s: string) => s.trim()).filter(Boolean);
+              return lines.length ? { ...a, lines } : a;
+            } catch {
+              return a; // fall back to a reference line if the file can't be read
+            }
+          }),
+        );
+
+        if (!cancelled) {
+          setData(c as EjariContractData);
+          setAddendums(enriched);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load');
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [params?.id]);
 
   if (error) {
