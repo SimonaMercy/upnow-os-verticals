@@ -460,7 +460,7 @@ export default function TenantContractDetailPage() {
               <Eye size={14} /> Preview
             </Link>
             <Link
-              href={`/dashboard/customer/contracts/${contract.id}/print?download=1`}
+              href={`/dashboard/customer/contracts/${contract.id}/print`}
               target="_blank"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white"
             >

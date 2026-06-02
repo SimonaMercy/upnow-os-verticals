@@ -1334,7 +1334,7 @@ export default function ContractDetailPage() {
               <Eye size={14} /> Preview
             </Link>
             <Link
-              href={`/rental-provider/dashboard/contracts/${contract.id}/print?download=1`}
+              href={`/rental-provider/dashboard/contracts/${contract.id}/print`}
               target="_blank"
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white"
             >
@@ -2443,7 +2443,7 @@ export default function ContractDetailPage() {
                     <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print`} target="_blank" className="flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white">
                       <Eye size={14} /> Preview
                     </Link>
-                    <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print?download=1`} target="_blank" className="flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white">
+                    <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print`} target="_blank" className="flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white">
                       <Download size={14} /> Download PDF
                     </Link>
                   </div>
