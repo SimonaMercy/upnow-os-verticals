@@ -1,16 +1,20 @@
 /**
  * Customer-side contract print page — Dubai Unified Tenancy Contract (Ejari).
+ *
+ * Rendered via a portal to <body> so it fully escapes the dashboard shell
+ * (sidebar/topbar + fixed-height overflow wrappers). Without this the print
+ * preview is left-aligned inside the content column and the browser only
+ * prints one page.
+ *
  * Two-page official layout:
  *   Page 1 — Date + Owner/Lessor + Tenant + Property + Contract Info + Terms 1-3 + Signatures
  *   Page 2 — Terms 4-14 + Know your Rights + Attachments + Additional Terms + Signatures
  * Addendum coversheets (if any) are appended after.
- *
- * Uses the tenant API endpoint which returns the contract record with
- * `signatures` embedded.
  */
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
@@ -242,22 +246,10 @@ export default function TenantContractPrintPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const prevHtml = html.style.overflow;
-    const prevBody = body.style.overflow;
-    html.style.overflow = 'auto';
-    body.style.overflow = 'auto';
-    document.body.classList.add('print-only');
-    return () => {
-      document.body.classList.remove('print-only');
-      html.style.overflow = prevHtml;
-      body.style.overflow = prevBody;
-    };
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!params?.id) return;
@@ -311,16 +303,56 @@ export default function TenantContractPrintPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contract, autoDownload]);
 
-  if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <Loader2 className="animate-spin" size={32} style={{ color: '#1a3c6e' }} />
-    </div>
+  if (!mounted) return null;
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed', inset: 0, overflow: 'auto', background: '#e5e7eb', zIndex: 9999, padding: '16px 0',
+  };
+
+  const styleTag = (
+    <style>{`
+      @page { size: A4 portrait; margin: 0; }
+      #contract-print-root * { box-sizing: border-box; }
+      #contract-print-root .page {
+        width: 210mm;
+        min-height: 297mm;
+        padding: 9mm 9mm 8mm;
+        background: #fff;
+        margin: 0 auto 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+        page-break-after: always;
+        break-after: page;
+      }
+      #contract-print-root .page:last-of-type { page-break-after: auto; break-after: auto; margin-bottom: 0; }
+      #contract-print-root .keep-together { page-break-inside: avoid; break-inside: avoid; }
+      @media print {
+        html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
+        /* Hide the dashboard app — print only the contract overlay */
+        body > *:not(#contract-print-root) { display: none !important; }
+        #contract-print-root { position: static !important; overflow: visible !important; background: #fff !important; z-index: auto !important; padding: 0 !important; }
+        #contract-print-root .no-print { display: none !important; }
+        #contract-print-root .page { margin: 0 auto; box-shadow: none; }
+        img { image-rendering: -webkit-optimize-contrast; }
+      }
+    `}</style>
   );
-  if (error || !contract) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c00', padding: 32 }}>
-      Failed to load contract: {error}
-    </div>
-  );
+
+  if (loading) return createPortal(
+    <div id="contract-print-root" style={overlayStyle}>
+      {styleTag}
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 className="animate-spin" size={32} style={{ color: '#1a3c6e' }} />
+      </div>
+    </div>, document.body);
+
+  if (error || !contract) return createPortal(
+    <div id="contract-print-root" style={overlayStyle}>
+      {styleTag}
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c00', padding: 32 }}>
+        Failed to load contract: {error}
+      </div>
+    </div>, document.body);
 
   const rent = contract.annualRent;
   const contractValue = contract.contractValue ?? rent;
@@ -349,41 +381,9 @@ export default function TenantContractPrintPage() {
   const contractDate = fmtDate(contract.createdAt) || fmtDate(new Date().toISOString());
   const pageStyle: React.CSSProperties = { fontSize: 9, lineHeight: 1.5, fontFamily: 'Arial, sans-serif', color: '#111' };
 
-  return (
-    <>
-      <style>{`
-        body.print-only aside,
-        body.print-only header { display: none !important; }
-        body.print-only > div,
-        body.print-only > div > div,
-        body.print-only > div > div > div { height: auto !important; overflow: visible !important; flex: none !important; }
-        body.print-only main { padding: 0 !important; margin: 0 !important; max-width: none !important; overflow: visible !important; flex: none !important; min-height: 0 !important; }
-
-        @page { size: A4 portrait; margin: 0; }
-        * { box-sizing: border-box; }
-        html, body { margin: 0; padding: 0; }
-        .page {
-          width: 210mm;
-          min-height: 297mm;
-          padding: 9mm 9mm 8mm;
-          background: #fff;
-          page-break-after: always;
-          break-after: page;
-        }
-        .page:last-of-type { page-break-after: auto; break-after: auto; }
-        .keep-together { page-break-inside: avoid; break-inside: avoid; }
-        @media screen {
-          body { background: #e5e7eb; padding: 16px 0; }
-          .page { margin: 0 auto 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-        }
-        @media print {
-          .no-print { display: none !important; }
-          html, body { background: #fff !important; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
-          img { image-rendering: -webkit-optimize-contrast; }
-          .page { margin: 0; box-shadow: none; }
-        }
-      `}</style>
+  return createPortal(
+    <div id="contract-print-root" style={overlayStyle}>
+      {styleTag}
 
       {/* Screen toolbar */}
       <div className="no-print" style={{ background: '#fff', borderBottom: '1px solid #ddd', padding: '10px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
@@ -392,7 +392,7 @@ export default function TenantContractPrintPage() {
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>Official DLD format · Preview or save as PDF</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => window.close()} style={{ padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✕ Close</button>
+          <button onClick={() => window.history.back()} style={{ padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✕ Close</button>
           <button onClick={() => window.print()} style={{ padding: '6px 16px', background: '#fff', color: '#1a3c6e', border: '1px solid #1a3c6e', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
             🖨 Browser print
           </button>
@@ -405,206 +405,207 @@ export default function TenantContractPrintPage() {
 
       <div ref={sheetRef}>
 
-      {/* ─────────── PAGE 1 ─────────── */}
-      <div className="page" style={pageStyle}>
-        <DLDHeader contractDate={contractDate} />
-
-        <Section en="Owner / Lessor Information" ar="معلومات المالك/ المؤجر">
-          <Field label="Owner's Name" labelAr="اسم المالك" value={landlordName} />
-          <Field label="Lessor's Name" labelAr="اسم المؤجر" value={landlordName} />
-          <Field label="Lessor's Emirates ID" labelAr="الهوية اللإماراتية للمؤجر" value={contract.landlord.emiratesId ?? ''} />
-          <div style={{ display: 'flex' }}>
-            <Field label="License No. (Company)" labelAr="رقم الرخصة" value={contract.landlord.licenseNumber ?? ''} half />
-            <Field label="Licensing Authority" labelAr="سلطة الترخيص" value={contract.landlord.licenseAuthority ?? ''} half />
-          </div>
-          <Field label="Lessor's Email" labelAr="البريد اللإلكتروني للمؤجر" value={contract.landlord.email ?? ''} />
-          <Field label="Lessor's Phone" labelAr="رقم هاتف المؤجر" value={contract.landlord.phone ?? ''} />
-        </Section>
-
-        <Section en="Tenant Information" ar="معلومات المستأجر">
-          <Field label="Tenant's Name" labelAr="اسم المستأجر" value={contract.tenant.name ?? ''} />
-          <Field label="Tenant's Emirates ID" labelAr="الهوية الإماراتية للمستأجر" value={contract.tenant.emiratesId ?? ''} />
-          <div style={{ display: 'flex' }}>
-            <Field label="License No. (Company)" labelAr="رقم الرخصة" value={contract.tenant.licenseNumber ?? ''} half />
-            <Field label="Licensing Authority" labelAr="سلطة الترخيص" value={contract.tenant.licenseAuthority ?? ''} half />
-          </div>
-          <Field label="Tenant's Email" labelAr="البريد الإلكتروني للمستأجر" value={contract.tenant.email ?? ''} />
-          <Field label="Tenant's Phone" labelAr="رقم هاتف المستأجر" value={contract.tenant.phone ?? ''} />
-        </Section>
-
-        <Section en="Property Information" ar="معلومات العقار">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 5 }}>
-            <span style={{ fontSize: 8.5 }}>Property Usage  استخدام العقار</span>
-            {[
-              { label: 'Residential', labelAr: 'سكني', checked: isResidential },
-              { label: 'Commercial', labelAr: 'تجاري', checked: isCommercial },
-              { label: 'Industrial', labelAr: 'صناعي', checked: isIndustrial },
-            ].map(({ label, labelAr, checked }) => (
-              <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8.5, cursor: 'default' }}>
-                <span style={{ width: 11, height: 11, borderRadius: '50%', border: '1.5px solid #555', display: 'inline-block', flexShrink: 0, background: checked ? '#1a3c6e' : 'transparent' }} />
-                <span>{label}</span>
-                <span style={{ direction: 'rtl', fontSize: 8 }}>{labelAr}</span>
-              </label>
-            ))}
-          </div>
-          <div style={{ display: 'flex' }}>
-            <Field label="Plot No." labelAr="رقم الأرض" value={contract.property.plotNumber ?? ''} half />
-            <Field label="Makani No." labelAr="رقم مكاني" value={contract.property.makaniNumber ?? ''} half />
-          </div>
-          <div style={{ display: 'flex' }}>
-            <Field label="Building Name" labelAr="اسم المبنى" value={contract.property.buildingName ?? ''} half />
-            <Field label="Property No." labelAr="رقم العقار" value={contract.unit.number ?? contract.unit.name ?? ''} half />
-          </div>
-          <div style={{ display: 'flex' }}>
-            <Field label="Property Type" labelAr="نوع الوحدة" value={unitType} half />
-            <Field label="Property Area (s.m)" labelAr="مساحة العقار (متر.مربع)" value={contract.unit.sizeSqm ? String(contract.unit.sizeSqm) : ''} half />
-          </div>
-          <div style={{ display: 'flex' }}>
-            <Field label="Location" labelAr="الموقع" value={contract.property.fullAddress ?? contract.property.community ?? contract.property.emirate ?? ''} half />
-            <Field label="Premises No. (DEWA)" labelAr="رقم المبنى (ديوا)" value={dewa} half />
-          </div>
-        </Section>
-
-        <Section en="Contract Information" ar="معلومات العقد">
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 5, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>Contract Period  فترة العقد</span>
-            <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>From من</span>
-            <span style={{ borderBottom: '1px dashed #888', width: 70, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>{fmtDate(contract.startDate)}</span>
-            <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>To إلى</span>
-            <span style={{ borderBottom: '1px dashed #888', width: 70, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>{fmtDate(contract.endDate)}</span>
-            <span style={{ flex: 1 }} />
-            <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>Contract Value  قيمة العقد</span>
-            <span style={{ borderBottom: '1px dashed #888', flex: 1, minWidth: 90, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>
-              {contractValue > 0 ? `${fmtAed(contractValue)} (${numWords(contractValue)})` : ''}
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 5 }}>
-            <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>Annual Rent  الايجار السنوي</span>
-            <span style={{ borderBottom: '1px dashed #888', flex: 1, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>
-              {rent > 0 ? `${fmtAed(rent)} (${numWords(rent)})` : ''}
-            </span>
-            <span style={{ fontSize: 8.5, whiteSpace: 'nowrap', marginLeft: 10 }}>Security Deposit  مبلغ التأمين</span>
-            <span style={{ borderBottom: '1px dashed #888', minWidth: 80, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>
-              {deposit > 0 ? fmtAed(deposit) : ''}
-            </span>
-          </div>
-          <Field label="Mode of Payment" labelAr="طريقة الدفع" value={mopText} />
-        </Section>
-
-        {/* Terms 1-3 belong on page 1 in the official form */}
-        <TermsBlock start={0} end={3} showHeader />
-
-        <SigSection tenantSig={tenantSig} landlordSig={landlordSig} />
-      </div>
-
-      {/* ─────────── PAGE 2 ─────────── */}
-      <div className="page" style={pageStyle}>
-        {/* Terms 4-14 continue (no logo header on page 2, matching the official form) */}
-        <TermsBlock start={3} end={14} />
-
-        <Section en="Know your Rights" ar="لمعرفة حقوق الأطراف">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            <div style={{ paddingRight: 8, borderRight: '1px solid #ddd', fontSize: 8 }}>
-              <p style={{ margin: '0 0 4px' }}>• You may visit Rental Dispute Center website through <strong>www.dubailand.gov.ae</strong> in case of any rental dispute between parties.</p>
-              <p style={{ margin: '0 0 4px' }}>• Law No 26 of 2007 regulating relationship between landlords and tenants.</p>
-              <p style={{ margin: '0 0 4px' }}>• Law No 33 of 2008 amending law 26 of year 2007.</p>
-              <p style={{ margin: 0 }}>• Law No 43 of 2013 determining rent increases for properties.</p>
-            </div>
-            <div style={{ paddingLeft: 8, direction: 'rtl', textAlign: 'right', fontSize: 8 }}>
-              <p style={{ margin: '0 0 4px' }}>• يمكنكم زيارة موقع مركز فض المنازعات الإيجارية من خلال <strong>www.dubailand.gov.ae</strong></p>
-              <p style={{ margin: '0 0 4px' }}>• الإطلاع على قانون رقم 26 لسنة 2007 بشأن تنظيم العلاقة بين المؤجرين والمستأجرين.</p>
-              <p style={{ margin: '0 0 4px' }}>• الإطلاع على قانون رقم 33 لسنة 2008 الخاص بتعديل بعض أحكام قانون 26 لعام 2007.</p>
-              <p style={{ margin: 0 }}>• الإطلاع على قانون رقم 43 لسنة 2013 بشأن تحديد زيادة بدل الإيجار.</p>
-            </div>
-          </div>
-        </Section>
-
-        <Section en="Attachments for Ejari Registration" ar="مرفقات التسجيل في إيجاري">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            <div style={{ paddingRight: 8, borderRight: '1px solid #ddd', fontSize: 8 }}>
-              <p style={{ margin: '0 0 3px' }}>1. Original unified tenancy contract</p>
-              <p style={{ margin: 0 }}>2. Original emirates ID of applicant</p>
-            </div>
-            <div style={{ paddingLeft: 8, direction: 'rtl', textAlign: 'right', fontSize: 8 }}>
-              <p style={{ margin: '0 0 3px' }}>.١ نسخة أصلية عن عقد الايجار الموحد</p>
-              <p style={{ margin: 0 }}>.٢ الهوية الإماراتية الأصلية لمقدم الطلب</p>
-            </div>
-          </div>
-        </Section>
-
-        <Section en="Additional Terms" ar="شروط إضافية">
-          {additionalTerms.map((term, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'flex-end', gap: 6, marginBottom: 8 }}>
-              <span style={{ fontSize: 8.5, minWidth: 14 }}>{i + 1}.</span>
-              <span style={{ borderBottom: '1px dashed #888', flex: 1, fontSize: 8.5, paddingLeft: 4, paddingBottom: 1, color: '#000' }}>{term}</span>
-            </div>
-          ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 2 }}>
-            <span style={{ fontSize: 7.5, color: '#555' }}>
-              Note: You may add addendum to this tenancy contract in case you have additional terms while it needs to be signed by all parties.
-            </span>
-            <span style={{ fontSize: 7.5, color: '#555', direction: 'rtl', textAlign: 'right' }}>
-              ملاحظة: يمكن إضافة ملحق إلى هذا العقد في حال وجود أي شروط إضافية، على أن يوقع من أطراف التعاقد.
-            </span>
-          </div>
-        </Section>
-
-        <SigSection tenantSig={tenantSig} landlordSig={landlordSig} />
-
-        <div style={{ marginTop: 12, borderTop: '1px solid #bbb', paddingTop: 5, textAlign: 'center', fontSize: 7.5, color: '#555' }}>
-          Tel: 8004488 &nbsp;|&nbsp; P.O.Box 1166, Dubai, U.A.E. &nbsp;|&nbsp; E-mail: support@dubailand.gov.ae &nbsp;|&nbsp; Website: www.dubailand.gov.ae
-          <br />
-          <span style={{ fontSize: 7, color: '#888' }}>Ref: {contract.ref} · Generated: {fmtDate(new Date().toISOString())}</span>
-        </div>
-      </div>
-
-      {/* ═══ ADDENDUM PAGES — appended after the main Ejari pages ═══ */}
-      {addendums.map((a, idx) => (
-        <div key={a.id} className="page" style={pageStyle}>
+        {/* ─────────── PAGE 1 ─────────── */}
+        <div className="page" style={pageStyle}>
           <DLDHeader contractDate={contractDate} />
-          <div className="keep-together" style={{ marginTop: 8 }}>
-            <SectionHeader en={`Addendum ${idx + 1} of ${addendums.length} — ${a.name}`} ar="ملحق العقد" />
-            <div style={{ border: '1px solid #bbb', borderTop: 'none', padding: '14px 16px', minHeight: 360 }}>
-              {a.mimeType?.startsWith('image/') ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={a.fileUrl} alt={a.name}
-                    style={{ display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: 540, objectFit: 'contain', border: '1px solid #e3e3e3' }} />
-                  <p style={{ fontSize: 8.5, color: '#888', textAlign: 'center', margin: '6px 0 0' }}>{a.fileUrl}</p>
-                </>
-              ) : (
-                <>
-                  <p style={{ fontSize: 11, color: '#222', margin: '0 0 10px' }}>
-                    The full document of this addendum is attached to the contract record:
-                  </p>
-                  <div style={{ padding: '12px 14px', background: '#f4f3ef', borderRadius: 4, fontSize: 10.5, color: '#333', wordBreak: 'break-all' }}>
-                    <a href={a.fileUrl} style={{ color: '#1a3c6e' }}>{a.fileUrl}</a>
-                  </div>
-                  <p style={{ fontSize: 9, color: '#666', margin: '12px 0 0', fontStyle: 'italic' }}>
-                    Both parties have reviewed the attached document and signed below to confirm acceptance of its terms. This page is part of the bound contract record.
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
 
-          <div className="keep-together" style={{ marginTop: 10 }}>
-            <SectionHeader en="Signatures" ar="التوقيعات" />
-            <div style={{ border: '1px solid #bbb', borderTop: 'none', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-              <div style={{ borderRight: '1px solid #bbb', padding: '4px 8px' }}>
-                <SigBox sig={a.tenantSig ? { role: 'tenant', signatoryName: '', signatureImage: a.tenantSig, signedAt: a.tenantSignedAt ?? '' } : null}
-                  label="Tenant Signature" labelAr="توقيع المستأجر" />
+          <Section en="Owner / Lessor Information" ar="معلومات المالك/ المؤجر">
+            <Field label="Owner's Name" labelAr="اسم المالك" value={landlordName} />
+            <Field label="Lessor's Name" labelAr="اسم المؤجر" value={landlordName} />
+            <Field label="Lessor's Emirates ID" labelAr="الهوية اللإماراتية للمؤجر" value={contract.landlord.emiratesId ?? ''} />
+            <div style={{ display: 'flex' }}>
+              <Field label="License No. (Company)" labelAr="رقم الرخصة" value={contract.landlord.licenseNumber ?? ''} half />
+              <Field label="Licensing Authority" labelAr="سلطة الترخيص" value={contract.landlord.licenseAuthority ?? ''} half />
+            </div>
+            <Field label="Lessor's Email" labelAr="البريد اللإلكتروني للمؤجر" value={contract.landlord.email ?? ''} />
+            <Field label="Lessor's Phone" labelAr="رقم هاتف المؤجر" value={contract.landlord.phone ?? ''} />
+          </Section>
+
+          <Section en="Tenant Information" ar="معلومات المستأجر">
+            <Field label="Tenant's Name" labelAr="اسم المستأجر" value={contract.tenant.name ?? ''} />
+            <Field label="Tenant's Emirates ID" labelAr="الهوية الإماراتية للمستأجر" value={contract.tenant.emiratesId ?? ''} />
+            <div style={{ display: 'flex' }}>
+              <Field label="License No. (Company)" labelAr="رقم الرخصة" value={contract.tenant.licenseNumber ?? ''} half />
+              <Field label="Licensing Authority" labelAr="سلطة الترخيص" value={contract.tenant.licenseAuthority ?? ''} half />
+            </div>
+            <Field label="Tenant's Email" labelAr="البريد الإلكتروني للمستأجر" value={contract.tenant.email ?? ''} />
+            <Field label="Tenant's Phone" labelAr="رقم هاتف المستأجر" value={contract.tenant.phone ?? ''} />
+          </Section>
+
+          <Section en="Property Information" ar="معلومات العقار">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 5 }}>
+              <span style={{ fontSize: 8.5 }}>Property Usage  استخدام العقار</span>
+              {[
+                { label: 'Residential', labelAr: 'سكني', checked: isResidential },
+                { label: 'Commercial', labelAr: 'تجاري', checked: isCommercial },
+                { label: 'Industrial', labelAr: 'صناعي', checked: isIndustrial },
+              ].map(({ label, labelAr, checked }) => (
+                <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8.5, cursor: 'default' }}>
+                  <span style={{ width: 11, height: 11, borderRadius: '50%', border: '1.5px solid #555', display: 'inline-block', flexShrink: 0, background: checked ? '#1a3c6e' : 'transparent' }} />
+                  <span>{label}</span>
+                  <span style={{ direction: 'rtl', fontSize: 8 }}>{labelAr}</span>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex' }}>
+              <Field label="Plot No." labelAr="رقم الأرض" value={contract.property.plotNumber ?? ''} half />
+              <Field label="Makani No." labelAr="رقم مكاني" value={contract.property.makaniNumber ?? ''} half />
+            </div>
+            <div style={{ display: 'flex' }}>
+              <Field label="Building Name" labelAr="اسم المبنى" value={contract.property.buildingName ?? ''} half />
+              <Field label="Property No." labelAr="رقم العقار" value={contract.unit.number ?? contract.unit.name ?? ''} half />
+            </div>
+            <div style={{ display: 'flex' }}>
+              <Field label="Property Type" labelAr="نوع الوحدة" value={unitType} half />
+              <Field label="Property Area (s.m)" labelAr="مساحة العقار (متر.مربع)" value={contract.unit.sizeSqm ? String(contract.unit.sizeSqm) : ''} half />
+            </div>
+            <div style={{ display: 'flex' }}>
+              <Field label="Location" labelAr="الموقع" value={contract.property.fullAddress ?? contract.property.community ?? contract.property.emirate ?? ''} half />
+              <Field label="Premises No. (DEWA)" labelAr="رقم المبنى (ديوا)" value={dewa} half />
+            </div>
+          </Section>
+
+          <Section en="Contract Information" ar="معلومات العقد">
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 5, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>Contract Period  فترة العقد</span>
+              <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>From من</span>
+              <span style={{ borderBottom: '1px dashed #888', width: 70, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>{fmtDate(contract.startDate)}</span>
+              <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>To إلى</span>
+              <span style={{ borderBottom: '1px dashed #888', width: 70, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>{fmtDate(contract.endDate)}</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>Contract Value  قيمة العقد</span>
+              <span style={{ borderBottom: '1px dashed #888', flex: 1, minWidth: 90, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>
+                {contractValue > 0 ? `${fmtAed(contractValue)} (${numWords(contractValue)})` : ''}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 5 }}>
+              <span style={{ fontSize: 8.5, whiteSpace: 'nowrap' }}>Annual Rent  الايجار السنوي</span>
+              <span style={{ borderBottom: '1px dashed #888', flex: 1, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>
+                {rent > 0 ? `${fmtAed(rent)} (${numWords(rent)})` : ''}
+              </span>
+              <span style={{ fontSize: 8.5, whiteSpace: 'nowrap', marginLeft: 10 }}>Security Deposit  مبلغ التأمين</span>
+              <span style={{ borderBottom: '1px dashed #888', minWidth: 80, fontSize: 8.5, paddingLeft: 3, color: '#000' }}>
+                {deposit > 0 ? fmtAed(deposit) : ''}
+              </span>
+            </div>
+            <Field label="Mode of Payment" labelAr="طريقة الدفع" value={mopText} />
+          </Section>
+
+          {/* Terms 1-3 belong on page 1 in the official form */}
+          <TermsBlock start={0} end={3} showHeader />
+
+          <SigSection tenantSig={tenantSig} landlordSig={landlordSig} />
+        </div>
+
+        {/* ─────────── PAGE 2 ─────────── */}
+        <div className="page" style={pageStyle}>
+          {/* Terms 4-14 continue (no logo header on page 2, matching the official form) */}
+          <TermsBlock start={3} end={14} />
+
+          <Section en="Know your Rights" ar="لمعرفة حقوق الأطراف">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+              <div style={{ paddingRight: 8, borderRight: '1px solid #ddd', fontSize: 8 }}>
+                <p style={{ margin: '0 0 4px' }}>• You may visit Rental Dispute Center website through <strong>www.dubailand.gov.ae</strong> in case of any rental dispute between parties.</p>
+                <p style={{ margin: '0 0 4px' }}>• Law No 26 of 2007 regulating relationship between landlords and tenants.</p>
+                <p style={{ margin: '0 0 4px' }}>• Law No 33 of 2008 amending law 26 of year 2007.</p>
+                <p style={{ margin: 0 }}>• Law No 43 of 2013 determining rent increases for properties.</p>
               </div>
-              <div style={{ padding: '4px 8px' }}>
-                <SigBox sig={a.landlordSig ? { role: 'landlord', signatoryName: '', signatureImage: a.landlordSig, signedAt: a.landlordSignedAt ?? '' } : null}
-                  label="Lessor's Signature" labelAr="توقيع المؤجر" />
+              <div style={{ paddingLeft: 8, direction: 'rtl', textAlign: 'right', fontSize: 8 }}>
+                <p style={{ margin: '0 0 4px' }}>• يمكنكم زيارة موقع مركز فض المنازعات الإيجارية من خلال <strong>www.dubailand.gov.ae</strong></p>
+                <p style={{ margin: '0 0 4px' }}>• الإطلاع على قانون رقم 26 لسنة 2007 بشأن تنظيم العلاقة بين المؤجرين والمستأجرين.</p>
+                <p style={{ margin: '0 0 4px' }}>• الإطلاع على قانون رقم 33 لسنة 2008 الخاص بتعديل بعض أحكام قانون 26 لعام 2007.</p>
+                <p style={{ margin: 0 }}>• الإطلاع على قانون رقم 43 لسنة 2013 بشأن تحديد زيادة بدل الإيجار.</p>
               </div>
             </div>
+          </Section>
+
+          <Section en="Attachments for Ejari Registration" ar="مرفقات التسجيل في إيجاري">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+              <div style={{ paddingRight: 8, borderRight: '1px solid #ddd', fontSize: 8 }}>
+                <p style={{ margin: '0 0 3px' }}>1. Original unified tenancy contract</p>
+                <p style={{ margin: 0 }}>2. Original emirates ID of applicant</p>
+              </div>
+              <div style={{ paddingLeft: 8, direction: 'rtl', textAlign: 'right', fontSize: 8 }}>
+                <p style={{ margin: '0 0 3px' }}>.١ نسخة أصلية عن عقد الايجار الموحد</p>
+                <p style={{ margin: 0 }}>.٢ الهوية الإماراتية الأصلية لمقدم الطلب</p>
+              </div>
+            </div>
+          </Section>
+
+          <Section en="Additional Terms" ar="شروط إضافية">
+            {additionalTerms.map((term, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-end', gap: 6, marginBottom: 8 }}>
+                <span style={{ fontSize: 8.5, minWidth: 14 }}>{i + 1}.</span>
+                <span style={{ borderBottom: '1px dashed #888', flex: 1, fontSize: 8.5, paddingLeft: 4, paddingBottom: 1, color: '#000' }}>{term}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 2 }}>
+              <span style={{ fontSize: 7.5, color: '#555' }}>
+                Note: You may add addendum to this tenancy contract in case you have additional terms while it needs to be signed by all parties.
+              </span>
+              <span style={{ fontSize: 7.5, color: '#555', direction: 'rtl', textAlign: 'right' }}>
+                ملاحظة: يمكن إضافة ملحق إلى هذا العقد في حال وجود أي شروط إضافية، على أن يوقع من أطراف التعاقد.
+              </span>
+            </div>
+          </Section>
+
+          <SigSection tenantSig={tenantSig} landlordSig={landlordSig} />
+
+          <div style={{ marginTop: 12, borderTop: '1px solid #bbb', paddingTop: 5, textAlign: 'center', fontSize: 7.5, color: '#555' }}>
+            Tel: 8004488 &nbsp;|&nbsp; P.O.Box 1166, Dubai, U.A.E. &nbsp;|&nbsp; E-mail: support@dubailand.gov.ae &nbsp;|&nbsp; Website: www.dubailand.gov.ae
+            <br />
+            <span style={{ fontSize: 7, color: '#888' }}>Ref: {contract.ref} · Generated: {fmtDate(new Date().toISOString())}</span>
           </div>
         </div>
-      ))}
+
+        {/* ═══ ADDENDUM PAGES ═══ */}
+        {addendums.map((a, idx) => (
+          <div key={a.id} className="page" style={pageStyle}>
+            <DLDHeader contractDate={contractDate} />
+            <div className="keep-together" style={{ marginTop: 8 }}>
+              <SectionHeader en={`Addendum ${idx + 1} of ${addendums.length} — ${a.name}`} ar="ملحق العقد" />
+              <div style={{ border: '1px solid #bbb', borderTop: 'none', padding: '14px 16px', minHeight: 360 }}>
+                {a.mimeType?.startsWith('image/') ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={a.fileUrl} alt={a.name}
+                      style={{ display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: 540, objectFit: 'contain', border: '1px solid #e3e3e3' }} />
+                    <p style={{ fontSize: 8.5, color: '#888', textAlign: 'center', margin: '6px 0 0' }}>{a.fileUrl}</p>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 11, color: '#222', margin: '0 0 10px' }}>
+                      The full document of this addendum is attached to the contract record:
+                    </p>
+                    <div style={{ padding: '12px 14px', background: '#f4f3ef', borderRadius: 4, fontSize: 10.5, color: '#333', wordBreak: 'break-all' }}>
+                      <a href={a.fileUrl} style={{ color: '#1a3c6e' }}>{a.fileUrl}</a>
+                    </div>
+                    <p style={{ fontSize: 9, color: '#666', margin: '12px 0 0', fontStyle: 'italic' }}>
+                      Both parties have reviewed the attached document and signed below to confirm acceptance of its terms. This page is part of the bound contract record.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="keep-together" style={{ marginTop: 10 }}>
+              <SectionHeader en="Signatures" ar="التوقيعات" />
+              <div style={{ border: '1px solid #bbb', borderTop: 'none', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+                <div style={{ borderRight: '1px solid #bbb', padding: '4px 8px' }}>
+                  <SigBox sig={a.tenantSig ? { role: 'tenant', signatoryName: '', signatureImage: a.tenantSig, signedAt: a.tenantSignedAt ?? '' } : null}
+                    label="Tenant Signature" labelAr="توقيع المستأجر" />
+                </div>
+                <div style={{ padding: '4px 8px' }}>
+                  <SigBox sig={a.landlordSig ? { role: 'landlord', signatoryName: '', signatureImage: a.landlordSig, signedAt: a.landlordSignedAt ?? '' } : null}
+                    label="Lessor's Signature" labelAr="توقيع المؤجر" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
 
       </div>{/* /sheetRef wrapper */}
-    </>
+    </div>,
+    document.body
   );
 }
