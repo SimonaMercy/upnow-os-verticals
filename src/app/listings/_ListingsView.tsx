@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { MapPin, BedDouble, Bath, Maximize2 } from 'lucide-react';
 import FilterBar from './FilterBar';
 import FilterSidebarWrapper from './FilterSidebarWrapper';
+import { Navbar } from '@/components/upnow/Navbar';
 
 const BACKEND = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
@@ -172,20 +173,7 @@ export default async function ListingsView({ country, emirate, searchParams }: P
   return (
     <div className="min-h-screen bg-white">
       {/* ── Navbar ─────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-[#e8e6e0]">
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
-          <Link href="/listings" className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-xl text-sm font-extrabold text-white" style={{ backgroundColor: '#2e9f82' }}>U</span>
-            <span className="font-extrabold text-lg text-[#1a1916] tracking-tight">UpNow</span>
-          </Link>
-          <div className="hidden sm:flex items-center gap-4 text-sm text-[#6b6860]">
-            <Link href="/login" className="hover:text-[#1a1916] transition-colors">Sign In</Link>
-            <Link href="/register" className="py-2 px-4 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90" style={{ backgroundColor: '#2e9f82' }}>
-              Register
-            </Link>
-          </div>
-        </div>
-      </header>
+      <Navbar />
 
       {/* ── Page header ─────────────────────────────────────────────────── */}
       <section style={{ backgroundColor: '#f9f8f6', paddingBlock: 40 }}>

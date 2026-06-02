@@ -187,7 +187,12 @@ function ViewMultiSelect({ selected, onChange }: { selected: string[]; onChange:
 // ─── Helpers ──────────────────────────────────────────────
 function amenitiesFromUnit(unit: Unit): string[] {
   if (!unit.facilities) return [];
-  try { return JSON.parse(unit.facilities) as string[]; } catch { return []; }
+  try {
+    const parsed = JSON.parse(unit.facilities);
+    if (Array.isArray(parsed)) return parsed as string[];
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.amenities)) return parsed.amenities as string[];
+    return [];
+  } catch { return []; }
 }
 
 function categoryLabel(cat: string): string {
@@ -234,6 +239,9 @@ function unitFormToDto(data: UnitFormData) {
     ejariFeeFils: data.ejariFeeFils ? Number(data.ejariFeeFils) : undefined,
     commission: data.commission ? Number(data.commission) : undefined,
     serviceCharges: data.serviceCharges ? Number(data.serviceCharges) : undefined,
+    minLeaseMonths: data.minLeaseMonths ? Number(data.minLeaseMonths) : undefined,
+    noticePeriodDays: data.noticePeriodDays ? Number(data.noticePeriodDays) : undefined,
+    rentEscalationPct: data.rentEscalationPct ? Number(data.rentEscalationPct) : undefined,
     description: data.description || undefined,
   };
 }
@@ -904,23 +912,26 @@ export default function PortfolioPage() {
           propertyCategory={unitModal.propertyCategory ?? ''}
           title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
           initial={unitModal.editingUnit ? {
-            unitNumber:      unitModal.editingUnit.unitNumber,
-            unitName:        unitModal.editingUnit.unitName ?? '',
-            unitType:        unitModal.editingUnit.unitType,
-            unitTier:        unitModal.editingUnit.unitTier,
-            floor:           unitModal.editingUnit.floor ?? '',
-            bedrooms:        unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : '1',
-            bathrooms:       unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
-            unitSizeSqft:    unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
-            view:            unitModal.editingUnit.view ?? '',
-            amenities:       amenitiesFromUnit(unitModal.editingUnit),
-            rentalPrice:     unitModal.editingUnit.rentalPrice != null ? String(unitModal.editingUnit.rentalPrice) : '',
-            securityDeposit: unitModal.editingUnit.securityDeposit != null ? String(unitModal.editingUnit.securityDeposit) : '',
-            adminFee:        unitModal.editingUnit.adminFee != null ? String(unitModal.editingUnit.adminFee) : '',
-            ejariFeeFils:    unitModal.editingUnit.ejariFeeFils != null ? String(unitModal.editingUnit.ejariFeeFils) : '',
-            commission:      unitModal.editingUnit.commission != null ? String(unitModal.editingUnit.commission) : '',
-            serviceCharges:  unitModal.editingUnit.serviceCharges != null ? String(unitModal.editingUnit.serviceCharges) : '',
-            description:     unitModal.editingUnit.description ?? '',
+            unitNumber:       unitModal.editingUnit.unitNumber,
+            unitName:         unitModal.editingUnit.unitName ?? '',
+            unitType:         unitModal.editingUnit.unitType,
+            unitTier:         unitModal.editingUnit.unitTier,
+            floor:            unitModal.editingUnit.floor ?? '',
+            bedrooms:         unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : '1',
+            bathrooms:        unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
+            unitSizeSqft:     unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
+            view:             unitModal.editingUnit.view ?? '',
+            amenities:        amenitiesFromUnit(unitModal.editingUnit),
+            rentalPrice:      unitModal.editingUnit.rentalPrice != null ? String(unitModal.editingUnit.rentalPrice) : '',
+            securityDeposit:  unitModal.editingUnit.securityDeposit != null ? String(unitModal.editingUnit.securityDeposit) : '',
+            adminFee:         unitModal.editingUnit.adminFee != null ? String(unitModal.editingUnit.adminFee) : '',
+            ejariFeeFils:     unitModal.editingUnit.ejariFeeFils != null ? String(unitModal.editingUnit.ejariFeeFils) : '',
+            commission:       unitModal.editingUnit.commission != null ? String(unitModal.editingUnit.commission) : '',
+            serviceCharges:   unitModal.editingUnit.serviceCharges != null ? String(unitModal.editingUnit.serviceCharges) : '',
+            minLeaseMonths:   '',
+            noticePeriodDays: '',
+            rentEscalationPct: '',
+            description:      unitModal.editingUnit.description ?? '',
           } : undefined}
           onClose={() => setUnitModal({ open: false })}
           onSave={handleSaveUnit}

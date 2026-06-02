@@ -30,7 +30,7 @@ const REPORTS: ReportTile[] = [
   { slug: 'collection-rate',    title: 'Collection Rate Report',   description: 'Collected vs scheduled rent, by period.',                              Icon: BarChart2,    available: false },
   { slug: 'security-deposits',  title: 'Security Deposits Report', description: 'Deposits held, status, and refund obligations.',                       Icon: ShieldCheck,  available: false },
   { slug: 'vacancy-analysis',   title: 'Vacancy Analysis',         description: 'Time-on-market, turnover, and listing price changes.',                 Icon: MapPin,       available: false },
-  { slug: 'tenant-ledger',      title: 'Tenant Ledger',            description: 'Per-tenant payment history and balance.',                              Icon: FileText,     available: false },
+  { slug: 'tenant-ledger',      title: 'Customer Ledger',          description: 'Per-customer payment history and balance.',                            Icon: FileText,     available: false },
   { slug: 'portfolio-overview', title: 'Portfolio Overview',       description: 'Properties, units, types, and emirate breakdown.',                     Icon: FileBarChart, available: false },
   { slug: 'income-statement',   title: 'Income Statement',         description: 'Revenue by stream — rent, admin, ejari, deposits.',                    Icon: BarChart2,    available: false },
   { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false },

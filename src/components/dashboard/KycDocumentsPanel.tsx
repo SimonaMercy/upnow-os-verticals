@@ -27,7 +27,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +80,8 @@ export interface KycDocumentsPanelProps {
    * and calls this callback.
    */
   onAllRequiredUploaded?: () => void;
+  /** Fired immediately after any document is successfully registered, with the document key. */
+  onAfterUpload?: (documentKey: string) => void;
   /** Button label. Defaults to "Go to my dashboard". */
   continueLabel?: string;
   /**
@@ -164,6 +166,7 @@ export function KycDocumentsPanel({
   entityTypeOverride,
   companyTypeOverride,
   onAllRequiredUploaded,
+  onAfterUpload,
   continueLabel = "Go to my dashboard",
   profileHref,
 }: KycDocumentsPanelProps) {
@@ -256,22 +259,31 @@ export function KycDocumentsPanel({
       if (!s3Res.ok) throw new Error("Upload to storage failed");
 
       const req = checklist.find((c) => c.key === docKey) ?? data.checklist.find((c) => c.key === docKey)!;
-      await apiPost("/documents", {
-        ownerType,
-        ownerId: data.profile.id,
-        category: req.category,
-        documentKey: docKey,
-        displayName: req.displayName,
-        fileUrl,
-        mimeType: file.type,
-        s3Key: fileKey,
-        storageProvider: "s3",
-      });
+      if (req.documentId) {
+        // Document already exists — update file URL instead of inserting a duplicate
+        await apiPatch(`/documents/${req.documentId}`, {
+          fileUrl,
+          mimeType: file.type,
+        });
+      } else {
+        await apiPost("/documents", {
+          ownerType,
+          ownerId: data.profile.id,
+          category: req.category,
+          documentKey: docKey,
+          displayName: req.displayName,
+          fileUrl,
+          mimeType: file.type,
+          s3Key: fileKey,
+          storageProvider: "s3",
+        });
+      }
 
       setLocalPreviews((p) => ({
         ...p,
         [docKey]: { url: localPreviewUrl, mimeType: file.type },
       }));
+      onAfterUpload?.(docKey);
       load();
     } catch (err) {
       URL.revokeObjectURL(localPreviewUrl);

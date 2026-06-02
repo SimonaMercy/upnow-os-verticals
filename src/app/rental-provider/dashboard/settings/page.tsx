@@ -344,7 +344,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
           {/* Total card */}
           <div className="mt-1.5 p-3.5 bg-[#e7f5f0] rounded-[10px] grid grid-cols-[1fr_auto] items-baseline gap-2.5">
             <div>
-              <span className="text-[12px] font-bold uppercase tracking-[.06em] text-[#1f7e66]">Total billed to tenant</span>
+              <span className="text-[12px] font-bold uppercase tracking-[.06em] text-[#1f7e66]">Total billed to customer</span>
               <span className="block text-[11px] text-[#1f7e66] opacity-85 mt-0.5 font-medium">
                 {refundable > 0 ? `Incl. AED ${fmtN(refundable)} refundable deposit` : 'No refundable amount'}
               </span>
@@ -423,6 +423,20 @@ export default function SettingsPage() {
   const [bizSaved, setBizSaved]             = useState(false);
   const [bizError, setBizError]             = useState<string | null>(null);
 
+  // ── Contract date config ─────────────────────────────────────
+  const [preferredDays,    setPreferredDays]    = useState<number[]>([]);
+  const [daysSaving,       setDaysSaving]       = useState(false);
+  const [daysSaved,        setDaysSaved]        = useState(false);
+  const [daysError,        setDaysError]        = useState<string | null>(null);
+
+  // ── Renewal defaults (Phase 6) ──────────────────────────────
+  // Default % bump applied to the previous annual rent when proposing a
+  // renewal. Pre-fills the "New Annual Rent" field on the renewal modal.
+  const [renewalIncPct,    setRenewalIncPct]    = useState<string>('');
+  const [renewalIncSaving, setRenewalIncSaving] = useState(false);
+  const [renewalIncSaved,  setRenewalIncSaved]  = useState(false);
+  const [renewalIncError,  setRenewalIncError]  = useState<string | null>(null);
+
   const [notifs, setNotifs] = useState<Record<NotifKey, boolean>>({
     newInquiry: true, chequeReminder: true, renewalAlert: true,
     maintenanceUpdate: false, promotional: false,
@@ -464,6 +478,8 @@ export default function SettingsPage() {
         const ct = p.companyType as 'landlord' | 'brokerage' | 'agents' | null | undefined;
         if (ct) setCompanyType(ct);
         if (p.parentBrokerageName) setParentBrokerageName(p.parentBrokerageName as string);
+        if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
+        if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
         const matched = EMIRATES_LIST.find(e => addr.endsWith(`, ${e}`) || addr === e);
@@ -560,6 +576,52 @@ export default function SettingsPage() {
       setBizError('Failed to save. Please try again.');
     } finally {
       setSavingBiz(false);
+    }
+  };
+
+  const handleSaveDays = async () => {
+    setDaysSaving(true);
+    setDaysError(null);
+    setDaysSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferredStartDays: preferredDays }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setDaysSaved(true);
+    } catch {
+      setDaysError('Failed to save. Please try again.');
+    } finally {
+      setDaysSaving(false);
+    }
+  }
+
+  async function saveRenewalIncrement() {
+    setRenewalIncSaving(true);
+    setRenewalIncError(null);
+    setRenewalIncSaved(false);
+    try {
+      const raw = renewalIncPct.trim();
+      const parsed = raw === '' ? null : Number(raw);
+      if (parsed !== null && (Number.isNaN(parsed) || parsed < 0 || parsed > 100)) {
+        setRenewalIncError('Enter a percentage between 0 and 100.');
+        return;
+      }
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ renewalRentIncrementPct: parsed }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setRenewalIncSaved(true);
+    } catch {
+      setRenewalIncError('Failed to save. Please try again.');
+    } finally {
+      setRenewalIncSaving(false);
     }
   };
 
@@ -870,6 +932,58 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Contract Date Configuration */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="mb-4">
+              <h2 className="font-semibold text-base text-[#1a1916]">Contract Start Days</h2>
+              <p className="text-xs text-[#9b9890] mt-0.5">
+                Select the days of the month when contracts can start. Customers will only be able to pick these days in the booking calendar. Leave empty to allow any date.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
+                const active = preferredDays.includes(day);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => {
+                      setPreferredDays(prev =>
+                        prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
+                      );
+                      setDaysSaved(false);
+                    }}
+                    className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
+                      ${active
+                        ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
+                        : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+
+            {preferredDays.length > 0 && (
+              <p className="text-xs text-[#2e9f82] mb-3">
+                Selected: {preferredDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each month
+              </p>
+            )}
+
+            <div className="flex items-center gap-3 flex-wrap">
+              {daysError  && <p className="text-xs text-red-600 flex-1">{daysError}</p>}
+              {daysSaved  && !daysSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+              {preferredDays.length > 0 && (
+                <button type="button" onClick={() => { setPreferredDays([]); setDaysSaved(false); }}
+                  className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
+                  Clear all
+                </button>
+              )}
+              <SaveButton saving={daysSaving} label="Save Start Days" />
+            </div>
+          </div>
+
           {/* Team Management */}
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
@@ -961,6 +1075,58 @@ export default function SettingsPage() {
                   <p className="text-[13px] text-[#76480f] leading-[1.45]">
                     <strong className="text-[#5a3608]">Renewal logic:</strong> the refundable security deposit is collected once on the original contract and carries forward, so it&apos;s excluded here. Update only the fees that should re-charge on renewal.
                   </p>
+                </div>
+              )}
+
+              {/* Phase 6 — Annual rent increment default. Pre-fills the New
+                  Annual Rent field on the Propose Renewal modal. RP can still
+                  override per renewal. Lives here (Fee Rules → Renewal) because
+                  that's where every other renewal-only knob lives. */}
+              {contractType === 'renewal' && (
+                <div className="mx-6 mt-3.5 p-4 rounded-[12px] border border-[#e8e6e0] bg-[#fbfbf8]">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex-1 min-w-[220px]">
+                      <h3 className="text-[13px] font-semibold text-[#1a1916]">Annual rent increment</h3>
+                      <p className="text-[11px] text-[#6b6860] mt-0.5 leading-snug">
+                        When you open Propose Renewal, the New Annual Rent field starts at the previous rent bumped by this percentage.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <input
+                          id="renewal-inc-pct"
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.5"
+                          value={renewalIncPct}
+                          onChange={e => { setRenewalIncPct(e.target.value); setRenewalIncSaved(false); }}
+                          placeholder="0"
+                          className="w-24 text-sm pl-3 pr-8 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#9b9890]">%</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={saveRenewalIncrement}
+                        disabled={renewalIncSaving}
+                        className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
+                        style={{ background: '#2e9f82' }}
+                      >
+                        {renewalIncSaving ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 mt-2 flex-wrap">
+                    {renewalIncPct && !Number.isNaN(Number(renewalIncPct)) && Number(renewalIncPct) > 0 ? (
+                      <p className="text-[11px] text-[#6b6860]">
+                        Preview: AED {previewRent.toLocaleString('en-AE')} →{' '}
+                        <b className="text-[#1a1916]">AED {Math.round(previewRent * (1 + Number(renewalIncPct) / 100)).toLocaleString('en-AE')}</b>
+                      </p>
+                    ) : <span />}
+                    {renewalIncError && <p className="text-[11px] text-red-600">{renewalIncError}</p>}
+                    {renewalIncSaved && !renewalIncSaving && <p className="text-[11px] text-[#2e9f82]">Saved.</p>}
+                  </div>
                 </div>
               )}
 

@@ -4,36 +4,104 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// ─── Lookup data ──────────────────────────────────────────
+// ─── Unit type arrays (match backend UnitType enum) ───────
 export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'townhouse', 'penthouse', 'studio', 'duplex_loft'];
 export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
 export const INDUSTRIAL_UNIT_TYPES  = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
+export const WORKSPACES_UNIT_TYPES  = ['coworking_desk', 'private_office', 'meeting_room', 'day_office'];
+export const VENUES_UNIT_TYPES      = ['event_hall', 'wedding_venue', 'conference_hall', 'private_dining', 'outdoor_venue'];
 
-const UNIT_TYPE_LABELS: Record<string, string> = {
-  apartment: 'Apartment', villa: 'Villa', townhouse: 'Townhouse', penthouse: 'Penthouse',
-  studio: 'Studio', duplex_loft: 'Duplex / Loft',
+// All non-residential types combined (useful for downstream checks)
+export const ALL_COMMERCIAL_TYPES = [
+  ...COMMERCIAL_UNIT_TYPES,
+  ...INDUSTRIAL_UNIT_TYPES,
+  ...WORKSPACES_UNIT_TYPES,
+  ...VENUES_UNIT_TYPES,
+];
+
+export const UNIT_TYPE_LABELS: Record<string, string> = {
+  // Residential
+  apartment: 'Apartment', villa: 'Villa', townhouse: 'Townhouse',
+  penthouse: 'Penthouse', studio: 'Studio', duplex_loft: 'Duplex / Loft',
+  // Commercial
   office_fitted: 'Office (Fitted)', office_shell_core: 'Office (Shell & Core)',
   retail_shop: 'Retail Shop', showroom: 'Showroom',
   restaurant_fnb: 'Restaurant / F&B', clinic_medical: 'Clinic / Medical',
+  // Industrial
   warehouse: 'Warehouse', open_yard: 'Open Yard', storage_unit: 'Storage Unit',
   cold_storage: 'Cold Storage', logistics_facility: 'Logistics Facility',
+  // Workspaces
+  coworking_desk: 'Coworking Desk', private_office: 'Private Office',
+  meeting_room: 'Meeting Room', day_office: 'Day Office',
+  // Venues
+  event_hall: 'Event Hall', wedding_venue: 'Wedding Venue',
+  conference_hall: 'Conference Hall', private_dining: 'Private Dining Room',
+  outdoor_venue: 'Outdoor Venue',
 };
 
 function unitTypesForCategory(category: string): string[] {
   switch (category) {
-    case 'residential': return RESIDENTIAL_UNIT_TYPES;
-    case 'commercial':  return COMMERCIAL_UNIT_TYPES;
-    case 'industrial':  return INDUSTRIAL_UNIT_TYPES;
-    default:            return [...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES];
+    case 'residential':  return RESIDENTIAL_UNIT_TYPES;
+    case 'commercial':   return COMMERCIAL_UNIT_TYPES;
+    case 'industrial':   return INDUSTRIAL_UNIT_TYPES;
+    case 'workspaces':   return WORKSPACES_UNIT_TYPES;
+    case 'venues':       return VENUES_UNIT_TYPES;
+    default:             return [...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES];
   }
 }
 
+// ─── Category-specific amenities ─────────────────────────
+const AMENITIES_MAP: Record<string, string[]> = {
+  residential: [
+    'Central A/C', 'Parking', 'Swimming Pool', 'Gym', 'Security', 'CCTV',
+    'Balcony', 'Elevator', 'Concierge', 'Playground', "Maid's Room", 'Storage',
+    'Built-in Wardrobes', 'Shared Pool', 'Covered Parking', 'Pet Friendly',
+    'High-Speed Internet', 'Smart Home', '24/7 Security', 'Kids Play Area',
+  ],
+  commercial: [
+    'High-Speed Internet', 'Dedicated Parking', 'Central A/C', 'Backup Generator',
+    'Reception Services', 'CCTV', '24/7 Security', 'Elevator', 'Meeting Rooms',
+    'Pantry / Kitchen', 'Server Room', 'Prayer Room', 'Common Areas',
+    'Retail Frontage', 'Fire Suppression', 'Cable Management', 'Loading Bay',
+    'Disabled Access', 'Male & Female Washrooms', 'Covered Parking',
+  ],
+  industrial: [
+    'Loading Dock', 'Forklift Access', 'High-Bay Lighting', 'Three-Phase Power',
+    'Floor Drains', 'CCTV', '24/7 Security', 'Ample Truck Parking', 'Backup Power',
+    'Fire Suppression', 'Mezzanine Floor', 'Weighbridge', 'Yard Space', 'Office Annex',
+    'Temperature Control', 'Sprinkler System', 'Rail Access', 'Hazmat Storage',
+    'Water Supply', 'Sewage / Drainage',
+  ],
+  workspaces: [
+    'High-Speed Internet', 'Meeting Rooms', 'Printing & Scanning', 'Coffee & Tea Station',
+    'Phone Booths', 'Lounge Area', 'Receptionist', 'Mail Handling', '24/7 Access',
+    'Parking', 'Elevator', 'CCTV', 'Air Conditioning', 'Shower Facilities',
+    'Bike Storage', 'Outdoor Terrace', 'Event Space', 'Storage Lockers',
+    'Dedicated Desk', 'Breakout Rooms',
+  ],
+  venues: [
+    'Stage / Platform', 'Professional AV Equipment', 'Catering Kitchen',
+    'Bridal Suite / Green Room', 'Valet Parking', 'CCTV', 'Air Conditioning',
+    'Male & Female Restrooms', 'Wheelchair Access', 'Wi-Fi', 'LED Lighting Rig',
+    'Professional Sound System', 'Dance Floor', 'Outdoor Space', 'Bar Area',
+    'Prayer Room', 'Natural Lighting', 'Dedicated Storage', 'In-house Catering', 'Photo / Film Friendly',
+  ],
+};
+
+// Combined list for backward compatibility with add page
 export const AMENITIES = [
-  'Central A/C', 'Parking', 'Swimming Pool', 'Gym', 'Security', 'CCTV',
-  'Balcony', 'Elevator', 'Concierge', 'Playground', "Maid's Room", 'Storage',
-  'Built-in Wardrobes', 'Shared Pool', 'Covered Parking', 'Pet Friendly',
-  'High-Speed Internet', 'Smart Home', '24/7 Security', 'Kids Play Area',
+  ...new Set([
+    ...AMENITIES_MAP.residential,
+    ...AMENITIES_MAP.commercial,
+    ...AMENITIES_MAP.industrial,
+    ...AMENITIES_MAP.workspaces,
+    ...AMENITIES_MAP.venues,
+  ]),
 ];
+
+function getAmenitiesForCategory(category: string): string[] {
+  return AMENITIES_MAP[category] ?? AMENITIES_MAP.residential;
+}
 
 const VIEW_OPTIONS = [
   'Sea View', 'Partial Sea View', 'Full Sea View', 'Beach View', 'Marina View',
@@ -51,6 +119,24 @@ export const UNIT_TIERS = [
   { id: 'premium',  label: 'Premium' },
   { id: 'elite',    label: 'Elite' },
 ];
+
+// Default minimum lease months by category
+const DEFAULT_MIN_LEASE: Record<string, string> = {
+  residential: '12',
+  commercial:  '12',
+  industrial:  '24',
+  workspaces:  '1',
+  venues:      '0',
+};
+
+// Default notice period by category (days)
+const DEFAULT_NOTICE: Record<string, string> = {
+  residential: '60',
+  commercial:  '90',
+  industrial:  '90',
+  workspaces:  '30',
+  venues:      '14',
+};
 
 export interface UnitFormData {
   unitNumber: string;
@@ -70,7 +156,79 @@ export interface UnitFormData {
   ejariFeeFils: string;
   commission: string;
   serviceCharges: string;
+  minLeaseMonths: string;
+  noticePeriodDays: string;
+  rentEscalationPct: string;
   description: string;
+}
+
+function composeUnitDescription(d: UnitFormData, propertyCategory: string): string {
+  const typeLabel = d.unitType ? d.unitType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null;
+  const isResidential = RESIDENTIAL_UNIT_TYPES.includes(d.unitType);
+  const isCommercial  = COMMERCIAL_UNIT_TYPES.includes(d.unitType);
+  const isIndustrial  = INDUSTRIAL_UNIT_TYPES.includes(d.unitType);
+  const isWorkspace   = WORKSPACES_UNIT_TYPES.includes(d.unitType);
+  const isVenue       = VENUES_UNIT_TYPES.includes(d.unitType);
+
+  const tierLabel = UNIT_TIERS.find(t => t.id === d.unitTier)?.label;
+  const tierPrefix = tierLabel && tierLabel !== 'Standard' ? `${tierLabel}-tier ` : '';
+
+  let headline: string;
+  if (isResidential) {
+    const beds = d.bedrooms === 'Studio' ? 'studio' : d.bedrooms ? `${d.bedrooms}-bedroom` : '';
+    headline = [tierPrefix, beds, typeLabel ? typeLabel.toLowerCase() : 'home'].filter(Boolean).join(' ').trim();
+  } else if (isCommercial) {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'commercial unit'}`;
+  } else if (isIndustrial) {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'industrial unit'}`;
+  } else if (isWorkspace) {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'workspace'}`;
+  } else if (isVenue) {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'venue'}`;
+  } else {
+    headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? propertyCategory.toLowerCase() + ' unit'}`;
+  }
+  headline = headline.charAt(0).toUpperCase() + headline.slice(1);
+
+  const sentenceBits: string[] = [];
+  if (d.floor) sentenceBits.push(`located on the ${ordinal(d.floor)} floor`);
+  if (d.unitSizeSqft) sentenceBits.push(`spanning ${Number(d.unitSizeSqft).toLocaleString('en-AE')} sqft`);
+  if (isResidential && d.bathrooms) {
+    const bathLabel = Number(d.bathrooms) === 1 ? '1 bathroom' : `${d.bathrooms} bathrooms`;
+    sentenceBits.push(`with ${bathLabel}`);
+  }
+  const sentence1 = `${headline}${sentenceBits.length ? ', ' + sentenceBits.join(', ') : ''}.`;
+
+  const sentence2Bits: string[] = [];
+  if (d.view) sentence2Bits.push(`Enjoys a ${d.view.toLowerCase()}`);
+  if (isResidential && d.furnishing && d.furnishing !== 'Unfurnished') {
+    const furnLabel = d.furnishing.toLowerCase();
+    sentence2Bits.push(sentence2Bits.length ? `comes ${furnLabel}` : `Comes ${furnLabel}`);
+  }
+  const sentence2 = sentence2Bits.length ? sentence2Bits.join(' and ') + '.' : '';
+
+  const topAmenities = d.amenities.slice(0, 6);
+  const sentence3 = topAmenities.length
+    ? `Amenities include ${topAmenities.join(', ').toLowerCase()}.`
+    : '';
+
+  // Lease terms sentence for non-residential
+  let sentence4 = '';
+  if (!isResidential && d.minLeaseMonths && Number(d.minLeaseMonths) > 0) {
+    const months = Number(d.minLeaseMonths);
+    const period = months >= 12 ? `${months / 12} year${months > 12 ? 's' : ''}` : `${months} month${months > 1 ? 's' : ''}`;
+    sentence4 = `Minimum lease period: ${period}.`;
+  }
+
+  return [sentence1, sentence2, sentence3, sentence4].filter(Boolean).join(' ').trim();
+}
+
+function ordinal(n: string): string {
+  const v = Number(n);
+  if (Number.isNaN(v)) return n;
+  if (v % 100 >= 11 && v % 100 <= 13) return `${v}th`;
+  const suffix = ['th', 'st', 'nd', 'rd'][v % 10] ?? 'th';
+  return `${v}${v % 10 <= 3 ? suffix : 'th'}`;
 }
 
 const EMPTY_UNIT: UnitFormData = {
@@ -78,7 +236,8 @@ const EMPTY_UNIT: UnitFormData = {
   floor: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', view: '',
   furnishing: 'Unfurnished', amenities: [], rentalPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
-  serviceCharges: '', description: '',
+  serviceCharges: '', minLeaseMonths: '12', noticePeriodDays: '60',
+  rentEscalationPct: '', description: '',
 };
 
 interface Props {
@@ -144,7 +303,16 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) { setForm({ ...EMPTY_UNIT, ...initial }); setErrors({}); }
+    if (open) {
+      const defaults = {
+        ...EMPTY_UNIT,
+        minLeaseMonths:  DEFAULT_MIN_LEASE[propertyCategory] ?? '12',
+        noticePeriodDays: DEFAULT_NOTICE[propertyCategory] ?? '60',
+        ejariFeeFils: propertyCategory === 'residential' ? '220' : '',
+      };
+      setForm({ ...defaults, ...initial });
+      setErrors({});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -156,8 +324,9 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
         if (!isNaN(rent) && rent > 0) {
           next.securityDeposit = String(Math.round(rent * 0.05));
           next.adminFee        = String(Math.round(rent * 0.05));
-          next.ejariFeeFils    = '220';
           next.commission      = String(Math.round(rent * 0.05));
+          // Ejari fee: AED 220 for residential only; 0 for all others
+          next.ejariFeeFils    = propertyCategory === 'residential' ? '220' : '';
         }
       }
       return next;
@@ -192,9 +361,10 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
     finally { setSaving(false); }
   };
 
-  const unitTypes   = unitTypesForCategory(propertyCategory);
-  const showBedBath = ['residential', ''].includes(propertyCategory) ||
-    RESIDENTIAL_UNIT_TYPES.includes(form.unitType);
+  const unitTypes    = unitTypesForCategory(propertyCategory);
+  const showBedBath  = ['residential', ''].includes(propertyCategory) || RESIDENTIAL_UNIT_TYPES.includes(form.unitType);
+  const isResidential = propertyCategory === 'residential' || RESIDENTIAL_UNIT_TYPES.includes(form.unitType);
+  const amenityList  = getAmenitiesForCategory(propertyCategory);
 
   if (!open) return null;
 
@@ -339,9 +509,16 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Ejari Fee</label>
-                <input type="number" min="0" className={INPUT} placeholder="220"
-                  value={form.ejariFeeFils} onChange={e => upd('ejariFeeFils', e.target.value)} />
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">
+                  Ejari Fee {!isResidential && <span className="text-[#9b9890] font-normal">(residential only)</span>}
+                </label>
+                <input type="number" min="0" className={INPUT}
+                  placeholder={isResidential ? '220' : 'N/A'}
+                  disabled={!isResidential}
+                  value={form.ejariFeeFils}
+                  onChange={e => upd('ejariFeeFils', e.target.value)}
+                  style={!isResidential ? { background: '#f4f3ef', color: '#9b9890' } : undefined}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Commission</label>
@@ -356,11 +533,37 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
             </div>
           </div>
 
-          {/* Amenities */}
+          {/* Lease Terms — non-residential gets full section; residential gets notice only */}
+          <div className="rounded-xl border border-[#dbeafe] bg-[#eff6ff] p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#1e40af]">Lease Terms</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Min. Lease (months)</label>
+                <input type="number" min="0" className={INPUT} placeholder="12"
+                  value={form.minLeaseMonths} onChange={e => upd('minLeaseMonths', e.target.value)} />
+                <p className="text-[10px] text-[#6b82b8] mt-0.5">
+                  {propertyCategory === 'venues' ? '0 = per-event' : propertyCategory === 'workspaces' ? '1 = monthly' : '12 = 1 year'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Notice Period (days)</label>
+                <input type="number" min="0" className={INPUT} placeholder="60"
+                  value={form.noticePeriodDays} onChange={e => upd('noticePeriodDays', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Rent Escalation (%/yr)</label>
+                <input type="number" min="0" max="100" step="0.5" className={INPUT} placeholder="e.g. 5"
+                  value={form.rentEscalationPct} onChange={e => upd('rentEscalationPct', e.target.value)} />
+                <p className="text-[10px] text-[#6b82b8] mt-0.5">Leave blank = RERA index</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Amenities — category-filtered */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-2">Amenities</label>
+            <label className="block text-xs font-medium text-[#6b6860] mb-2">Amenities & Facilities</label>
             <div className="flex flex-wrap gap-2">
-              {AMENITIES.map(a => (
+              {amenityList.map(a => (
                 <button
                   key={a} type="button"
                   onClick={() => toggleAmenity(a)}
@@ -379,10 +582,29 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
 
           {/* Description */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Description</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-[#6b6860]">Unit Description</label>
+              <button
+                type="button"
+                onClick={() => upd('description', composeUnitDescription(form, propertyCategory))}
+                disabled={!form.unitType}
+                title={form.unitType ? 'Compose a description from the selected fields' : 'Select a unit type first'}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors',
+                  form.unitType
+                    ? 'bg-[#d8f2e8] text-[#1a7a5a] hover:bg-[#c0e8d6] cursor-pointer'
+                    : 'bg-[#f4f3ef] text-[#9b9890] cursor-not-allowed',
+                )}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+                </svg>
+                {form.description ? 'Re-generate' : 'Auto-generate'}
+              </button>
+            </div>
             <textarea
               className={cn(INPUT, 'min-h-[70px] resize-vertical')}
-              placeholder="Describe this unit for the listing — features, highlights, unique selling points…"
+              placeholder="Describe this unit for the listing — features, highlights, unique selling points… or click Auto-generate above."
               value={form.description}
               onChange={e => upd('description', e.target.value)}
             />

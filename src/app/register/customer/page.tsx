@@ -1,13 +1,10 @@
 import { Suspense } from 'react';
-import { RegisterForm } from "@/components/auth/RegisterForm";
+import { CustomerRegisterForm } from '@/components/auth/CustomerRegisterForm';
 
-export default function RegisterTenantPage() {
+export default function RegisterCustomerPage() {
   return (
     <Suspense>
-      <RegisterForm
-        role="customer"
-        title="Sign up as a Customer"
-      />
+      <CustomerRegisterForm />
     </Suspense>
   );
 }

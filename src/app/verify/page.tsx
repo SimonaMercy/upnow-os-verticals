@@ -46,13 +46,15 @@ function VerifyOtpInner() {
   const [sentTo, setSentTo] = useState<string | null>(maskedPhone);
   const [devOtp, setDevOtp] = useState<string | null>(devOtpFromQuery);
 
-  // Guard logic only applies to registration flow, not login mode
+  // fromRegistration = arrived here from the register form (email/phone in URL, no auth cookie yet)
+  const fromRegistration = !isLoginMode && !!identifierFromQuery;
+
   useEffect(() => {
     if (isLoginMode || loading) return;
-    if (!user) router.replace("/login");
-    else if (user.phoneVerified) router.replace(dashboardPath(user.role));
-    else if (!user.emailVerified) router.replace("/verify-email");
-  }, [isLoginMode, loading, user, router]);
+    // New registrations have no user yet — let them stay and verify
+    if (!user && !fromRegistration) router.replace("/login");
+    else if (user?.phoneVerified) router.replace(dashboardPath(user.role));
+  }, [isLoginMode, loading, user, router, fromRegistration]);
 
   // Auto-send OTP for registration flow when user has phone on file
   useEffect(() => {
@@ -104,8 +106,9 @@ function VerifyOtpInner() {
         router.push(dashboardPath(freshUser?.role ?? res.user?.role ?? "customer"));
       } else {
         const res = await verifyOtp(code);
-        await refresh();
-        router.push(dashboardPath(res.user?.role ?? "customer"));
+        const me = await refresh();
+        const role = me?.role ?? res.user?.role ?? "customer";
+        router.push(role === "customer" ? "/" : dashboardPath(role));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed");
@@ -190,7 +193,7 @@ function VerifyOtpInner() {
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
         {devOtp && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-0.5">Dev — OTP code</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-0.5">Your OTP code</p>
             <p className="text-2xl font-mono font-bold tracking-[0.3em] text-amber-900">{devOtp}</p>
           </div>
         )}

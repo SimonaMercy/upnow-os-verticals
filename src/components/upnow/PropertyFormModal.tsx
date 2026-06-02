@@ -554,9 +554,10 @@ export function StreetSearch({
 // ─── Space categories ─────────────────────────────────────
 export const SPACE_CATEGORIES = [
   { id: 'residential', label: 'Residential', icon: '🏠', desc: 'Apartments, Villas, Townhouses' },
-  { id: 'commercial',  label: 'Commercial',  icon: '🏢', desc: 'Offices, Retail, Warehouses' },
-  { id: 'industrial',  label: 'Industrial',  icon: '🏗️', desc: 'Warehouses, Factories' },
-
+  { id: 'commercial',  label: 'Commercial',  icon: '🏢', desc: 'Offices, Retail, Clinics, Restaurants' },
+  { id: 'industrial',  label: 'Industrial',  icon: '🏗️', desc: 'Warehouses, Cold Storage, Logistics' },
+  { id: 'workspaces',  label: 'Workspaces',  icon: '💼', desc: 'Coworking, Private Offices, Meeting Rooms' },
+  { id: 'venues',      label: 'Venues',      icon: '🎪', desc: 'Event Halls, Wedding Venues, Conference' },
 ];
 
 export interface PropertyFormData {
@@ -743,7 +744,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
         longitude:     r.lng || prev.longitude,
         emirateId:     newEmirateId,
         emirateName,
-        communityId:   r.communityId,
+        communityId:   r.communityId ?? null,
         communityName: '',  // backfilled by cascade after communities load
         googlePlaceId: r.googlePlaceId ?? prev.googlePlaceId,
       }));

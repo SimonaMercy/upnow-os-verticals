@@ -7,8 +7,18 @@ import {
   Clock, CheckCircle2, MessageSquare, User, Calendar,
   FileText, ExternalLink, Loader2, MoreVertical, ArrowRight,
   StickyNote, ShieldAlert, Copy, Check, CreditCard, Plus, Trash2,
-  ClipboardList, BadgeCheck, Printer, Eye,
+  ClipboardList, BadgeCheck, Printer, Eye, ZoomIn,
 } from 'lucide-react';
+import Lightbox from 'yet-another-react-lightbox';
+import Zoom from 'yet-another-react-lightbox/plugins/zoom';
+import Captions from 'yet-another-react-lightbox/plugins/captions';
+import Thumbnails from 'yet-another-react-lightbox/plugins/thumbnails';
+import 'yet-another-react-lightbox/styles.css';
+import 'yet-another-react-lightbox/plugins/captions.css';
+import 'yet-another-react-lightbox/plugins/thumbnails.css';
+import { toast } from 'sonner';
+import { PreferredDayPicker } from '@/components/PreferredDayPicker';
+import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -50,7 +60,7 @@ type LeadStage =
   | 'new' | 'contacted' | 'viewing_scheduled'
   | 'offer_made' | 'applied' | 'approved'
   | 'documents_collection' | 'payment_plan_shared'
-  | 'cheques_submitted' | 'cheques_collected' | 'contract_issued'
+  | 'interested' | 'cheques_submitted' | 'cheques_collected' | 'contract_issued'
   | 'rejected' | 'converted';
 
 const STAGE_LABELS: Record<LeadStage, string> = {
@@ -62,6 +72,7 @@ const STAGE_LABELS: Record<LeadStage, string> = {
   approved:             'Approved',
   documents_collection: 'Docs Collection',
   payment_plan_shared:  'Plan Shared',
+  interested:           'Interested',
   cheques_submitted:    'Cheques Ready',
   cheques_collected:    'Cheques Collected',
   contract_issued:      'Contract Issued',
@@ -78,6 +89,7 @@ const STAGE_PILL: Record<LeadStage, string> = {
   approved:             'bg-[#d1fae5] text-[#065f46]',
   documents_collection: 'bg-[#fff7ed] text-[#c2410c]',
   payment_plan_shared:  'bg-[#f0f9ff] text-[#0369a1]',
+  interested:           'bg-[#d8f2e8] text-[#1f5a3f]',
   cheques_submitted:    'bg-[#fef9c3] text-[#854d0e]',
   cheques_collected:    'bg-[#d8f2e8] text-[#1a7a5a]',
   contract_issued:      'bg-[#d1fae5] text-[#065f46]',
@@ -92,6 +104,7 @@ const TABS: { key: 'all' | LeadStage; label: string }[] = [
   { key: 'viewing_scheduled',    label: 'Viewing' },
   { key: 'documents_collection', label: 'Docs' },
   { key: 'payment_plan_shared',  label: 'Plan Shared' },
+  { key: 'interested',           label: 'Interested' },
   { key: 'cheques_submitted',    label: 'Cheques Ready' },
   { key: 'cheques_collected',    label: 'Collected' },
   { key: 'contract_issued',      label: 'Contract' },
@@ -121,6 +134,15 @@ interface PaymentPlanItem {
   type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
 }
 
+type PaymentMethodKind = 'cheque' | 'bank_transfer' | 'card' | 'cash';
+
+const PAYMENT_METHOD_LABEL: Record<PaymentMethodKind, string> = {
+  cheque:        'Cheque',
+  bank_transfer: 'Bank transfer',
+  card:          'Card',
+  cash:          'Cash',
+};
+
 interface PaymentPlan {
   chequeCount: number;
   totalAmountFils: number;
@@ -136,17 +158,33 @@ interface PaymentPlan {
   securityDepositFils: number;
   items: PaymentPlanItem[];
   notes?: string;
+  rentalIndexReportUrl?: string;
+  chequesPayableTo?: string;
   issuedAt: string;
 }
 
 interface LeadChequeRecord {
   id: number;
-  chequeSerial: string;
+  /** Generic payment reference. For cheques this is the serial; for bank
+   *  transfers, the transaction id; for cards/cash, any tracking string.
+   *  Nullable for customer-uploaded rows that haven't been tagged yet. */
+  chequeSerial: string | null;
   bankName: string;
   amountFils: number;
   dueDate: string;
   status: string;
   notes?: string | null;
+  imageUrl?: string | null;
+  payeeName?: string | null;
+  accountNumber?: string | null;
+  ocrStatus?: 'pending' | 'done' | 'failed' | null;
+  isCustomerUpload?: boolean;
+  /** Phase 5b — set by the RP when they verify the customer's reference.
+   *  Null until the landlord taps one of the method pills on review. */
+  paymentMethod?: PaymentMethodKind | null;
+  /** Phase 5b — which PaymentPlan item this upload settles. Null until
+   *  the RP picks one from the dropdown on the customer-uploaded row. */
+  planItemIndex?: number | null;
 }
 
 interface ApiLead {
@@ -167,6 +205,10 @@ interface ApiLead {
     id: number; unitNumber: string; unitName: string | null;
     unitType: string | null;
     rentalPrice: number | null;
+    securityDeposit: number | null;
+    adminFee: number | null;
+    ejariFeeFils: number | null;
+    commission: number | null;
     property?: { id: number; buildingName: string };
   } | null;
   docStats: { total: number; pending: number } | null;
@@ -207,7 +249,7 @@ function getPendingViewing(lead: ApiLead) {
 type PrimaryAction =
   | { kind: 'stage'; label: string; target: LeadStage; cls: string }
   | { kind: 'mark_visited'; label: string; cls: string }
-  | { kind: 'issue_plan'; label: string; cls: string }
+  | { kind: 'approve_docs'; label: string; cls: string }
   | { kind: 'record_cheques'; label: string; cls: string }
   | { kind: 'confirm_collected'; label: string; cls: string }
   | { kind: 'convert'; label: string; cls: string };
@@ -237,14 +279,21 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
       return lead.unit?.id && lead.convertedTenant?.id
         ? { kind: 'convert', label: 'Convert', cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' }
         : null;
-    // New pipeline stages
+    // New pipeline stages — `interested` and `documents_collection` both
+    // sit at "customer has uploaded their docs and is waiting for RP to
+    // confirm". The payment plan was already auto-generated when the
+    // customer expressed interest, so RP just needs a one-click "looks
+    // good" action — no modal, no re-entry of plan fields. Approving
+    // flips the lead to `payment_plan_shared` and unlocks Step 3 on the
+    // customer side (cheque upload / ready-to-collect).
     case 'documents_collection':
-      return { kind: 'issue_plan', label: 'Issue Payment Plan',
-        cls: 'bg-[#f0f9ff] text-[#0369a1] hover:bg-[#e0f2fe]' };
+    case 'interested':
+      return { kind: 'approve_docs', label: 'Approve Documents',
+        cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' };
     case 'payment_plan_shared':
-      return null; // waiting for tenant to confirm cheques ready
+      return null; // waiting for customer to upload cheques
     case 'cheques_submitted':
-      return { kind: 'record_cheques', label: 'Record Cheques',
+      return { kind: 'record_cheques', label: 'Payment Review & Approve',
         cls: 'bg-[#fef9c3] text-[#854d0e] hover:bg-[#fef08a]' };
     case 'cheques_collected':
       return lead.unit?.id && lead.convertedTenant?.id
@@ -272,21 +321,38 @@ const CHEQUE_STATUS_STYLE: Record<ChequeRowStatus, string> = {
   cancelled: 'bg-[#f4f3ef] text-[#6b6860] border-[#d6d4ce]',
 };
 
+/** Increment the trailing numeric portion of a cheque serial, e.g. "CK001234" → "CK001235" */
+function nextSerial(base: string, offset = 1): string {
+  const match = base.match(/^(.*?)(\d+)$/);
+  if (!match) return base;
+  const [, prefix, digits] = match;
+  const next = (parseInt(digits, 10) + offset).toString().padStart(digits.length, '0');
+  return prefix + next;
+}
+
 function ChequeRow({
   seq, description, amountFils, dueDate, recorded,
-  onRecord, onDelete, onStatusChange,
+  suggestedSerial, onRecord, onDelete, onStatusChange, onSerialChange,
 }: {
   seq: number;
   description: string;
   amountFils: number;
   dueDate: string;
   recorded?: LeadChequeRecord;
+  suggestedSerial?: string;
   onRecord: (serial: string) => void | Promise<void>;
   onDelete: () => void | Promise<void>;
   onStatusChange: (status: ChequeRowStatus) => void | Promise<void>;
+  onSerialChange?: (serial: string) => void;
 }) {
-  const [serial, setSerial] = useState('');
+  const [serial, setSerial] = useState(suggestedSerial ?? '');
   const [saving, setSaving] = useState(false);
+
+  // Apply parent suggestion only when the field is still empty
+  useEffect(() => {
+    if (suggestedSerial && !serial) setSerial(suggestedSerial);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestedSerial]);
 
   if (recorded) {
     const status = (recorded.status as ChequeRowStatus) || 'pending';
@@ -324,7 +390,7 @@ function ChequeRow({
       <input
         type="text"
         value={serial}
-        onChange={e => setSerial(e.target.value)}
+        onChange={e => { setSerial(e.target.value); onSerialChange?.(e.target.value); }}
         placeholder="Cheque #"
         className="w-40 shrink-0 text-[10px] border border-[#fde68a] rounded px-2 py-1 focus:outline-none focus:border-[#f59e0b] bg-white"
       />
@@ -341,7 +407,7 @@ function ChequeRow({
 
 /* ─── Lead Row ────────────────────────────────────────────────────────────── */
 function LeadRow({
-  lead, onMoveStage, moving, onConvert, setLeads, feeRules,
+  lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays,
 }: {
   lead: ApiLead;
   onMoveStage: (id: number, s: LeadStage) => void;
@@ -349,8 +415,9 @@ function LeadRow({
   onConvert: (lead: ApiLead) => void;
   setLeads: React.Dispatch<React.SetStateAction<ApiLead[]>>;
   feeRules: FeeRulesMap | null;
+  preferredStartDays: number[];
 }) {
-  const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'cheques'>('none');
+  const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
   const [visitRemarks, setVisitRemarks] = useState('');
   const [markingVisit, setMarkingVisit] = useState(false);
   const [visitError, setVisitError]   = useState<string | null>(null);
@@ -364,7 +431,9 @@ function LeadRow({
     return at(b) - at(a);
   })[0] ?? null;
   const _defaultInstallments = _existingPlan?.installmentCount ?? _latestViewing?.preferredChequeCount ?? 4;
-  const _startDateInit = _existingPlan?.items?.[0]?.dueDate ?? _latestViewing?.desiredMoveIn?.slice(0, 10) ?? '';
+  const _startDateInit = _existingPlan?.items?.find(it => it.type === 'first_bundle')?.dueDate
+    ?? _existingPlan?.items?.[0]?.dueDate
+    ?? _latestViewing?.desiredMoveIn?.slice(0, 10) ?? '';
   const [planRentAed,         setPlanRentAed]         = useState<string>(_existingPlan ? String(_existingPlan.rentFils / 100) : _unitRentAed);
   const [planInstallmentCount, setPlanInstallmentCount] = useState<number>(_defaultInstallments);
   const [planStartDate,       setPlanStartDate]       = useState<string>(_startDateInit);
@@ -391,6 +460,7 @@ function LeadRow({
       : Array.from({ length: Math.max(0, _defaultInstallments - 1) }, (_, i) => _installmentDatesInit[i] ?? ''),
   );
   const [planNotes, setPlanNotes] = useState(_existingPlan?.notes ?? '');
+  const [planChequesPayableTo, setPlanChequesPayableTo] = useState(_existingPlan?.chequesPayableTo ?? '');
   // Hydrate Extra Installments from the existing plan (items typed 'extra_installment',
   // or legacy plans where extras live as type='installment' beyond installmentCount+1).
   const _extrasFromPlan: { description: string; amountAed: string; dueDate: string }[] = (() => {
@@ -414,15 +484,33 @@ function LeadRow({
   );
   const [planSaving, setPlanSaving] = useState(false);
   const [planError, setPlanError]   = useState<string | null>(null);
+  const [rentalIndexUrl, setRentalIndexUrl]         = useState<string>(_existingPlan?.rentalIndexReportUrl ?? '');
+  const [rentalIndexUploading, setRentalIndexUploading] = useState(false);
+  const [rentalIndexFileName, setRentalIndexFileName]   = useState<string>('');
+  const [rentalIndexStatus, setRentalIndexStatus]       = useState<{ ok: boolean; msg: string } | null>(null);
 
   // Cheque collection state
   const [cheques, setCheques] = useState<LeadChequeRecord[]>([]);
   const [chequesLoaded, setChequesLoaded] = useState(false);
   const [chequesLoading, setChequesLoading] = useState(false);
+  // Auto-fill suggestions: index-in-sortedItems → suggested serial (propagated when user types in any row)
+  const [chequeSuggestions, setChequeSuggestions] = useState<Record<number, string>>({});
   const [chequeError, setChequeError]   = useState<string | null>(null);
   const [confirmingCollection, setConfirmingCollection] = useState(false);
+  const [approvingDocs, setApprovingDocs] = useState(false);
+  const [approveDocsError, setApproveDocsError] = useState<string | null>(null);
   const [tenantDocs, setTenantDocs]   = useState<TenantDoc[] | null>(null);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [viewAllOpen, setViewAllOpen]   = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  // Phase 5b — in-page preview for the customer's payment references.
+  // Stays inside the leads page (no new tab); handles images + PDFs.
+  const [chequePreview, setChequePreview] = useState<{ url: string; label: string } | null>(null);
+  const [docActioning, setDocActioning]     = useState<number | null>(null);
+  const [docActionError, setDocActionError] = useState<string | null>(null);
+  const [rejectingDoc, setRejectingDoc]     = useState<{ id: number; label: string } | null>(null);
+  const [rejectReason, setRejectReason]     = useState('');
   const [docsNoteItems, setDocsNoteItems] = useState<string[]>(() => {
     try { const p = JSON.parse(lead.additionalDocsNote ?? ''); return Array.isArray(p) ? p : []; }
     catch { return []; }
@@ -438,6 +526,28 @@ function LeadRow({
   const [guardContact, setGuardContact] = useState('');
   const [guardMsg, setGuardMsg]       = useState('');
   const [copied, setCopied]           = useState(false);
+
+  // Sync rentalIndexUrl when the plan's report URL changes (e.g. after a within-session save updates lead.paymentPlan)
+  const _existingReportUrl = _existingPlan?.rentalIndexReportUrl;
+  useEffect(() => {
+    if (_existingReportUrl && !rentalIndexUrl) setRentalIndexUrl(_existingReportUrl);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_existingReportUrl]);
+
+  // Auto-fill "Cheques payable to" from RP profile when the plan form opens
+  useEffect(() => {
+    if (panel !== 'plan' || planChequesPayableTo) return;
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { bankAccountName?: string | null; companyName?: string | null; user?: { name?: string | null } } } | null) => {
+        if (!data?.profile) return;
+        const p = data.profile;
+        const name = p.bankAccountName?.trim() || p.companyName?.trim() || p.user?.name?.trim() || '';
+        if (name) setPlanChequesPayableTo(name);
+      })
+      .catch(() => {/* silent — field stays blank, backend will fill from profile on submit */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -463,7 +573,7 @@ function LeadRow({
   const canReject   = !['approved', 'rejected', 'converted'].includes(lead.stage);
   const canDocs     = !!lead.convertedTenant?.id &&
     (lead.viewings?.some(v => ['completed', 'no_show'].includes(v.status)) ?? false);
-  const canCheques  = ['payment_plan_shared', 'cheques_submitted', 'cheques_collected'].includes(lead.stage) && !!lead.paymentPlan;
+  const canCheques  = ['payment_plan_shared', 'cheques_submitted', 'cheques_collected', 'interested'].includes(lead.stage);
   const canEditPlan = lead.stage === 'payment_plan_shared' && !!lead.paymentPlan;
 
   // Timezone-safe month shift on a YYYY-MM-DD string — Date.toISOString() drops a day in UTC+ zones.
@@ -547,7 +657,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
 </style></head>
 <body>
 <div class="btnrow noprint"><button class="btn" onclick="window.print()">Print / Save as PDF</button><button class="btn alt" onclick="window.close()">Close</button></div>
-<h1>Payment Plan — Tenant Preview</h1>
+<h1>Payment Plan — Customer Preview</h1>
 <p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'}) : '—'}</p>
 <h2>Contract &amp; Cheque Details</h2>
 <div class="grid">
@@ -571,7 +681,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
 <tfoot><tr><td colspan="2">Total</td><td style="text-align:right">${aed(plan.totalAmountFils)}</td><td></td></tr></tfoot>
 </table>
 ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.notes.replace(/</g, '&lt;')}</p>` : ''}
-<div class="footer">UpNow · Tenant preview · ${new Date().toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'})}</div>
+<div class="footer">UpNow · Customer preview · ${new Date().toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'})}</div>
 </body></html>`;
     const w = window.open('', '_blank', 'width=820,height=900');
     if (!w) { alert('Please allow pop-ups to preview the plan.'); return; }
@@ -624,6 +734,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           installmentDueDates: planInstallmentDates,
           notes: planNotes.trim() || undefined,
           extraItems: extraItemsPayload.length ? extraItemsPayload : undefined,
+          rentalIndexReportUrl: rentalIndexUrl || undefined,
+          chequesPayableTo: planChequesPayableTo.trim() || undefined,
           ...(planInstallmentCount === 1 && planDiscountType !== 'none' && planDiscountValue && parseFloat(planDiscountValue) > 0 && {
             discountType: planDiscountType,
             ...(planDiscountType === 'percent' ? { discountPercent: parseFloat(planDiscountValue) } : { discountFils: Math.round(parseFloat(planDiscountValue) * 100) }),
@@ -646,6 +758,20 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (res.ok) setCheques(prev => prev.filter(c => c.id !== chequeId));
   }
 
+  async function handleApproveDocs() {
+    setApprovingDocs(true); setApproveDocsError(null);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/approve-documents`, {
+        method: 'PATCH', credentials: 'include',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setApproveDocsError(body.message ?? 'Failed to approve'); return; }
+      setLeads(prev => prev.map(l =>
+        l.id !== lead.id ? l : { ...l, stage: 'payment_plan_shared' as LeadStage },
+      ));
+    } finally { setApprovingDocs(false); }
+  }
+
   async function handleConfirmCollected() {
     setConfirmingCollection(true); setChequeError(null);
     try {
@@ -661,7 +787,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     } finally { setConfirmingCollection(false); }
   }
 
-  function openPanel(p: 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'cheques') {
+  function openPanel(p: 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques') {
     setPanel(prev => prev === p ? 'none' : p);
     setMenuOpen(false);
     if (p === 'plan' && !lead.paymentPlan) {
@@ -669,20 +795,28 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       // (planStartDate is initialised from the tenant's desiredMoveIn). Falls back to a blank resize when no date.
       if (planStartDate) applyStartDate(planStartDate, planInstallmentCount);
       else resizeInstallmentDates(planInstallmentCount);
-      // Prefill fees from the RP's saved fee rules
-      if (feeRules) {
+      // Prefill fees: unit-specific values take priority over global fee rules
+      const u = lead.unit;
+      const hasUnitAdmin   = u?.adminFee    != null;
+      const hasUnitEjari   = u?.ejariFeeFils != null;
+      const hasUnitComm    = u?.commission   != null;
+      const hasUnitDeposit = u?.securityDeposit != null;
+
+      if (hasUnitAdmin)   setPlanAdminFeeAed(String(Number(u!.adminFee)));
+      if (hasUnitEjari)   setPlanEjariAed(String(Number(u!.ejariFeeFils)));
+      if (hasUnitComm)    setPlanCommissionAed(String(Number(u!.commission)));
+      if (hasUnitDeposit) setPlanDepositAed(String(Number(u!.securityDeposit)));
+
+      // Fill any remaining gaps from global fee rules
+      if (feeRules && (!hasUnitAdmin || !hasUnitEjari || !hasUnitComm || !hasUnitDeposit)) {
         const cat   = unitSpaceCategory(lead.unit?.unitType);
         const rules = feeRules[cat] ?? feeRules['residential'] ?? [];
         const rent  = parseFloat(planRentAed) || 0;
         const find  = (ft: string) => rules.find(r => r.feeType === ft);
-        const adminRule  = find('admin_fee');
-        const ejariRule  = find('ejari_fee');
-        const commRule   = find('commission');
-        const depRule    = find('security_deposit');
-        if (adminRule)  setPlanAdminFeeAed(feeToAed(adminRule, rent));
-        if (ejariRule)  setPlanEjariAed(feeToAed(ejariRule, rent));
-        if (commRule)   setPlanCommissionAed(feeToAed(commRule, rent));
-        if (depRule)    setPlanDepositAed(feeToAed(depRule, rent));
+        if (!hasUnitAdmin)   { const r = find('admin_fee');        if (r) setPlanAdminFeeAed(feeToAed(r, rent)); }
+        if (!hasUnitEjari)   { const r = find('ejari_fee');        if (r) setPlanEjariAed(feeToAed(r, rent)); }
+        if (!hasUnitComm)    { const r = find('commission');       if (r) setPlanCommissionAed(feeToAed(r, rent)); }
+        if (!hasUnitDeposit) { const r = find('security_deposit'); if (r) setPlanDepositAed(feeToAed(r, rent)); }
       }
     }
     if (p === 'cheques') loadCheques();
@@ -690,7 +824,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       const unitStr = unitLabel ?? 'the unit';
       const bldgStr = building ? `, ${building}` : '';
       const timeStr = fmtDateTime(viewing.scheduledAt);
-      setGuardMsg(`Hi,\n\nPlease be advised that a tenant viewing has been scheduled at ${unitStr}${bldgStr} on ${timeStr}.\n\nKindly ensure you are available at the building entrance during this time to assist the tenant with access to the property.\n\nThank you.`);
+      setGuardMsg(`Hi,\n\nPlease be advised that a customer viewing has been scheduled at ${unitStr}${bldgStr} on ${timeStr}.\n\nKindly ensure you are available at the building entrance during this time to assist the customer with access to the property.\n\nThank you.`);
     }
   }
 
@@ -728,6 +862,28 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel]);
 
+  async function handleApproveDoc(docId: number) {
+    setDocActioning(docId); setDocActionError(null);
+    try {
+      const res = await fetch(`/api/documents/${docId}/verify`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) { setDocActionError('Failed to approve'); return; }
+      setTenantDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'processed' } : d) : null);
+    } finally { setDocActioning(null); }
+  }
+
+  async function handleRejectDoc(docId: number, reason?: string) {
+    setDocActioning(docId); setDocActionError(null);
+    try {
+      const res = await fetch(`/api/documents/${docId}/reject`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+      });
+      if (!res.ok) { setDocActionError('Failed to reject'); return; }
+      setTenantDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'rejected' } : d) : null);
+    } finally { setDocActioning(null); }
+  }
+
   async function handleMarkVisited() {
     if (!viewing) return;
     setMarkingVisit(true); setVisitError(null);
@@ -756,7 +912,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (primary.kind === 'stage') { onMoveStage(lead.id, primary.target); return; }
     if (primary.kind === 'convert') { onConvert(lead); return; }
     if (primary.kind === 'mark_visited') { openPanel('visited'); return; }
-    if (primary.kind === 'issue_plan') { openPanel('plan'); return; }
+    if (primary.kind === 'approve_docs') { handleApproveDocs(); return; }
     if (primary.kind === 'record_cheques') { openPanel('cheques'); return; }
     if (primary.kind === 'confirm_collected') { handleConfirmCollected(); return; }
   }
@@ -862,12 +1018,13 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
           {primary && (
             <button
-              disabled={moving}
+              disabled={moving || approvingDocs}
               onClick={handlePrimary}
+              title={approveDocsError ?? undefined}
               className={`flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap ${primary.cls}`}
             >
               {primary.kind === 'convert' ? <ArrowRight size={12} /> : <CheckCircle2 size={12} />}
-              {primary.label}
+              {primary.kind === 'approve_docs' && approvingDocs ? 'Approving…' : primary.label}
             </button>
           )}
 
@@ -927,6 +1084,18 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                     </button>
                   </>
                 )}
+                {canCheques && (
+                  <>
+                    <div className="my-1 border-t border-[#f0ede8]" />
+                    <button
+                      onClick={() => openPanel('plan_summary')}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                    >
+                      <ClipboardList size={13} className="text-[#9b9890]" />
+                      {panel === 'plan_summary' ? 'Hide Plan' : 'View Payment Plan'}
+                    </button>
+                  </>
+                )}
                 {canEditPlan && (
                   <>
                     <div className="my-1 border-t border-[#f0ede8]" />
@@ -947,7 +1116,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
                     >
                       <CreditCard size={13} className="text-[#9b9890]" />
-                      {panel === 'cheques' ? 'Hide Cheques' : 'Add / Record Cheques'}
+                      {panel === 'cheques' ? 'Hide Payments' : 'Record Payments'}
                     </button>
                   </>
                 )}
@@ -1038,42 +1207,139 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         <div className="border-t border-[#e8e6e0] bg-[#fafaf8] px-5 py-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-semibold text-[#3d3b35] flex items-center gap-1.5">
-              <FileText size={12} className="text-[#2e9f82]" /> Tenant Documents
+              <FileText size={12} className="text-[#2e9f82]" /> Customer Documents
             </p>
-            <button
-              onClick={() => setPanel('none')}
-              className="text-xs font-medium text-[#9b9890] hover:text-[#3d3b35] transition-colors cursor-pointer"
-            >
-              Hide
-            </button>
+            <div className="flex items-center gap-2">
+              {tenantDocs && tenantDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 && (
+                <button
+                  onClick={() => setViewAllOpen(true)}
+                  className="flex items-center gap-1 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-2.5 py-1 hover:bg-[#f0faf6] transition-colors cursor-pointer"
+                >
+                  <Printer size={11} /> View All
+                </button>
+              )}
+              <button
+                onClick={() => setPanel('none')}
+                className="text-xs font-medium text-[#9b9890] hover:text-[#3d3b35] transition-colors cursor-pointer"
+              >
+                Hide
+              </button>
+            </div>
           </div>
+          {docActionError && <p className="text-[10px] text-[#b91c1c] mb-2">{docActionError}</p>}
           {docsLoading ? (
             <p className="flex items-center gap-2 text-xs text-[#9b9890]">
               <Loader2 size={12} className="animate-spin" /> Loading…
             </p>
-          ) : !tenantDocs || tenantDocs.filter(d => d.documentKey !== 'profile_picture').length === 0 ? (
-            <p className="text-xs text-[#9b9890]">No documents uploaded yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {tenantDocs.filter(d => d.documentKey !== 'profile_picture').map(doc => (
-                <div key={doc.id} className="flex items-center gap-3 bg-white rounded-lg border border-[#e8e6e0] px-3 py-2.5">
-                  <FileText size={13} className="text-[#2e9f82] shrink-0" />
+          ) : (() => {
+            const KYC_1 = new Set(['emirates_id', 'passport', 'uae_visa']);
+            const RENTAL = new Set(['employment_letter', 'bank_statement', 'marriage_certificate', 'rental_history', 'credit_report', 'utility_clearance', 'trade_license', 'tax_registration', 'moa', 'business_license', 'utility_proof_of_payment']);
+            const docs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
+
+            const occ1Docs    = docs.filter(d => KYC_1.has(d.documentKey));
+            const rentalDocs  = docs.filter(d => RENTAL.has(d.documentKey));
+            const extraOccMap = new Map<number, TenantDoc[]>();
+            const otherDocs: TenantDoc[]  = [];
+            for (const d of docs) {
+              const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+              if (m) {
+                const n = parseInt(m[2]);
+                if (!extraOccMap.has(n)) extraOccMap.set(n, []);
+                extraOccMap.get(n)!.push(d);
+              } else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) {
+                otherDocs.push(d);
+              }
+            }
+            const extraNs = [...extraOccMap.keys()].sort((a, b) => a - b);
+            const hasAny  = occ1Docs.length > 0 || extraNs.length > 0 || rentalDocs.length > 0 || otherDocs.length > 0;
+
+            function DocRow({ doc }: { doc: TenantDoc }) {
+              const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              const isPending    = ['pending', 'attached'].includes(doc.status);
+              const isApproved   = doc.status === 'processed';
+              const isRejected   = doc.status === 'rejected';
+              const isActioning  = docActioning === doc.id;
+              return (
+                <div className="flex items-center gap-2.5 bg-white rounded-lg border border-[#e8e6e0] px-3 py-2">
+                  <FileText size={12} className="text-[#2e9f82] shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-[#1a1916] truncate">
-                      {doc.displayName ?? doc.documentKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                    <p className="text-[11px] font-semibold text-[#1a1916] truncate">{label}</p>
+                    <p className={`text-[10px] capitalize ${isApproved ? 'text-[#16a34a]' : isRejected ? 'text-[#b91c1c]' : 'text-[#9b9890]'}`}>
+                      {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Uploaded'}
                     </p>
-                    <p className="text-[10px] text-[#9b9890] capitalize">{doc.status}</p>
                   </div>
-                  <a
-                    href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline"
-                  >
+                  <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline">
                     View <ExternalLink size={10} />
                   </a>
+                  {isPending && (
+                    <>
+                      <button disabled={!!isActioning} onClick={() => handleApproveDoc(doc.id)}
+                        className="shrink-0 flex items-center gap-0.5 text-[10px] font-semibold text-[#065f46] bg-[#d1fae5] hover:bg-[#a7f3d0] disabled:opacity-50 rounded px-2 py-0.5 transition-colors cursor-pointer">
+                        {isActioning ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />} Approve
+                      </button>
+                      <button disabled={!!isActioning} onClick={() => { setRejectingDoc({ id: doc.id, label }); setRejectReason(''); }}
+                        className="shrink-0 flex items-center gap-0.5 text-[10px] font-semibold text-[#b91c1c] bg-[#fee2e2] hover:bg-[#fecaca] disabled:opacity-50 rounded px-2 py-0.5 transition-colors cursor-pointer">
+                        <X size={9} /> Reject
+                      </button>
+                    </>
+                  )}
+                  {isApproved && <span className="shrink-0 text-[9px] font-bold text-[#16a34a] bg-[#dcfce7] rounded px-1.5 py-0.5">✓</span>}
+                  {isRejected && <span className="shrink-0 text-[9px] font-bold text-[#b91c1c] bg-[#fee2e2] rounded px-1.5 py-0.5">✗</span>}
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            }
+
+            if (!hasAny) return <p className="text-xs text-[#9b9890]">No documents uploaded yet.</p>;
+
+            return (
+              <div className="space-y-3">
+                {/* ── Per-occupant identity docs ── */}
+                <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
+                  {/* Occupant 1 */}
+                  <div className={extraNs.length > 0 ? 'border-b border-[#e8e6e0]' : ''}>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] px-3 pt-2 pb-1">Occupant 1</p>
+                    <div className="px-3 pb-2.5 space-y-1.5">
+                      {occ1Docs.length > 0
+                        ? occ1Docs.map(doc => <DocRow key={doc.id} doc={doc} />)
+                        : <p className="text-[10px] text-[#9b9890]">No identity documents uploaded yet.</p>}
+                    </div>
+                  </div>
+                  {/* Occupants 2+ */}
+                  {extraNs.map(n => (
+                    <div key={n} className="border-t border-[#e8e6e0]">
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] px-3 pt-2 pb-1 flex items-center justify-between">
+                        Occupant {n} <span className="text-[8px] font-normal normal-case text-[#c8c6c0]">optional</span>
+                      </p>
+                      <div className="px-3 pb-2.5 space-y-1.5">
+                        {extraOccMap.get(n)!.map(doc => <DocRow key={doc.id} doc={doc} />)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Rental docs ── */}
+                {rentalDocs.length > 0 && (
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">Rental Documents</p>
+                    <div className="space-y-1.5">
+                      {rentalDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Other docs ── */}
+                {otherDocs.length > 0 && (
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">Other</p>
+                    <div className="space-y-1.5">
+                      {otherDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* ── Additional docs request ── */}
           <div className="mt-4 pt-4 border-t border-[#e8e6e0]">
@@ -1081,7 +1347,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               Request Additional Documents
             </p>
             <p className="text-[10px] text-[#9b9890] mb-3">
-              Each document appears as an individual upload slot in the tenant's journey.
+              Each document appears as an individual upload slot in the customer's journey.
             </p>
 
             {/* Existing items */}
@@ -1184,7 +1450,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-start gap-2 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg px-3 py-2.5">
                 <CreditCard size={12} className="text-[#16a34a] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] text-[#15803d] uppercase font-semibold tracking-wide mb-1">Tenant Requested</p>
+                  <p className="text-[10px] text-[#15803d] uppercase font-semibold tracking-wide mb-1">Customer Requested</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                     {anyViewing.desiredMoveIn && (
                       <p className="text-xs font-semibold text-[#1a1916]">
@@ -1209,7 +1475,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-start gap-2">
                 <MessageSquare size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Tenant Notes & Occupancy</p>
+                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Customer Notes & Occupancy</p>
                   <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">{anyViewing.notes}</p>
                 </div>
               </div>
@@ -1242,7 +1508,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-start gap-2">
                 <User size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Tenant Contact</p>
+                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Customer Contact</p>
                   <div className="flex flex-wrap gap-3">
                     {email && (
                       <a href={`mailto:${email}`} className="flex items-center gap-1 text-xs text-[#2e9f82] hover:underline">
@@ -1334,7 +1600,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-center gap-2 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg px-3 py-2 mb-4">
                 <BadgeCheck size={13} className="text-[#16a34a] shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-semibold text-[#15803d] mb-0.5">Tenant Requested</p>
+                  <p className="text-[10px] font-semibold text-[#15803d] mb-0.5">Customer Requested</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                     {_latestViewing.desiredMoveIn && (
                       <span className="text-[10px] text-[#1a1916]">
@@ -1392,15 +1658,11 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
                   Contract Start Date
                 </label>
-                <input
-                  type="date"
+                <PreferredDayPicker
                   value={planStartDate}
-                  onChange={e => {
-                    const d = e.target.value;
-                    setPlanStartDate(d);
-                    if (d) applyStartDate(d, planInstallmentCount);
-                  }}
-                  className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
+                  preferredDays={preferredStartDays}
+                  onChange={d => { setPlanStartDate(d); if (d) applyStartDate(d, planInstallmentCount); }}
+                  placeholder="Pick start date"
                 />
                 {planStartDate && (
                   <p className="text-[9px] text-[#0369a1] mt-0.5">Cheque dates auto-generated from start date</p>
@@ -1570,6 +1832,20 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             </div>
 
             <div className="mb-3">
+              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
+                Cheques payable to <span className="font-normal normal-case text-[#9b9890]">(name customer writes on cheques)</span>
+              </label>
+              <input
+                type="text"
+                value={planChequesPayableTo}
+                onChange={e => setPlanChequesPayableTo(e.target.value)}
+                placeholder="e.g. ABC Real Estate LLC"
+                className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
+              />
+              <p className="mt-1 text-[10px] text-[#9b9890]">Auto-filled from your profile. Edit if you need a different name on the cheques.</p>
+            </div>
+
+            <div className="mb-3">
               <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">Notes (optional)</label>
               <input
                 type="text"
@@ -1578,6 +1854,80 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 placeholder="e.g. 4 quarterly cheques"
                 className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
               />
+            </div>
+
+            {/* ── Rental Index Report attachment ── */}
+            <div className="mb-3">
+              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
+                Rental Index Report <span className="font-normal normal-case text-[#9b9890]">(optional — visible to customer)</span>
+              </label>
+              {rentalIndexUrl ? (
+                <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#2e9f82] rounded-lg px-3 py-2">
+                  <FileText size={13} className="text-[#2e9f82] shrink-0" />
+                  <span className="flex-1 text-[11px] font-medium text-[#1a1916] truncate">
+                    {rentalIndexFileName || 'Rental Index Report'}
+                  </span>
+                  <a href={rentalIndexUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] text-[#2e9f82] hover:underline shrink-0 flex items-center gap-0.5">
+                    View <ExternalLink size={9} />
+                  </a>
+                  <button type="button" onClick={() => { setRentalIndexUrl(''); setRentalIndexFileName(''); setRentalIndexStatus(null); }}
+                    className="text-[#9b9890] hover:text-[#b91c1c] transition-colors cursor-pointer shrink-0">
+                    <X size={13} />
+                  </button>
+                </div>
+              ) : (
+                <label className={`flex items-center gap-2 border border-dashed border-[#bae6fd] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f0f9ff] transition-colors ${rentalIndexUploading ? 'opacity-60 pointer-events-none' : ''}`}>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setRentalIndexUploading(true);
+                      try {
+                        const urlRes = await fetch('/api/documents/upload-url', {
+                          method: 'POST', credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            ownerType: 'rental_provider', ownerId: lead.unit?.id ?? lead.id,
+                            documentKey: 'rental_index_report', mimeType: file.type,
+                            originalName: file.name,
+                          }),
+                        });
+                        if (!urlRes.ok) {
+                          const errBody = await urlRes.json().catch(() => ({})) as { message?: string };
+                          const msg = `Upload failed — ${errBody.message ?? urlRes.status}`;
+                          setRentalIndexStatus({ ok: false, msg });
+                          toast.error(msg);
+                          return;
+                        }
+                        const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+                        // Normalise to a relative path so the PUT stays same-origin (fixes 127.0.0.1 vs localhost mismatch)
+                        const safeUploadUrl = (() => {
+                          try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; }
+                          catch { return uploadUrl; }
+                        })();
+                        let putRes: Response;
+                        try { putRes = await fetch(safeUploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } }); }
+                        catch { setRentalIndexStatus({ ok: false, msg: 'Upload failed — network error' }); toast.error('Upload failed — network error'); return; }
+                        if (!putRes.ok) { setRentalIndexStatus({ ok: false, msg: `Upload failed — server error ${putRes.status}` }); toast.error(`Upload failed — server error ${putRes.status}`); return; }
+                        setRentalIndexUrl(fileUrl);
+                        setRentalIndexFileName(file.name);
+                        setRentalIndexStatus({ ok: true, msg: `"${file.name}" uploaded successfully` });
+                        toast.success(`Rental Index Report uploaded — "${file.name}"`);
+                      } finally { setRentalIndexUploading(false); e.target.value = ''; }
+                    }}
+                  />
+                  {rentalIndexUploading
+                    ? <><Loader2 size={13} className="animate-spin text-[#0ea5e9]" /><span className="text-[11px] text-[#0ea5e9]">Uploading…</span></>
+                    : <><FileText size={13} className="text-[#9b9890]" /><span className="text-[11px] text-[#9b9890]">Attach PDF or image</span></>}
+                </label>
+              )}
+              {rentalIndexStatus && (
+                <p className={`mt-1.5 text-[10px] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 ${rentalIndexStatus.ok ? 'bg-[#f0faf6] text-[#16a34a] border border-[#bbf7d0]' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                  {rentalIndexStatus.ok ? <CheckCircle2 size={10} /> : <X size={10} />}
+                  {rentalIndexStatus.msg}
+                </p>
+              )}
             </div>
 
             {planError && (
@@ -1603,7 +1953,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       })()}
 
       {/* ── Payment Plan summary ── */}
-      {['payment_plan_shared','cheques_submitted','cheques_collected'].includes(lead.stage) && lead.paymentPlan && panel !== 'plan' && (() => {
+      {panel === 'plan_summary' && lead.paymentPlan && (() => {
         const plan = lead.paymentPlan;
         const sorted = plan.items.slice().sort((a, b) => {
           if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
@@ -1615,11 +1965,11 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-semibold text-[#0369a1] flex items-center gap-1.5">
                 <ClipboardList size={10} />
-                {lead.stage === 'payment_plan_shared' ? 'Payment Plan Shared — waiting for tenant' : 'Payment Plan'}
+                {lead.stage === 'payment_plan_shared' ? 'Payment Plan Shared — waiting for customer' : 'Payment Plan'}
               </p>
               <div className="flex items-center gap-3">
                 <button onClick={handlePreviewPlan} className="text-[10px] text-[#0369a1] hover:text-[#0284c7] font-semibold flex items-center gap-1 cursor-pointer">
-                  <Eye size={10} /> Preview as tenant
+                  <Eye size={10} /> Preview as customer
                 </button>
                 <button onClick={handlePreviewPlan} className="text-[10px] text-[#0369a1] hover:text-[#0284c7] font-semibold flex items-center gap-1 cursor-pointer">
                   <Printer size={10} /> Print / Download
@@ -1643,20 +1993,32 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               {plan.adminFeeFils > 0 && <span>Admin Fee: <b className="text-[#1a1916]">AED {(plan.adminFeeFils / 100).toLocaleString('en-AE')}</b></span>}
               {plan.ejariFils > 0 && <span>Ejari Fee: <b className="text-[#1a1916]">AED {(plan.ejariFils / 100).toLocaleString('en-AE')}</b></span>}
               {plan.commissionFils > 0 && <span>Commission: <b className="text-[#1a1916]">AED {(plan.commissionFils / 100).toLocaleString('en-AE')}</b></span>}
-              <span className="col-span-2 font-semibold text-[#0369a1] mt-0.5">Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} cheques</span>
+              <span className="col-span-2 font-semibold text-[#0369a1] mt-0.5">Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}</span>
             </div>
-            {/* Cheque schedule — sorted by date, deposit lands last on ties; single-line per row */}
+            {/* Payment schedule — sorted by date, deposit lands last on ties; single-line per row */}
             <div className="space-y-1">
               {sorted.map((item, i) => (
                 <p key={item.index} className="text-[10px] py-0.5 border-b border-[#e0f2fe] last:border-0 leading-snug">
-                  <span className="text-[#0369a1]">#{i + 1} {item.description ?? `Cheque ${i + 1}`}</span>
+                  <span className="text-[#0369a1]">#{i + 1} {item.description ?? `Payment ${i + 1}`}</span>
                   <span className="text-[#6b6860]"> — </span>
                   <span className="font-semibold text-[#1a1916]">AED {(item.amountFils / 100).toLocaleString('en-AE')}</span>
                   <span className="text-[#6b6860]"> · {item.dueDate}</span>
                 </p>
               ))}
             </div>
-            {plan.notes && <p className="text-[10px] text-[#6b6860] italic">{plan.notes}</p>}
+            {plan.chequesPayableTo && (
+              <p className="text-[10px] text-[#1a1916] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <BadgeCheck size={11} className="text-[#854d0e] shrink-0" />
+                <span><span className="font-semibold text-[#854d0e]">Cheques payable to:</span> {plan.chequesPayableTo}</span>
+              </p>
+            )}
+            {plan.notes && <p className="text-[10px] text-[#6b6860] italic mt-1">{plan.notes}</p>}
+            {plan.rentalIndexReportUrl && (
+              <a href={plan.rentalIndexReportUrl} target="_blank" rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-3 py-1.5 hover:bg-[#f0faf6] transition-colors">
+                <FileText size={11} /> View Rental Index Report
+              </a>
+            )}
           </div>
         );
       })()}
@@ -1675,14 +2037,17 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const chequeByDesc = new Map<string, LeadChequeRecord>();
         for (const c of cheques) if (c.notes) chequeByDesc.set(c.notes, c);
 
+        const customerUploads = cheques.filter(c => c.isCustomerUpload);
+        const hasCustomerUploads = customerUploads.length > 0;
+
         return (
           <div className="border-t border-[#fef3c7] bg-[#fffdf0] px-5 py-4 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-[#854d0e] flex items-center gap-1.5">
-                <CreditCard size={12} /> Record Cheques — Series View
+                <CreditCard size={12} /> Record Payments — Series View
                 {plan && (
                   <span className="ml-2 text-[10px] font-normal text-[#92400e]">
-                    {plan.chequeCount} cheques · Total AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')}
+                    {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'} · Total AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')}
                   </span>
                 )}
               </p>
@@ -1699,8 +2064,12 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </p>
             )}
 
-            {/* Series of planned payments — one row per plan item */}
-            {!chequesLoading && plan && (
+            {/* Series of planned payments — one row per plan item. Only
+                shown when the customer hasn't attached references; once they
+                have, the verification flow happens below in the uploads
+                section (one row per uploaded reference, with the RP mapping
+                each to a plan installment + tagging the method). */}
+            {!chequesLoading && plan && !hasCustomerUploads && (
               <div className="space-y-2">
                 {sortedItems.map((it, i) => {
                   const desc = it.description ?? `Cheque ${i + 1}`;
@@ -1713,6 +2082,21 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       amountFils={it.amountFils}
                       dueDate={it.dueDate}
                       recorded={recorded}
+                      suggestedSerial={!recorded ? chequeSuggestions[i] : undefined}
+                      onSerialChange={(value) => {
+                        // Propagate incremented serials to all subsequent unrecorded rows
+                        if (!value.trim()) return;
+                        setChequeSuggestions(prev => {
+                          const next: Record<number, string> = { ...prev };
+                          sortedItems.forEach((_, j) => {
+                            if (j <= i) return;
+                            const jDesc = sortedItems[j]?.description ?? `Cheque ${j + 1}`;
+                            if (chequeByDesc.get(jDesc)) return; // already recorded
+                            next[j] = nextSerial(value, j - i);
+                          });
+                          return next;
+                        });
+                      }}
                       onRecord={async (serial) => {
                         if (!serial.trim()) { setChequeError('Cheque number is required'); return; }
                         setChequeError(null);
@@ -1730,6 +2114,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                         const body = await res.json().catch(() => ({}));
                         if (!res.ok) { setChequeError(body.message ?? 'Failed to record'); return; }
                         setCheques(prev => [...prev, body]);
+                        setChequeSuggestions(prev => { const n = { ...prev }; delete n[i]; return n; });
                       }}
                       onDelete={async () => {
                         if (!recorded) return;
@@ -1758,10 +2143,12 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </p>
             )}
 
-            {/* Any extra cheques that don't match a plan-item description */}
+            {/* Any extra physical cheques that don't match a plan-item description.
+                Customer-uploaded references intentionally don't appear here —
+                they're rendered as a dedicated mapping list below. */}
             {!chequesLoading && plan && (() => {
               const planDescs = new Set(sortedItems.map(it => it.description ?? ''));
-              const orphans = cheques.filter(c => !c.notes || !planDescs.has(c.notes));
+              const orphans = cheques.filter(c => !c.isCustomerUpload && (!c.notes || !planDescs.has(c.notes)));
               if (orphans.length === 0) return null;
               return (
                 <div className="border-t border-[#fde68a] pt-3 space-y-1.5">
@@ -1782,11 +2169,173 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               );
             })()}
 
+            {/* Customer-uploaded references — shown when stage is cheques_submitted.
+                Each row is one upload; RP maps it to a plan installment + tags
+                the verified payment method. This replaces the old Series View
+                for the customer-upload path. */}
+            {lead.stage === 'cheques_submitted' && hasCustomerUploads && (
+              <div className={`pt-3 space-y-2 ${plan ? 'border-t border-[#fde68a]' : ''}`}>
+                <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
+                  Payment references uploaded by customer
+                  <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{customerUploads.length}</span>
+                </p>
+                {customerUploads.map((c, i) => {
+                  const previewLabel = c.notes || `Payment ${i + 1}`;
+                  const openPreview = () => c.imageUrl && setChequePreview({ url: c.imageUrl, label: previewLabel });
+                  return (
+                    <div key={c.id} className="bg-white border border-[#fde68a] rounded-xl overflow-hidden">
+                      {/* Top band: thumbnail + meta — full width, no narrow column squeeze */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-[#fef3c7] bg-[#fffdf0]">
+                        <button
+                          type="button"
+                          onClick={openPreview}
+                          disabled={!c.imageUrl}
+                          className="relative w-14 h-14 rounded-lg border border-[#fde68a] overflow-hidden bg-[#fef9c3] flex items-center justify-center hover:opacity-80 disabled:cursor-default transition-opacity cursor-pointer flex-shrink-0"
+                          aria-label={`Preview ${previewLabel}`}
+                        >
+                          {c.imageUrl
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={c.imageUrl} alt={previewLabel} className="w-full h-full object-cover" />
+                            : <FileText size={16} className="text-[#9b9890]" />
+                          }
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-semibold text-[#1a1916] truncate">{previewLabel}</p>
+                          <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-[#9b9890] mt-0.5">
+                            {c.amountFils > 0 && <span className="text-[#1a1916] font-semibold">AED {(c.amountFils / 100).toLocaleString('en-AE')}</span>}
+                            {c.dueDate && <span>Due {c.dueDate}</span>}
+                            {c.ocrStatus === 'done' && <span className="text-[#2e9f82]">✓ Auto-read</span>}
+                          </div>
+                        </div>
+                        {c.imageUrl && (
+                          <button
+                            type="button"
+                            onClick={openPreview}
+                            className="text-[10px] font-semibold text-[#0369a1] hover:underline cursor-pointer flex-shrink-0"
+                          >
+                            View
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Form rows: aligned label column + control column */}
+                      <div className="px-3 py-2.5 space-y-2">
+                        {plan && sortedItems.length > 0 && (
+                          <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
+                            <label htmlFor={`map-${c.id}`} className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Map to</label>
+                            <select
+                              id={`map-${c.id}`}
+                              value={c.planItemIndex ?? ''}
+                              onChange={async (e) => {
+                                const raw = e.target.value;
+                                const next = raw === '' ? null : Number(raw);
+                                setChequeError(null);
+                                const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
+                                  method: 'PATCH', credentials: 'include',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ planItemIndex: next }),
+                                });
+                                if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
+                                setCheques(prev => prev.map(x => x.id === c.id ? { ...x, planItemIndex: next } : x));
+                              }}
+                              className="w-full text-[11px] px-2 py-1.5 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] cursor-pointer focus:outline-none focus:border-[#2e9f82]"
+                            >
+                              <option value="">— Select payment —</option>
+                              {sortedItems.map((it) => (
+                                <option key={it.index} value={it.index}>
+                                  #{it.index} {it.description ?? `Payment ${it.index}`} · AED {(it.amountFils / 100).toLocaleString('en-AE')}{it.dueDate ? ` · ${it.dueDate}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
+                          <label htmlFor={`ref-${c.id}`} className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Reference</label>
+                          <input
+                            id={`ref-${c.id}`}
+                            type="text"
+                            defaultValue={c.chequeSerial ?? ''}
+                            placeholder="Cheque #, transfer ID, auth code…"
+                            onBlur={async (e) => {
+                              const next = e.currentTarget.value;
+                              if ((c.chequeSerial ?? '') === next) return;
+                              setChequeError(null);
+                              const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
+                                method: 'PATCH', credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ chequeSerial: next }),
+                              });
+                              if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
+                              setCheques(prev => prev.map(x => x.id === c.id ? { ...x, chequeSerial: next.trim() || null } : x));
+                            }}
+                            className="w-full text-[11px] px-2 py-1.5 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82]"
+                          />
+                        </div>
+
+                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
+                          <span className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Method</span>
+                          <div className="flex gap-1 flex-wrap">
+                            {(['cheque','bank_transfer','card','cash'] as PaymentMethodKind[]).map(m => {
+                              const active = c.paymentMethod === m;
+                              return (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={async () => {
+                                    setChequeError(null);
+                                    const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
+                                      method: 'PATCH', credentials: 'include',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ paymentMethod: m }),
+                                    });
+                                    if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
+                                    setCheques(prev => prev.map(x => x.id === c.id ? { ...x, paymentMethod: m } : x));
+                                  }}
+                                  className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors cursor-pointer ${
+                                    active
+                                      ? 'bg-[#2e9f82] text-white border-[#1f6655]'
+                                      : 'bg-white text-[#6b6860] border-[#ede9e3] hover:bg-[#f4f3f0]'
+                                  }`}
+                                >
+                                  {PAYMENT_METHOD_LABEL[m]}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {chequeError && (
               <p className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{chequeError}</p>
             )}
 
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-2 pt-1 flex-wrap">
+              {/* Approve customer cheques — only shown in cheques_submitted stage */}
+              {lead.stage === 'cheques_submitted' && (
+                <button
+                  disabled={confirmingCollection}
+                  onClick={async () => {
+                    setConfirmingCollection(true); setChequeError(null);
+                    try {
+                      const res = await fetch(`/api/leads/${lead.id}/approve-cheques`, { method: 'PATCH', credentials: 'include' });
+                      const body = await res.json().catch(() => ({}));
+                      if (!res.ok) { setChequeError(body.message ?? 'Failed'); return; }
+                      setPanel('none');
+                      setLeads(prev => prev.map(l => l.id !== lead.id ? l : { ...l, stage: 'cheques_collected' as LeadStage }));
+                    } finally { setConfirmingCollection(false); }
+                  }}
+                  className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
+                  Payment Review & Approve
+                </button>
+              )}
               <button
                 disabled={confirmingCollection || cheques.length === 0}
                 onClick={handleConfirmCollected}
@@ -1802,6 +2351,40 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           </div>
         );
       })()}
+
+      {/* ── Phase 5b — in-page preview for customer payment references ── */}
+      {chequePreview && (
+        <div
+          onClick={() => setChequePreview(null)}
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#ede9e3]">
+              <p className="text-sm font-semibold text-[#1a1916] truncate">{chequePreview.label}</p>
+              <button
+                onClick={() => setChequePreview(null)}
+                className="text-[#9b9890] hover:text-[#1a1916] transition-colors cursor-pointer"
+                aria-label="Close preview"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto bg-[#f4f3f0] flex items-center justify-center">
+              {chequePreview.url.toLowerCase().split('?')[0].endsWith('.pdf') ? (
+                <iframe src={chequePreview.url} className="w-full h-[80vh]" title={chequePreview.label} />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={chequePreview.url} alt={chequePreview.label} className="max-w-full max-h-[80vh] object-contain" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Notify Guard panel ── */}
       {panel === 'guard' && viewing && (
@@ -1873,6 +2456,197 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           </div>
         </div>
       )}
+
+      {/* ── Reject document dialog ── */}
+      {rejectingDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setRejectingDoc(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex items-center justify-center w-9 h-9 rounded-full bg-[#fee2e2] shrink-0">
+                <X size={16} className="text-[#b91c1c]" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#1a1916]">Reject Document</p>
+                <p className="text-[11px] text-[#9b9890] mt-0.5">{rejectingDoc.label}</p>
+              </div>
+            </div>
+            <label className="block text-[11px] font-semibold text-[#3d3b35] mb-1.5">
+              Reason <span className="font-normal text-[#9b9890]">(optional — customer will see this)</span>
+            </label>
+            <textarea
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              placeholder="e.g. Document is blurry, please re-upload a clearer copy"
+              rows={3}
+              className="w-full text-xs border border-[#e8e6e0] rounded-xl px-3 py-2.5 resize-none focus:outline-none focus:border-[#b91c1c] text-[#1a1916] placeholder:text-[#c8c6c0]"
+            />
+            <div className="flex gap-2.5 mt-4">
+              <button
+                onClick={() => setRejectingDoc(null)}
+                className="flex-1 text-xs font-semibold px-4 py-2.5 rounded-xl border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors cursor-pointer">
+                Cancel
+              </button>
+              <button
+                disabled={docActioning === rejectingDoc.id}
+                onClick={async () => {
+                  const { id, label: _l } = rejectingDoc;
+                  setRejectingDoc(null);
+                  await handleRejectDoc(id, rejectReason);
+                }}
+                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl bg-[#b91c1c] hover:bg-[#991b1b] text-white disabled:opacity-50 transition-colors cursor-pointer">
+                {docActioning === rejectingDoc.id
+                  ? <><Loader2 size={12} className="animate-spin" /> Rejecting…</>
+                  : <><X size={12} /> Reject Document</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Document viewer modal ── */}
+      {(() => {
+        const KYC_1  = new Set(['emirates_id', 'passport', 'uae_visa']);
+        const RENTAL = new Set(['employment_letter','bank_statement','marriage_certificate','rental_history','credit_report','utility_clearance','trade_license','tax_registration','moa','business_license','utility_proof_of_payment']);
+        const allDocs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
+
+        // Build ordered flat list of image-only docs for lightbox navigation
+        const imgDocs = allDocs.filter(d => {
+          const up = d.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = d.mimeType === 'application/pdf' || up.endsWith('.pdf');
+          return !isPdf && (d.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(up));
+        });
+        const lightboxSlides = imgDocs.map(d => ({
+          src: d.fileUrl,
+          title: d.displayName ?? d.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          description: d.status === 'processed' ? '✓ Approved' : d.status === 'rejected' ? '✗ Rejected' : 'Uploaded',
+        }));
+
+        if (!viewAllOpen) {
+          // Lightbox can still be open (opened from within modal, then modal closed) — keep it mounted
+          return lightboxOpen ? (
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[Zoom, Captions, Thumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          ) : null;
+        }
+
+        // Group docs for the panel
+        const occ1   = allDocs.filter(d => KYC_1.has(d.documentKey));
+        const rental = allDocs.filter(d => RENTAL.has(d.documentKey));
+        const extraMap = new Map<number, TenantDoc[]>();
+        const other: TenantDoc[] = [];
+        for (const d of allDocs) {
+          const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+          if (m) { const n = parseInt(m[2]); if (!extraMap.has(n)) extraMap.set(n, []); extraMap.get(n)!.push(d); }
+          else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) other.push(d);
+        }
+        type DocGroup = { heading: string; sub?: string; docs: TenantDoc[] };
+        const groups: DocGroup[] = [];
+        if (occ1.length)   groups.push({ heading: 'Occupant 1 — Identity', docs: occ1 });
+        [...extraMap.keys()].sort((a,b) => a-b).forEach(n =>
+          groups.push({ heading: `Occupant ${n} — Identity`, sub: 'optional', docs: extraMap.get(n)! })
+        );
+        if (rental.length) groups.push({ heading: 'Rental Documents', docs: rental });
+        if (other.length)  groups.push({ heading: 'Other', docs: other });
+
+        const tenantName = lead.convertedTenant?.user?.name?.trim() || lead.customerName || '—';
+        const unitLabel  = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : '—');
+
+        function StatusChip({ status }: { status: string }) {
+          if (status === 'processed') return <span className="text-[9px] font-bold bg-[#dcfce7] text-[#16a34a] rounded px-1.5 py-0.5">Approved</span>;
+          if (status === 'rejected')  return <span className="text-[9px] font-bold bg-[#fee2e2] text-[#b91c1c] rounded px-1.5 py-0.5">Rejected</span>;
+          return <span className="text-[9px] font-bold bg-[#f4f3ef] text-[#6b6860] rounded px-1.5 py-0.5">Uploaded</span>;
+        }
+
+        function DocEntry({ doc }: { doc: TenantDoc }) {
+          const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const urlPath = doc.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = doc.mimeType === 'application/pdf' || urlPath.endsWith('.pdf');
+          const isImg = !isPdf && (doc.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(urlPath));
+          const imgIdx = isImg ? imgDocs.findIndex(d => d.id === doc.id) : -1;
+          return (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[12px] font-semibold text-[#1a1916]">{label}</span>
+                <StatusChip status={doc.status} />
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0">
+                  Open <ExternalLink size={10} />
+                </a>
+              </div>
+              {isPdf ? (
+                <iframe src={doc.fileUrl} className="w-full h-[480px] rounded-xl border border-[#e8e6e0]" />
+              ) : isImg ? (
+                /* Clickable thumbnail → opens YALR lightbox with zoom/nav */
+                <button type="button" onClick={() => { setLightboxIndex(imgIdx); setLightboxOpen(true); }}
+                  className="group relative block w-full rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f8f7f4] cursor-zoom-in">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={doc.fileUrl} alt={label} loading="lazy"
+                    className="max-h-[320px] w-full object-contain block transition-transform duration-200 group-hover:scale-[1.02]" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                    <span className="bg-white/90 rounded-full p-2 shadow"><ZoomIn size={18} className="text-[#1a1916]" /></span>
+                  </div>
+                </button>
+              ) : (
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline">
+                  <FileText size={14} /> Open file
+                </a>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <>
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4"
+              onClick={(e) => { if (e.target === e.currentTarget) setViewAllOpen(false); }}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+                {/* Header */}
+                <div className="sticky top-0 bg-white rounded-t-2xl border-b border-[#e8e6e0] px-6 py-4 flex items-center justify-between z-10">
+                  <div>
+                    <p className="text-sm font-bold text-[#1a1916]">{tenantName}</p>
+                    <p className="text-[11px] text-[#9b9890]">{unitLabel} · {allDocs.length} document{allDocs.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button onClick={() => setViewAllOpen(false)}
+                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-[#f4f3ef] text-[#6b6860] transition-colors cursor-pointer">
+                    <X size={16} />
+                  </button>
+                </div>
+                {/* Content */}
+                <div className="px-6 py-6 space-y-8">
+                  {groups.map((g, gi) => (
+                    <section key={gi}>
+                      <div className="flex items-baseline gap-2 mb-4 border-b-2 border-[#2e9f82] pb-1.5">
+                        <h2 className="text-[13px] font-bold text-[#1a1916]">{g.heading}</h2>
+                        {g.sub && <span className="text-[10px] text-[#9b9890]">{g.sub}</span>}
+                      </div>
+                      {g.docs.map(doc => <DocEntry key={doc.id} doc={doc} />)}
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* Lightbox — rendered outside the scrollable modal so z-index stacks correctly */}
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[Zoom, Captions, Thumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -1885,8 +2659,10 @@ export default function LeadsPage() {
   const [error, setError]           = useState<string | null>(null);
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
+  const [view, setView]             = useState<'list' | 'calendar'>('list');
   const [movingLead, setMovingLead] = useState<number | null>(null);
-  const [feeRules, setFeeRules]     = useState<FeeRulesMap | null>(null);
+  const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
+  const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true); setError(null);
@@ -1915,6 +2691,17 @@ export default function LeadsPage() {
       .then((data: FeeRulesMap | null) => { if (data) setFeeRules(data); })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { preferredStartDays?: number[] | null } } | null) => {
+        if (Array.isArray(data?.profile?.preferredStartDays)) {
+          setPreferredStartDays(data!.profile!.preferredStartDays!);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
   useEffect(() => { setSearch(''); }, [activeTab]);
 
   async function moveStage(leadId: number, stage: LeadStage) {
@@ -1930,10 +2717,14 @@ export default function LeadsPage() {
   }
 
   function handleConvert(lead: ApiLead) {
-    const name         = encodeURIComponent(lead.convertedTenant?.user?.name ?? lead.customerName ?? '');
-    const moveIn       = lead.viewings?.find(v => v.desiredMoveIn)?.desiredMoveIn ?? '';
-    const startParam   = moveIn ? `&startDate=${moveIn}` : '';
-    const chequeParam  = lead.paymentPlan?.chequeCount ? `&chequeCount=${lead.paymentPlan.chequeCount}` : '';
+    const name = encodeURIComponent(lead.convertedTenant?.user?.name ?? lead.customerName ?? '');
+    // Prefer the payment plan's first_bundle date (the agreed start date) over the
+    // tenant's original desiredMoveIn (just their initial preference at viewing time).
+    const planStart = lead.paymentPlan?.items?.find(it => it.type === 'first_bundle')?.dueDate
+      ?? lead.paymentPlan?.items?.slice().sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))[0]?.dueDate;
+    const startDate = planStart ?? lead.viewings?.find(v => v.desiredMoveIn)?.desiredMoveIn ?? '';
+    const startParam  = startDate ? `&startDate=${startDate}` : '';
+    const chequeParam = lead.paymentPlan?.chequeCount ? `&chequeCount=${lead.paymentPlan.chequeCount}` : '';
     router.push(
       `/rental-provider/dashboard/contracts/new?unitId=${lead.unit?.id}&tenantId=${lead.convertedTenant?.id}&leadId=${lead.id}&tenantName=${name}${startParam}${chequeParam}`,
     );
@@ -1967,15 +2758,54 @@ export default function LeadsPage() {
             {leads.length} lead{leads.length !== 1 ? 's' : ''} in pipeline
           </p>
         </div>
-        <button
-          onClick={fetchLeads}
-          disabled={loading}
-          className="flex items-center gap-2 text-sm text-[#2e9f82] border border-[#2e9f82] rounded-lg px-4 py-2 hover:bg-[#f0fdf4] transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="inline-flex bg-[#f4f3ef] rounded-lg p-0.5 border border-[#e8e6e0]">
+            <button
+              onClick={() => setView('list')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
+                view === 'list' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
+              }`}
+            >
+              List
+            </button>
+            <button
+              onClick={() => setView('calendar')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
+                view === 'calendar' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
+              }`}
+            >
+              <Calendar size={12} /> Calendar
+            </button>
+          </div>
+          <button
+            onClick={fetchLeads}
+            disabled={loading}
+            className="flex items-center gap-2 text-sm text-[#2e9f82] border border-[#2e9f82] rounded-lg px-4 py-2 hover:bg-[#f0fdf4] transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
+      {/* Calendar view */}
+      {view === 'calendar' && !loading && (
+        <LeadsCalendarView
+          leads={leads}
+          onOpenLead={(id) => {
+            setView('list');
+            // Scroll the matching lead into view after the list re-renders
+            setTimeout(() => {
+              const el = document.getElementById(`lead-${id}`);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 50);
+          }}
+        />
+      )}
+
+      {/* List view — stage tabs, search, list */}
+      {view === 'list' && (
+      <>
       {/* Stage tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 mb-5 scrollbar-none">
         {TABS.map(tab => {
@@ -2050,7 +2880,7 @@ export default function LeadsPage() {
             <User size={22} className="text-[#2e9f82]" />
           </div>
           <p className="font-semibold text-[#1a1916] text-sm mb-1">No leads yet</p>
-          <p className="text-xs text-[#9b9890]">Leads appear when tenants book viewings on your units.</p>
+          <p className="text-xs text-[#9b9890]">Leads appear when customers book viewings on your units.</p>
         </div>
       )}
 
@@ -2065,17 +2895,21 @@ export default function LeadsPage() {
       {!loading && filtered.length > 0 && (
         <div className="space-y-2">
           {filtered.map(lead => (
-            <LeadRow
-              key={`${lead.id}-${lead.updatedAt}`}
-              lead={lead}
-              onMoveStage={moveStage}
-              moving={movingLead === lead.id}
-              onConvert={handleConvert}
-              setLeads={setLeads}
-              feeRules={feeRules}
-            />
+            <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`}>
+              <LeadRow
+                lead={lead}
+                onMoveStage={moveStage}
+                moving={movingLead === lead.id}
+                onConvert={handleConvert}
+                setLeads={setLeads}
+                feeRules={feeRules}
+                preferredStartDays={preferredStartDays}
+              />
+            </div>
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );

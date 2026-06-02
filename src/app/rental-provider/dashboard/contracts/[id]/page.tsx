@@ -27,8 +27,16 @@ import {
   User, Building2, Calendar, DollarSign, Pencil, RotateCcw,
   FileSignature, Download, BadgeCheck, ChevronDown, ChevronUp,
   ClipboardList, Plus, Trash2, Paperclip, UploadCloud, ExternalLink,
-  CreditCard, ListChecks, Eye, ChevronRight, ClipboardCheck,
+  CreditCard, ListChecks, Eye, ChevronRight, ClipboardCheck, ZoomIn,
 } from 'lucide-react';
+import Lightbox from 'yet-another-react-lightbox';
+import LbZoom from 'yet-another-react-lightbox/plugins/zoom';
+import LbCaptions from 'yet-another-react-lightbox/plugins/captions';
+import LbThumbnails from 'yet-another-react-lightbox/plugins/thumbnails';
+import 'yet-another-react-lightbox/styles.css';
+import 'yet-another-react-lightbox/plugins/captions.css';
+import 'yet-another-react-lightbox/plugins/thumbnails.css';
+import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -84,9 +92,21 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
-  // Renewal fields (SCRUM-272/273)
+  // Renewal fields (SCRUM-272/273 + Phase 6c reject reason)
   renewalAccepted: 'pending' | 'accepted' | 'rejected' | null;
   renewalStatus: string | null;
+  renewalRejectionReason?: string | null;
+  parentContractId?: number | null;
+  /** Phase 6c — when this contract is a DECLINED renewal child and the RP has
+   *  subsequently proposed a fresh renewal on the same parent, the backend
+   *  inlines the active sibling here so the declined detail page can link
+   *  forward to "the proposal that replaced this one". */
+  successorProposal?: {
+    id: number;
+    status: 'pending' | 'issued' | 'active' | 'expired' | 'terminated';
+    contractActive: boolean;
+    createdAt: string;
+  } | null;
   termination: {
     requestedByRole: 'tenant' | 'rental_provider' | null;
     requestedAt: string | null;
@@ -104,6 +124,20 @@ interface ContractDetail {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+/** Map a unit type (apartment / villa / retail_shop / warehouse / …) to the
+ *  space category used by the RP's fee rule settings. Mirrors the backend
+ *  classifier in fee-rules.service so the renewal modal auto-fills from the
+ *  correct rule set. Unknown types default to residential. */
+function spaceCategoryFromUnitType(unitType: string | null): string {
+  if (!unitType) return 'residential';
+  const t = unitType.toLowerCase();
+  if (['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'].includes(t)) return 'industrial';
+  if (['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical',
+       'coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue',
+       'conference_hall','private_dining','outdoor_venue'].includes(t)) return 'commercial';
+  return 'residential';
+}
 
 function fmtAed(fils: number) {
   return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(fils);
@@ -221,23 +255,29 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function SectionCard({ title, icon: Icon, children, defaultOpen = true }: {
+function SectionCard({ title, icon: Icon, children, defaultOpen = true, headerAction }: {
   title: string; icon: React.ElementType; children: React.ReactNode; defaultOpen?: boolean;
+  headerAction?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      <button
-        type="button"
-        className="w-full flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]"
-        onClick={() => setOpen(o => !o)}
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
+        <button
+          type="button"
+          className="flex items-center gap-2 flex-1 text-left"
+          onClick={() => setOpen(o => !o)}
+        >
           <Icon size={15} className="text-[#2e9f82]" />
           <span className="text-sm font-semibold text-[#1a1916]">{title}</span>
+        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {headerAction}
+          <button type="button" onClick={() => setOpen(o => !o)}>
+            {open ? <ChevronUp size={14} className="text-[#9b9890]" /> : <ChevronDown size={14} className="text-[#9b9890]" />}
+          </button>
         </div>
-        {open ? <ChevronUp size={14} className="text-[#9b9890]" /> : <ChevronDown size={14} className="text-[#9b9890]" />}
-      </button>
+      </div>
       {open && <div className="px-5 py-4">{children}</div>}
     </div>
   );
@@ -445,12 +485,26 @@ export default function ContractDetailPage() {
     chequePayeeName: '',
     adminFee: '',
     ejariFee: '',
+    commission: '',
   });
+
+  // Phase 6 — RP's saved fee rules, fetched when the modal opens. Used to
+  // auto-compute admin / ejari / commission from the typed annual rent so the
+  // renewal proposal mirrors the RP's settings instead of just copying the
+  // previous contract's numbers. Each fee carries a "touched" flag — once the
+  // RP edits a field by hand, auto-recompute stops touching it.
+  type FeeRule = { feeType: string; valueType: 'fixed_aed' | 'percentage'; value: number; isActive: boolean };
+  const [feeRules, setFeeRules] = useState<Record<string, FeeRule[]> | null>(null);
+  const [feesTouched, setFeesTouched] = useState({ adminFee: false, ejariFee: false, commission: false });
   const [renewalExtras, setRenewalExtras] = useState<Array<{ description: string; amount: string; dueDate: string }>>([]);
-  const [tenantKycDocs, setTenantKycDocs] = useState<{ id: number; documentKey: string; displayName: string | null; fileUrl: string; status: string; notes: string | null }[] | null>(null);
+  type TenantKycDoc = { id: number; documentKey: string; displayName: string | null; fileUrl: string; mimeType: string | null; status: string; notes: string | null };
+  const [tenantKycDocs, setTenantKycDocs] = useState<TenantKycDoc[] | null>(null);
   const [tenantKycLoading, setTenantKycLoading] = useState(false);
   const [reviewingDocId, setReviewingDocId] = useState<number | null>(null);
   const [rejectingDocId, setRejectingDocId] = useState<number | null>(null);
+  const [viewAllOpen,   setViewAllOpen]   = useState(false);
+  const [lightboxOpen,  setLightboxOpen]  = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const [rejectionReason, setRejectionReason] = useState('');
   const [docRequestInput, setDocRequestInput] = useState('');
   const [docRequestNotes, setDocRequestNotes] = useState('');
@@ -467,6 +521,16 @@ export default function ContractDetailPage() {
   const [utilityFile, setUtilityFile] = useState<File | null>(null);
   const [utilityUploading, setUtilityUploading] = useState(false);
   const [utilityError, setUtilityError] = useState<string | null>(null);
+  const [moveInInsp, setMoveInInsp] = useState<{
+    rpSubmittedAt?: string | null;
+    tenantSig?: string | null;
+    rpCounterSig?: string | null;
+    rpCounterSignedAt?: string | null;
+  } | null>(null);
+  // Inline RP counter-sign for the move-in inspection (Step 5).
+  const [inspSigImg, setInspSigImg]       = useState<string | null>(null);
+  const [inspSigBusy, setInspSigBusy]     = useState(false);
+  const [inspSigError, setInspSigError]   = useState<string | null>(null);
 
   useEffect(() => {
     if (!params?.id) return;
@@ -490,6 +554,14 @@ export default function ContractDetailPage() {
         if (hasLandlordSig) setSignedMode('online');
         if (hasTenantSig)   setHasTenantSigned(true);
 
+        // Load move-in inspection signing state for Step 4 status display.
+        fetch(`/api/contracts/${params.id}/inspection?type=move_in`, { credentials: 'include' })
+          .then(r => r.ok ? r.json() : null)
+          .then((insp: { rpSubmittedAt?: string | null; tenantSig?: string | null; rpCounterSig?: string | null; rpCounterSignedAt?: string | null } | null) => {
+            if (insp) setMoveInInsp({ rpSubmittedAt: insp.rpSubmittedAt, tenantSig: insp.tenantSig, rpCounterSig: insp.rpCounterSig, rpCounterSignedAt: insp.rpCounterSignedAt });
+          })
+          .catch(() => null);
+
         // Also check tenant's own documents for utility proof (uploaded by tenant or admin)
         const tenantId = data?.tenant?.id;
         if (tenantId) {
@@ -505,6 +577,29 @@ export default function ContractDetailPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [params?.id]);
+
+  // Phase 6 — auto-fill admin / ejari / commission from the RP's saved fee
+  // rules whenever the renewal rent changes, unless the RP has manually
+  // touched that specific field. Keeps the modal aligned with /settings/fees
+  // and removes the "remember to blank the field" trick.
+  useEffect(() => {
+    if (!showRenewalModal || !feeRules || !contract) return;
+    const cat = spaceCategoryFromUnitType(contract.unit?.type ?? null);
+    const rules = feeRules[cat] ?? feeRules['residential'] ?? [];
+    const rent = parseFloat(renewalForm.newAnnualRent) || 0;
+    const applyRule = (feeType: string): string => {
+      const r = rules.find(x => x.feeType === feeType && x.isActive !== false);
+      if (!r) return '';
+      const v = r.valueType === 'percentage' ? rent * Number(r.value) / 100 : Number(r.value);
+      return v > 0 ? String(Math.round(v)) : '';
+    };
+    setRenewalForm(f => ({
+      ...f,
+      adminFee:   feesTouched.adminFee   ? f.adminFee   : applyRule('admin_fee'),
+      ejariFee:   feesTouched.ejariFee   ? f.ejariFee   : applyRule('ejari_fee'),
+      commission: feesTouched.commission ? f.commission : applyRule('commission'),
+    }));
+  }, [showRenewalModal, feeRules, renewalForm.newAnnualRent, feesTouched, contract]);
 
   // Load tenant rental documents when the Documents drawer opens.
   // For RENEWAL contracts the tenant uploads to ownerType='tenancy_contract', ownerId=<child id>
@@ -723,23 +818,15 @@ export default function ContractDetailPage() {
       setEjariFile(null);
       if (ejariInputRef.current) ejariInputRef.current.value = '';
 
-      // Auto-progress: Ejari upload registers the contract with DLD and
-      // activates the tenancy in one step — no separate buttons needed.
+      // Register Ejari with DLD. Tenancy activation happens automatically when
+      // the RP counter-signs the move-in inspection (step 4 of the workflow).
       const ejariRes = await fetch(`/api/contracts/${contract.id}/ejari`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ejariStatus: 'registered' }),
       });
       if (!ejariRes.ok) throw new Error('Failed to mark Ejari registered');
-      let updated = await ejariRes.json();
-
-      if (updated.status !== 'active') {
-        const actRes = await fetch(`/api/contracts/${contract.id}/activate`, {
-          method: 'PATCH', credentials: 'include',
-        });
-        if (!actRes.ok) throw new Error('Failed to activate tenancy');
-        updated = await actRes.json();
-      }
+      const updated = await ejariRes.json();
       setContract(updated);
     } catch (e: unknown) {
       setEjariError(e instanceof Error ? e.message : 'Upload failed');
@@ -864,6 +951,54 @@ export default function ContractDetailPage() {
     }
   }
 
+  /**
+   * Phase 6c — opens the Propose Renewal modal pre-filled from the current
+   * (parent) contract. Reused by:
+   *   - the header "Propose Renewal" button (active, never-proposed)
+   *   - the "Customer declined this renewal" banner's CTA (re-propose after
+   *     a rejection — backend already allows re-proposing on REJECTED parents)
+   */
+  function openProposeRenewalModal() {
+    if (!contract) return;
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const newStart = new Date(contract.endDate);
+    newStart.setDate(newStart.getDate() + 1);
+    const newEnd = new Date(newStart);
+    newEnd.setFullYear(newStart.getFullYear() + 1);
+    newEnd.setDate(newEnd.getDate() - 1);
+    setRenewalForm({
+      newAnnualRent: String(contract.annualRent ?? ''),
+      newStartDate: fmt(newStart),
+      newEndDate: fmt(newEnd),
+      numberOfInstallments: String(contract.numberOfInstallments ?? 4),
+      modeOfPayment: contract.modeOfPayment ?? 'cheque',
+      samePayee: true,
+      chequePayeeName: '',
+      adminFee: '',
+      ejariFee: '',
+      commission: '',
+    });
+    setFeesTouched({ adminFee: false, ejariFee: false, commission: false });
+    setRenewalExtras([]);
+    setRenewalError(null);
+    setShowRenewalModal(true);
+    fetch('/api/fee-rules', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: Record<string, FeeRule[]> | null) => setFeeRules(data))
+      .catch(() => setFeeRules(null));
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { renewalRentIncrementPct?: number | string | null } } | null) => {
+        const raw = data?.profile?.renewalRentIncrementPct;
+        const pct = raw == null ? 0 : Number(raw);
+        if (pct > 0 && contract.annualRent) {
+          const bumped = Math.round(contract.annualRent * (1 + pct / 100));
+          setRenewalForm(f => ({ ...f, newAnnualRent: String(bumped) }));
+        }
+      })
+      .catch(() => undefined);
+  }
+
   async function submitProposeRenewal() {
     if (!contract) return;
     setRenewalError(null);
@@ -889,10 +1024,12 @@ export default function ContractDetailPage() {
       if (!renewalForm.samePayee && renewalForm.chequePayeeName.trim()) {
         body.chequePayeeName = renewalForm.chequePayeeName.trim();
       }
-      const adminFeeNum = parseFloat(renewalForm.adminFee);
-      const ejariFeeNum = parseFloat(renewalForm.ejariFee);
-      if (Number.isFinite(adminFeeNum) && adminFeeNum >= 0) body.adminFee = adminFeeNum;
-      if (Number.isFinite(ejariFeeNum) && ejariFeeNum >= 0) body.ejariFee = ejariFeeNum;
+      const adminFeeNum  = parseFloat(renewalForm.adminFee);
+      const ejariFeeNum  = parseFloat(renewalForm.ejariFee);
+      const commissionN  = parseFloat(renewalForm.commission);
+      if (Number.isFinite(adminFeeNum) && adminFeeNum >= 0)   body.adminFee   = adminFeeNum;
+      if (Number.isFinite(ejariFeeNum) && ejariFeeNum >= 0)   body.ejariFee   = ejariFeeNum;
+      if (Number.isFinite(commissionN) && commissionN >= 0)   body.commission = commissionN;
       const cleanExtras = renewalExtras
         .map(e => ({
           description: e.description.trim(),
@@ -1090,6 +1227,11 @@ export default function ContractDetailPage() {
   }
 
   const isRenewalContract = contract.contractType === 'renewal';
+  /** Phase 6c — a renewal proposal the customer declined. The child row is
+   *  archived (`contractActive=false`), so we suppress the payment-collection
+   *  drawer, the activation timeline, and the Sign Contract CTA, leaving
+   *  only the declined banner + a routing card pointing back to the parent. */
+  const isDeclinedRenewalChild = isRenewalContract && contract.contractActive === false;
 
   // Derived from payment records — used in timeline + sidebar
   const hasAdminFeePaid = payments.some(
@@ -1142,6 +1284,13 @@ export default function ContractDetailPage() {
   const st2Done = isRenewalContract ? (contract.pdcConfirmed ?? false) : true;
   const st3Done = allSigsDone;
   const st4Done = tl_hasEjari;
+  // Utility step (NEW, between Ejari and Move-In). Either party can upload —
+  // tenant via their portal OR RP here. The utility doc presence is the truth.
+  const stUtilityDone = !!utilityDoc;
+  // Move-in inspection complete once RP counter-signs.
+  const stMoveInDone  = !!moveInInsp?.rpCounterSig || tl_isActive;
+  // st5Done kept as alias for tl_isActive so the renewal-flow steps (which
+  // still use the 4-step model: Terms → Sigs → Ejari → Active) keep working.
   const st5Done = tl_isActive;
 
   type TLStep = 'done' | 'current' | 'upcoming';
@@ -1162,7 +1311,7 @@ export default function ContractDetailPage() {
       <div className="bg-white border-b border-[#e8e6e0] px-4 sm:px-6 py-4 sticky top-0 z-20">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <Link href="/rental-provider/dashboard/contracts" className="text-[#6b6860] hover:text-[#1a1916]" title="Back to contracts">
+            <Link href="/rental-provider/dashboard/orders" className="text-[#6b6860] hover:text-[#1a1916]" title="Back to orders">
               <ArrowLeft size={18} />
             </Link>
             <div className="min-w-0">
@@ -1194,33 +1343,7 @@ export default function ContractDetailPage() {
             {/* Propose Renewal CTA — shown on active, NEW (non-renewal) contracts when no proposal is in flight */}
             {contract.status === 'active' && contract.contractType !== 'renewal' && !contract.renewalAccepted && (
               <button
-                onClick={() => {
-                  // Prefill renewal terms from current contract
-                  const today = new Date();
-                  const oneYear = new Date(today);
-                  oneYear.setFullYear(today.getFullYear() + 1);
-                  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-                  // Default to the day after current contract ends
-                  const newStart = new Date(contract.endDate);
-                  newStart.setDate(newStart.getDate() + 1);
-                  const newEnd = new Date(newStart);
-                  newEnd.setFullYear(newStart.getFullYear() + 1);
-                  newEnd.setDate(newEnd.getDate() - 1);
-                  setRenewalForm({
-                    newAnnualRent: String(contract.annualRent ?? ''),
-                    newStartDate: fmt(newStart),
-                    newEndDate: fmt(newEnd),
-                    numberOfInstallments: String(contract.numberOfInstallments ?? 4),
-                    modeOfPayment: contract.modeOfPayment ?? 'cheque',
-                    samePayee: true,
-                    chequePayeeName: '',
-                    adminFee: String(contract.adminFeeFils ?? ''),
-                    ejariFee: String(contract.ejariFeeFils ?? ''),
-                  });
-                  setRenewalExtras([]);
-                  setRenewalError(null);
-                  setShowRenewalModal(true);
-                }}
+                onClick={openProposeRenewalModal}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors bg-white"
               >
                 <RotateCcw size={14} /> Propose Renewal
@@ -1249,7 +1372,7 @@ export default function ContractDetailPage() {
                 <X size={14} /> Request Termination
               </button>
             )}
-            {signedMode ? (
+            {isDeclinedRenewalChild ? null : signedMode ? (
               <span className="flex items-center gap-1.5 text-xs text-[#2e9f82] font-semibold bg-[#f0faf6] px-3 py-1.5 rounded-full border border-[#c5e8df]">
                 <BadgeCheck size={13} /> Signed Online
               </span>
@@ -1268,6 +1391,89 @@ export default function ContractDetailPage() {
 
       {/* Body */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+        {/* Addendums — visible at all times. Attach/remove gated to draft state inside the component. */}
+        <AddendumsPanel contractId={contract.id} role="landlord" contractStatus={contract.status} />
+
+        {/* ── Renewal declined banner (Phase 6c). Shown when either:
+             - the RP is on the PARENT contract and the customer rejected
+               (`renewalAccepted === 'rejected'`); or
+             - the RP opened the renewal CHILD directly and its parent
+               carries the rejection (renewalAccepted mirrored from parent).
+             The backend inlines the parent's `renewalRejectionReason` on
+             child responses so this banner works on either page. */}
+        {(contract.renewalAccepted === 'rejected') && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+            <X size={18} className="text-red-700 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-red-900">Customer declined this renewal</p>
+              <p className="text-xs text-red-800 mt-0.5">
+                The proposal is archived. The original lease keeps running until{' '}
+                <b>{fmtDate(contract.contractType === 'renewal' && contract.parentContractId ? contract.endDate : contract.endDate)}</b>.
+                You can propose new terms anytime.
+              </p>
+              {contract.renewalRejectionReason ? (
+                <div className="mt-2 bg-white border border-red-200 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-red-700 uppercase tracking-wide mb-1">Reason from customer</p>
+                  <p className="text-xs text-[#1a1916] whitespace-pre-wrap">“{contract.renewalRejectionReason}”</p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-red-700 italic mt-2">No reason provided.</p>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5 shrink-0">
+              {/* If a fresh proposal has already been created on the same
+                  parent (Phase 6c successor), link straight to it. Otherwise
+                  offer the re-propose CTA — routed via the parent contract
+                  when we're viewing a child, so the modal targets the right id. */}
+              {contract.successorProposal ? (
+                <Link
+                  href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}`}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> View new proposal · CID-{contract.successorProposal.id}
+                </Link>
+              ) : contract.contractType === 'renewal' && contract.parentContractId ? (
+                <Link
+                  href={`/rental-provider/dashboard/contracts/${contract.parentContractId}`}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> Open original lease to re-propose
+                </Link>
+              ) : (
+                <button
+                  onClick={openProposeRenewalModal}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> Propose new renewal
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 6c — when the RP is viewing a declined renewal child and a
+             successor proposal exists, render an informational strip so the
+             RP knows the lifecycle continued: this row was rejected, the
+             follow-up is the row they should act on. */}
+        {isDeclinedRenewalChild && contract.successorProposal && (
+          <div className="bg-[#f0faf6] border border-[#c5e8df] rounded-2xl p-4 flex items-start gap-3">
+            <RotateCcw size={18} className="text-[#2e9f82] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-[#1a1916]">A new renewal has been proposed</p>
+              <p className="text-xs text-[#4b4a44] mt-0.5">
+                After this proposal was declined, you proposed a fresh renewal on{' '}
+                <b>{fmtDate(contract.successorProposal.createdAt)}</b>. The customer's decision is tracked there.
+              </p>
+            </div>
+            <Link
+              href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}`}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center gap-1.5 shrink-0"
+            >
+              Open CID-{contract.successorProposal.id}
+            </Link>
+          </div>
+        )}
 
         {/* ── Termination request banner (only shows when one is in flight) ── */}
         {contract.termination?.response === 'pending' && contract.termination.requestedByRole === 'tenant' && (
@@ -1347,7 +1553,7 @@ export default function ContractDetailPage() {
             <>
               <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
               <div>
-                <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Cheques</p>
+                <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Payments</p>
                 <p className="text-sm font-semibold text-[#1a1916]">{contract.numberOfInstallments}</p>
               </div>
             </>
@@ -1466,15 +1672,15 @@ export default function ContractDetailPage() {
                   </div>
                   <div className={activeDrawer !== 'payments' ? 'hidden' : 'p-5 space-y-4'}>
 
-                  {/* Security Deposit */}
-                  <SectionCard title="Security Deposit" icon={DollarSign}>
+                  {/* Security Deposit Payment */}
+                  <SectionCard title="Security Deposit Payment" icon={DollarSign}>
                     {depositPayment ? (
                       <div className="overflow-x-auto -mx-1">
                         <table className="w-full text-xs min-w-[400px]">
                           <thead>
                             <tr className="text-left text-[10px] text-[#9b9890] uppercase border-b border-[#f4f3ef]">
                               <th className="px-2 py-2 font-medium">Amount</th>
-                              <th className="px-2 py-2 font-medium">Cheque No.</th>
+                              <th className="px-2 py-2 font-medium">Reference</th>
                               <th className="px-2 py-2 font-medium">Due Date</th>
                               <th className="px-2 py-2 font-medium">Status</th>
                             </tr>
@@ -1521,16 +1727,16 @@ export default function ContractDetailPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <p className="text-xs text-[#9b9890]">Amount: <strong className="text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</strong> — enter the cheque details to record receipt.</p>
+                        <p className="text-xs text-[#9b9890]">Amount: <strong className="text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</strong> — enter the payment details to record receipt.</p>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Cheque No.</label>
+                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Reference</label>
                             <input type="text" value={depChequeNo} onChange={e => setDepChequeNo(e.target.value)}
-                              placeholder="e.g. 001234"
+                              placeholder="Cheque #, transfer ID, auth code…"
                               className="w-full font-mono text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
                           </div>
                           <div>
-                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Cheque Date</label>
+                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Date</label>
                             <input type="date" value={depDate} onChange={e => setDepDate(e.target.value)}
                               className="w-full text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none text-[#6b6860]" />
                           </div>
@@ -1539,20 +1745,20 @@ export default function ContractDetailPage() {
                         <button onClick={addDepositCheque} disabled={recordingDeposit}
                           className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1a7a63] disabled:opacity-50 transition-colors">
                           {recordingDeposit ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
-                          Record Deposit Cheque
+                          Record Deposit Payment
                         </button>
                       </div>
                     )}
                   </SectionCard>
 
-                  {/* Rental Instalments — includes the first-bundle cheque (Admin + Ejari + Commission + Installment 1)
+                  {/* Rental Instalments — includes the first-bundle payment (Admin + Ejari + Commission + Installment 1)
                        and any extra plan items (Tax, VAT, etc.). Security deposit is rendered separately above. */}
                   <SectionCard
-                    title={`Rental Instalments (${rentChequePayments.length} cheques)`}
+                    title={`Rental Instalments (${rentChequePayments.length} payment${rentChequePayments.length === 1 ? '' : 's'})`}
                     icon={CreditCard}
                   >
               {rentChequePayments.length === 0 && !showAddInstalment && (
-                <p className="text-xs text-[#9b9890] text-center py-4">No instalments recorded yet.</p>
+                <p className="text-xs text-[#9b9890] text-center py-4">No payments recorded yet.</p>
               )}
 
               {rentChequePayments.length > 0 && (
@@ -1563,7 +1769,7 @@ export default function ContractDetailPage() {
                         <th className="px-2 py-2 font-medium">#</th>
                         <th className="px-2 py-2 font-medium">Description</th>
                         <th className="px-2 py-2 font-medium">Amount</th>
-                        <th className="px-2 py-2 font-medium">Cheque No.</th>
+                        <th className="px-2 py-2 font-medium">Reference</th>
                         <th className="px-2 py-2 font-medium">Due Date</th>
                         <th className="px-2 py-2 font-medium">Status</th>
                       </tr>
@@ -1637,9 +1843,9 @@ export default function ContractDetailPage() {
                         placeholder="0.00" className="w-full text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
                     </div>
                     <div>
-                      <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Cheque No.</label>
+                      <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Reference</label>
                       <input type="text" value={newInstalment.chequeNumber} onChange={e => setNewInstalment(v => ({ ...v, chequeNumber: e.target.value }))}
-                        placeholder="optional" className="w-full font-mono text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
+                        placeholder="Cheque #, transfer ID…" className="w-full font-mono text-xs px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:border-[#2e9f82] focus:outline-none" />
                     </div>
                     <div>
                       <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1">Due Date</label>
@@ -1754,7 +1960,7 @@ export default function ContractDetailPage() {
                               {/* Visibility toggle */}
                               <button
                                 type="button"
-                                title={doc.isVisibleToTenant ? 'Click to make Internal' : 'Click to make visible to Tenant'}
+                                title={doc.isVisibleToTenant ? 'Click to make Internal' : 'Click to make visible to Customer'}
                                 onClick={async () => {
                                   const res = await fetch(`/api/documents/${doc.id}`, {
                                     method: 'PATCH',
@@ -1773,7 +1979,7 @@ export default function ContractDetailPage() {
                                     : 'bg-[#f4f3ef] text-[#6b6860] hover:bg-[#e8e6e0]'
                                 }`}
                               >
-                                {doc.isVisibleToTenant ? <><Eye size={10} /> Tenant</> : <>🔒 Internal</>}
+                                {doc.isVisibleToTenant ? <><Eye size={10} /> Customer</> : <>🔒 Internal</>}
                               </button>
                               {expired && (
                                 <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
@@ -1853,7 +2059,7 @@ export default function ContractDetailPage() {
                                 onChange={() => setUploadVisible(true)}
                                 className="accent-[#2e9f82]"
                               />
-                              <span className="text-[#4a4844]">👁 Visible to tenant</span>
+                              <span className="text-[#4a4844]">👁 Visible to customer</span>
                             </label>
                           </div>
                         </div>
@@ -1922,14 +2128,28 @@ export default function ContractDetailPage() {
                        For renewal contracts these are the fresh docs the tenant uploaded against
                        the renewal child specifically (ownerType=tenancy_contract). For the original
                        lease they're the tenant's customer-scoped KYC pack. */}
-                  <SectionCard title={isRenewalContract ? 'Renewal Documents' : 'Rental Documents'} icon={User}>
+                  <SectionCard
+                    title={isRenewalContract ? 'Renewal Documents' : 'Rental Documents'}
+                    icon={User}
+                    headerAction={
+                      tenantKycDocs && tenantKycDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setViewAllOpen(true); }}
+                          className="flex items-center gap-1 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-2.5 py-1 hover:bg-[#f0faf6] transition-colors cursor-pointer"
+                        >
+                          <FileText size={11} /> View All
+                        </button>
+                      ) : undefined
+                    }
+                  >
                     {tenantKycLoading ? (
                       <p className="flex items-center gap-1.5 text-xs text-[#9b9890]"><Loader2 size={11} className="animate-spin" /> Loading…</p>
                     ) : (
                       <div className="space-y-4">
                         {/* Uploaded docs */}
                         {(!tenantKycDocs || tenantKycDocs.filter(d => d.status !== 'pending').length === 0) ? (
-                          <p className="text-xs text-[#9b9890] text-center py-2">No documents uploaded by tenant yet.</p>
+                          <p className="text-xs text-[#9b9890] text-center py-2">No documents uploaded by customer yet.</p>
                         ) : (
                           <ul className="space-y-2">
                             {tenantKycDocs.filter(d => d.status !== 'pending').map(doc => {
@@ -1979,7 +2199,7 @@ export default function ContractDetailPage() {
                                   {/* Inline rejection reason form */}
                                   {isRejectOpen && (
                                     <div className="px-4 pb-3 pt-0 space-y-2 border-t border-[#fecaca]">
-                                      <p className="text-[10px] font-semibold text-[#b91c1c] pt-2">Reason for rejection (shown to tenant)</p>
+                                      <p className="text-[10px] font-semibold text-[#b91c1c] pt-2">Reason for rejection (shown to customer)</p>
                                       <input
                                         type="text"
                                         value={rejectionReason}
@@ -2012,7 +2232,7 @@ export default function ContractDetailPage() {
                         {/* RP-requested pending docs (awaiting tenant upload) */}
                         {tenantKycDocs && tenantKycDocs.filter(d => d.status === 'pending').length > 0 && (
                           <div>
-                            <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-1.5">Awaiting tenant upload</p>
+                            <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-1.5">Awaiting customer upload</p>
                             <ul className="space-y-1.5">
                               {tenantKycDocs.filter(d => d.status === 'pending').map(doc => (
                                 <li key={doc.id} className="flex items-center gap-3 rounded-xl px-4 py-2.5 bg-[#fff7ed] border border-[#fed7aa]">
@@ -2042,7 +2262,7 @@ export default function ContractDetailPage() {
                             type="text"
                             value={docRequestNotes}
                             onChange={e => setDocRequestNotes(e.target.value)}
-                            placeholder="Instructions for tenant (optional)"
+                            placeholder="Instructions for customer (optional)"
                             className="w-full text-xs px-3 py-2 border border-[#e8e6e0] rounded-xl bg-[#f9f8f6] focus:outline-none focus:border-[#2e9f82] placeholder:text-[#c0bdb8]"
                           />
                           <button
@@ -2052,7 +2272,7 @@ export default function ContractDetailPage() {
                             style={{ background: '#2e9f82' }}
                           >
                             {docRequesting ? <Loader2 size={12} className="animate-spin" /> : null}
-                            Send Request to Tenant
+                            Send Request to Customer
                           </button>
                         </div>
                       </div>
@@ -2162,7 +2382,7 @@ export default function ContractDetailPage() {
                   )}
                   <p className="text-[11px] text-[#b0ada8] flex items-center gap-1.5">
                     <BadgeCheck size={12} className="text-[#2e9f82]" />
-                    Contract sent to tenant — clauses are locked.
+                    Contract sent to customer — clauses are locked.
                   </p>
                 </div>
               )}
@@ -2206,7 +2426,7 @@ export default function ContractDetailPage() {
                             </div>
                             {totalCheques > 0 && (
                               <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                                <span className="text-xs text-[#9b9890]">Total Cheques</span>
+                                <span className="text-xs text-[#9b9890]">Total Payments</span>
                                 <span className="text-xs font-semibold text-[#1a1916]">{totalCheques}</span>
                               </div>
                             )}
@@ -2234,7 +2454,13 @@ export default function ContractDetailPage() {
           </>
         )}
 
-        {/* ── grid: nav (3) + timeline (9) ── */}
+        {/* ── grid: nav (3) + timeline (9) ──
+             Hidden on declined renewal children — the proposal is archived,
+             so payment collection drawers, the activation timeline, and the
+             Sign Contract CTA would all be misleading. The red declined
+             banner + quick-glance strip above already give the RP everything
+             they need; the re-propose CTA routes them back to the parent. */}
+        {!isDeclinedRenewalChild && (
         <div className="grid grid-cols-12 gap-5 items-start">
 
           {/* Contract Details vertical nav */}
@@ -2302,18 +2528,18 @@ export default function ContractDetailPage() {
                     <StepRow num={1} label="Contract Issued" state={state} last={false}>
                       {state === 'current' && (
                         <div className="mt-2">
-                          <p className="text-[10px] text-[#9b9890] mb-2">Review the contract in the left panel, then issue it to the tenant to begin the signing process.</p>
+                          <p className="text-[10px] text-[#9b9890] mb-2">Review the contract in the left panel, then issue it to the customer to begin the signing process.</p>
                           <button
                             onClick={doIssueContract}
                             disabled={markingStep === 'issue'}
                             className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1">
                             {markingStep === 'issue' ? <Loader2 size={10} className="animate-spin" /> : <FileSignature size={10} />}
-                            Issue Contract to Tenant
+                            Issue Contract to Customer
                           </button>
                         </div>
                       )}
                       {state === 'done' && (
-                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued to tenant ✓</p>
+                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued to customer ✓</p>
                       )}
                     </StepRow>
                     );})()}
@@ -2328,7 +2554,7 @@ export default function ContractDetailPage() {
                           <div className="flex items-center gap-1.5">
                             <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
                             <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
-                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting tenant — they sign via their portal)</span>}
+                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting customer — they sign via their portal)</span>}
                           </div>
                           {/* Landlord countersigns only after tenant has signed */}
                           <div className="flex items-center justify-between">
@@ -2402,87 +2628,154 @@ export default function ContractDetailPage() {
                     </StepRow>
                     );})()}
 
-                    {/* Step 5: Move-In & Utility */}
-                    {(()=>{ const state: TLStep = stepState(st4Done, st5Done); return (
-                    <StepRow num={4} label="Move-In & Utility" state={state} last={false}>
-                      {/* Inspection link is ALWAYS visible — before, during, and after this step.
-                          RPs need it to prepare the walkthrough early and to look it up afterwards. */}
+                    {/* Step 4: Utility Account — either party can upload */}
+                    {(()=>{ const state: TLStep = stepState(st4Done, stUtilityDone); return (
+                    <StepRow num={4} label="Utility Account" state={state} last={false}>
+                      <p className="text-[10px] text-[#9b9890] mt-0.5">
+                        DEWA / utility proof — customer can upload from their portal, or you can attach it here.
+                      </p>
+
+                      {/* Utility upload — shown when step is current OR when doc exists */}
+                      {(state === 'current' || utilityDoc) && (
+                        <div className="mt-2 space-y-1">
+                          <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" className="hidden"
+                            onChange={e => setUtilityFile(e.target.files?.[0] ?? null)} />
+                          {utilityDoc ? (
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#2e9f82]">
+                              <CheckCircle size={10} />
+                              <span className="font-medium">Proof uploaded ✓</span>
+                              {utilityDoc.fileUrl && (
+                                <a href={utilityDoc.fileUrl} target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-0.5 text-[#2e9f82] hover:underline font-normal">
+                                  <ExternalLink size={9} /> View
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={() => utilityInputRef.current?.click()}
+                                  className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
+                                  <UploadCloud size={10} /> {utilityFile ? utilityFile.name : 'Upload proof'}
+                                </button>
+                                {utilityFile && (
+                                  <button onClick={() => uploadUtilityDoc(utilityFile)} disabled={utilityUploading}
+                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
+                                    {utilityUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
+                                  </button>
+                                )}
+                              </div>
+                              {utilityError && <p className="text-[9px] text-red-600">{utilityError}</p>}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </StepRow>
+                    );})()}
+
+                    {/* Step 5: Move-In Inspection */}
+                    {(()=>{ const state: TLStep = stepState(stUtilityDone, stMoveInDone); return (
+                    <StepRow num={5} label="Move-In Inspection" state={state} last={false}>
                       <Link href={`/rental-provider/dashboard/contracts/${contract.id}/inspection?type=move_in`}
                         className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf7] w-fit">
                         <ClipboardCheck size={10} /> {state === 'done' ? 'View Move-In Inspection' : 'Open Move-In Inspection'}
                       </Link>
-                      {state !== 'done' && (
-                        <div className="mt-2 space-y-2">
-                          {feeError && state === 'current' && (
-                            <div className="flex items-center gap-1.5 text-[10px] text-red-600 bg-red-50 rounded-lg px-2.5 py-1.5 border border-red-200">
-                              <AlertCircle size={11} />{feeError}
+
+                      {state !== 'upcoming' && (
+                        <div className="mt-2 space-y-1">
+                          <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide">Inspection signing progress</p>
+                          {[
+                            { label: 'RP submitted inspection', done: !!moveInInsp?.rpSubmittedAt },
+                            { label: 'Tenant signed', done: !!moveInInsp?.tenantSig },
+                            { label: 'RP counter-signed → tenancy activated', done: !!moveInInsp?.rpCounterSig },
+                          ].map(({ label, done }) => (
+                            <div key={label} className="flex items-center gap-1.5">
+                              <span className={`w-3 h-3 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${done ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{done ? '✓' : '○'}</span>
+                              <span className={`text-[10px] ${done ? 'text-[#2e9f82] font-medium' : 'text-[#9b9890]'}`}>{label}</span>
                             </div>
-                          )}
-                          {state === 'current' && (
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input type="checkbox" checked={moveInConfirmed} onChange={e => setMoveInConfirmed(e.target.checked)}
-                                className="rounded border-[#c8c6be] text-[#2e9f82] focus:ring-[#2e9f82]" />
-                              <span className="text-[10px] text-[#6b6860]">Move-in inspection done & keys handed over</span>
-                            </label>
-                          )}
-                          {/* Utility upload + Activate are still gated to 'current' because they're only meaningful
-                              once signatures + Ejari are done. */}
-                          {state === 'current' && (<>
-                          <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" className="hidden"
-                            onChange={e => setUtilityFile(e.target.files?.[0] ?? null)} />
-                          <div className="space-y-1">
-                            <p className="text-[10px] text-[#6b6860] font-medium">Utility account activation verified</p>
-                            {utilityDoc ? (
-                              <div className="flex items-center gap-1.5 text-[10px] text-[#2e9f82]">
-                                <CheckCircle size={10} />
-                                <span className="font-medium">Proof uploaded ✓</span>
-                                {utilityDoc.fileUrl && (
-                                  <a href={utilityDoc.fileUrl} target="_blank" rel="noopener noreferrer"
-                                    className="flex items-center gap-0.5 text-[#2e9f82] hover:underline font-normal">
-                                    <ExternalLink size={9} /> View
-                                  </a>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1.5">
-                                  <button onClick={() => utilityInputRef.current?.click()}
-                                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-white">
-                                    <UploadCloud size={10} /> {utilityFile ? utilityFile.name : 'Upload proof'}
-                                  </button>
-                                  {utilityFile && (
-                                    <button onClick={() => uploadUtilityDoc(utilityFile)} disabled={utilityUploading}
-                                      className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50">
-                                      {utilityUploading ? <Loader2 size={9} className="animate-spin" /> : <UploadCloud size={9} />} Upload
-                                    </button>
-                                  )}
-                                </div>
-                                {utilityError && <p className="text-[9px] text-red-600">{utilityError}</p>}
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={doActivateContract}
-                            disabled={!moveInConfirmed || !utilityDoc || markingStep === 'activate'}
-                            className="w-full text-[10px] font-semibold py-1.5 rounded-md bg-[#2e9f82] text-white hover:bg-[#27896f] disabled:opacity-50 flex items-center justify-center gap-1 mt-1">
-                            {markingStep === 'activate' ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
-                            Activate Contract
-                          </button>
-                          </>)}
+                          ))}
                         </div>
                       )}
+
+                      {/* Inline RP counter-sign — visible when tenant has signed but RP hasn't yet.
+                          Posting here auto-activates the tenancy server-side. */}
+                      {moveInInsp?.tenantSig && !moveInInsp?.rpCounterSig && state !== 'upcoming' && (
+                        <div className="mt-3 p-3 rounded-lg border border-[#fed7aa] bg-[#fff7ed] space-y-2">
+                          <p className="text-[10px] font-semibold text-[#9a3412]">Counter-sign to activate the tenancy</p>
+                          <p className="text-[10px] text-[#c2410c]">Tenant has signed. Add your signature below to lock the inspection record and activate the contract.</p>
+                          <div className="bg-white rounded-md border border-[#fed7aa] overflow-hidden">
+                            <SignaturePad onSignatureChange={setInspSigImg} />
+                          </div>
+                          {inspSigError && <p className="text-[9px] text-red-600">{inspSigError}</p>}
+                          <button
+                            type="button"
+                            disabled={inspSigBusy || !inspSigImg}
+                            onClick={async () => {
+                              if (!inspSigImg) { setInspSigError('Please draw your signature.'); return; }
+                              setInspSigBusy(true); setInspSigError(null);
+                              try {
+                                const res = await fetch(`/api/contracts/${contract.id}/inspection/sign?type=move_in`, {
+                                  method: 'POST', credentials: 'include',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ signatureImage: inspSigImg }),
+                                });
+                                if (!res.ok) {
+                                  const b = await res.json().catch(() => ({}));
+                                  throw new Error(b?.message ?? `Error ${res.status}`);
+                                }
+                                // Re-fetch inspection so rpCounterSig is reflected; reload the contract too
+                                // since signing here auto-activates the tenancy.
+                                const ir = await fetch(`/api/contracts/${contract.id}/inspection?type=move_in`, { credentials: 'include' });
+                                if (ir.ok) {
+                                  const insp = await ir.json();
+                                  setMoveInInsp({ rpSubmittedAt: insp.rpSubmittedAt, tenantSig: insp.tenantSig, rpCounterSig: insp.rpCounterSig, rpCounterSignedAt: insp.rpCounterSignedAt });
+                                }
+                                const cr = await fetch(`/api/contracts/${contract.id}`, { credentials: 'include' });
+                                if (cr.ok) setContract(await cr.json());
+                                setInspSigImg(null);
+                              } catch (e) {
+                                setInspSigError(e instanceof Error ? e.message : 'Failed to sign');
+                              } finally {
+                                setInspSigBusy(false);
+                              }
+                            }}
+                            className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#c2410c] text-white text-[10px] font-semibold hover:bg-[#9a3412] disabled:opacity-50"
+                          >
+                            {inspSigBusy ? <Loader2 size={10} className="animate-spin" /> : <FileSignature size={10} />}
+                            {inspSigBusy ? 'Signing…' : 'Counter-sign & activate tenancy'}
+                          </button>
+                        </div>
+                      )}
+
                       {state === 'done' && (
-                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Unit handed over · Utility active ✓</p>
+                        <p className="text-[10px] text-[#2e9f82] mt-0.5">Unit handed over ✓</p>
                       )}
                     </StepRow>
                     );})()}
 
                     {/* Step 6: Active Tenancy */}
                     {(()=>{ const state: TLStep = tl_isActive ? 'current' : 'upcoming'; return (
-                    <StepRow num={5} label="Active Tenancy" state={state} last={true}>
+                    <StepRow num={6} label="Active Tenancy" state={state} last={true}>
                       {tl_isActive && (
-                        <div className="mt-1 space-y-1">
+                        <div className="mt-1 space-y-2">
                           <p className="text-[10px] text-[#2e9f82] font-medium">Contract is live</p>
-                          <p className="text-[10px] text-[#9b9890]">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
+                          <p className="text-[10px] text-[#9b9890]">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} payments</p>
+                          <div className="flex gap-2 pt-1">
+                            <Link
+                              href={`/rental-provider/dashboard/contracts/${contract.id}/print`}
+                              target="_blank"
+                              className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf7] transition-colors"
+                            >
+                              <Eye size={10} /> Preview Rental Agreement
+                            </Link>
+                            <Link
+                              href={`/rental-provider/dashboard/contracts/${contract.id}/print/receipt`}
+                              target="_blank"
+                              className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-md border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors"
+                            >
+                              <FileText size={10} /> Preview Receipt
+                            </Link>
+                          </div>
                         </div>
                       )}
                     </StepRow>
@@ -2498,28 +2791,28 @@ export default function ContractDetailPage() {
                     </StepRow>
                     );})()}
 
-                    {/* Step 2: Payment Collection — tenant brings PDC cheques, RP records them.
-                         For renewals there's no upstream lead, so cheques are collected on this
+                    {/* Step 2: Payment Collection — customer submits payment references, RP records them.
+                         For renewals there's no upstream lead, so payments are collected on this
                          contract before signatures can proceed. */}
                     {(()=>{ const state: TLStep = stepState(true, st2Done); return (
                     <StepRow num={2} label="Payment Collection" state={state} last={false}>
-                      <p className="text-[10px] text-[#9b9890] mt-0.5">Tenant brings PDC cheques — record each and confirm receipt.</p>
-                      {/* Tenant submission status — mirrors the lead's CHEQUES_SUBMITTED stage.
-                          The tenant signals readiness from their portal before the RP records. */}
+                      <p className="text-[10px] text-[#9b9890] mt-0.5">Customer prepares the payments — record each one and confirm receipt.</p>
+                      {/* Customer submission status — mirrors the lead's CHEQUES_SUBMITTED stage.
+                          The customer signals readiness from their portal before the RP records. */}
                       {state === 'current' && contract.tenantChequesSubmittedAt && (
                         <div className="mt-2 flex items-start gap-1.5 text-[10px] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5">
                           <CheckCircle size={11} className="text-[#854d0e] shrink-0 mt-0.5" />
                           <div className="flex-1">
-                            <p className="font-semibold text-[#854d0e]">Tenant confirmed cheques submitted</p>
+                            <p className="font-semibold text-[#854d0e]">Customer confirmed payments submitted</p>
                             <p className="text-[9px] text-[#854d0e] opacity-80">
                               {new Date(contract.tenantChequesSubmittedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                              {' '}— record each cheque below and confirm receipt.
+                              {' '}— record each one below and confirm receipt.
                             </p>
                           </div>
                         </div>
                       )}
                       {state === 'current' && !contract.tenantChequesSubmittedAt && (
-                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting tenant to confirm cheques handed over.</p>
+                        <p className="mt-2 text-[10px] text-[#9b9890] italic">Awaiting customer to confirm payments.</p>
                       )}
                       {state === 'current' && (
                         <div className="mt-2 space-y-1.5">
@@ -2546,7 +2839,7 @@ export default function ContractDetailPage() {
                           <div className="flex items-center justify-between rounded-lg border border-[#e8e6e0] px-2.5 py-2">
                             <div>
                               <p className="text-[10px] font-semibold text-[#1a1916]">Rental Instalments</p>
-                              <p className="text-[9px] text-[#9b9890]">{expectedCheques} cheques (PDC)</p>
+                              <p className="text-[9px] text-[#9b9890]">{expectedCheques} payment{expectedCheques === 1 ? '' : 's'}</p>
                             </div>
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
                               allChequesRecorded ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef9c3] text-[#854d0e]'
@@ -2558,7 +2851,7 @@ export default function ContractDetailPage() {
                           <button
                             onClick={() => setActiveDrawer('payments')}
                             className="w-full text-[10px] font-semibold py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-white flex items-center justify-center gap-1.5">
-                            <CreditCard size={10} /> Manage Cheques
+                            <CreditCard size={10} /> Manage Payments
                             <ChevronRight size={9} className="ml-auto opacity-50" />
                           </button>
                           {/* Confirm PDC Received button */}
@@ -2598,7 +2891,7 @@ export default function ContractDetailPage() {
                           <div className="flex items-center gap-1.5">
                             <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'}`}>{hasTenantSigned ? '✓' : '○'}</span>
                             <span className="text-[10px] text-[#6b6860]">Tenant signed</span>
-                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting tenant — they sign via their portal)</span>}
+                            {!hasTenantSigned && <span className="text-[9px] text-[#9b9890] ml-1">(awaiting customer — they sign via their portal)</span>}
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
@@ -2699,7 +2992,8 @@ export default function ContractDetailPage() {
             </p>
           </div>{/* end timeline col */}
 
-        </div>{/* end grid */}
+        </div>
+        )}{/* end grid */}
       </div>
 
       {/* Sign modal */}
@@ -2739,24 +3033,16 @@ export default function ContractDetailPage() {
                   <div><span className="text-[#9b9890]">Unit </span><span className="font-semibold text-[#1a1916]">{contract.unit.number ?? '—'}</span></div>
                   <div><span className="text-[#9b9890]">Location </span><span className="font-semibold text-[#1a1916]">{[contract.property.community, contract.property.emirate].filter(Boolean).join(', ') || '—'}</span></div>
                   <div><span className="text-[#9b9890]">Annual Rent </span><span className="font-semibold text-[#1a1916]">{fmtAed(contract.annualRent)}</span></div>
+                  <div><span className="text-[#9b9890]">Installments </span><span className="font-semibold text-[#1a1916]">{contract.numberOfInstallments ?? '—'} payment{contract.numberOfInstallments === 1 ? '' : 's'}</span></div>
+                  <div><span className="text-[#9b9890]">Security Deposit </span><span className="font-semibold text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</span></div>
                   <div className="col-span-2"><span className="text-[#9b9890]">Cheques payable to </span><span className="font-semibold text-[#1a1916]">{contract.landlord.companyName ?? contract.landlord.name ?? '—'}</span></div>
                 </div>
               </div>
 
-              {/* New renewal terms */}
+              {/* Renewal period — start / end / installments / method */}
               <div>
-                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">New Renewal Terms</p>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Renewal Period</p>
                 <div className="space-y-3">
-                  <div>
-                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">New annual rent (AED)</label>
-                    <input
-                      type="number"
-                      value={renewalForm.newAnnualRent}
-                      onChange={e => setRenewalForm(f => ({ ...f, newAnnualRent: e.target.value }))}
-                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                      placeholder="90000"
-                    />
-                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Start date</label>
@@ -2819,58 +3105,144 @@ export default function ContractDetailPage() {
                       type="text"
                       value={renewalForm.chequePayeeName}
                       onChange={e => setRenewalForm(f => ({ ...f, chequePayeeName: e.target.value }))}
-                      placeholder="New payee name on cheques"
+                      placeholder="New payee name (used when payment method is cheque)"
                       className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
                     />
                   )}
                 </div>
               </div>
 
-              {/* Fees */}
+              {/* Rent & Fees — single grouped block (admin + ejari + commission bundle into payment 1; deposit carries forward) */}
               <div>
-                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Fees (AED)</p>
+                <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Rent &amp; Fees (AED)</p>
                 <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">New annual rent</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewalForm.newAnnualRent}
+                      onChange={e => setRenewalForm(f => ({ ...f, newAnnualRent: e.target.value }))}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="90000"
+                    />
+                  </div>
                   <div>
-                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Admin fee</label>
+                    <label className="text-[11px] font-medium text-[#6b6860] flex items-center justify-between mb-1">
+                      <span>Admin fee</span>
+                      {feesTouched.adminFee && (
+                        <button
+                          type="button"
+                          onClick={() => setFeesTouched(t => ({ ...t, adminFee: false }))}
+                          className="text-[10px] text-[#2e9f82] hover:underline cursor-pointer"
+                        >Reset to rule</button>
+                      )}
+                    </label>
                     <input
                       type="number"
                       min={0}
                       value={renewalForm.adminFee}
-                      onChange={e => setRenewalForm(f => ({ ...f, adminFee: e.target.value }))}
+                      onChange={e => { setFeesTouched(t => ({ ...t, adminFee: true })); setRenewalForm(f => ({ ...f, adminFee: e.target.value })); }}
                       className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                      placeholder="1000"
+                      placeholder="From your fee rule"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Ejari fee</label>
+                    <label className="text-[11px] font-medium text-[#6b6860] flex items-center justify-between mb-1">
+                      <span>Ejari fee</span>
+                      {feesTouched.ejariFee && (
+                        <button
+                          type="button"
+                          onClick={() => setFeesTouched(t => ({ ...t, ejariFee: false }))}
+                          className="text-[10px] text-[#2e9f82] hover:underline cursor-pointer"
+                        >Reset to rule</button>
+                      )}
+                    </label>
                     <input
                       type="number"
                       min={0}
                       value={renewalForm.ejariFee}
-                      onChange={e => setRenewalForm(f => ({ ...f, ejariFee: e.target.value }))}
+                      onChange={e => { setFeesTouched(t => ({ ...t, ejariFee: true })); setRenewalForm(f => ({ ...f, ejariFee: e.target.value })); }}
                       className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                      placeholder="250"
+                      placeholder="From your fee rule"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] flex items-center justify-between mb-1">
+                      <span>Commission</span>
+                      {feesTouched.commission && (
+                        <button
+                          type="button"
+                          onClick={() => setFeesTouched(t => ({ ...t, commission: false }))}
+                          className="text-[10px] text-[#2e9f82] hover:underline cursor-pointer"
+                        >Reset to rule</button>
+                      )}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewalForm.commission}
+                      onChange={e => { setFeesTouched(t => ({ ...t, commission: true })); setRenewalForm(f => ({ ...f, commission: e.target.value })); }}
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                      placeholder="From your fee rule"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-[#6b6860] block mb-1">Security deposit (carried forward)</label>
+                    <input
+                      type="number"
+                      value={contract.securityDepositAmount ?? 0}
+                      disabled
+                      className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-[#f7f6f2] text-[#6b6860] cursor-not-allowed"
                     />
                   </div>
                 </div>
-                <p className="text-[10px] text-[#9b9890] mt-1.5">Prefilled from the current contract. Adjust if your fee rules have changed.</p>
+                <p className="text-[10px] text-[#9b9890] mt-1.5">
+                  Admin, ejari and commission auto-fill from your <a href="/rental-provider/dashboard/settings/fees" target="_blank" rel="noreferrer" className="text-[#2e9f82] hover:underline">fee rules</a> against the new annual rent — edit any value to override. They bundle into the first installment. Security deposit stays the same and is not re-collected.
+                </p>
               </div>
 
-              {/* Installment preview */}
+              {/* Planned Installments preview — mirrors the new-lease auto-plan:
+                  payment #1 wraps admin + ejari + commission + first rent installment,
+                  payments 2..N are rent-only at month-stepped due dates. */}
               {(() => {
-                const n = parseInt(renewalForm.numberOfInstallments, 10) || 0;
-                const rent = parseFloat(renewalForm.newAnnualRent) || 0;
-                const start = renewalForm.newStartDate ? new Date(renewalForm.newStartDate) : null;
-                const end = renewalForm.newEndDate ? new Date(renewalForm.newEndDate) : null;
+                const n      = parseInt(renewalForm.numberOfInstallments, 10) || 0;
+                const rent   = parseFloat(renewalForm.newAnnualRent) || 0;
+                const admin  = Math.max(0, parseFloat(renewalForm.adminFee)   || 0);
+                const ejari  = Math.max(0, parseFloat(renewalForm.ejariFee)   || 0);
+                const comm   = Math.max(0, parseFloat(renewalForm.commission) || 0);
+                const start  = renewalForm.newStartDate ? new Date(renewalForm.newStartDate) : null;
+                const end    = renewalForm.newEndDate   ? new Date(renewalForm.newEndDate)   : null;
                 if (!n || !rent || !start || !end) return null;
                 const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000));
-                const stepDays = Math.max(1, Math.floor(totalDays / n));
-                const each = Math.round(rent / n);
-                const rows = Array.from({ length: n }, (_, i) => {
-                  const d = new Date(start);
-                  d.setDate(d.getDate() + i * stepDays);
-                  return { idx: i + 1, due: d, amount: each };
-                });
+                const stepDays  = Math.max(1, Math.floor(totalDays / n));
+                const base      = Math.floor(rent / n);
+                const last      = rent - base * (n - 1);
+                const firstRent = n === 1 ? last : base;
+                const bundleAmount = admin + ejari + comm + firstRent;
+                const bundleParts: string[] = [];
+                if (admin > 0) bundleParts.push('Admin');
+                if (ejari > 0) bundleParts.push('Ejari');
+                if (comm  > 0) bundleParts.push('Commission');
+                bundleParts.push(n === 1 ? 'Annual Rent' : 'Installment 1');
+                const bundleLabel = bundleParts.length > 1
+                  ? `${bundleParts.join(' + ')} (Payment 1/${n})`
+                  : `Rent — Payment 1/${n}`;
+                const rows = [
+                  { idx: 1, due: new Date(start), description: bundleLabel, amount: bundleAmount, bundled: bundleParts.length > 1 },
+                  ...Array.from({ length: Math.max(0, n - 1) }, (_, i) => {
+                    const d = new Date(start);
+                    d.setDate(d.getDate() + (i + 1) * stepDays);
+                    return {
+                      idx: i + 2,
+                      due: d,
+                      description: `Rent — Payment ${i + 2}/${n}`,
+                      amount: i === n - 2 ? last : base,
+                      bundled: false,
+                    };
+                  }),
+                ];
+                const total = rows.reduce((s, r) => s + r.amount, 0);
                 return (
                   <div>
                     <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Planned Installments</p>
@@ -2886,17 +3258,23 @@ export default function ContractDetailPage() {
                         </thead>
                         <tbody>
                           {rows.map(r => (
-                            <tr key={r.idx} style={{ borderTop: '1px solid #f0ede8' }}>
+                            <tr key={r.idx} style={{ borderTop: '1px solid #f0ede8', background: r.bundled ? '#fef9ed' : undefined }}>
                               <td className="px-3 py-2 text-[#9b9890]">{r.idx}</td>
-                              <td className="px-3 py-2 text-[#1a1916]">Rent — Cheque {r.idx}/{n}</td>
+                              <td className="px-3 py-2 text-[#1a1916]">{r.description}</td>
                               <td className="px-3 py-2 text-[#1a1916] tabular-nums">{fmtDate(r.due.toISOString())}</td>
                               <td className="px-3 py-2 text-right text-[#1a1916] font-semibold tabular-nums">{r.amount.toLocaleString('en-AE')}</td>
                             </tr>
                           ))}
+                          <tr style={{ borderTop: '2px solid #e8e6e0' }} className="bg-[#f7f6f2]">
+                            <td className="px-3 py-2 text-[10px] text-[#9b9890] uppercase font-semibold" colSpan={3}>Total</td>
+                            <td className="px-3 py-2 text-right text-[#1a1916] font-bold tabular-nums">{total.toLocaleString('en-AE')}</td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-[10px] text-[#9b9890] mt-1.5">Even-split based on annual rent ÷ {n}. You can add extra one-off charges below.</p>
+                    <p className="text-[10px] text-[#9b9890] mt-1.5">
+                      Payment 1 bundles admin + ejari + commission + rent installment 1. Subsequent payments are rent-only, month-stepped to the renewal end date.
+                    </p>
                   </div>
                 );
               })()}
@@ -2995,7 +3373,7 @@ export default function ContractDetailPage() {
               <div>
                 <p className="text-sm font-bold text-[#1a1916]">Request termination</p>
                 <p className="text-xs text-[#6b6860] mt-1">
-                  The tenant must accept this request before the contract terminates.
+                  The customer must accept this request before the contract terminates.
                 </p>
               </div>
             </div>
@@ -3041,6 +3419,143 @@ export default function ContractDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── View All Documents modal ── */}
+      {(() => {
+        const KYC_1  = new Set(['emirates_id', 'passport', 'uae_visa']);
+        const RENTAL = new Set(['employment_letter','bank_statement','marriage_certificate','rental_history','credit_report','utility_clearance','trade_license','tax_registration','moa','business_license','utility_proof_of_payment']);
+        const allDocs = (tenantKycDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
+
+        const imgDocs = allDocs.filter(d => {
+          const up = d.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = d.mimeType === 'application/pdf' || up.endsWith('.pdf');
+          return !isPdf && (d.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(up));
+        });
+        const lightboxSlides = imgDocs.map(d => ({
+          src: d.fileUrl,
+          title: d.displayName ?? d.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          description: d.status === 'processed' ? '✓ Approved' : d.status === 'rejected' ? '✗ Rejected' : 'Uploaded',
+        }));
+
+        if (!viewAllOpen) {
+          return lightboxOpen ? (
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[LbZoom, LbCaptions, LbThumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          ) : null;
+        }
+
+        const occ1   = allDocs.filter(d => KYC_1.has(d.documentKey));
+        const rental = allDocs.filter(d => RENTAL.has(d.documentKey));
+        const extraMap = new Map<number, TenantKycDoc[]>();
+        const other: TenantKycDoc[] = [];
+        for (const d of allDocs) {
+          const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+          if (m) { const n = parseInt(m[2]); if (!extraMap.has(n)) extraMap.set(n, []); extraMap.get(n)!.push(d); }
+          else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) other.push(d);
+        }
+        type DocGroup = { heading: string; sub?: string; docs: TenantKycDoc[] };
+        const groups: DocGroup[] = [];
+        if (occ1.length)   groups.push({ heading: 'Occupant 1 — Identity', docs: occ1 });
+        [...extraMap.keys()].sort((a,b) => a-b).forEach(n =>
+          groups.push({ heading: `Occupant ${n} — Identity`, sub: 'optional', docs: extraMap.get(n)! })
+        );
+        if (rental.length) groups.push({ heading: 'Rental Documents', docs: rental });
+        if (other.length)  groups.push({ heading: 'Other', docs: other });
+
+        const tenantName = contract.tenant.name?.trim() || '—';
+        const unitLabel  = contract.unit.name ?? (contract.unit.number ? `Unit ${contract.unit.number}` : '—');
+
+        function StatusChip({ status }: { status: string }) {
+          if (status === 'processed') return <span className="text-[9px] font-bold bg-[#dcfce7] text-[#16a34a] rounded px-1.5 py-0.5">Approved</span>;
+          if (status === 'rejected')  return <span className="text-[9px] font-bold bg-[#fee2e2] text-[#b91c1c] rounded px-1.5 py-0.5">Rejected</span>;
+          return <span className="text-[9px] font-bold bg-[#f4f3ef] text-[#6b6860] rounded px-1.5 py-0.5">Uploaded</span>;
+        }
+
+        function DocEntry({ doc }: { doc: TenantKycDoc }) {
+          const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const urlPath = doc.fileUrl.split('?')[0].toLowerCase();
+          const isPdf = doc.mimeType === 'application/pdf' || urlPath.endsWith('.pdf');
+          const isImg = !isPdf && (doc.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(urlPath));
+          const imgIdx = isImg ? imgDocs.findIndex(d => d.id === doc.id) : -1;
+          return (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[12px] font-semibold text-[#1a1916]">{label}</span>
+                <StatusChip status={doc.status} />
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0">
+                  Open <ExternalLink size={10} />
+                </a>
+              </div>
+              {isPdf ? (
+                <iframe src={doc.fileUrl} className="w-full h-[480px] rounded-xl border border-[#e8e6e0]" />
+              ) : isImg ? (
+                <button type="button" onClick={() => { setLightboxIndex(imgIdx); setLightboxOpen(true); }}
+                  className="group relative block w-full rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f8f7f4] cursor-zoom-in">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={doc.fileUrl} alt={label} loading="lazy"
+                    className="max-h-[320px] w-full object-contain block transition-transform duration-200 group-hover:scale-[1.02]" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                    <span className="bg-white/90 rounded-full p-2 shadow"><ZoomIn size={18} className="text-[#1a1916]" /></span>
+                  </div>
+                </button>
+              ) : (
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline">
+                  <FileText size={14} /> Open file
+                </a>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <>
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4"
+              onClick={(e) => { if (e.target === e.currentTarget) setViewAllOpen(false); }}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+                <div className="sticky top-0 bg-white rounded-t-2xl border-b border-[#e8e6e0] px-6 py-4 flex items-center justify-between z-10">
+                  <div>
+                    <p className="text-sm font-bold text-[#1a1916]">{tenantName}</p>
+                    <p className="text-[11px] text-[#9b9890]">{unitLabel} · {allDocs.length} document{allDocs.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button onClick={() => setViewAllOpen(false)}
+                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-[#f4f3ef] text-[#6b6860] transition-colors cursor-pointer">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="px-6 py-6 space-y-8">
+                  {groups.map((g, gi) => (
+                    <section key={gi}>
+                      <div className="flex items-baseline gap-2 mb-4 border-b-2 border-[#2e9f82] pb-1.5">
+                        <h2 className="text-[13px] font-bold text-[#1a1916]">{g.heading}</h2>
+                        {g.sub && <span className="text-[10px] text-[#9b9890]">{g.sub}</span>}
+                      </div>
+                      {g.docs.map(doc => <DocEntry key={doc.id} doc={doc} />)}
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <Lightbox
+              open={lightboxOpen}
+              close={() => setLightboxOpen(false)}
+              index={lightboxIndex}
+              slides={lightboxSlides}
+              plugins={[LbZoom, LbCaptions, LbThumbnails]}
+              zoom={{ maxZoomPixelRatio: 4 }}
+              captions={{ showToggle: true }}
+            />
+          </>
+        );
+      })()}
     </div>
   );
 }

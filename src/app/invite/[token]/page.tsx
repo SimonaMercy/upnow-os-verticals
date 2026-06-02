@@ -62,7 +62,7 @@ const PERM_LABELS: Record<string, string> = {
   can_manage_renewals:    'Manage renewals',
   can_manage_documents:   'Manage documents',
   can_view_financials:    'View financials',
-  can_communicate_tenants:'Communicate with tenants',
+  can_communicate_tenants:'Communicate with customers',
   can_escalate_to_admin:  'Escalate to admin',
   can_invite_manager:     'Invite other managers',
 };

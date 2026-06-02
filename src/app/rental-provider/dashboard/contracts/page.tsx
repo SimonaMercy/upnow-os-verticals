@@ -103,7 +103,7 @@ export default function ContractsListPage() {
             type="text"
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="Search by reference, tenant, unit, building…"
+            placeholder="Search by reference, customer, unit, building…"
             className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]"
           />
         </div>
@@ -129,7 +129,7 @@ export default function ContractsListPage() {
                 <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold">Contract</th>
-                    <th className="px-4 py-3 text-left font-semibold">Tenant</th>
+                    <th className="px-4 py-3 text-left font-semibold">Customer</th>
                     <th className="px-4 py-3 text-left font-semibold">Unit</th>
                     <th className="px-4 py-3 text-left font-semibold">Period</th>
                     <th className="px-4 py-3 text-right font-semibold">Annual Rent</th>

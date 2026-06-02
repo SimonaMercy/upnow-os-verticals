@@ -301,7 +301,7 @@ export default function ContractDetailPage() {
             ? <span className="text-sm text-[#1a1916]">{humanize(contract.renewalStatus)}</span>
             : <span className="text-sm text-[#9b9890]">No renewal initiated</span>
         } />
-        <Row label="Tenant Decision" value={
+        <Row label="Customer Decision" value={
           renewalCfg
             ? <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
                 style={{ backgroundColor: renewalCfg.bg, color: renewalCfg.text }}>
@@ -321,14 +321,14 @@ export default function ContractDetailPage() {
               Initiate Renewal Process
             </button>
             <p className="text-xs text-center text-[#9b9890] mt-2">
-              A renewal notice will be sent to the tenant via email & SMS.
+              A renewal notice will be sent to the customer via email & SMS.
             </p>
           </div>
         )}
       </Section>
 
       {/* Tenant */}
-      <Section title="Tenant Information" icon={<User size={18} />}>
+      <Section title="Customer Information" icon={<User size={18} />}>
         <div className="flex items-center gap-4 mb-4 pb-4 border-b border-[#f4f3ef]">
           <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
             style={{ background: 'linear-gradient(135deg, #2e9f82, #1f6655)' }}>
@@ -336,7 +336,7 @@ export default function ContractDetailPage() {
           </div>
           <div>
             <p className="font-semibold text-[#1a1916]">{contract.tenant.name ?? '—'}</p>
-            <p className="text-sm text-[#6b6860]">Tenant ID #{contract.tenant.id}</p>
+            <p className="text-sm text-[#6b6860]">Customer ID #{contract.tenant.id}</p>
           </div>
         </div>
         {contract.tenant.email && (

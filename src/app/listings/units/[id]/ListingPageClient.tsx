@@ -353,7 +353,8 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
   // Inline auth state — shown when unauthenticated user hits "Confirm Viewing"
   type AuthStep = null | 'register' | 'verify-otp' | 'register-success';
   const [authStep, setAuthStep] = useState<AuthStep>(null);
-  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
+  const [authIsNewUser, setAuthIsNewUser] = useState(false);
+  const [authVerificationStep, setAuthVerificationStep] = useState<'email' | 'phone'>('email');
   const [authEmail, setAuthEmail] = useState('');
   const [authDevOtp, setAuthDevOtp] = useState<string | null>(null);
   const [authOtp, setAuthOtp] = useState(['', '', '', '', '', '']);
@@ -435,29 +436,60 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
     await submitBooking(date, time, notes, moveInDate);
   }
 
-  // Step 1 — send OTP for register or login
+  // Step 1 — unified: try login first, auto-register if no account found
   async function handleAuthIdentify() {
-    const email = authEmail.trim().toLowerCase();
-    if (!email) { setAuthError('Enter your email address.'); return; }
+    const raw = authEmail.trim();
+    if (!raw) { setAuthError('Enter your email or phone number.'); return; }
     setAuthError(null);
     setAuthSubmitting(true);
     try {
-      const endpoint = authMode === 'register'
-        ? '/api/auth/register/customer'
-        : '/api/auth/login';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        credentials: 'include',
+      const isPhone = !raw.includes('@');
+      const identifier = isPhone
+        ? (raw.startsWith('+') ? raw : /^\d{8,12}$/.test(raw) ? `+971${raw.replace(/^0+/, '')}` : raw)
+        : raw.toLowerCase();
+
+      // Always try login first
+      const loginRes = await fetch('/api/auth/login', {
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: identifier }),
       });
-      const body = await res.json();
-      if (!res.ok) {
-        const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Something went wrong';
-        throw new Error(msg);
+      const loginBody = await loginRes.json();
+
+      if (loginRes.ok) {
+        // Existing user — OTP sent
+        setAuthIsNewUser(false);
+        setAuthVerificationStep(loginBody.verificationStep ?? (isPhone ? 'phone' : 'email'));
+        if (loginBody.devOtp) setAuthDevOtp(loginBody.devOtp);
+        setAuthOtp(['', '', '', '', '', '']);
+        setAuthEmail(identifier);
+        setAuthStep('verify-otp');
+        return;
       }
-      if (body.devOtp) setAuthDevOtp(body.devOtp);
+
+      // If any error other than "no account found" — surface it
+      const isNotFound = loginRes.status === 401 &&
+        (loginBody.message ?? '').toLowerCase().includes('no account');
+      if (!isNotFound) {
+        throw new Error(Array.isArray(loginBody.message) ? loginBody.message.join(', ') : loginBody.message ?? 'Something went wrong');
+      }
+
+      // New user — auto-register with whatever they provided
+      const regPayload = isPhone ? { phone: identifier } : { email: identifier };
+      const regRes = await fetch('/api/auth/register/customer', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(regPayload),
+      });
+      const regBody = await regRes.json();
+      if (!regRes.ok) {
+        throw new Error(Array.isArray(regBody.message) ? regBody.message.join(', ') : regBody.message ?? 'Registration failed');
+      }
+      setAuthIsNewUser(true);
+      setAuthVerificationStep(regBody.verificationStep ?? (isPhone ? 'phone' : 'email'));
+      if (regBody.devOtp) setAuthDevOtp(regBody.devOtp);
       setAuthOtp(['', '', '', '', '', '']);
+      setAuthEmail(identifier);
       setAuthStep('verify-otp');
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'Something went wrong');
@@ -466,28 +498,39 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
     }
   }
 
-  // Step 2 — verify the OTP and complete the booking
+  // Step 2 — verify OTP, route to correct endpoint based on flow
   async function handleAuthVerifyOtp() {
     const code = authOtp.join('');
     if (code.length !== 6) { setAuthError('Enter the 6-digit code.'); return; }
     setAuthError(null);
     setAuthSubmitting(true);
     try {
-      const email = authEmail.trim().toLowerCase();
+      const identifier = authEmail;
       let res: Response;
-      if (authMode === 'register') {
-        res = await fetch('/api/auth/email/verify-otp', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, code }),
-        });
-      } else {
+
+      if (!authIsNewUser) {
+        // Existing user: login verify (works for email and phone)
         res = await fetch('/api/auth/login/verify-otp', {
           method: 'POST', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: email, code }),
+          body: JSON.stringify({ identifier, code }),
+        });
+      } else if (authVerificationStep === 'phone') {
+        // New phone-only user: cookie from registration carries the JWT
+        res = await fetch('/api/auth/otp/verify', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+      } else {
+        // New email user
+        res = await fetch('/api/auth/email/verify-otp', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: identifier, code }),
         });
       }
+
       const body = await res.json();
       if (!res.ok) {
         const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Verification failed';
@@ -528,43 +571,13 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
     }
   }
 
-  // ── Step 1: email entry (register or sign-in toggle) ──────────────────────
+  // ── Step 1: email or phone entry — auto-detects login vs register ────────
   if (authStep === 'register') {
     return (
       <ModalShell onClose={onClose}>
-        {/* Mode toggle */}
-        <div className="flex rounded-xl overflow-hidden border border-[#e8e6e0] mb-5">
-          <button
-            type="button"
-            onClick={() => { setAuthMode('register'); setAuthError(null); }}
-            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
-            style={{
-              backgroundColor: authMode === 'register' ? '#1a1916' : 'transparent',
-              color: authMode === 'register' ? '#fff' : '#6b6860',
-            }}
-          >
-            Create account
-          </button>
-          <button
-            type="button"
-            onClick={() => { setAuthMode('login'); setAuthError(null); }}
-            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
-            style={{
-              backgroundColor: authMode === 'login' ? '#1a1916' : 'transparent',
-              color: authMode === 'login' ? '#fff' : '#6b6860',
-            }}
-          >
-            Sign in
-          </button>
-        </div>
-
-        <h3 className="font-bold text-xl text-[#1a1916] mb-1">
-          {authMode === 'register' ? 'Create your account' : 'Welcome back'}
-        </h3>
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Continue to UpNow</h3>
         <p className="text-sm text-[#9b9890] mb-5">
-          {authMode === 'register'
-            ? 'Enter your email and we\'ll send you a verification code.'
-            : 'Enter your email and we\'ll send you a sign-in code.'}
+          Enter your email or phone number. We&apos;ll send a one-time code to sign you in — or create your account instantly if you&apos;re new.
         </p>
 
         {authError && (
@@ -573,15 +586,16 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
 
         <div className="mb-4">
           <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">
-            Email address
+            Email or phone number
           </label>
           <input
-            type="email"
+            type="text"
+            inputMode="email"
             value={authEmail}
             onChange={(e) => setAuthEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAuthIdentify()}
-            placeholder="you@example.com"
-            autoComplete="email"
+            placeholder="you@example.com or +971 50 123 4567"
+            autoComplete="username"
             autoFocus
             className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3.5 py-3 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20 focus:border-[#1a1916]"
           />
@@ -593,7 +607,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
           style={{ backgroundColor: '#1a1916' }}
         >
-          {authSubmitting ? 'Sending code…' : 'Send verification code →'}
+          {authSubmitting ? 'Sending code…' : 'Continue →'}
         </button>
       </ModalShell>
     );
@@ -612,7 +626,9 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
           <ChevronLeft size={14} /> Back
         </button>
 
-        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Check your email</h3>
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">
+          {authVerificationStep === 'phone' ? 'Check your phone' : 'Check your email'}
+        </h3>
         <p className="text-sm text-[#9b9890] mb-5">
           We sent a 6-digit code to{' '}
           <span className="font-semibold text-[#1a1916]">{authEmail}</span>

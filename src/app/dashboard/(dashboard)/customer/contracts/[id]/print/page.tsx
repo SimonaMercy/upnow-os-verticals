@@ -1,6 +1,11 @@
+/**
+ * Customer-side contract print page — mirrors the RP layout
+ * (rental-provider/dashboard/contracts/[id]/print) exactly. Uses the tenant
+ * API endpoint which returns the contract record with `signatures` embedded.
+ */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
@@ -22,11 +27,11 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
-  tenant: { name: string | null; email: string | null; phone: string | null; emiratesId: string | null; licenseNumber: string | null; licenseAuthority: string | null };
-  landlord: { name: string | null; email: string | null; phone: string | null; companyName: string | null; emiratesId: string | null; licenseNumber: string | null; licenseAuthority: string | null };
+  tenant: { name: string | null; email: string | null; phone: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null };
+  landlord: { name: string | null; email: string | null; phone: string | null; companyName: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null };
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null };
-  unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null; sizeSqft: number | null; sizeSqm: number | null };
-  signatures: Signature[];
+  unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null; sizeSqm: number | null };
+  signatures?: Signature[];
 }
 
 interface Signature {
@@ -34,6 +39,17 @@ interface Signature {
   signatoryName: string;
   signatureImage: string | null;
   signedAt: string;
+}
+
+interface PrintAddendum {
+  id: number;
+  name: string;
+  fileUrl: string;
+  mimeType: string;
+  tenantSig: string | null;
+  tenantSignedAt: string | null;
+  landlordSig: string | null;
+  landlordSignedAt: string | null;
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -85,6 +101,7 @@ function SigBox({ sig, label, labelAr }: { sig?: Signature | null; label: string
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{ height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {sig?.signatureImage
+          /* eslint-disable-next-line @next/next/no-img-element */
           ? <img src={sig.signatureImage} alt="signature" style={{ maxHeight: 48, maxWidth: '90%', objectFit: 'contain' }} />
           : <span style={{ fontSize: 7, color: '#bbb', fontStyle: 'italic' }}>Not yet signed</span>
         }
@@ -127,20 +144,35 @@ function SigSection({ tenantSig, landlordSig }: { tenantSig?: Signature | null; 
   );
 }
 
-function DLDHeader() {
+/**
+ * Official logos. Drop the licensed artwork at:
+ *   - /public/dld/government-of-dubai.png
+ *   - /public/dld/land-department.png
+ */
+function DLDHeader({ contractDate }: { contractDate?: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottom: '2px solid #1a3c6e' }}>
-      <div style={{ border: '1px solid #1a3c6e', borderRadius: 3, padding: '3px 10px', textAlign: 'center' }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700, color: '#1a3c6e', direction: 'rtl' }}>حكومـة دبـي</div>
-        <div style={{ fontSize: 7.5, color: '#444' }}>GOVERNMENT OF DUBAI</div>
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 80 }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/dld/government-of-dubai.png" alt="Government of Dubai"
+          style={{ height: 72, width: 'auto', maxWidth: 280, objectFit: 'contain' }} />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/dld/land-department.png" alt="Dubai Land Department"
+          style={{ height: 72, width: 'auto', maxWidth: 300, objectFit: 'contain' }} />
       </div>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 15, fontWeight: 900, color: '#1a3c6e', letterSpacing: 4, direction: 'rtl', fontFamily: 'Georgia, serif' }}>عـقـد إيـجـار مـوحـد</div>
-        <div style={{ fontSize: 11, fontWeight: 900, color: '#1a3c6e', letterSpacing: 2, fontFamily: 'Georgia, serif' }}>UNIFIED TENANCY CONTRACT</div>
-      </div>
-      <div style={{ textAlign: 'center', border: '1px solid #1a3c6e', borderRadius: 3, padding: '3px 10px' }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700, color: '#1a3c6e', direction: 'rtl' }}>دائرة الأراضي والأملاك</div>
-        <div style={{ fontSize: 7.5, color: '#444' }}>Land Department</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginTop: 14, marginBottom: 8, gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+          <span style={{ fontSize: 11, color: '#222' }}>Date</span>
+          <span style={{ borderBottom: '1px dashed #888', display: 'inline-block', minWidth: 180, fontSize: 11, paddingLeft: 6, paddingBottom: 1, color: '#000' }}>
+            {contractDate ?? ''}
+          </span>
+          <span style={{ fontSize: 11, direction: 'rtl', color: '#222' }}>التاريخ</span>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: '#1a3c6e', letterSpacing: 14, direction: 'rtl', fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1.1 }}>عـقـد إيـجـار</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1a3c6e', letterSpacing: 6, fontFamily: 'Georgia, "Times New Roman", serif', marginTop: 2 }}>TENANCY CONTRACT</div>
+        </div>
+        <div />
       </div>
     </div>
   );
@@ -185,26 +217,84 @@ export default function TenantContractPrintPage() {
   const searchParams = useSearchParams();
   const autoDownload = searchParams?.get('download') === '1';
   const [contract, setContract] = useState<ContractDetail | null>(null);
+  const [addendums, setAddendums] = useState<PrintAddendum[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  // Hide the dashboard chrome and unlock scroll while this print page is mounted.
+  // DashboardShell locks html/body to overflow:hidden — we undo that so all pages
+  // are visible without needing to change the shell itself.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = 'auto';
+    body.style.overflow = 'auto';
+    document.body.classList.add('print-only');
+    return () => {
+      document.body.classList.remove('print-only');
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, []);
 
   useEffect(() => {
     if (!params?.id) return;
-    fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include' })
-      .then(r => {
+    Promise.all([
+      fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include' }).then(r => {
         if (!r.ok) throw new Error(`Error ${r.status}`);
         return r.json();
+      }),
+      fetch(`/api/contracts/${params.id}/addendums`, { credentials: 'include' }).then(r =>
+        r.ok ? r.json() : []
+      ),
+    ])
+      .then(([data, adds]) => {
+        setContract(data as ContractDetail);
+        setAddendums(Array.isArray(adds) ? adds : []);
       })
-      .then(data => setContract(data))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [params?.id]);
 
+  // Download the rendered 3-sheet DOM as a real multi-page PDF using html2pdf.js
+  // (dynamically imported so the ~50KB library only loads when the user clicks).
+  // Honors the existing `.page` divs as page breaks — each renders as one A4.
+  async function downloadPdf() {
+    if (!sheetRef.current || !contract) return;
+    setPdfBusy(true);
+    try {
+      const html2pdfMod = await import('html2pdf.js');
+      const html2pdf = (html2pdfMod as unknown as { default: (...args: unknown[]) => unknown }).default;
+      const opts = {
+        margin:       0,
+        filename:     `tenancy-contract-${contract.ref}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:    { mode: ['css', 'legacy'], before: '.page', avoid: '.keep-together' },
+      };
+      (html2pdf as (...args: unknown[]) => { from: (el: HTMLElement) => { set: (o: unknown) => { save: () => Promise<void> } } })()
+        .from(sheetRef.current).set(opts).save();
+    } catch (e) {
+      console.error('PDF generation failed', e);
+      alert('Could not generate PDF. Falling back to browser print.');
+      window.print();
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (contract && autoDownload) {
-      const t = setTimeout(() => window.print(), 800);
+      // Auto-trigger PDF on ?download=1 — same affordance the old window.print had.
+      const t = setTimeout(() => void downloadPdf(), 800);
       return () => clearTimeout(t);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contract, autoDownload]);
 
   if (loading) return (
@@ -224,13 +314,14 @@ export default function TenantContractPrintPage() {
   const installments = contract.numberOfInstallments ?? 4;
   const mopText = contract.modeOfPayment || instalmentLabel(installments);
   const landlordName = contract.landlord.companyName ?? contract.landlord.name ?? '';
-  const unitTypeLC = (contract.unit.type ?? '').toLowerCase();
   const unitType = contract.unit.type ? contract.unit.type.charAt(0).toUpperCase() + contract.unit.type.slice(1) : '';
+  const unitTypeLC = (contract.unit.type ?? '').toLowerCase();
   const isCommercial = unitTypeLC.includes('commercial');
   const isIndustrial = unitTypeLC.includes('industrial');
   const isResidential = !isCommercial && !isIndustrial;
-  const landlordSig = contract.signatures.find(s => s.role === 'landlord') ?? null;
-  const tenantSig = contract.signatures.find(s => s.role === 'tenant') ?? null;
+  const sigs = contract.signatures ?? [];
+  const landlordSig = sigs.find(s => s.role === 'landlord') ?? null;
+  const tenantSig = sigs.find(s => s.role === 'tenant') ?? null;
 
   const filledClauses: string[] = [
     ...(contract.customClauses ?? []),
@@ -241,9 +332,6 @@ export default function TenantContractPrintPage() {
   while (additionalTerms.length < minRows) additionalTerms.push('');
 
   const pageStyle: React.CSSProperties = {
-    maxWidth: 794,
-    margin: '0 auto',
-    padding: '18px 22px',
     fontSize: 9,
     lineHeight: 1.5,
     fontFamily: 'Arial, sans-serif',
@@ -253,12 +341,41 @@ export default function TenantContractPrintPage() {
   return (
     <>
       <style>{`
-        @page { size: A4; margin: 12mm 10mm; }
+        /* Hide the dashboard chrome and unwind the h-screen shell constraint. */
+        body.print-only aside,
+        body.print-only header { display: none !important; }
+        /* Unwind the shell's fixed-height overflow-hidden wrappers */
+        body.print-only > div,
+        body.print-only > div > div,
+        body.print-only > div > div > div { height: auto !important; overflow: visible !important; flex: none !important; }
+        /* main keeps visible so pages flow naturally in the document */
+        body.print-only main { padding: 0 !important; margin: 0 !important; max-width: none !important; overflow: visible !important; flex: none !important; min-height: 0 !important; }
+
+        @page { size: A4 portrait; margin: 0; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        .page {
+          width: 210mm;
+          min-height: 297mm;
+          padding: 10mm 9mm;
+          background: #fff;
+          page-break-after: always;
+          break-after: page;
+          overflow: hidden;
+        }
+        .page:last-of-type { page-break-after: auto; break-after: auto; }
+        .keep-together { page-break-inside: avoid; break-inside: avoid; }
+        @media screen {
+          body { background: #e5e7eb; padding: 16px 0; }
+          .page { margin: 0 auto 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+        }
         @media print {
           .no-print { display: none !important; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          html, body { background: #fff !important; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
+          img { image-rendering: -webkit-optimize-contrast; }
+          .page { margin: 0; box-shadow: none; }
         }
-        * { box-sizing: border-box; }
       `}</style>
 
       {/* Screen toolbar */}
@@ -268,27 +385,23 @@ export default function TenantContractPrintPage() {
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>Official DLD format · Preview or save as PDF</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => window.history.back()} style={{ padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✕ Close</button>
-          <button onClick={() => window.print()} style={{ padding: '6px 16px', background: '#1a3c6e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-            ⬇ Download PDF
+          <button onClick={() => window.close()} style={{ padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✕ Close</button>
+          <button onClick={() => window.print()} style={{ padding: '6px 16px', background: '#fff', color: '#1a3c6e', border: '1px solid #1a3c6e', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+            🖨 Browser print
+          </button>
+          <button onClick={downloadPdf} disabled={pdfBusy}
+            style={{ padding: '6px 16px', background: '#1a3c6e', color: '#fff', border: 'none', borderRadius: 6, cursor: pdfBusy ? 'wait' : 'pointer', fontWeight: 700, fontSize: 13, opacity: pdfBusy ? 0.7 : 1 }}>
+            {pdfBusy ? '⏳ Generating…' : '⬇ Download PDF'}
           </button>
         </div>
       </div>
 
-      {/* ═══ PAGE 1 ═══ */}
-      <div style={pageStyle}>
-        <DLDHeader />
+      <div ref={sheetRef}>
 
-        {/* Date */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 10 }}>
-          <span style={{ fontSize: 8.5, direction: 'rtl' }}>التاريخ</span>
-          <span style={{ borderBottom: '1px dashed #888', display: 'inline-block', minWidth: 130, fontSize: 8.5, paddingLeft: 4, color: '#000' }}>
-            {fmtDate(new Date().toISOString())}
-          </span>
-          <span style={{ fontSize: 8.5 }}>Date</span>
-        </div>
+      {/* PAGE 1 */}
+      <div className="page" style={pageStyle}>
+        <DLDHeader contractDate={fmtDate(contract.createdAt) || fmtDate(new Date().toISOString())} />
 
-        {/* Owner / Lessor */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
           <SectionHeader en="Owner / Lessor Information" ar="معلومات المالك/ المؤجر" />
           <div style={{ padding: '4px 8px 2px' }}>
@@ -304,7 +417,6 @@ export default function TenantContractPrintPage() {
           </div>
         </div>
 
-        {/* Tenant */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
           <SectionHeader en="Tenant Information" ar="معلومات المستأجر" />
           <div style={{ padding: '4px 8px 2px' }}>
@@ -319,7 +431,6 @@ export default function TenantContractPrintPage() {
           </div>
         </div>
 
-        {/* Property */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
           <SectionHeader en="Property Information" ar="معلومات العقار" />
           <div style={{ padding: '4px 8px 2px' }}>
@@ -331,11 +442,7 @@ export default function TenantContractPrintPage() {
                 { label: 'Industrial', labelAr: 'صناعي', checked: isIndustrial },
               ].map(({ label, labelAr, checked }) => (
                 <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8.5, cursor: 'default' }}>
-                  <span style={{
-                    width: 11, height: 11, borderRadius: '50%', border: '1.5px solid #555',
-                    display: 'inline-block', flexShrink: 0,
-                    background: checked ? '#1a3c6e' : 'transparent',
-                  }} />
+                  <span style={{ width: 11, height: 11, borderRadius: '50%', border: '1.5px solid #555', display: 'inline-block', flexShrink: 0, background: checked ? '#1a3c6e' : 'transparent' }} />
                   <span>{label}</span>
                   <span style={{ direction: 'rtl', fontSize: 8 }}>{labelAr}</span>
                 </label>
@@ -360,7 +467,6 @@ export default function TenantContractPrintPage() {
           </div>
         </div>
 
-        {/* Contract */}
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
           <SectionHeader en="Contract Information" ar="معلومات العقد" />
           <div style={{ padding: '4px 8px 2px' }}>
@@ -393,9 +499,9 @@ export default function TenantContractPrintPage() {
         <SigSection tenantSig={tenantSig} landlordSig={landlordSig} />
       </div>
 
-      {/* ═══ PAGE 2 — Terms & Conditions ═══ */}
-      <div style={{ ...pageStyle, pageBreakBefore: 'always' }}>
-        <DLDHeader />
+      {/* PAGE 2 — Terms & Conditions */}
+      <div className="page" style={pageStyle}>
+        <DLDHeader contractDate={fmtDate(contract.createdAt) || fmtDate(new Date().toISOString())} />
         <div style={{ border: '1px solid #bbb' }}>
           <SectionHeader en="Terms and Conditions" ar="الأحكام و الشروط" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: '1px solid #e0e0e0' }}>
@@ -416,9 +522,9 @@ export default function TenantContractPrintPage() {
         <SigSection tenantSig={tenantSig} landlordSig={landlordSig} />
       </div>
 
-      {/* ═══ PAGE 3 — Rights / Additional Terms ═══ */}
-      <div style={{ ...pageStyle, pageBreakBefore: 'always' }}>
-        <DLDHeader />
+      {/* PAGE 3 — Rights / Additional Terms */}
+      <div className="page" style={pageStyle}>
+        <DLDHeader contractDate={fmtDate(contract.createdAt) || fmtDate(new Date().toISOString())} />
 
         <div style={{ border: '1px solid #bbb', marginBottom: 5 }}>
           <SectionHeader en="Know your Rights" ar="لمعرفة حقوق الأطراف" />
@@ -481,6 +587,50 @@ export default function TenantContractPrintPage() {
           <span style={{ fontSize: 7, color: '#888' }}>Ref: {contract.ref} · Generated: {fmtDate(new Date().toISOString())}</span>
         </div>
       </div>
+
+      {/* ═══ ADDENDUM PAGES — appended after the main 3 Ejari pages ═══ */}
+      {addendums.map((a, idx) => (
+        <div key={a.id} className="page" style={pageStyle}>
+          <DLDHeader />
+          <div style={{ marginTop: 8 }}>
+            <div style={{ background: '#1a3c6e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', marginBottom: 6 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff' }}>
+                Addendum {idx + 1} of {addendums.length} — {a.name}
+              </span>
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff', direction: 'rtl' }}>ملحق العقد</span>
+            </div>
+            <div style={{ border: '1px solid #bbb', borderTop: 'none', padding: '14px 16px', minHeight: 380 }}>
+              <p style={{ fontSize: 11, color: '#222', margin: '0 0 12px' }}>
+                The full text of this addendum is attached as a separate file:
+              </p>
+              <div style={{ padding: '12px 14px', background: '#f4f3ef', borderRadius: 4, fontSize: 10.5, color: '#333', wordBreak: 'break-all' }}>
+                {a.fileUrl}
+              </div>
+              <p style={{ fontSize: 9, color: '#666', margin: '12px 0 0', fontStyle: 'italic' }}>
+                Both parties have reviewed the attached document and signed below to confirm acceptance of its terms. This page is part of the bound contract record.
+              </p>
+            </div>
+          </div>
+
+          {/* Addendum signatures */}
+          <div style={{ background: '#1a3c6e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', marginTop: 14 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff' }}>Signatures</span>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: '#fff', direction: 'rtl' }}>التوقيعات</span>
+          </div>
+          <div style={{ border: '1px solid #bbb', borderTop: 'none', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+            <div style={{ borderRight: '1px solid #bbb', padding: '4px 8px' }}>
+              <SigBox sig={a.tenantSig ? { role: 'tenant', signatoryName: '', signatureImage: a.tenantSig, signedAt: a.tenantSignedAt ?? '' } : null}
+                label="Tenant Signature" labelAr="توقيع المستأجر" />
+            </div>
+            <div style={{ padding: '4px 8px' }}>
+              <SigBox sig={a.landlordSig ? { role: 'landlord', signatoryName: '', signatureImage: a.landlordSig, signedAt: a.landlordSignedAt ?? '' } : null}
+                label="Lessor's Signature" labelAr="توقيع المؤجر" />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      </div>{/* /sheetRef wrapper */}
     </>
   );
 }

@@ -9,33 +9,72 @@ import {
 } from 'lucide-react';
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
-type TabKey = ContractStatus | 'all' | 'upcoming_renewal';
+/** Synthetic statuses surfaced ONLY on the orders page so the RP can tell a
+ *  renewal proposal apart from a brand-new lease draft. The DB column stays
+ *  'pending' / 'active' in these cases — we just re-label the row for the
+ *  list view. See docs/CONTRACT_LIFECYCLE.md §7 for the full list. */
+type DisplayStatus = ContractStatus | 'declined' | 'renewal_pending' | 'superseded' | 'terminating';
+type TabKey = DisplayStatus | 'all' | 'upcoming_renewal';
 
-const STATUS_LABELS: Record<ContractStatus, string> = {
-  active:     'Active',
-  expired:    'Expired',
-  terminated: 'Terminated',
-  pending:    'Pending',
-  issued:     'In Progress',
+const STATUS_LABELS: Record<DisplayStatus, string> = {
+  active:          'Active',
+  expired:         'Expired',
+  terminated:      'Terminated',
+  pending:         'Pending',
+  issued:          'In Progress',
+  declined:        'Declined',
+  renewal_pending: 'Renewal Pending',
+  superseded:      'Superseded',
+  terminating:     'Terminating',
 };
 
-const STATUS_STYLE: Record<ContractStatus, string> = {
-  active:     'bg-[#dbeafe] text-[#1e40af]',
-  expired:    'bg-[#e5e7eb] text-[#374151]',
-  terminated: 'bg-[#fee2e2] text-[#b91c1c]',
-  pending:    'bg-[#fef3c7] text-[#92400e]',
-  issued:     'bg-[#d8f2e8] text-[#1a7a5a]',
+const STATUS_STYLE: Record<DisplayStatus, string> = {
+  active:          'bg-[#dbeafe] text-[#1e40af]',
+  expired:         'bg-[#e5e7eb] text-[#374151]',
+  terminated:      'bg-[#fee2e2] text-[#b91c1c]',
+  pending:         'bg-[#fef3c7] text-[#92400e]',
+  issued:          'bg-[#d8f2e8] text-[#1a7a5a]',
+  declined:        'bg-[#fee2e2] text-[#b91c1c]',
+  renewal_pending: 'bg-[#fef3c7] text-[#92400e]',
+  superseded:      'bg-[#f3e8ff] text-[#6b21a8]',
+  terminating:     'bg-[#ffedd5] text-[#9a3412]',
 };
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'all',             label: 'All' },
-  { key: 'active',          label: 'Active' },
-  { key: 'pending',         label: 'Pending' },
-  { key: 'issued',          label: 'In Progress' },
-  { key: 'expired',         label: 'Expired' },
+  { key: 'all',              label: 'All' },
+  { key: 'active',           label: 'Active' },
+  { key: 'terminating',      label: 'Terminating' },
+  { key: 'pending',          label: 'Pending' },
+  { key: 'issued',           label: 'In Progress' },
+  { key: 'expired',          label: 'Expired' },
   { key: 'upcoming_renewal', label: 'Upcoming Renewal' },
-  { key: 'terminated',      label: 'Terminated' },
+  { key: 'renewal_pending',  label: 'Renewal Pending' },
+  { key: 'declined',         label: 'Declined' },
+  { key: 'superseded',       label: 'Superseded' },
+  { key: 'terminated',       label: 'Terminated' },
 ];
+
+/** Map the raw DB status to a display status. Surfaces four synthetic labels
+ *  on top of the DB enum (docs/CONTRACT_LIFECYCLE.md §3 + §4.3):
+ *   - `declined`        — renewal child where `contractActive=false`
+ *   - `renewal_pending` — renewal child still awaiting customer decision
+ *   - `superseded`      — new-lease draft archived because the unit was
+ *                         leased to a different customer first
+ *   - `terminating`     — ACTIVE contract with accepted termination, still
+ *                         winding down to its effective date */
+function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contractActive' | 'termination'>): DisplayStatus {
+  if (c.contractType === 'renewal' && c.contractActive === false) return 'declined';
+  if (c.contractType === 'renewal' && c.status === 'pending') return 'renewal_pending';
+  if (
+    c.contractType !== 'renewal' &&
+    c.contractActive === false &&
+    (c.status === 'pending' || c.status === 'issued')
+  ) {
+    return 'superseded';
+  }
+  if (c.status === 'active' && c.termination?.response === 'accepted') return 'terminating';
+  return c.status;
+}
 
 const PAGE_SIZE = 15;
 
@@ -54,6 +93,11 @@ interface Contract {
   tenant: { id: number | null; name: string | null; email: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
+  /** Termination snapshot — only present when a request has been raised. */
+  termination?: {
+    response: 'pending' | 'accepted' | 'rejected' | null;
+    effectiveDate: string | null;
+  } | null;
 }
 
 function fmt(dateStr: string | null) {
@@ -93,11 +137,11 @@ export default function OrdersPage() {
   const tabCounts = useMemo(() => {
     const counts: Partial<Record<TabKey, number>> = {};
     counts.all = contracts.length;
-    for (const s of Object.keys(STATUS_LABELS) as ContractStatus[]) {
-      counts[s] = contracts.filter(c => c.status === s).length;
+    for (const s of Object.keys(STATUS_LABELS) as DisplayStatus[]) {
+      counts[s] = contracts.filter(c => displayStatusOf(c) === s).length;
     }
     counts.upcoming_renewal = contracts.filter(c => {
-      if (c.status !== 'active') return false;
+      if (displayStatusOf(c) !== 'active') return false;
       const end = new Date(c.endDate);
       return end >= now && end <= in60;
     }).length;
@@ -108,25 +152,28 @@ export default function OrdersPage() {
   const activeCount   = tabCounts.active ?? 0;
   const expiringCount = tabCounts.upcoming_renewal ?? 0;
   const totalRent     = contracts
-    .filter(c => c.status === 'active')
+    .filter(c => displayStatusOf(c) === 'active')
     .reduce((s, c) => s + c.annualRent, 0);
 
+  const declinedCount = tabCounts.declined ?? 0;
   const STATS = [
     { label: 'Total Contracts',  value: contracts.length },
     { label: 'Active',           value: activeCount },
     { label: 'Expiring (60d)',   value: expiringCount },
+    { label: 'Declined Renewals', value: declinedCount },
     { label: 'Active Rent / yr', value: `AED ${totalRent.toLocaleString('en-AE')}` },
   ];
 
   // Filter logic
   const tabFiltered = useMemo(() => {
     return contracts.filter(c => {
+      const ds = displayStatusOf(c);
       if (activeTab === 'upcoming_renewal') {
-        if (c.status !== 'active') return false;
+        if (ds !== 'active') return false;
         const end = new Date(c.endDate);
         if (!(end >= now && end <= in60)) return false;
       } else if (activeTab !== 'all') {
-        if (c.status !== activeTab) return false;
+        if (ds !== activeTab) return false;
       }
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
       if (search) {
@@ -213,7 +260,7 @@ export default function OrdersPage() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
           <input
             type="text"
-            placeholder="Search by ref, tenant or unit…"
+            placeholder="Search by ref, customer or unit…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
@@ -271,7 +318,7 @@ export default function OrdersPage() {
               <table className="w-full text-left min-w-[1100px]">
                 <thead>
                   <tr className="bg-[#f4f3ef]">
-                    {['Ref', 'Unit', 'Property', 'Tenant', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
+                    {['Ref', 'Unit', 'Property', 'Customer', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
                       <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
                     ))}
                   </tr>
@@ -279,7 +326,8 @@ export default function OrdersPage() {
                 <tbody>
                   {pageRows.map(c => {
                     const endDate = new Date(c.endDate);
-                    const isExpiringSoon = c.status === 'active' && endDate >= now && endDate <= in60;
+                    const ds = displayStatusOf(c);
+                    const isExpiringSoon = ds === 'active' && endDate >= now && endDate <= in60;
                     return (
                       <tr
                         key={c.id}
@@ -303,8 +351,8 @@ export default function OrdersPage() {
                         </td>
                         <td className="px-4 py-3.5 capitalize text-[#6b6860]">{c.contractType ?? '—'}</td>
                         <td className="px-4 py-3.5">
-                          <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[c.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
-                            {STATUS_LABELS[c.status] ?? c.status}
+                          <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[ds] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
+                            {STATUS_LABELS[ds] ?? ds}
                           </span>
                         </td>
                         <td className="px-4 py-3.5">

@@ -78,7 +78,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               {
                 icon: '🏢',
                 title: 'Rent a Space',
-                desc: 'Property owners list apartments, offices, and commercial units. Tenants browse, view, and sign rental contracts — all online. No paperwork, no back-and-forth emails.',
+                desc: 'Property owners list apartments, offices, and commercial units. Customers browse, view, and sign rental contracts — all online. No paperwork, no back-and-forth emails.',
               },
               {
                 icon: '🔧',
@@ -108,8 +108,8 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
             type: 'table',
             headers: ['Who', 'What They Do', 'How They Join'],
             rows: [
-              ['🧑 Customer / Tenant', 'Books home services and/or rents properties', 'Self-register at sign-up'],
-              ['🏢 Rental Provider', 'Lists properties and manages tenants', 'Self-register, then identity verified'],
+              ['🧑 Customer', 'Books home services and/or rents properties', 'Self-register at sign-up'],
+              ['🏢 Rental Provider', 'Lists properties and manages customers', 'Self-register, then identity verified'],
               ['📋 Asset Manager', 'Manages day-to-day operations for a Rental Provider', 'Invited by email from a Rental Provider'],
               ['🔧 Service Provider', 'Company offering home services (AC, cleaning, etc.)', 'Self-register, then identity verified'],
               ['👷 Technician', 'Field worker who carries out the service jobs', 'Invited by email from a Service Provider'],
@@ -167,7 +167,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
   // ─────────────────────────────────────────────────────────────────────────
   {
     id: 'customer',
-    label: 'Customer / Tenant',
+    label: 'Customer',
     icon: '👤',
     sections: [
       {
@@ -179,7 +179,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
           {
             type: 'note',
             variant: 'warning',
-            md: '🚧 **The full tenant rental journey (interest → viewing → offer) is in development.** Currently, the listings browse page is live and properties are visible. The steps below describe the intended workflow for Sprint 2–4.',
+            md: '🚧 **The full customer rental journey (interest → viewing → offer) is in development.** Currently, the listings browse page is live and properties are visible. The steps below describe the intended workflow for Sprint 2–4.',
           },
           {
             type: 'steps',
@@ -189,7 +189,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               { label: 'Contact the provider', description: '🚧 Coming soon — a contact/interest button on the listing page will notify the Rental Provider. For now, contact must happen outside the platform.', actor: 'Customer' },
               { label: 'Attend the viewing', description: '🚧 Coming soon — viewings will be scheduled and confirmed inside the platform.', actor: 'Customer' },
               { label: 'Sign the contract', description: 'Once the Rental Provider creates a contract for you, log in to "My Contracts". Review all terms. Sign digitally.', actor: 'Customer' },
-              { label: 'You are now a tenant', description: 'Your active tenancy appears in your dashboard under "My Spaces". You can view payment schedules, documents, and maintenance history from here.', actor: 'Customer' },
+              { label: 'You are now a customer', description: 'Your active tenancy appears in your dashboard under "My Spaces". You can view payment schedules, documents, and maintenance history from here.', actor: 'Customer' },
             ],
           },
         ],
@@ -279,7 +279,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               { label: 'Enter building details', description: 'Building name, emirate, area, address, and number of floors. Upload at least one photo.', actor: 'Rental Provider' },
               { label: 'Add units', description: 'For each rentable unit: enter the unit number, type (apartment, villa, studio…), size, bedrooms, bathrooms, amenities, and photos.', actor: 'Rental Provider' },
               { label: 'Set the price', description: 'Annual rent in AED. Choose how many cheques (1, 2, 4, 6, or 12). Set the security deposit amount.', actor: 'Rental Provider' },
-              { label: 'Publish', description: 'The unit appears live on the public listings page. Tenants can find it and express interest.', actor: 'Rental Provider' },
+              { label: 'Publish', description: 'The unit appears live on the public listings page. Customers can find it and express interest.', actor: 'Rental Provider' },
             ],
           },
           {
@@ -292,7 +292,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
       {
         id: 'rp-leads',
         title: 'Managing Leads & Viewings',
-        description: 'How tenant interest is tracked from first contact to a signed contract.',
+        description: 'How customer interest is tracked from first contact to a signed contract.',
         tags: ['leads', 'viewing', 'kanban', 'pipeline'],
         blocks: [
           {
@@ -303,10 +303,10 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
           {
             type: 'steps',
             steps: [
-              { label: 'Lead comes in', description: 'When a tenant expresses interest in a unit, a lead is created automatically in your Leads section.', actor: 'System' },
+              { label: 'Lead comes in', description: 'When a customer expresses interest in a unit, a lead is created automatically in your Leads section.', actor: 'System' },
               { label: 'Track on Kanban board', description: 'Leads move through stages: New → Contacted → Viewing Scheduled → Viewing Done → Offer Sent → Won / Lost.', actor: 'Rental Provider' },
-              { label: 'Schedule a viewing', description: 'Assign a date and time. The tenant is notified. Your Asset Manager can facilitate the visit.', actor: 'Rental Provider' },
-              { label: 'Send an offer', description: 'Once the tenant is interested, send a formal rental offer with agreed terms directly from the lead record.', actor: 'Rental Provider' },
+              { label: 'Schedule a viewing', description: 'Assign a date and time. The customer is notified. Your Asset Manager can facilitate the visit.', actor: 'Rental Provider' },
+              { label: 'Send an offer', description: 'Once the customer is interested, send a formal rental offer with agreed terms directly from the lead record.', actor: 'Rental Provider' },
             ],
           },
         ],
@@ -325,10 +325,10 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
           {
             type: 'steps',
             steps: [
-              { label: 'Create the contract', description: 'From the Contracts section, click "New Contract". Select the unit, the tenant, start/end dates, and annual rent.', actor: 'Rental Provider' },
-              { label: 'Tenant signs', description: 'The tenant receives a notification and signs the contract digitally from their dashboard.', actor: 'Tenant' },
+              { label: 'Create the contract', description: 'From the Contracts section, click "New Contract". Select the unit, the customer, start/end dates, and annual rent.', actor: 'Rental Provider' },
+              { label: 'Customer signs', description: 'The customer receives a notification and signs the contract digitally from their dashboard.', actor: 'Customer' },
               { label: 'You countersign', description: 'You sign the contract from your dashboard. Both signatures are recorded.', actor: 'Rental Provider' },
-              { label: 'Activate the tenancy', description: 'Click "Activate Tenancy". The unit is marked Occupied. The tenant can now see their active tenancy in "My Spaces".', actor: 'Rental Provider' },
+              { label: 'Activate the tenancy', description: 'Click "Activate Tenancy". The unit is marked Occupied. The customer can now see their active tenancy in "My Spaces".', actor: 'Rental Provider' },
             ],
           },
         ],
@@ -346,9 +346,9 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               ['Overview', 'KPIs — total units, occupancy %, revenue, upcoming renewals.', '✅ Live'],
               ['Portfolio', 'View all your properties and their units.', '✅ Live'],
               ['Units', 'Full unit inventory with availability status.', '✅ Live'],
-              ['Leads', 'Kanban pipeline of tenant leads and viewings.', '✅ Live'],
+              ['Leads', 'Kanban pipeline of customer leads and viewings.', '✅ Live'],
               ['Contracts', 'All tenancy contracts — create, sign, activate, print.', '✅ Live'],
-              ['Tenants', 'List of all your active tenants.', '✅ Live'],
+              ['Customers', 'List of all your active customers.', '✅ Live'],
               ['Team', 'Invite and manage your Asset Managers.', '✅ Live'],
               ['Documents', 'Upload and manage KYC and property documents.', '✅ Live'],
               ['Orders', 'Service orders linked to your properties.', '✅ Live'],
@@ -556,7 +556,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               ['Dashboard', 'Platform-wide KPIs — total users, bookings, contracts, revenue.', '✅ Live (stub)'],
               ['Accounts', 'View all user accounts. Create delegated admin accounts.', '✅ Live'],
               ['Provider Approval', 'Review and approve/reject new Rental Provider and Service Provider sign-ups.', '🚧 Coming soon (UI missing)'],
-              ['KYC Review', 'Review identity documents uploaded by providers and tenants.', '🚧 Coming soon (UI missing — workaround via database)'],
+              ['KYC Review', 'Review identity documents uploaded by providers and customers.', '🚧 Coming soon (UI missing — workaround via database)'],
               ['Properties', 'View and moderate all property listings.', '🚧 Coming soon'],
               ['Bookings & Jobs', 'Monitor all service jobs across all providers.', '🚧 Coming soon'],
               ['Disputes', 'Resolve disputes between customers and service providers.', '🚧 Coming soon'],
@@ -625,10 +625,10 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               ['Property listings', 'Rental Providers can create properties and units. Units appear on the public listings page.'],
               ['Public browse', 'Anyone can browse and search properties by type, location, and price.'],
               ['Unit detail page', 'Photos, amenities, pricing, floor details.'],
-              ['Leads pipeline', 'Kanban board for managing tenant interest from first contact to offer.'],
-              ['Tenancy contracts', 'Create, send, sign (by tenant), countersign (by RP), and activate. Full lifecycle.'],
+              ['Leads pipeline', 'Kanban board for managing customer interest from first contact to offer.'],
+              ['Tenancy contracts', 'Create, send, sign (by customer), countersign (by RP), and activate. Full lifecycle.'],
               ['Contract print view', 'Printable/PDF version of any signed contract.'],
-              ['Rental Provider dashboard', 'Portfolio, units, leads, contracts, tenants, team, documents, deposits, receivables, AMC, reports.'],
+              ['Rental Provider dashboard', 'Portfolio, units, leads, contracts, customers, team, documents, deposits, receivables, AMC, reports.'],
               ['Service Provider dashboard', 'Profile, onboarding, team (invite technicians), documents.'],
               ['Customer dashboard', 'Contracts (e-sign), active tenancies, scheduled viewings.'],
               ['Asset Manager dashboard', 'Scoped view of assigned properties, leases, and collections.'],
@@ -652,7 +652,7 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
               ['Job management for SP & Technician', 'Accept, assign, track, and complete jobs. Sprint 3.'],
               ['Escrow (payment hold/release)', 'Payment held until job completion. Sprint 3.'],
               ['Reviews & ratings', 'Post-job reviews by customer. Sprint 3.'],
-              ['Maintenance requests', 'Tenant can log maintenance issue from their dashboard. Sprint 3.'],
+              ['Maintenance requests', 'Customer can log maintenance issue from their dashboard. Sprint 3.'],
               ['Admin KYC approval UI', 'Admin page to review and approve provider identity documents. Sprint 2.'],
               ['Property listing wizard (13 steps)', 'Full guided listing flow for Rental Providers. Sprint 2.'],
               ['@RequireKyc guard', 'Enforce that providers are verified before they can publish listings. Sprint 2.'],

@@ -418,7 +418,7 @@ function LoginForm() {
               <form onSubmit={onVerify} className={s.formBody}>
                 {devOtp && (
                   <div className={s.devOtp}>
-                    <span>Dev OTP</span>
+                    <span>Your OTP</span>
                     <b>{devOtp}</b>
                   </div>
                 )}

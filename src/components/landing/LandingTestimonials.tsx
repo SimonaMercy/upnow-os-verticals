@@ -10,7 +10,7 @@ const REVIEWS = [
     accentBg: '#fffbeb', accentBorder: '#fde68a', avatarBg: '#d4a820',
   },
   {
-    initials: 'PM', name: 'Priya M.',  role: 'Tenant · JLT',
+    initials: 'PM', name: 'Priya M.',  role: 'Customer · JLT',
     text: 'Found a 2-bedroom I love, signed the contract, and moved in — all without a single back-and-forth email chain. UpNow handled everything in one place.',
     accentBg: '#f0f9ff', accentBorder: '#bae6fd', avatarBg: '#0ea5e9',
   },

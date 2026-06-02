@@ -156,7 +156,7 @@ export default function ReceivablesPage() {
       <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm border border-[#f0ede8]">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input type="text" placeholder="Search contract, tenant, unit…" value={search}
+          <input type="text" placeholder="Search contract, customer, unit…" value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
         </div>
@@ -227,7 +227,7 @@ export default function ReceivablesPage() {
             <table className="w-full text-left min-w-[960px]">
               <thead>
                 <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
-                  {['Contract', 'Building', 'Unit', 'Tenant', 'Type', 'Amount', 'Due Date', 'Method', 'Overdue', 'Status', ''].map(h => (
+                  {['Contract', 'Building', 'Unit', 'Customer', 'Type', 'Amount', 'Due Date', 'Method', 'Overdue', 'Status', ''].map(h => (
                     <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
@@ -298,7 +298,7 @@ export default function ReceivablesPage() {
                   { label: 'Contract',    value: detail.contractRef },
                   { label: 'Building',    value: detail.building },
                   { label: 'Unit',        value: detail.unit },
-                  { label: 'Tenant',      value: detail.tenant },
+                  { label: 'Customer',    value: detail.tenant },
                   { label: 'Amount',      value: fmtAed(detail.amount) },
                   { label: 'Due Date',    value: fmtDate(detail.dueDate) },
                   { label: 'Method',      value: detail.paymentMethod?.replace('_', ' ') ?? '—' },
