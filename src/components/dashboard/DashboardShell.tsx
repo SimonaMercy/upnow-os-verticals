@@ -11,6 +11,7 @@ import {
   TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
   Heart, HelpCircle,
 } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import shell from './DashboardShell.module.css';
@@ -472,9 +473,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 {user.kycStatus === 'pending_review' ? 'KYC under review' : user.kycStatus === 'rejected' ? 'KYC rejected' : 'KYC required'}
               </Link>
             )}
-            <button className="relative text-[var(--color-neutral-500)] hover:text-[var(--color-neutral-900)]">
-              <Bell size={20} />
-            </button>
+            <NotificationBell />
 
             {/* Customer-only avatar dropdown with the full personal nav list */}
             {role === 'customer' && <CustomerAvatarMenu />}

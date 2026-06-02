@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UpNow — Workflow Messages</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --green:#2e9f82; --green-d:#1f7e66; --tint:#e7f5f0;
+    --ink:#0e1a16; --ink-2:#2b3a34; --mute:#6b7a74;
+    --line:#e6ebe7; --paper:#f3f5f1; --panel:#fafbfa; --white:#fff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;display:flex;height:100vh;overflow:hidden}
+  ::selection{background:var(--tint)}
+
+  /* ---- sidebar ---- */
+  .side{width:286px;flex:0 0 286px;background:var(--white);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh}
+  .brand{display:flex;align-items:center;gap:10px;padding:22px 22px 18px;border-bottom:1px solid var(--line)}
+  .brand-mark{width:30px;height:30px;border-radius:8px;background:var(--green);display:grid;place-items:center;color:#fff;font-weight:800;font-size:16px}
+  .brand-name{font-weight:800;font-size:17px;letter-spacing:-0.3px}
+  .brand-sub{font-size:11px;color:var(--mute);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-top:1px}
+  .nav{flex:1;overflow-y:auto;padding:8px 12px 24px}
+  .nav-h{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:14px 12px 8px}
+  .item{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent;transition:background .12s,border-color .12s;margin-bottom:2px}
+  .item:hover{background:var(--panel)}
+  .item.active{background:var(--tint);border-color:#cfe8de}
+  .item .num{width:24px;height:24px;flex:0 0 24px;border-radius:7px;background:var(--paper);color:var(--mute);font-size:11px;font-weight:700;display:grid;place-items:center}
+  .item.active .num{background:var(--green);color:#fff}
+  .item .tx{min-width:0}
+  .item .nm{font-size:13.5px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .st{font-size:11px;color:var(--mute);font-weight:500;margin-top:1px}
+  .side-foot{border-top:1px solid var(--line);padding:14px 16px;font-size:11.5px;color:var(--mute);line-height:1.5}
+
+  /* ---- main ---- */
+  .main{flex:1;display:flex;flex-direction:column;height:100vh;min-width:0}
+  .top{display:flex;align-items:center;gap:16px;padding:14px 26px;background:var(--white);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .subj-wrap{flex:1;min-width:0}
+  .subj-l{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+  .subj{font-size:15px;font-weight:700;color:var(--ink);line-height:1.3;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .seg{display:flex;background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:3px}
+  .seg button{border:0;background:transparent;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--mute);padding:6px 13px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:6px}
+  .seg button.on{background:var(--white);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .seg button .dot{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.55}
+  .btn{display:inline-flex;align-items:center;gap:7px;font-family:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:9px;border:1px solid var(--line);background:var(--white);color:var(--ink-2);cursor:pointer;transition:border-color .12s,background .12s;white-space:nowrap}
+  .btn:hover{border-color:#c7d2cc;background:var(--panel)}
+  .btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+  .btn.primary:hover{background:var(--green-d);border-color:var(--green-d)}
+  .btn svg{width:14px;height:14px}
+  .btn.hide{display:none}
+
+  .stage{flex:1;overflow-y:auto;background:var(--paper);display:flex;justify-content:center;align-items:flex-start;padding:34px 24px 60px}
+  .stage.center{align-items:center}
+
+  /* email */
+  .frame-wrap{width:100%;transition:max-width .25s ease}
+  .frame-wrap.desktop{max-width:640px}
+  .frame-wrap.mobile{max-width:380px}
+  .device{background:var(--white);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px -34px rgba(15,30,25,.4);overflow:hidden}
+  iframe{width:100%;border:0;display:block;background:#eef1ec}
+  .hint{font-size:12px;color:var(--mute);font-weight:500;padding:10px 4px 0;text-align:center}
+
+  /* phone */
+  .phone{width:332px;flex:0 0 332px;border-radius:46px;background:#0d140f;padding:13px;box-shadow:0 40px 80px -36px rgba(15,30,25,.55), inset 0 0 0 2px #20302a;margin:6px auto 0;position:relative}
+  .notch{position:absolute;top:24px;left:50%;transform:translateX(-50%);width:108px;height:30px;background:#0d140f;border-radius:18px;z-index:5}
+  .screen{border-radius:34px;overflow:hidden;height:620px;position:relative}
+
+  /* lock-screen (push) */
+  .lock{height:100%;background:linear-gradient(160deg,#1f5e4f 0%,#2e9f82 42%,#14302a 100%);position:relative;color:#fff;display:flex;flex-direction:column}
+  .lock::after{content:"";position:absolute;inset:0;background:radial-gradient(420px 280px at 78% 8%,rgba(255,255,255,.20),transparent 60%);pointer-events:none}
+  .statusbar{display:flex;justify-content:space-between;align-items:center;padding:16px 26px 0;font-size:13px;font-weight:600;position:relative;z-index:2}
+  .statusbar .ic{display:flex;gap:5px;align-items:center;opacity:.95}
+  .clock{text-align:center;padding:42px 0 0;position:relative;z-index:2}
+  .clock .date{font-size:15px;font-weight:600;opacity:.92;letter-spacing:.2px}
+  .clock .time{font-size:74px;font-weight:700;letter-spacing:-2px;line-height:1;margin-top:4px}
+  .notif-area{margin-top:auto;padding:0 14px 40px;position:relative;z-index:2;display:flex;flex-direction:column;gap:9px}
+  .notif{background:rgba(255,255,255,.86);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-radius:22px;padding:13px 15px;color:#10201b;box-shadow:0 12px 30px -16px rgba(0,0,0,.5)}
+  .notif.stacked{transform:scale(.93);opacity:.5;margin-bottom:-22px}
+  .notif-h{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .notif-ic{width:22px;height:22px;border-radius:6px;background:var(--green);color:#fff;font-weight:800;font-size:12px;display:grid;place-items:center}
+  .notif-app{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#48564f}
+  .notif-time{margin-left:auto;font-size:11.5px;color:#7c8a83;font-weight:500}
+  .notif-title{font-size:14.5px;font-weight:700;line-height:1.3;margin:0 0 2px}
+  .notif-body{font-size:13.5px;line-height:1.4;color:#33433c;margin:0}
+  .swipe{text-align:center;font-size:12px;opacity:.7;padding-top:6px;font-weight:500}
+
+  /* sms screen */
+  .sms{height:100%;background:#fff;display:flex;flex-direction:column}
+  .sms-bar{padding:14px 16px 12px;border-bottom:1px solid #ececec;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+  .sms-bar .chev{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:#2e9f82;font-size:22px;font-weight:600}
+  .sms-av{width:46px;height:46px;border-radius:50%;background:var(--green);color:#fff;font-weight:800;font-size:18px;display:grid;place-items:center}
+  .sms-name{font-size:13px;font-weight:700;color:#10201b}
+  .sms-body{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#fff}
+  .sms-date{text-align:center;font-size:11px;color:#9aa39e;font-weight:600;margin-bottom:4px}
+  .sms-date b{color:#6b7a74}
+  .bubble{max-width:78%;align-self:flex-start;background:#e9e9eb;color:#10201b;font-size:14px;line-height:1.42;padding:10px 14px;border-radius:19px;border-bottom-left-radius:6px}
+  .bubble a{color:#0a7cff;text-decoration:none}
+  .sms-foot{padding:10px 16px 18px;border-top:1px solid #ececec}
+  .sms-input{height:36px;border:1px solid #d9ddd9;border-radius:18px}
+
+  /* source drawer */
+  .src{flex:1;overflow:auto;background:#0e1a16;display:none}
+  .src.show{display:block}
+  .src pre{margin:0;padding:24px 26px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;line-height:1.65;color:#cbd9d2;white-space:pre-wrap;word-break:break-word}
+  .stage.hide{display:none}
+
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;font-size:13px;font-weight:600;padding:11px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:all .25s ease;z-index:50}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark">U</div>
+      <div>
+        <div class="brand-name">UpNow</div>
+        <div class="brand-sub">Workflow Messages</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">13 events × 3 channels. Backend templates in <b>emails/notifications-tenancy-emails.ts</b> and <b>emails/notifications-channels.ts</b>.</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div class="subj-wrap">
+        <div class="subj-l" id="subjL">Subject line</div>
+        <div class="subj" id="subj">—</div>
+      </div>
+      <div class="controls">
+        <div class="seg" id="chan">
+          <button data-c="push" class="on"><span class="dot"></span>Push</button>
+          <button data-c="email"><span class="dot"></span>Email</button>
+          <button data-c="sms"><span class="dot"></span>SMS</button>
+        </div>
+        <div class="seg" id="seg">
+          <button data-w="desktop" class="on">Desktop</button>
+          <button data-w="mobile">Mobile</button>
+        </div>
+        <button class="btn" id="srcBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          <span class="lbl">Source</span>
+        </button>
+        <button class="btn primary" id="copyBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <span class="lbl">Copy</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="stage" id="stage"></div>
+    <div class="src" id="src"><pre id="srcPre"></pre></div>
+  </main>
+
+  <div class="toast" id="toast">Copied</div>
+
+  <script src="emails/social-icons.js"></script>
+  <script src="emails/email-builder.js"></script>
+  <script>
+    const { EVENTS } = window.UpnowEmails;
+    let cur = 0, chan = 'push', width = 'desktop', showSrc = false;
+
+    const nav = document.getElementById('nav');
+    let lastGroup = null;
+    EVENTS.forEach((e, i) => {
+      if (e.group !== lastGroup){
+        const h = document.createElement('div');
+        h.className = 'nav-h';
+        h.textContent = e.group;
+        nav.appendChild(h);
+        lastGroup = e.group;
+      }
+      const d = document.createElement('div');
+      d.className = 'item' + (i === 0 ? ' active' : '');
+      d.innerHTML = '<div class="num">' + (i + 1) + '</div><div class="tx"><div class="nm">' + e.name + '</div><div class="st">' + e.step + '</div></div>';
+      d.onclick = () => select(i);
+      nav.appendChild(d);
+    });
+
+    const stage  = document.getElementById('stage');
+    const subj   = document.getElementById('subj');
+    const subjL  = document.getElementById('subjL');
+    const srcPre = document.getElementById('srcPre');
+    const seg    = document.getElementById('seg');
+
+    function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function linkify(s){ return esc(s).replace(/(upnow\.ae\/[^\s]+)/g, '<a href="#">$1</a>'); }
+
+    function renderPush(e){
+      stage.className = 'stage';
+      seg.style.display = 'none';
+      stage.innerHTML =
+        '<div class="phone"><div class="notch"></div><div class="screen"><div class="lock">' +
+          '<div class="statusbar"><span>11:02</span><span class="ic">5G &nbsp; 100%</span></div>' +
+          '<div class="clock"><div class="date">Tuesday, 19 May</div><div class="time">11:02</div></div>' +
+          '<div class="notif-area">' +
+            '<div class="notif stacked"><div class="notif-h"><div class="notif-ic">U</div><div class="notif-app">UpNow</div><div class="notif-time">9:14 AM</div></div><p class="notif-body">Earlier update</p></div>' +
+            '<div class="notif"><div class="notif-h"><div class="notif-ic">U</div><div class="notif-app">UpNow</div><div class="notif-time">now</div></div>' +
+              '<p class="notif-title">' + esc(e.push.title) + '</p>' +
+              '<p class="notif-body">' + esc(e.push.body) + '</p></div>' +
+            '<div class="swipe">Swipe to open &middot; ' + e.push.deepLink + '</div>' +
+          '</div>' +
+        '</div></div></div>';
+    }
+
+    function renderSms(e){
+      stage.className = 'stage';
+      seg.style.display = 'none';
+      stage.innerHTML =
+        '<div><div class="phone"><div class="notch"></div><div class="screen"><div class="sms">' +
+          '<div class="sms-bar"><span class="chev">&#8249;</span><div class="sms-av">U</div><div class="sms-name">UpNow</div></div>' +
+          '<div class="sms-body"><div class="sms-date"><b>Today</b> 11:02 AM</div>' +
+            '<div class="bubble">' + linkify(e.sms) + '</div></div>' +
+          '<div class="sms-foot"><div class="sms-input"></div></div>' +
+        '</div></div></div>' +
+        '<div class="hint">' + e.sms.length + ' characters &middot; ' + (e.sms.length <= 160 ? '1 SMS segment' : Math.ceil(e.sms.length/153) + ' segments') + '</div></div>';
+    }
+
+    function renderEmail(e){
+      stage.className = 'stage';
+      seg.style.display = '';
+      stage.innerHTML =
+        '<div class="frame-wrap ' + width + '" id="frameWrap"><div class="device"><iframe id="frame" title="email preview"></iframe></div>' +
+        '<div class="hint" id="hint"></div></div>';
+      const frame = document.getElementById('frame');
+      frame.srcdoc = e.html;
+      document.getElementById('hint').textContent = 'To: layla.h@gmail.com · ' + Math.round(e.html.length/1024*10)/10 + ' KB';
+      frame.onload = () => {
+        try { frame.style.height = (frame.contentDocument.body.scrollHeight + 4) + 'px'; }
+        catch(_) { frame.style.height = '900px'; }
+      };
+    }
+
+    function render(){
+      const e = EVENTS[cur];
+      if (chan === 'email'){ subjL.textContent = 'Email subject'; subj.textContent = e.subject; renderEmail(e); srcPre.textContent = e.html; }
+      else if (chan === 'push'){ subjL.textContent = 'Push / in-app notification'; subj.textContent = e.push.title; renderPush(e); srcPre.textContent = JSON.stringify({ channel:'push', title:e.push.title, body:e.push.body, deepLink:e.push.deepLink, entityType:'tenancy_contract' }, null, 2); }
+      else { subjL.textContent = 'SMS'; subj.textContent = 'To +971 50 421 8870'; renderSms(e); srcPre.textContent = e.sms; }
+      // source label
+      document.querySelector('#srcBtn .lbl').textContent = showSrc ? 'Preview' : 'Source';
+    }
+
+    function select(i){
+      cur = i;
+      [...nav.querySelectorAll('.item')].forEach((el,n)=>el.classList.toggle('active', n===i));
+      render();
+    }
+
+    document.getElementById('chan').onclick = (ev)=>{
+      const b = ev.target.closest('button'); if(!b) return;
+      chan = b.dataset.c;
+      [...ev.currentTarget.children].forEach(c=>c.classList.toggle('on', c===b));
+      if (showSrc) toggleSrc();
+      render();
+    };
+
+    seg.onclick = (ev)=>{
+      const b = ev.target.closest('button'); if(!b) return;
+      width = b.dataset.w;
+      [...ev.currentTarget.children].forEach(c=>c.classList.toggle('on', c===b));
+      const fw = document.getElementById('frameWrap');
+      if (fw){ fw.className = 'frame-wrap ' + width; const f=document.getElementById('frame'); setTimeout(()=>{ if(f.onload) f.onload(); }, 280); }
+    };
+
+    function toggleSrc(){
+      showSrc = !showSrc;
+      document.getElementById('src').classList.toggle('show', showSrc);
+      stage.classList.toggle('hide', showSrc);
+      document.querySelector('#srcBtn .lbl').textContent = showSrc ? 'Preview' : 'Source';
+    }
+    document.getElementById('srcBtn').onclick = toggleSrc;
+
+    function toast(msg){
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(window._tt); window._tt = setTimeout(()=>t.classList.remove('show'), 1600);
+    }
+
+    document.getElementById('copyBtn').onclick = async ()=>{
+      const e = EVENTS[cur];
+      const txt = chan === 'email' ? e.html : chan === 'sms' ? e.sms : JSON.stringify({ title:e.push.title, body:e.push.body, deepLink:e.push.deepLink }, null, 2);
+      try { await navigator.clipboard.writeText(txt); toast(chan === 'email' ? 'Email HTML copied' : chan === 'sms' ? 'SMS text copied' : 'Notification JSON copied'); }
+      catch(_) { toast('Copy failed'); }
+    };
+
+    render();
+  </script>
+</body>
+</html>
