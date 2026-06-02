@@ -581,10 +581,6 @@ function SpContentPanel({ sp }: { sp: ServiceProvider }) {
               {sp.businessName ?? sp.ownerName ?? providerName(sp, `SP #${sp.id}`)}
             </h2>
             <ComplianceBadge s={sp.complianceStatus} />
-            <Link href={`/dashboard/admin/kyc/service-provider/${sp.id}`}
-              className="ml-auto flex items-center gap-1 text-xs" style={{ color: "var(--color-primary)" }}>
-              <ExternalLink size={11} /> Full page
-            </Link>
           </div>
           <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{sp.user?.email}</p>
         </div>
@@ -612,11 +608,12 @@ function SpContentPanel({ sp }: { sp: ServiceProvider }) {
 
       <div className="shrink-0 border-t px-4 py-3"
         style={{ borderColor: "var(--color-base-200)", backgroundColor: "#fff" }}>
-        <Link href={`/dashboard/admin/kyc/service-provider/${sp.id}`}
-          className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-semibold"
-          style={{ backgroundColor: "var(--color-primary)", color: "#fff" }}>
-          <ShieldCheck size={13} /> Open Full KYC Review
-        </Link>
+        {/* The dedicated SP KYC review page isn't built yet — link removed so it
+            no longer 404s. SP details are shown inline above. */}
+        <div className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-semibold"
+          style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral-400)" }}>
+          <ShieldCheck size={13} /> Full KYC review — coming soon
+        </div>
       </div>
     </div>
   );

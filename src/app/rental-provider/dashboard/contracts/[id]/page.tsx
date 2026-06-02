@@ -3203,7 +3203,7 @@ export default function ContractDetailPage() {
                   </div>
                 </div>
                 <p className="text-[10px] text-[#9b9890] mt-1.5">
-                  Admin, ejari and commission auto-fill from your <a href="/rental-provider/dashboard/settings/fees" target="_blank" rel="noreferrer" className="text-[#2e9f82] hover:underline">fee rules</a> against the new annual rent — edit any value to override. They bundle into the first installment. Security deposit stays the same and is not re-collected.
+                  Admin, ejari and commission auto-fill from your <a href="/rental-provider/dashboard/settings" target="_blank" rel="noreferrer" className="text-[#2e9f82] hover:underline">fee rules</a> against the new annual rent — edit any value to override. They bundle into the first installment. Security deposit stays the same and is not re-collected.
                 </p>
               </div>
 

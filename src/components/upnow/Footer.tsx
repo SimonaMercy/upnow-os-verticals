@@ -36,10 +36,10 @@ const cols = [
   {
     label: 'SPACES',
     links: [
-      { text: 'Residential', href: '/spaces?category=Residential' },
-      { text: 'Commercial',  href: '/spaces?category=Commercial' },
-      { text: 'Industrial',  href: '/spaces?category=Industrial' },
-      { text: 'View all spaces →', href: '/spaces' },
+      { text: 'Residential', href: '/listings?category=Residential' },
+      { text: 'Commercial',  href: '/listings?category=Commercial' },
+      { text: 'Industrial',  href: '/listings?category=Industrial' },
+      { text: 'View all spaces →', href: '/listings' },
     ],
   },
   {

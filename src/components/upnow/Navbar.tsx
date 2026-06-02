@@ -187,7 +187,12 @@ export function Navbar() {
             </button>
 
             <div className="flex flex-col gap-4">
-              {(['/', '/services', '/spaces', '/about'] as const).map((href) => (
+              {([
+                { href: '/', label: 'Home' },
+                { href: '/services', label: 'Services' },
+                { href: '/listings', label: 'Spaces' },
+                { href: '/about', label: 'About' },
+              ] as const).map(({ href, label }) => (
                 <Link
                   key={href}
                   href={href}
@@ -195,7 +200,7 @@ export function Navbar() {
                   className="font-[500] hover:text-primary transition-colors text-lg"
                   style={{ color: 'var(--neutral-700)' }}
                 >
-                  {href === '/' ? 'Home' : href.replace('/', '').replace(/^\w/, c => c.toUpperCase())}
+                  {label}
                 </Link>
               ))}
             </div>

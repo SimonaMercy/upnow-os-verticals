@@ -188,6 +188,7 @@ interface ApiContract {
   adminFeeFils?: number | null;
   ejariFeeFils?: number | null;
   tenantSignedAt: string | null;
+  landlordSignedAt: string | null;
   unit: { id: number | null };
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   moveInInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
@@ -384,8 +385,12 @@ function deriveStateKey(r: Resolved): StateKey {
     if (rc.status === 'terminated') return 'renewal_rejected';
     if (rc.status === 'active') return 'renewal_active';
     if (rc.ejariStatus === 'registered') return 'renewal_ejari';
-    if (rc.status === 'issued' && rc.tenantSignedAt) return 'renewal_ejari';
-    if (rc.status === 'issued' && !rc.tenantSignedAt) return 'renewal_progress';
+    if (rc.status === 'issued') {
+      // Advance to Ejari only once BOTH parties have signed — not on the
+      // tenant's signature alone. Otherwise stay in the signing step.
+      if (rc.tenantSignedAt && rc.landlordSignedAt) return 'renewal_ejari';
+      return 'renewal_progress';
+    }
     return 'renewal_cheques';
   }
 
@@ -1467,15 +1472,23 @@ function PersonalEditField({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const editingRef = useRef(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Re-sync when the parent prop changes (e.g. OCR completes mid-edit
-  // for another field) — but only when the user isn't actively typing.
+  // Re-sync when the parent prop changes (e.g. OCR completes mid-edit for
+  // another field) — but ONLY when this field isn't being edited, so a parent
+  // refresh can't wipe the user's in-progress text.
   useEffect(() => {
+    if (editingRef.current) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setValue(initial);
   }, [initial]);
 
+  // Clear the "Saved ✓" timer if the field unmounts first.
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
+
   async function maybeSave() {
+    editingRef.current = false;
     const next = value.trim();
     if (next === (initial ?? '').trim()) return;
     setSaving(true); setErr(null);
@@ -1483,7 +1496,8 @@ function PersonalEditField({
       await apiPatch('/auth/me', { [fieldKey]: next || null });
       setSaved(true);
       await onSaved();
-      setTimeout(() => setSaved(false), 1500);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 1500);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to save');
     } finally {
@@ -1500,6 +1514,7 @@ function PersonalEditField({
       </span>
       <input
         value={value}
+        onFocus={() => { editingRef.current = true; }}
         onChange={e => setValue(e.target.value)}
         onBlur={maybeSave}
         placeholder={placeholder ?? ''}

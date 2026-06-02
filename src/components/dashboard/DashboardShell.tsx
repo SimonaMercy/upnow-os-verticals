@@ -57,8 +57,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Team',             href: '/dashboard/service-provider/team',     icon: Users },
     { label: 'Reviews',          href: '/dashboard/service-provider/reviews',  icon: Star },
     { divider: true },
-    { label: 'Earnings',         href: '/dashboard/service-provider/earnings', icon: Wallet },
-    { label: 'Settings',         href: '/dashboard/service-provider/settings', icon: Settings },
+    { label: 'Earnings',         href: '/dashboard/service-provider/earnings', icon: Wallet, soon: true },
+    { label: 'Settings',         href: '/dashboard/service-provider/settings', icon: Settings, soon: true },
   ],
   manager: [
     { label: 'Overview',         href: '/dashboard/manager',                   icon: LayoutDashboard },
@@ -66,14 +66,14 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Contracts',        href: '/dashboard/manager/contracts',         icon: FileText },
     { label: 'Maintenance',      href: '/dashboard/manager/maintenance',       icon: Wrench },
     { divider: true },
-    { label: 'Settings',         href: '/dashboard/manager/settings',          icon: Settings },
+    { label: 'Settings',         href: '/dashboard/manager/settings',          icon: Settings, soon: true },
   ],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
     { label: 'My Jobs',          href: '/dashboard/technician/jobs',           icon: CalendarCheck },
     { label: 'Schedule',         href: '/dashboard/technician/schedule',       icon: CalendarCheck },
     { divider: true },
-    { label: 'Settings',         href: '/dashboard/technician/settings',       icon: Settings },
+    { label: 'Settings',         href: '/dashboard/technician/settings',       icon: Settings, soon: true },
   ],
   admin: [
     { label: 'Overview',         href: '/dashboard/admin',                     icon: LayoutDashboard },
@@ -84,7 +84,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2 },
     { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox },
-    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings },
+    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true },
   ],
   super_admin: [
     { label: 'Overview',         href: '/dashboard/admin',                     icon: LayoutDashboard },
@@ -95,7 +95,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2 },
     { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox },
-    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings },
+    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true },
   ],
 };
 

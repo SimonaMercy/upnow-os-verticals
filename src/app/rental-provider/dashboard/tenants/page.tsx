@@ -33,8 +33,12 @@ const CONTRACT_STYLE: Record<ContractStatus, string> = {
 
 function calcRenewalDays(endDate: string | null): number | null {
   if (!endDate) return null;
-  const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000);
-  return diff;
+  // Compare calendar day to calendar day (UTC) so the count isn't skewed by the
+  // current time-of-day vs the date's UTC-midnight.
+  const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`).getTime();
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((end - todayUtc) / 86400000);
 }
 
 export default function TenantsPage() {
@@ -56,9 +60,13 @@ export default function TenantsPage() {
           const contractStatus: ContractStatus =
             c.contractActive ? 'active' : c.status === 'terminated' ? 'terminated' : 'none';
           const existing = map.get(tid);
-          // Prefer active contracts; among equals keep more recent
+          // Prefer active contracts; among equals keep the more recent one,
+          // comparing like-for-like end dates (the later-ending contract is the
+          // current/renewed one). Previously compared the new contract's START
+          // against the existing END, which kept the stale row for back-to-back
+          // leases.
           if (!existing || (contractStatus === 'active' && existing.contractStatus !== 'active') ||
-              (contractStatus === existing.contractStatus && new Date(c.startDate) > new Date(existing.endDate ?? 0))) {
+              (contractStatus === existing.contractStatus && new Date(c.endDate ?? 0) > new Date(existing.endDate ?? 0))) {
             map.set(tid, {
               id: tid,
               contractId: c.id ?? null,

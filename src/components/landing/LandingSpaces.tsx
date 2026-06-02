@@ -5,9 +5,9 @@ import { Home, Building2, Warehouse, ArrowRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 const CATEGORIES = [
-  { Icon: Home,         label: 'Residential',  sub: 'Apartments, villas, studios', href: '/spaces?category=Residential', price: 'From AED 30k/yr', topBg: '#f0faf6', topBorder: '#d8f2e8', iconColor: '#2e9f82' },
-  { Icon: Building2,    label: 'Commercial',   sub: 'Offices, retail, showrooms',  href: '/spaces?category=Commercial',  price: 'From AED 50k/yr', topBg: '#f0f9ff', topBorder: '#bae6fd', iconColor: '#0ea5e9' },
-  { Icon: Warehouse,    label: 'Industrial',   sub: 'Warehouses, cold storage',    href: '/spaces?category=Industrial',  price: 'From AED 40k/yr', topBg: '#f0fdf4', topBorder: '#bbf7d0', iconColor: '#16a34a' },
+  { Icon: Home,         label: 'Residential',  sub: 'Apartments, villas, studios', href: '/listings?category=Residential', price: 'From AED 30k/yr', topBg: '#f0faf6', topBorder: '#d8f2e8', iconColor: '#2e9f82' },
+  { Icon: Building2,    label: 'Commercial',   sub: 'Offices, retail, showrooms',  href: '/listings?category=Commercial',  price: 'From AED 50k/yr', topBg: '#f0f9ff', topBorder: '#bae6fd', iconColor: '#0ea5e9' },
+  { Icon: Warehouse,    label: 'Industrial',   sub: 'Warehouses, cold storage',    href: '/listings?category=Industrial',  price: 'From AED 40k/yr', topBg: '#f0fdf4', topBorder: '#bbf7d0', iconColor: '#16a34a' },
 
 ];
 
@@ -24,7 +24,7 @@ export function LandingSpaces() {
             </h2>
             <p style={{ fontSize: 15, color: '#6b6860', margin: 0 }}>5 space categories. Transparent pricing. Digital contracts end-to-end.</p>
           </div>
-          <Link href="/spaces" style={{
+          <Link href="/listings" style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             border: '1px solid #d8f2e8', borderRadius: 12,
             padding: '10px 18px', textDecoration: 'none',

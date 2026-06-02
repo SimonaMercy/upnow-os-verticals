@@ -76,10 +76,12 @@ function fmtAed(fils: number) {
 
 function addMonths(dateStr: string, months: number): string {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
-  d.setMonth(d.getMonth() + months);
+  // Work entirely in UTC so a YYYY-MM-DD date doesn't shift a day depending on
+  // the viewer's timezone.
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
   // subtract 1 day so e.g. 2026-05-01 +12m = 2027-04-30
-  d.setDate(d.getDate() - 1);
+  d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
 
@@ -87,9 +89,9 @@ function addMonths(dateStr: string, months: number): string {
 function chequeDate(startDate: string, installments: number, i: number): string {
   if (!startDate || !installments) return '';
   const monthsPerCheque = 12 / installments;
-  const d = new Date(startDate);
-  d.setMonth(d.getMonth() + Math.round(i * monthsPerCheque));
-  return d.toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  const d = new Date(`${startDate}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + Math.round(i * monthsPerCheque));
+  return d.toLocaleDateString('en-AE', { timeZone: 'Asia/Dubai', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function calcDurationLabel(start: string, end: string): string {
@@ -466,7 +468,7 @@ export default function NewContractPage() {
               You need to list a property and add at least one unit before you can create a tenancy contract.
             </p>
             <Link
-              href="/rental-provider/dashboard/portfolio?action=add"
+              href="/rental-provider/dashboard/portfolio/add"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
               style={{ background: '#2e9f82' }}
             >
@@ -513,7 +515,7 @@ export default function NewContractPage() {
                     <PlusCircle size={12} /> Add Unit
                   </Link>
                 ) : (
-                  <Link href="/rental-provider/dashboard/portfolio?action=add" target="_blank"
+                  <Link href="/rental-provider/dashboard/portfolio/add" target="_blank"
                     className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
                     <PlusCircle size={12} /> List Property First
                   </Link>

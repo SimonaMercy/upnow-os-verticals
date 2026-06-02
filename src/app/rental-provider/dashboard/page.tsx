@@ -68,8 +68,10 @@ interface DashboardExtras {
 }
 
 function fmtAed(n: number) {
-  if (n >= 1_000_000) return `AED ${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `AED ${(n / 1_000).toFixed(0)}K`;
+  // Keep one decimal in the abbreviations so e.g. AED 1,500 shows as "1.5K"
+  // rather than rounding to "2K" (the old .toFixed(0) lost precision on KPIs).
+  if (n >= 1_000_000) return `AED ${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (n >= 1_000) return `AED ${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
   return `AED ${n.toLocaleString()}`;
 }
 
@@ -125,7 +127,7 @@ function presetToDates(preset: RangePreset): { from: string; to: string } {
 }
 
 const QUICK_LINKS = [
-  { label: 'List Property',  desc: 'Add a new asset',         href: '/rental-provider/dashboard/portfolio?action=add', Icon: PlusSquare },
+  { label: 'List Property',  desc: 'Add a new asset',         href: '/rental-provider/dashboard/portfolio/add', Icon: PlusSquare },
   { label: 'New Contract',   desc: 'Start a tenancy',         href: '/rental-provider/dashboard/contracts/new',        Icon: ClipboardList },
   { label: 'Leads',          desc: 'Review pipeline',         href: '/rental-provider/dashboard/leads',                Icon: Users },
   { label: 'Receivables',    desc: 'Collect rent',            href: '/rental-provider/dashboard/receivables',          Icon: CreditCard },
@@ -292,7 +294,7 @@ export default function RentalProviderDashboard() {
             <span className="hidden sm:inline">{refreshing ? 'Refreshing' : 'Refresh'}</span>
           </button>
           <Link
-            href="/rental-provider/dashboard/portfolio?action=add"
+            href="/rental-provider/dashboard/portfolio/add"
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-dark)] transition-colors"
           >
             <Building2 size={16} /> List Property
