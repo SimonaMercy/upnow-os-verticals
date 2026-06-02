@@ -3,6 +3,10 @@
 // they never touch JavaScript context (no localStorage, no sessionStorage).
 // See: src/app/api/[...path]/route.ts
 
+// In-flight GET requests keyed by path, so concurrent identical reads share a
+// single network request (see apiGet). Cleared the moment each settles.
+const inFlightGets = new Map<string, Promise<unknown>>();
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let message = res.statusText;
@@ -29,12 +33,40 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string, options?: { signal?: AbortSignal }): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    credentials: "include",
-    cache: "no-store",
-    signal: options?.signal,
-  });
-  return handleResponse<T>(res);
+  // When a caller manages its own AbortSignal, don't coalesce — it wants an
+  // independent request lifecycle (aborting a shared request would cancel it
+  // for every other subscriber).
+  if (options?.signal) {
+    const res = await fetch(`/api${path}`, {
+      credentials: "include",
+      cache: "no-store",
+      signal: options.signal,
+    });
+    return handleResponse<T>(res);
+  }
+
+  // Request coalescing: if an identical GET is already in flight, every caller
+  // shares that one network request instead of firing its own. This collapses
+  // the "same endpoint requested 3× at the same time" glitch — e.g. /auth/me
+  // hit by AuthContext + DashboardShell, or any endpoint double-mounted by
+  // React StrictMode — into a single request. The entry is removed as soon as
+  // the request settles, so there is no stale caching: a later call re-fetches.
+  const existing = inFlightGets.get(path);
+  if (existing) return existing as Promise<T>;
+
+  const p = (async () => {
+    try {
+      const res = await fetch(`/api${path}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      return await handleResponse<T>(res);
+    } finally {
+      inFlightGets.delete(path);
+    }
+  })();
+  inFlightGets.set(path, p);
+  return p as Promise<T>;
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
