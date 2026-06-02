@@ -273,6 +273,12 @@ export default function TenantContractPrintPage() {
   async function downloadPdf() {
     if (!sheetRef.current || !contract) return;
     setPdfBusy(true);
+    // The overlay is position:fixed + overflow:auto, which makes html2canvas
+    // capture only the visible first page. Temporarily flatten it so the full
+    // multi-page height is rendered, then restore.
+    const root = document.getElementById('contract-print-root');
+    const prev = root ? { position: root.style.position, overflow: root.style.overflow, height: root.style.height } : null;
+    if (root) { root.style.position = 'static'; root.style.overflow = 'visible'; root.style.height = 'auto'; }
     try {
       const html2pdfMod = await import('html2pdf.js');
       const html2pdf = (html2pdfMod as unknown as { default: (...args: unknown[]) => unknown }).default;
@@ -280,17 +286,22 @@ export default function TenantContractPrintPage() {
         margin:       0,
         filename:     `tenancy-contract-${contract.ref}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
+        html2canvas:  {
+          scale: 2, useCORS: true, letterRendering: true, scrollX: 0, scrollY: 0,
+          windowWidth: sheetRef.current.scrollWidth,
+          windowHeight: sheetRef.current.scrollHeight,
+        },
         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak:    { mode: ['css', 'legacy'], before: '.page', avoid: '.keep-together' },
       };
-      (html2pdf as (...args: unknown[]) => { from: (el: HTMLElement) => { set: (o: unknown) => { save: () => Promise<void> } } })()
+      await (html2pdf as (...args: unknown[]) => { from: (el: HTMLElement) => { set: (o: unknown) => { save: () => Promise<void> } } })()
         .from(sheetRef.current).set(opts).save();
     } catch (e) {
       console.error('PDF generation failed', e);
       alert('Could not generate PDF. Falling back to browser print.');
       window.print();
     } finally {
+      if (root && prev) { root.style.position = prev.position; root.style.overflow = prev.overflow; root.style.height = prev.height; }
       setPdfBusy(false);
     }
   }
