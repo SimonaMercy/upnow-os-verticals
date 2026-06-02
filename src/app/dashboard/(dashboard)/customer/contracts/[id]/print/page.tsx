@@ -156,27 +156,23 @@ function SigSection({ tenantSig, landlordSig }: { tenantSig?: Signature | null; 
 function DLDHeader({ contractDate }: { contractDate?: string }) {
   return (
     <div style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 56 }}>
+      {/* Logos flank a centered title, matching the official form */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 12, minHeight: 52 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/dld/government-of-dubai.png" alt="Government of Dubai"
-          style={{ height: 54, width: 'auto', maxWidth: 240, objectFit: 'contain' }} />
+          style={{ height: 50, width: 'auto', maxWidth: 200, objectFit: 'contain', justifySelf: 'start' }} />
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#1a3c6e', letterSpacing: 8, direction: 'rtl', fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1.1 }}>عـقـد إيـجـار</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#1a3c6e', letterSpacing: 4, fontFamily: 'Georgia, "Times New Roman", serif', marginTop: 1 }}>TENANCY CONTRACT</div>
+        </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/dld/land-department.png" alt="Dubai Land Department"
-          style={{ height: 54, width: 'auto', maxWidth: 260, objectFit: 'contain' }} />
+          style={{ height: 50, width: 'auto', maxWidth: 220, objectFit: 'contain', justifySelf: 'end' }} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', marginTop: 8, marginBottom: 4, gap: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-          <span style={{ fontSize: 10, color: '#222' }}>Date</span>
-          <span style={{ borderBottom: '1px dashed #888', display: 'inline-block', minWidth: 150, fontSize: 10, paddingLeft: 6, paddingBottom: 1, color: '#000' }}>
-            {contractDate ?? ''}
-          </span>
-          <span style={{ fontSize: 10, direction: 'rtl', color: '#222' }}>التاريخ</span>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#1a3c6e', letterSpacing: 12, direction: 'rtl', fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1.1 }}>عـقـد إيـجـار</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#1a3c6e', letterSpacing: 5, fontFamily: 'Georgia, "Times New Roman", serif', marginTop: 1 }}>TENANCY CONTRACT</div>
-        </div>
-        <div />
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, marginTop: 6 }}>
+        <span style={{ fontSize: 10, color: '#222' }}>Date</span>
+        <span style={{ borderBottom: '1px dashed #888', display: 'inline-block', minWidth: 150, fontSize: 10, paddingLeft: 6, paddingBottom: 1, color: '#000' }}>{contractDate ?? ''}</span>
+        <span style={{ fontSize: 10, direction: 'rtl', color: '#222' }}>التاريخ</span>
       </div>
     </div>
   );
