@@ -416,7 +416,7 @@ function LoginForm() {
               </div>
 
               <form onSubmit={onVerify} className={s.formBody}>
-                {process.env.NODE_ENV !== 'production' && devOtp && (
+                {devOtp && (
                   <div className={s.devOtp}>
                     <span>Dev OTP</span>
                     <b>{devOtp}</b>

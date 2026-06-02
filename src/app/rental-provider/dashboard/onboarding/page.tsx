@@ -1016,7 +1016,7 @@ function SectionDetails(props: {
         {phoneError && <div className={s.err}><AlertCircle size={12} /> {phoneError}</div>}
         {(otpPhase === "sent" || otpPhase === "verifying") && !phoneVerified && (
           <div className={s.subCard}>
-            {process.env.NODE_ENV !== "production" && devOtp && (
+            {devOtp && (
               <div style={{ background: "var(--warn-bg)", color: "var(--warn-fg)", padding: 10, borderRadius: 8, textAlign: "center", marginBottom: 10, fontFamily: "ui-monospace, monospace", fontWeight: 700, letterSpacing: 4 }}>
                 Dev OTP: {devOtp}
               </div>

@@ -188,7 +188,7 @@ function VerifyOtpInner() {
       }
     >
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-        {process.env.NODE_ENV !== 'production' && devOtp && (
+        {devOtp && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-0.5">Dev — OTP code</p>
             <p className="text-2xl font-mono font-bold tracking-[0.3em] text-amber-900">{devOtp}</p>
