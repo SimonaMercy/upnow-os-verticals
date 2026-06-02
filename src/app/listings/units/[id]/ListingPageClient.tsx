@@ -8,7 +8,7 @@ import {
   MapPin, X, ChevronLeft, ChevronRight, BedDouble, Bath, Maximize2,
   Layers, Wind, CheckCircle2, Check, Shield, Clock,
   Calendar, MessageSquare, ImageIcon,
-  Flame, AppWindow, DoorOpen, Hash, Star, Ruler,
+  Flame, AppWindow, DoorOpen, Hash, Ruler,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
@@ -44,6 +44,8 @@ export interface PublicUnit {
   rentalPrice: string | number | null;
   marketPrice: string | number | null;
   serviceCharges: string | number | null;
+  securityDeposit: string | number | null;
+  adminFee: string | number | null;
   leaseAmount: string | number | null;
   availability: string;
   description: string | null;
@@ -102,9 +104,11 @@ function fmt(n: string | number | null) {
 }
 function fmtAed(n: string | number | null) {
   if (n == null) return null;
-  const num = Number(n);
-  if (isNaN(num)) return null;
-  return `AED ${new Intl.NumberFormat('en-AE').format(num)}`;
+  const fils = Number(n);
+  if (isNaN(fils)) return null;
+  // Prices are stored in fils (100 fils = 1 AED)
+  const aed = fils / 100;
+  return `AED ${new Intl.NumberFormat('en-AE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(aed)}`;
 }
 function humanType(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -177,8 +181,8 @@ function GalleryModal({
 
 /* ── Inquiry Panel ──────────────────────────────────────────────────────── */
 function InquiryPanel({
-  unit, property, onBook, onInquire,
-}: { unit: PublicUnit; property: PublicProperty; onBook: () => void; onInquire: () => void }) {
+  unit, property, onBook, onInquire, canBook,
+}: { unit: PublicUnit; property: PublicProperty; onBook: () => void; onInquire: () => void; canBook: boolean }) {
   return (
     <>
       {/* Provider */}
@@ -200,40 +204,83 @@ function InquiryPanel({
         </div>
       </div>
 
-      {/* CTA buttons */}
-      <div className="flex flex-col gap-3 mb-5">
-        <button
-          onClick={onInquire}
-          className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ backgroundColor: '#2e9f82' }}
-        >
-          Book Now
-        </button>
-        <button
-          onClick={onBook}
-          className="w-full py-3 rounded-xl text-sm font-semibold border border-[#2e9f82] hover:bg-[#edf7f3] transition-colors"
-          style={{ color: '#2e9f82' }}
-        >
-          Schedule Viewing
-        </button>
-      </div>
+      {/* CTA buttons — hidden for non-tenant roles (rental_provider, manager,
+          admin, super_admin) since those accounts can't lease a unit through
+          this flow. They're shown a contextual note instead so they know
+          why the CTAs are absent. */}
+      {canBook ? (
+        <div className="flex flex-col gap-3 mb-5">
+          <button
+            onClick={onInquire}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: '#2e9f82' }}
+          >
+            Book Now
+          </button>
+          <button
+            onClick={onBook}
+            className="w-full py-3 rounded-xl text-sm font-semibold border border-[#2e9f82] hover:bg-[#edf7f3] transition-colors"
+            style={{ color: '#2e9f82' }}
+          >
+            Schedule Viewing
+          </button>
+        </div>
+      ) : (
+        <div className="bg-[#f4f3ef] border border-[#e8e6e0] rounded-xl p-3 mb-5 text-center">
+          <p className="text-xs text-[#6b6860]">
+            You're browsing listings from your operator account. Sign in with a customer account to book or schedule a viewing.
+          </p>
+        </div>
+      )}
 
-      {/* Price */}
-      <div className="bg-[#f4f3ef] rounded-xl p-4 space-y-2 text-sm">
+      {/* Price breakdown */}
+      <div className="bg-[#f4f3ef] rounded-xl p-4 space-y-2.5 text-sm mb-4">
         {unit.rentalPrice != null && (
-          <div className="flex justify-between">
+          <div className="flex justify-between items-baseline">
             <span className="text-[#6b6860]">Annual Rent</span>
             <span className="font-bold text-[#1a1916]">{fmtAed(unit.rentalPrice)}</span>
           </div>
         )}
+        {unit.securityDeposit != null && (
+          <div className="flex justify-between items-baseline">
+            <span className="text-[#6b6860]">Security Deposit</span>
+            <span className="font-medium text-[#1a1916]">{fmtAed(unit.securityDeposit)}</span>
+          </div>
+        )}
+        {unit.adminFee != null && (
+          <div className="flex justify-between items-baseline">
+            <span className="text-[#6b6860]">Admin Fee</span>
+            <span className="font-medium text-[#1a1916]">{fmtAed(unit.adminFee)}</span>
+          </div>
+        )}
+        {unit.serviceCharges != null && (
+          <div className="flex justify-between items-baseline">
+            <span className="text-[#6b6860]">Service Charges</span>
+            <span className="font-medium text-[#1a1916]">{fmtAed(unit.serviceCharges)}</span>
+          </div>
+        )}
         {unit.marketPrice != null && (
-          <div className="flex justify-between">
-            <span className="text-[#6b6860]">Market Price</span>
+          <div className="flex justify-between items-baseline border-t border-[#e8e6e0] pt-2.5 mt-1">
+            <span className="text-[#6b6860]">Market Value</span>
             <span className="font-medium text-[#1a1916]">{fmtAed(unit.marketPrice)}</span>
           </div>
         )}
-
       </div>
+
+      {/* Building highlights */}
+      {(property.hasParking || property.hasGym || property.hasPool) && (
+        <div className="flex flex-wrap gap-2">
+          {property.hasParking && (
+            <span className="text-xs font-medium rounded-full px-3 py-1.5 bg-[#f4f3ef] text-[#3d3b35]">🅿 Parking</span>
+          )}
+          {property.hasGym && (
+            <span className="text-xs font-medium rounded-full px-3 py-1.5 bg-[#f4f3ef] text-[#3d3b35]">🏋️ Gym</span>
+          )}
+          {property.hasPool && (
+            <span className="text-xs font-medium rounded-full px-3 py-1.5 bg-[#f4f3ef] text-[#3d3b35]">🏊 Pool</span>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -883,6 +930,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
 /* ── Book Now Modal ─────────────────────────────────────────────────────── */
 function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property: PublicProperty; onClose: () => void }) {
   const router = useRouter();
+  const { refresh: refreshAuth } = useAuth();
 
   // Form state
   const [moveIn,       setMoveIn]       = useState('');
@@ -895,17 +943,18 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   // Submission state
   const [submitting, setSubmitting]   = useState(false);
   const [error,      setError]        = useState<string | null>(null);
-  const [contractId, setContractId]   = useState<number | null>(null); // set on success
+  const [contractId, setContractId]   = useState<number | null>(null);
 
-  // Inline auth state
-  type AuthStep = null | 'register' | 'verify-otp';
-  const [authStep,       setAuthStep]       = useState<AuthStep>(null);
-  const [authMode,       setAuthMode]       = useState<'register' | 'login'>('register');
-  const [authEmail,      setAuthEmail]      = useState('');
-  const [authDevOtp,     setAuthDevOtp]     = useState<string | null>(null);
-  const [authOtp,        setAuthOtp]        = useState(['','','','','','']);
-  const [authSubmitting, setAuthSubmitting] = useState(false);
-  const [authError,      setAuthError]      = useState<string | null>(null);
+  // Inline auth state — unified email-or-phone single-field flow
+  type AuthStep = null | 'identify' | 'verify-otp';
+  const [authStep,         setAuthStep]         = useState<AuthStep>(null);
+  const [authIsNewUser,    setAuthIsNewUser]     = useState(false);
+  const [authIdentifier,   setAuthIdentifier]   = useState('');
+  const [authVerifyStep,   setAuthVerifyStep]   = useState<'email' | 'phone'>('email');
+  const [authDevOtp,       setAuthDevOtp]       = useState<string | null>(null);
+  const [authOtp,          setAuthOtp]          = useState(['','','','','','']);
+  const [authSubmitting,   setAuthSubmitting]   = useState(false);
+  const [authError,        setAuthError]        = useState<string | null>(null);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([null,null,null,null,null,null]);
 
   // ── Submit contract ────────────────────────────────────────────────────
@@ -952,7 +1001,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
     setError(null);
     const meRes = await fetch('/api/auth/me', { credentials: 'include' });
     if (meRes.status === 401) {
-      setAuthStep('register');
+      setAuthStep('identify');
       return;
     }
     const me = await meRes.json().catch(() => ({}));
@@ -963,26 +1012,63 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
     await submitContract();
   }
 
-  // ── Step 1: send OTP (register or sign-in) ────────────────────────────
+  // ── Step 1: unified email-or-phone identify ───────────────────────────
   async function handleIdentify() {
-    const email = authEmail.trim().toLowerCase();
-    if (!email) { setAuthError('Enter your email address.'); return; }
+    const raw = authIdentifier.trim();
+    if (!raw) { setAuthError('Enter your email or phone number.'); return; }
+
+    const isPhone = !raw.includes('@');
+    const identifier = isPhone
+      ? (raw.startsWith('+') ? raw : /^\d{8,12}$/.test(raw) ? `+971${raw.replace(/^0+/, '')}` : raw)
+      : raw.toLowerCase();
+
     setAuthError(null); setAuthSubmitting(true);
     try {
-      const endpoint = authMode === 'register'
-        ? '/api/auth/register/customer'
-        : '/api/auth/login';
-      const res = await fetch(endpoint, {
+      // Try login first — works for existing users
+      const loginRes = await fetch('/api/auth/login', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: identifier }),
       });
-      const body = await res.json();
-      if (!res.ok) {
-        const m = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Something went wrong';
+      const loginBody = await loginRes.json().catch(() => ({})) as Record<string, unknown>;
+
+      if (loginRes.ok) {
+        setAuthIsNewUser(false);
+        setAuthVerifyStep((loginBody.verificationStep as 'email' | 'phone') ?? (isPhone ? 'phone' : 'email'));
+        if (loginBody.devOtp) setAuthDevOtp(loginBody.devOtp as string);
+        setAuthOtp(['','','','','','']);
+        setAuthStep('verify-otp');
+        return;
+      }
+
+      // Not found → auto-register as new customer
+      const isNotFound = loginRes.status === 401 &&
+        typeof loginBody.message === 'string' &&
+        loginBody.message.toLowerCase().includes('no account');
+      if (!isNotFound) {
+        const m = Array.isArray(loginBody.message)
+          ? (loginBody.message as string[]).join(', ')
+          : (loginBody.message as string) ?? 'Something went wrong';
         throw new Error(m);
       }
-      if (body.devOtp) setAuthDevOtp(body.devOtp);
+
+      const regPayload = isPhone ? { phone: identifier } : { email: identifier };
+      const regRes = await fetch('/api/auth/register/customer', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(regPayload),
+      });
+      const regBody = await regRes.json().catch(() => ({})) as Record<string, unknown>;
+      if (!regRes.ok) {
+        const m = Array.isArray(regBody.message)
+          ? (regBody.message as string[]).join(', ')
+          : (regBody.message as string) ?? 'Registration failed';
+        throw new Error(m);
+      }
+
+      setAuthIsNewUser(true);
+      setAuthVerifyStep((regBody.verificationStep as 'email' | 'phone') ?? (isPhone ? 'phone' : 'email'));
+      if (regBody.devOtp) setAuthDevOtp(regBody.devOtp as string);
       setAuthOtp(['','','','','','']);
       setAuthStep('verify-otp');
     } catch (err) {
@@ -992,32 +1078,50 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
     }
   }
 
-  // ── Step 2: verify OTP → then submit contract ─────────────────────────
+  // ── Step 2: verify OTP → refresh auth context → submit contract ────────
   async function handleVerifyOtp() {
     const code = authOtp.join('');
     if (code.length !== 6) { setAuthError('Enter the 6-digit code.'); return; }
     setAuthError(null); setAuthSubmitting(true);
     try {
-      const email = authEmail.trim().toLowerCase();
+      const identifier = authIdentifier.trim();
+      const isPhone = !identifier.includes('@');
       let res: Response;
-      if (authMode === 'register') {
-        res = await fetch('/api/auth/email/verify-otp', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, code }),
-        });
-      } else {
+
+      if (!authIsNewUser) {
+        // Existing user — standard login verify
         res = await fetch('/api/auth/login/verify-otp', {
           method: 'POST', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: email, code }),
+          body: JSON.stringify({ identifier, code }),
+        });
+      } else if (authVerifyStep === 'phone') {
+        // New user registered via phone — OTP from /auth/otp/verify
+        res = await fetch('/api/auth/otp/verify', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+      } else {
+        // New user registered via email — verify email OTP
+        res = await fetch('/api/auth/email/verify-otp', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: identifier.toLowerCase(), code }),
         });
       }
-      const body = await res.json();
+
+      const body = await res.json().catch(() => ({})) as Record<string, unknown>;
       if (!res.ok) {
-        const m = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Verification failed';
+        const m = Array.isArray(body.message)
+          ? (body.message as string[]).join(', ')
+          : (body.message as string) ?? 'Verification failed';
         throw new Error(m);
       }
+
+      // Sync AuthContext so DashboardShell sees an authenticated user on navigation
+      await refreshAuth();
+
       const ok = await submitContract();
       if (!ok) setAuthError('Verified! But could not create your reservation. Please try again.');
     } catch (err) {
@@ -1068,39 +1172,24 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
     );
   }
 
-  // ── Step 1: email entry (register or sign-in toggle) ──────────────────
-  if (authStep === 'register') {
+  // ── Step 1: unified email-or-phone identify ──────────────────────────
+  if (authStep === 'identify') {
     return (
       <ModalShell onClose={onClose}>
-        <div className="flex rounded-xl overflow-hidden border border-[#e8e6e0] mb-5">
-          <button type="button" onClick={() => { setAuthMode('register'); setAuthError(null); }}
-            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
-            style={{ backgroundColor: authMode === 'register' ? '#1a1916' : 'transparent', color: authMode === 'register' ? '#fff' : '#6b6860' }}>
-            Create account
-          </button>
-          <button type="button" onClick={() => { setAuthMode('login'); setAuthError(null); }}
-            className="flex-1 py-2.5 text-sm font-semibold transition-colors"
-            style={{ backgroundColor: authMode === 'login' ? '#1a1916' : 'transparent', color: authMode === 'login' ? '#fff' : '#6b6860' }}>
-            Sign in
-          </button>
-        </div>
-        <h3 className="font-bold text-xl text-[#1a1916] mb-1">
-          {authMode === 'register' ? 'Create your account' : 'Welcome back'}
-        </h3>
-        <p className="text-sm text-[#9b9890] mb-5">
-          {authMode === 'register' ? 'Enter your email — we\'ll send a verification code.' : 'Enter your email — we\'ll send a sign-in code.'}
-        </p>
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Continue to UpNow</h3>
+        <p className="text-sm text-[#9b9890] mb-5">Enter your email or phone — we&apos;ll send a verification code.</p>
         {authError && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>}
         <div className="mb-4">
-          <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">Email address</label>
+          <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">Email or phone</label>
           <input
-            type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+            type="text" value={authIdentifier} onChange={e => setAuthIdentifier(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleIdentify()}
-            placeholder="you@example.com" autoComplete="email" autoFocus
+            placeholder="you@example.com or +971 50 123 4567"
+            autoComplete="email" autoFocus
             className={inputCls}
           />
         </div>
-        <button disabled={authSubmitting || !authEmail.trim()} onClick={handleIdentify}
+        <button disabled={authSubmitting || !authIdentifier.trim()} onClick={handleIdentify}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
           style={{ backgroundColor: '#1a1916' }}>
           {authSubmitting ? 'Sending code…' : 'Send verification code →'}
@@ -1112,15 +1201,18 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   // ── Step 2: OTP verification ───────────────────────────────────────────
   if (authStep === 'verify-otp') {
     const otpCode = authOtp.join('');
+    const isPhoneVerify = authVerifyStep === 'phone';
     return (
       <ModalShell onClose={onClose}>
-        <button type="button" onClick={() => { setAuthStep('register'); setAuthError(null); setAuthOtp(['','','','','','']); }}
+        <button type="button" onClick={() => { setAuthStep('identify'); setAuthError(null); setAuthOtp(['','','','','','']); }}
           className="flex items-center gap-1 text-xs text-[#9b9890] hover:text-[#1a1916] mb-4 transition-colors">
           <ChevronLeft size={14} /> Back
         </button>
-        <h3 className="font-bold text-xl text-[#1a1916] mb-1">Check your email</h3>
+        <h3 className="font-bold text-xl text-[#1a1916] mb-1">
+          {isPhoneVerify ? 'Check your phone' : 'Check your email'}
+        </h3>
         <p className="text-sm text-[#9b9890] mb-5">
-          We sent a 6-digit code to <span className="font-semibold text-[#1a1916]">{authEmail}</span>
+          We sent a 6-digit code to <span className="font-semibold text-[#1a1916]">{authIdentifier}</span>
         </p>
         {authError && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>}
         {authDevOtp && (
@@ -1151,11 +1243,13 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
           <button type="button" className="font-semibold hover:underline" style={{ color: '#1a1916' }}
             onClick={async () => {
               try {
-                await fetch('/api/auth/email/resend-otp', {
-                  method: 'POST', credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email: authEmail.trim().toLowerCase() }),
-                });
+                if (!isPhoneVerify) {
+                  await fetch('/api/auth/email/resend-otp', {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: authIdentifier.trim().toLowerCase() }),
+                  });
+                }
               } catch { setAuthError('Could not resend. Please try again.'); }
             }}>Resend</button>
         </p>
@@ -1212,6 +1306,12 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
 
 /* ── Modal shell ─────────────────────────────────────────────────────────── */
 function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -1266,6 +1366,13 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIdx, setGalleryIdx] = useState(0);
   const [modal, setModal] = useState<'book' | 'inquire' | null>(null);
+  const { user } = useAuth();
+  // Booking CTAs only make sense for customers (or visitors who haven't logged
+  // in yet — they'll be prompted to register as a customer during the flow).
+  // Operator-side accounts (rental_provider, manager, admin, super_admin) can
+  // still browse the listing but the Book Now / Schedule Viewing surfaces
+  // are hidden — those flows aren't wired for non-customer roles.
+  const canBook = !user || user.role === 'customer' || user.role === 'service_provider' || user.role === 'technician';
 
   // Auto-open booking modal if user just returned from login with a saved intent
   useEffect(() => {
@@ -1297,7 +1404,6 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
     unit.unitSizeSqft && { icon: <Maximize2 size={18} />, label: 'Size (sqft)', value: `${fmt(Number(unit.unitSizeSqft))} sqft` },
     unit.unitSizeSqm && { icon: <Ruler size={18} />, label: 'Size (sqm)', value: `${fmt(Number(unit.unitSizeSqm))} sqm` },
     unit.floor && { icon: <Layers size={18} />, label: 'Floor', value: unit.floor },
-    unit.unitTier && { icon: <Star size={18} />, label: 'Tier', value: humanType(unit.unitTier) },
     unit.view && { icon: <ImageIcon size={18} />, label: 'View', value: unit.view },
     unit.numAcs > 0 && { icon: <Wind size={18} />, label: 'A/Cs', value: String(unit.numAcs) },
     unit.numHeaters > 0 && { icon: <Flame size={18} />, label: 'Heaters', value: String(unit.numHeaters) },
@@ -1309,10 +1415,14 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
   ].filter(Boolean) as Array<{ icon: React.ReactNode; label: string; value: string }>;
 
   const facilities: string[] = (() => {
-    try { return JSON.parse(unit.facilities ?? '[]'); } catch { return []; }
+    try {
+      const parsed = JSON.parse(unit.facilities ?? '[]');
+      if (Array.isArray(parsed)) return parsed as string[];
+      if (parsed && Array.isArray(parsed.amenities)) return parsed.amenities as string[];
+      return [];
+    } catch { return []; }
   })();
 
-  // `facilities` is the authoritative per-unit amenities list set by the RP.
   const features = facilities;
 
   const displayAddress = buildAddress(property);
@@ -1351,11 +1461,17 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
         </nav>
 
         {/* ── Gallery ─────────────────────────────────────────────────────── */}
-        <div className="mb-8 overflow-hidden rounded-2xl">
+        {/* Frame the whole grid so it stays visually contained on the page
+            even when the underlying images are white / transparent. Each
+            tile gets a cream backdrop (#f4f3ef, same neutral used on the
+            inquiry panel) so white-backed images don't vanish into the
+            page; a hairline border and subtle shadow give the gallery a
+            crisp edge. */}
+        <div className="mb-8 overflow-hidden rounded-2xl border border-[#e8e6e0] shadow-sm bg-[#f4f3ef]">
           {/* Desktop: 60% main + 40% right */}
-          <div className="hidden md:grid gap-2" style={{ gridTemplateColumns: '60% 40%', gridTemplateRows: 'repeat(3, 140px)' }}>
+          <div className="hidden md:grid gap-2 p-2" style={{ gridTemplateColumns: '60% 40%', gridTemplateRows: 'repeat(3, 140px)' }}>
             <div
-              className="relative row-span-3 cursor-pointer overflow-hidden"
+              className="relative row-span-3 cursor-pointer overflow-hidden rounded-xl bg-[#ecebe5]"
               onClick={() => openGallery(0)}
             >
               <img src={images[0]} alt={unitLabel} className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.03]" />
@@ -1367,13 +1483,13 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
               </button>
             </div>
             {images.slice(1, 4).map((img, i) => (
-              <div key={i} className="cursor-pointer overflow-hidden" onClick={() => openGallery(i + 1)}>
+              <div key={i} className="cursor-pointer overflow-hidden rounded-xl bg-[#ecebe5]" onClick={() => openGallery(i + 1)}>
                 <img src={img} alt={`${unitLabel} ${i + 2}`} className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.03]" />
               </div>
             ))}
           </div>
           {/* Mobile */}
-          <div className="md:hidden relative cursor-pointer overflow-hidden rounded-2xl" style={{ height: 260 }} onClick={() => openGallery(0)}>
+          <div className="md:hidden relative cursor-pointer overflow-hidden rounded-xl m-2 bg-[#ecebe5]" style={{ height: 260 }} onClick={() => openGallery(0)}>
             <img src={images[0]} alt={unitLabel} className="w-full h-full object-cover" />
             <button className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 text-xs font-medium text-[#1a1916] shadow-md">
               <ImageIcon size={13} /> {images.length} photos
@@ -1506,35 +1622,40 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
             style={{ width: 360, position: 'sticky', top: 84 }}
           >
             <h2 className="font-semibold text-xl text-[#1a1916] mb-4">Interested in this space?</h2>
-            <InquiryPanel unit={unit} property={property} onBook={() => setModal('book')} onInquire={() => setModal('inquire')} />
+            <InquiryPanel unit={unit} property={property} onBook={() => setModal('book')} onInquire={() => setModal('inquire')} canBook={canBook} />
           </aside>
         </div>
       </div>
 
-      {/* Mobile bottom bar */}
-      <div className="fixed bottom-0 inset-x-0 lg:hidden z-50 flex items-center justify-between bg-white border-t border-[#e8e6e0] px-5 py-4">
-        <div>
-          {unit.rentalPrice != null && (
-            <p className="font-bold text-[#1a1916] text-base">{fmtAed(unit.rentalPrice)}<span className="text-xs font-normal text-[#9b9890]"> /yr</span></p>
-          )}
+      {/* Mobile bottom bar — only rendered when the viewer can actually
+          book. Operator accounts get nothing here so the mobile UX matches
+          the desktop sidebar (which shows a "switch to a customer account"
+          note instead of the CTAs). */}
+      {canBook && (
+        <div className="fixed bottom-0 inset-x-0 lg:hidden z-50 flex items-center justify-between bg-white border-t border-[#e8e6e0] px-5 py-4">
+          <div>
+            {unit.rentalPrice != null && (
+              <p className="font-bold text-[#1a1916] text-base">{fmtAed(unit.rentalPrice)}<span className="text-xs font-normal text-[#9b9890]"> /yr</span></p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setModal('inquire')}
+              className="py-2.5 px-5 rounded-xl text-sm font-semibold text-white"
+              style={{ backgroundColor: '#2e9f82' }}
+            >
+              Book Now
+            </button>
+            <button
+              onClick={() => setModal('book')}
+              className="py-2.5 px-4 rounded-xl text-sm font-semibold border"
+              style={{ borderColor: '#2e9f82', color: '#2e9f82' }}
+            >
+              Schedule Viewing
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setModal('inquire')}
-            className="py-2.5 px-5 rounded-xl text-sm font-semibold text-white"
-            style={{ backgroundColor: '#2e9f82' }}
-          >
-            Book Now
-          </button>
-          <button
-            onClick={() => setModal('book')}
-            className="py-2.5 px-4 rounded-xl text-sm font-semibold border"
-            style={{ borderColor: '#2e9f82', color: '#2e9f82' }}
-          >
-            Schedule Viewing
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Lightbox */}
       {galleryOpen && (

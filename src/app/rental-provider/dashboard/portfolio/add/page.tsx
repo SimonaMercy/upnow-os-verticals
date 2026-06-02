@@ -16,7 +16,7 @@ import { MapPicker } from '@/components/upnow/MapPicker';
 import {
   RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
   WORKSPACES_UNIT_TYPES, VENUES_UNIT_TYPES,
-  FURNISHING_OPTIONS, AMENITIES, UNIT_TYPE_LABELS,
+  FURNISHING_OPTIONS, UNIT_TYPE_LABELS, getAmenitiesForCategory,
 } from '@/components/upnow/UnitFormModal';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
@@ -262,6 +262,10 @@ export default function AddListingPage() {
   const updP = <K extends keyof PropertyFormData>(k: K, v: PropertyFormData[K]) => {
     setPf(prev => ({ ...prev, [k]: v }));
     setPe(prev => ({ ...prev, [k]: undefined }));
+    // Clear amenities on all units when category changes so stale selections don't carry over
+    if (k === 'spaceCategory') {
+      setRows(prev => prev.map(r => ({ ...r, amenities: [] })));
+    }
   };
 
   const handleSearchSelect = (r: SearchResult) => {
@@ -365,14 +369,18 @@ export default function AddListingPage() {
   };
 
   /* ── stage photos ── */
-  const stagePhotos = (id: string, files: FileList) => {
-    const newPhotos: StagedPhoto[] = [];
-    Array.from(files).forEach(file => {
-      newPhotos.push({ file, previewUrl: URL.createObjectURL(file) });
-    });
+  const stagePhotos = (id: string, files: File[]) => {
+    const newPhotos: StagedPhoto[] = files.map(file => ({
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
     setRows(prev => prev.map(r => r.id === id
       ? { ...r, stagedPhotos: [...r.stagedPhotos, ...newPhotos].slice(0, 20) }
       : r));
+  };
+
+  const reorderPhotos = (id: string, newPhotos: StagedPhoto[]) => {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, stagedPhotos: newPhotos } : r));
   };
 
   const removeStagedPhoto = (rowId: string, idx: number) => {
@@ -721,6 +729,7 @@ export default function AddListingPage() {
                       const id = e.target.value ? Number(e.target.value) : null;
                       const cat = existingProps.find(p => p.id === id)?.spaceCategory ?? '';
                       setSelectedPropId(id); setSelectedPropCat(cat); setError(null);
+                      setRows(prev => prev.map(r => ({ ...r, amenities: [] })));
                     }}
                   >
                     <option value="">— Select a property —</option>
@@ -1019,6 +1028,7 @@ export default function AddListingPage() {
                   onToggle={() => toggleRow(r.id)}
                   onStagePhotos={(files) => stagePhotos(r.id, files)}
                   onRemovePhoto={(idx) => removeStagedPhoto(r.id, idx)}
+                  onReorderPhotos={(photos) => reorderPhotos(r.id, photos)}
                   canDelete={rows.length > 1}
                 />
               ))}
@@ -1155,7 +1165,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 /* ─── UnitCard ────────────────────────────────────────────────────────────── */
 function UnitCard({
-  row, index, unitTypes, propCategory, errors, onUpdate, onDelete, onDuplicate, onToggle, onStagePhotos, onRemovePhoto, canDelete,
+  row, index, unitTypes, propCategory, errors, onUpdate, onDelete, onDuplicate, onToggle, onStagePhotos, onRemovePhoto, onReorderPhotos, canDelete,
 }: {
   row: UnitRow;
   index: number;
@@ -1166,11 +1176,14 @@ function UnitCard({
   onDelete: () => void;
   onDuplicate: () => void;
   onToggle: () => void;
-  onStagePhotos: (files: FileList) => void;
+  onStagePhotos: (files: File[]) => void;
   onRemovePhoto: (idx: number) => void;
+  onReorderPhotos: (newPhotos: StagedPhoto[]) => void;
   canDelete: boolean;
 }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const dragIdxRef = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const showBedBath = !row.unitType || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
   const isResidentialUnit = propCategory === 'residential' || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
 
@@ -1364,22 +1377,33 @@ function UnitCard({
 
           {/* Amenities */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-2">Amenities</label>
-            <div className="flex flex-wrap gap-2">
-              {AMENITIES.map(a => (
-                <button
-                  key={a} type="button"
-                  onClick={() => onUpdate({ amenities: row.amenities.includes(a) ? row.amenities.filter(x => x !== a) : [...row.amenities, a] })}
-                  className={`px-3 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-colors ${
-                    row.amenities.includes(a)
-                      ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]'
-                      : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c8c6c0]'
-                  }`}
-                >
-                  {a}
-                </button>
-              ))}
-            </div>
+            <label className="block text-xs font-medium text-[#6b6860] mb-2">
+              Amenities
+              {row.amenities.length > 0 && (
+                <span className="ml-1.5 text-[#2e9f82] font-semibold">{row.amenities.length} selected</span>
+              )}
+            </label>
+            {!propCategory ? (
+              <p className="text-xs text-[#9b9890] bg-[#f4f3ef] rounded-lg px-3 py-2.5">
+                Select a property category above to see relevant amenities.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {getAmenitiesForCategory(propCategory).map(a => (
+                  <button
+                    key={a} type="button"
+                    onClick={() => onUpdate({ amenities: row.amenities.includes(a) ? row.amenities.filter(x => x !== a) : [...row.amenities, a] })}
+                    className={`px-3 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-colors ${
+                      row.amenities.includes(a)
+                        ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]'
+                        : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c8c6c0]'
+                    }`}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Description */}
@@ -1393,58 +1417,111 @@ function UnitCard({
 
           {/* Row 9: Photos */}
           <div>
+            {/* Hidden single file input — all triggers use this ref */}
+            <input
+              ref={photoInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              onChange={e => {
+                const files = e.target.files ? Array.from(e.target.files) : [];
+                if (files.length) onStagePhotos(files);
+                e.target.value = '';
+              }}
+            />
+
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-medium text-[#6b6860]">
-                Unit Photos <span className="text-[#9b9890] font-normal">({row.stagedPhotos.length}/20)</span>
-              </label>
-              {row.stagedPhotos.length < 20 && (
-                <button type="button"
+              <p className="text-xs font-medium text-[#6b6860]">
+                Unit Photos
+                <span className="text-[#9b9890] font-normal ml-1">({row.stagedPhotos.length}/20)</span>
+                {row.stagedPhotos.length > 1 && (
+                  <span className="text-[#9b9890] font-normal ml-2">· drag to set cover</span>
+                )}
+              </p>
+              {row.stagedPhotos.length > 0 && row.stagedPhotos.length < 20 && (
+                <button
+                  type="button"
                   onClick={() => photoInputRef.current?.click()}
-                  className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">
+                  className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer"
+                >
                   <ImagePlus size={13} /> Add Photos
                 </button>
               )}
             </div>
-            <input ref={photoInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp"
-              className="sr-only"
-              onChange={e => { if (e.target.files) stagePhotos(e.target.files); e.target.value = ''; }} />
 
             {row.stagedPhotos.length === 0 ? (
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 cursor-pointer hover:border-[#2e9f82] transition-colors">
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+              >
                 <Camera size={22} className="text-[#c8c6c0] mb-1.5" />
                 <span className="text-xs text-[#9b9890]">Click to add photos</span>
-                <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="sr-only"
-                  onChange={e => { if (e.target.files) stagePhotos(e.target.files); e.target.value = ''; }} />
-              </label>
+              </button>
             ) : (
               <div className="flex gap-2 flex-wrap">
                 {row.stagedPhotos.map((sp, idx) => (
-                  <div key={idx} className="relative w-20 h-20 rounded-lg overflow-hidden border border-[#e8e6e0] group">
+                  <div
+                    key={sp.previewUrl}
+                    draggable
+                    onDragStart={() => { dragIdxRef.current = idx; }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = dragIdxRef.current;
+                      if (from !== null && from !== idx) {
+                        const arr = [...row.stagedPhotos];
+                        const [moved] = arr.splice(from, 1);
+                        arr.splice(idx, 0, moved);
+                        onReorderPhotos(arr);
+                      }
+                      dragIdxRef.current = null;
+                      setDragOverIdx(null);
+                    }}
+                    onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null); }}
+                    className={`relative rounded-lg overflow-hidden border group transition-all select-none
+                      ${idx === 0 ? 'w-24 h-24' : 'w-20 h-20'}
+                      ${dragOverIdx === idx && dragIdxRef.current !== idx
+                        ? 'border-[#2e9f82] ring-2 ring-[#2e9f82] scale-105'
+                        : idx === 0 ? 'border-[#2e9f82]' : 'border-[#e8e6e0]'}
+                    `}
+                    style={{ cursor: 'grab' }}
+                  >
+                    {/* Cover badge */}
+                    {idx === 0 && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-[#2e9f82] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
+                        COVER
+                      </div>
+                    )}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={sp.previewUrl} alt="" className="w-full h-full object-cover" />
-                    <button onClick={() => onRemovePhoto(idx)}
-                      className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                    <img src={sp.previewUrl} alt="" className="w-full h-full object-cover pointer-events-none" draggable={false} />
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onRemovePhoto(idx); }}
+                      className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+                    >
                       <X size={10} />
                     </button>
                   </div>
                 ))}
+
                 {row.stagedPhotos.length < 20 && (
-                  <label className="w-20 h-20 rounded-lg border-2 border-dashed border-[#e8e6e0] flex items-center justify-center cursor-pointer hover:border-[#2e9f82] transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="w-20 h-20 rounded-lg border-2 border-dashed border-[#e8e6e0] flex items-center justify-center cursor-pointer hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors"
+                  >
                     <Plus size={16} className="text-[#c8c6c0]" />
-                    <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="sr-only"
-                      onChange={e => { if (e.target.files) stagePhotos(e.target.files); e.target.value = ''; }} />
-                  </label>
+                  </button>
                 )}
               </div>
             )}
-            <p className="text-[10px] text-[#9b9890] mt-1">Photos will be uploaded after saving. JPEG, PNG or WebP, up to 20 per unit.</p>
+            <p className="text-[10px] text-[#9b9890] mt-1">JPEG, PNG or WebP · up to 20 per unit · drag thumbnails to reorder · first image is the cover.</p>
           </div>
         </div>
       )}
     </div>
   );
 
-  function stagePhotos(files: FileList) {
-    onStagePhotos(files);
-  }
 }
