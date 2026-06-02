@@ -99,7 +99,7 @@ export const AMENITIES = [
   ]),
 ];
 
-function getAmenitiesForCategory(category: string): string[] {
+export function getAmenitiesForCategory(category: string): string[] {
   return AMENITIES_MAP[category] ?? AMENITIES_MAP.residential;
 }
 

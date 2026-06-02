@@ -100,7 +100,7 @@
 .prop { background: #fff; border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; box-shadow: var(--sh-sm); transition: box-shadow .15s; }
 .prop:hover { box-shadow: var(--sh-md); }
 
-.propH { display: grid; grid-template-columns: 64px 1fr auto; gap: 18px; align-items: center; padding: 18px 22px; cursor: pointer; }
+.propH { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; padding: 18px 22px; cursor: pointer; }
 .thumb {
   width: 64px; height: 64px; border-radius: 13px;
   background: repeating-linear-gradient(135deg, #f0f1ec 0 6px, #e8eae3 6px 12px);

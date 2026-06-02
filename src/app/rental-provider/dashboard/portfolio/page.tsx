@@ -321,7 +321,7 @@ function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyI
                 <div key={p.id} className="relative group rounded-xl overflow-hidden bg-[#f4f3ef] aspect-square">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={p.url.startsWith('http') ? p.url : `/api${p.url}`}
+                    src={p.url.startsWith('http') ? p.url : `${process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001'}${p.url}`}
                     alt={p.caption ?? 'Unit photo'}
                     className="w-full h-full object-cover"
                   />
@@ -365,12 +365,13 @@ function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyI
 // ─── Property card (new design) ──────────────────────────
 function PropertyCard({
   property, units, contracts, expanded, onToggle, onEdit, onDelete,
-  onAddUnit, onEditUnit, onDeleteUnit, onSubmitListing, onWithdrawListing,
+  onAddUnit, onEditUnit, onDeleteUnit, onSubmitListing, onWithdrawListing, onManagePhotos,
 }: {
   property: Property; units: Unit[]; contracts: ContractSummary[]; expanded: boolean;
   onToggle: () => void; onEdit: () => void; onDelete: () => void;
   onAddUnit: () => void; onEditUnit: (u: Unit) => void; onDeleteUnit: (uid: number) => void;
   onSubmitListing: (u: Unit) => void; onWithdrawListing: (u: Unit) => void;
+  onManagePhotos: (u: Unit) => void;
 }) {
   const totalRent = units.reduce((sum, u) => sum + (Number(u.rentalPrice ?? u.marketPrice) || 0), 0);
   const occupied = units.filter((u) => u.availability === 'occupied').length;
@@ -383,8 +384,6 @@ function PropertyCard({
     <div className={cn(s.prop, expanded && s.expanded)}>
       {/* Header row */}
       <div className={s.propH} onClick={onToggle} role="button">
-        <div className={s.thumb}>{property.spaceCategory.charAt(0).toUpperCase()}</div>
-
         <div className={s.propInfo}>
           <div className={s.propName}>
             {property.buildingName}
@@ -553,6 +552,9 @@ function PropertyCard({
                             <FileText size={14} />
                           </Link>
                         )}
+                        <button type="button" className={s.actsBtn} onClick={() => onManagePhotos(u)} title="Manage photos">
+                          <Camera size={14} />
+                        </button>
                         <button type="button" className={s.actsBtn} onClick={() => onEditUnit(u)} title="Edit unit">
                           <Pencil size={14} />
                         </button>
@@ -877,6 +879,7 @@ export default function PortfolioPage() {
                   onDeleteUnit={(uid) => deleteUnit.mutate({ propertyId: p.id, unitId: uid })}
                   onSubmitListing={(u) => submitListing.mutate({ propertyId: p.id, unitId: u.id })}
                   onWithdrawListing={(u) => withdrawListing.mutate({ propertyId: p.id, unitId: u.id })}
+                  onManagePhotos={(u) => setPhotoModal({ open: true, unit: u, propertyId: p.id })}
                 />
               );
             })}
