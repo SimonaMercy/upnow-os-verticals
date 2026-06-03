@@ -49,6 +49,7 @@ function unitTypesFor(cat: string) {
 }
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
+interface Country   { id: number; nameEn: string; code: string }
 interface Emirate   { id: number; nameEn: string }
 interface Community { id: number; nameEn: string }
 
@@ -61,8 +62,8 @@ export interface WizardProperty {
 
 const EMPTY_PROP: PropertyFormData = {
   buildingName: '', spaceCategory: '',
-  emirateId: null, communityId: null,
-  emirateName: '', communityName: '',
+  countryId: null, emirateId: null, communityId: null,
+  countryName: '', emirateName: '', communityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
   googlePlaceId: null,
@@ -159,9 +160,11 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
   /* property form */
   const [pf, setPf]   = useState<PropertyFormData>({ ...EMPTY_PROP });
   const [pe, setPe]   = useState<Partial<Record<keyof PropertyFormData, string>>>({});
+  const [countries, setCountries]     = useState<Country[]>([]);
   const [emirates, setEmirates]       = useState<Emirate[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loadingComms, setLoadingComms] = useState(false);
+  const defaultCountryIdRef = useRef<number | null>(null);
 
   /* existing property picker */
   const [selectedPropId, setSelectedPropId]         = useState<number | null>(null);
@@ -194,11 +197,26 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
     setError(null); setDone(false); setDoneMsg('');
   }, [open]);
 
-  /* emirates */
+  /* countries — load once; auto-select UAE */
   useEffect(() => {
-    if (open && emirates.length === 0)
-      apiGet<Emirate[]>('/locations/emirates').then(setEmirates).catch(() => {});
-  }, [open, emirates.length]);
+    if (countries.length > 0) return;
+    apiGet<Country[]>('/locations/countries').then(cs => {
+      setCountries(cs);
+      const ae = cs.find(c => c.code === 'AE');
+      if (ae) {
+        defaultCountryIdRef.current = ae.id;
+        setPf(prev => prev.countryId ? prev : { ...prev, countryId: ae.id, countryName: ae.nameEn });
+        apiGet<Emirate[]>(`/locations/countries/${ae.id}/emirates`).then(setEmirates).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [countries.length]);
+
+  /* reload emirates when country changes */
+  useEffect(() => {
+    if (!pf.countryId) { setEmirates([]); return; }
+    apiGet<Emirate[]>(`/locations/countries/${pf.countryId}/emirates`).then(setEmirates).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pf.countryId]);
 
   /* communities cascade */
   useEffect(() => {
@@ -491,16 +509,28 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                     </div>
                   </div>
 
-                  {/* Location — Emirate → Community → Street → Plot Number */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Location — Country → Emirate → Community */}
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <Label t="Emirate" req />
-                      <select className={SELECT} value={pf.emirateId ?? ''} onChange={e => {
+                      <Label t="Country" req />
+                      <select className={SELECT} value={pf.countryId ?? ''} onChange={e => {
+                        const id   = e.target.value ? Number(e.target.value) : null;
+                        const name = countries.find(c => c.id === id)?.nameEn ?? '';
+                        setPf(prev => ({ ...prev, countryId: id, countryName: name, emirateId: null, emirateName: '', communityId: null, communityName: '' }));
+                        setCommunities([]);
+                      }}>
+                        <option value="">Select</option>
+                        {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label t="Emirate / Region" req />
+                      <select className={SELECT} value={pf.emirateId ?? ''} disabled={!pf.countryId} onChange={e => {
                         const id   = e.target.value ? Number(e.target.value) : null;
                         const name = emirates.find(em => em.id === id)?.nameEn ?? '';
                         setPf(prev => ({ ...prev, emirateId: id, emirateName: name, communityId: null, communityName: '' }));
                       }}>
-                        <option value="">Select</option>
+                        <option value="">{pf.countryId ? 'Select' : 'Select country first'}</option>
                         {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
                       </select>
                     </div>

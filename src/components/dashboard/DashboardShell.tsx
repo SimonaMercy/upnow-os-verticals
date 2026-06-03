@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
+import { buildDisplayName } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import shell from './DashboardShell.module.css';
 
@@ -127,10 +128,7 @@ function Sidebar({
   const navItems = NAV[role] ?? [];
   const { user, signOut } = useAuth();
 
-  const displayName =
-    user?.name ??
-    [user?.firstName, user?.lastName].filter(Boolean).join(' ') ??
-    'User';
+  const displayName = buildDisplayName(user, 'User');
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
@@ -265,8 +263,7 @@ function CustomerAvatarMenu() {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const displayName =
-    user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ') ?? 'You';
+  const displayName = buildDisplayName(user, 'You');
   const initials = displayName.charAt(0).toUpperCase();
 
   const items: Array<{ label: string; href: string; icon: React.ElementType }> = [

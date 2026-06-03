@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
+import { buildDisplayName } from '@/lib/utils';
 
 const customerDropdownItems = [
   { label: 'Profile',          icon: UserCircle, href: '/dashboard/customer/profile' },
@@ -42,13 +43,11 @@ export function Navbar() {
   const isServiceProviderContext = pathname?.startsWith('/providers/services') || pathname?.startsWith('/signup/service-provider');
   const isSpaceProviderContext = pathname?.startsWith('/providers/spaces') || pathname?.startsWith('/signup/space-provider');
 
-  // T-107 — Auth routes (Sign Up always lands on the role-choice landing
-  // section because the platform must NOT have a generic /register).
   const signUpPath = isServiceProviderContext
     ? '/register/service-provider'
     : isSpaceProviderContext
       ? '/register/rental-provider'
-      : '/#signup';
+      : '/register';
 
   const signInPath = '/login';
 
@@ -60,7 +59,7 @@ export function Navbar() {
   const role = user?.role as string | undefined;
   const isCustomerRole = role === 'customer';
 
-  const displayName = user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+  const displayName = buildDisplayName(user) || undefined;
   const initials = displayName?.charAt(0)?.toUpperCase() ?? 'U';
 
   return (

@@ -45,6 +45,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /* ─── types ───────────────────────────────────────────────────────────────── */
+interface Country   { id: number; nameEn: string; code: string }
 interface Emirate   { id: number; nameEn: string }
 interface Community { id: number; nameEn: string }
 interface WizardProperty {
@@ -65,7 +66,7 @@ interface UnitRow {
   premiseNumber: string;
   bedrooms: string;
   bathrooms: string;
-  unitSizeSqft: string;
+  unitSizeSqm: string;
   furnishing: string;
   rentalPrice: string;
   securityDeposit: string;
@@ -86,7 +87,7 @@ function emptyRow(expanded = true): UnitRow {
     id: Math.random().toString(36).slice(2),
     expanded,
     unitName: '', unitType: '', unitNumber: '',
-    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '',
+    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqm: '',
     furnishing: 'Unfurnished', rentalPrice: '',
     securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
     view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
@@ -96,7 +97,8 @@ function emptyRow(expanded = true): UnitRow {
 
 const EMPTY_PROP: PropertyFormData = {
   buildingName: '', spaceCategory: '',
-  emirateId: null, communityId: null, emirateName: '', communityName: '',
+  countryId: null, emirateId: null, communityId: null,
+  countryName: '', emirateName: '', communityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
@@ -105,7 +107,7 @@ const EMPTY_PROP: PropertyFormData = {
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────────── */
 const CSV_TEMPLATE = [
-  'building_name,category,emirate,address,unit_name,unit_type,unit_number,floor,bedrooms,bathrooms,size_sqft,annual_rent_aed,security_deposit_aed,admin_fee_aed,ejari_fee_aed,commission_aed,furnishing,view,min_lease_months,notice_period_days,rent_escalation_pct,description',
+  'building_name,category,emirate,address,unit_name,unit_type,unit_number,floor,bedrooms,bathrooms,size_sqm,annual_rent_aed,security_deposit_aed,admin_fee_aed,ejari_fee_aed,commission_aed,furnishing,view,min_lease_months,notice_period_days,rent_escalation_pct,description',
   'Marina Heights,residential,Dubai,Dubai Marina Building 5,Sea View Suite,apartment,101,1,2,1,1200,120000,6000,6000,220,6000,Unfurnished,Sea View,12,60,,Corner unit with balcony',
   'Marina Heights,residential,Dubai,Dubai Marina Building 5,,apartment,102,1,1,1,800,85000,4250,4250,220,4250,Semi-Furnished,,12,60,,',
   'Business Bay Tower,commercial,Dubai,Business Bay,,office_fitted,Office-5A,5,,,1500,200000,10000,10000,,10000,,City View,12,90,5,Fitted office space',
@@ -117,7 +119,7 @@ const CSV_TEMPLATE = [
 interface CsvRow {
   building_name: string; category: string; emirate: string; address: string;
   unit_name: string; unit_type: string; unit_number: string; floor: string;
-  bedrooms: string; bathrooms: string; size_sqft: string;
+  bedrooms: string; bathrooms: string; size_sqm: string;
   annual_rent_aed: string;
   security_deposit_aed: string; admin_fee_aed: string;
   ejari_fee_aed: string; commission_aed: string;
@@ -181,7 +183,7 @@ function unitLabel(r: UnitRow) {
   if (r.unitType) parts.push(r.unitType.replace(/_/g, ' '));
   if (r.unitNumber) parts.push(`#${r.unitNumber}`);
   if (r.bedrooms && r.bedrooms !== 'Studio' && isResidential(r.unitType)) parts.push(`${r.bedrooms} Bed`);
-  if (r.unitSizeSqft) parts.push(`${r.unitSizeSqft} sqft`);
+  if (r.unitSizeSqm) parts.push(`${r.unitSizeSqm} sqm`);
   if (r.rentalPrice) parts.push(`AED ${Number(r.rentalPrice).toLocaleString('en-AE')}`);
   return parts.join('  ·  ') || 'New Unit';
 }
@@ -195,10 +197,12 @@ export default function AddListingPage() {
   /* property form */
   const [pf, setPf]   = useState<PropertyFormData>({ ...EMPTY_PROP });
   const [pe, setPe]   = useState<Partial<Record<keyof PropertyFormData, string>>>({});
+  const [countries, setCountries]     = useState<Country[]>([]);
   const [emirates, setEmirates]       = useState<Emirate[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loadingComms, setLoadingComms] = useState(false);
   const [loadCommsFor, setLoadCommsFor] = useState<number | null>(null);
+  const defaultCountryIdRef = useRef<number | null>(null);
   const [autoFilled, setAutoFilled]   = useState(false);
   const [showMap, setShowMap]         = useState(false);
   const [buildingQuery, setBuildingQuery] = useState('');
@@ -231,9 +235,25 @@ export default function AddListingPage() {
   const [importErrs, setImportErrs]     = useState<string[]>([]);
 
   useEffect(() => {
-    apiGet<Emirate[]>('/locations/emirates').then(setEmirates).catch(() => {});
     apiGet<WizardProperty[]>('/properties').then(setExistingProps).catch(() => {});
+    // Load countries then default to UAE
+    apiGet<Country[]>('/locations/countries').then(cs => {
+      setCountries(cs);
+      const ae = cs.find(c => c.code === 'AE');
+      if (ae) {
+        defaultCountryIdRef.current = ae.id;
+        setPf(prev => prev.countryId ? prev : { ...prev, countryId: ae.id, countryName: ae.nameEn });
+        apiGet<Emirate[]>(`/locations/countries/${ae.id}/emirates`).then(setEmirates).catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
+
+  // Reload emirates when country changes
+  useEffect(() => {
+    if (!pf.countryId) { setEmirates([]); return; }
+    apiGet<Emirate[]>(`/locations/countries/${pf.countryId}/emirates`).then(setEmirates).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pf.countryId]);
 
   useEffect(() => {
     if (!loadCommsFor) { setCommunities([]); return; }
@@ -408,7 +428,7 @@ export default function AddListingPage() {
       const e: Partial<Record<keyof UnitRow, string>> = {};
       if (!r.unitNumber.trim()) { e.unitNumber = 'Required'; ok = false; }
       if (!r.unitType)          { e.unitType   = 'Required'; ok = false; }
-      if (!r.unitSizeSqft)      { e.unitSizeSqft = 'Required'; ok = false; }
+      if (!r.unitSizeSqm)      { e.unitSizeSqm = 'Required'; ok = false; }
       if (!r.rentalPrice)       { e.rentalPrice = 'Required'; ok = false; }
       if (Object.keys(e).length) newRowErrors[r.id] = e;
     }
@@ -472,7 +492,7 @@ export default function AddListingPage() {
             premiseNumber:    r.premiseNumber   || undefined,
             bedrooms:         r.bedrooms && r.bedrooms !== 'Studio' ? Number(r.bedrooms) : undefined,
             bathrooms:        r.bathrooms       ? Number(r.bathrooms)       : undefined,
-            unitSizeSqft:     r.unitSizeSqft    ? Number(r.unitSizeSqft)    : undefined,
+            unitSizeSqm:     r.unitSizeSqm    ? Number(r.unitSizeSqm)    : undefined,
             rentalPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
             securityDeposit:  r.securityDeposit ? Number(r.securityDeposit) : undefined,
             adminFee:         r.adminFee        ? Number(r.adminFee)        : undefined,
@@ -587,7 +607,7 @@ export default function AddListingPage() {
             premiseNumber:    row.premise_number || row.dewa_premises_no || undefined,
             bedrooms:         row.bedrooms     ? Number(row.bedrooms)  : undefined,
             bathrooms:        row.bathrooms    ? Number(row.bathrooms) : undefined,
-            unitSizeSqft:     row.size_sqft    ? Number(row.size_sqft) : undefined,
+            unitSizeSqm:     row.size_sqm    ? Number(row.size_sqm) : undefined,
             rentalPrice:      rent > 0         ? rent                  : undefined,
             securityDeposit:  secDep,
             adminFee,
@@ -811,17 +831,30 @@ export default function AddListingPage() {
                 )}
               </div>
 
-              {/* Emirate | Community — auto-filled from search */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Country | Emirate | Community — auto-filled from search */}
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <Label t="Emirate" req />
-                  <select className={SELECT} value={pf.emirateId ?? ''} onChange={e => {
+                  <Label t="Country" req />
+                  <select className={SELECT} value={pf.countryId ?? ''} onChange={e => {
+                    const id = e.target.value ? Number(e.target.value) : null;
+                    const name = countries.find(c => c.id === id)?.nameEn ?? '';
+                    setPf(prev => ({ ...prev, countryId: id, countryName: name, emirateId: null, emirateName: '', communityId: null, communityName: '' }));
+                    setLoadCommsFor(null);
+                    setCommunities([]);
+                  }}>
+                    <option value="">Select</option>
+                    {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Label t="Emirate / Region" req />
+                  <select className={SELECT} value={pf.emirateId ?? ''} disabled={!pf.countryId} onChange={e => {
                     const id = e.target.value ? Number(e.target.value) : null;
                     const name = emirates.find(em => em.id === id)?.nameEn ?? '';
                     setPf(prev => ({ ...prev, emirateId: id, emirateName: name, communityId: null, communityName: '' }));
                     setLoadCommsFor(id);
                   }}>
-                    <option value="">Select</option>
+                    <option value="">{pf.countryId ? 'Select' : 'Select country first'}</option>
                     {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
                   </select>
                   <FieldErr msg={pe.emirateId} />
@@ -917,7 +950,7 @@ export default function AddListingPage() {
                         ['floor',                '',  'Floor number or label'],
                         ['bedrooms',             '',  'Number or Studio'],
                         ['bathrooms',            '',  'Number'],
-                        ['size_sqft',            '',  'e.g. 1200'],
+                        ['size_sqm',            '',  'e.g. 1200'],
                         ['annual_rent_aed',      '',  'e.g. 120000'],
                         ['security_deposit_aed', '',  'Auto-calculated at 5% if blank'],
                         ['admin_fee_aed',        '',  'Auto-calculated at 5% if blank'],
@@ -963,7 +996,7 @@ export default function AddListingPage() {
                     <table className="w-full text-xs min-w-[580px]">
                       <thead>
                         <tr className="bg-[#f4f3ef]">
-                          {['Building', 'Unit #', 'Type', 'Beds', 'sqft', 'Rent AED', 'View', ''].map(h => (
+                          {['Building', 'Unit #', 'Type', 'Beds', 'sqm', 'Rent AED', 'View', ''].map(h => (
                             <th key={h} className="px-3 py-2 text-left font-medium text-[#6b6860]">{h}</th>
                           ))}
                         </tr>
@@ -975,7 +1008,7 @@ export default function AddListingPage() {
                             <td className="px-3 py-1.5">{row.unit_number || '—'}</td>
                             <td className="px-3 py-1.5 text-[#6b6860]">{row.unit_type || '—'}</td>
                             <td className="px-3 py-1.5">{row.bedrooms || '—'}</td>
-                            <td className="px-3 py-1.5">{row.size_sqft || '—'}</td>
+                            <td className="px-3 py-1.5">{row.size_sqm || '—'}</td>
                             <td className="px-3 py-1.5 text-[#2e9f82] font-medium">
                               {row.annual_rent_aed ? Number(row.annual_rent_aed).toLocaleString('en-AE') : '—'}
                             </td>
@@ -1311,13 +1344,13 @@ function UnitCard({
           {/* Row 4: Size + Annual Rent */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.ft) <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.m) <span className="text-red-500">*</span></label>
               <input type="number" min="0"
-                className={errors.unitSizeSqft ? INPUT_ERR : INPUT_C}
+                className={errors.unitSizeSqm ? INPUT_ERR : INPUT_C}
                 placeholder="e.g. 1200"
-                value={row.unitSizeSqft}
-                onChange={e => onUpdate({ unitSizeSqft: e.target.value })} />
-              {errors.unitSizeSqft && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqft}</p>}
+                value={row.unitSizeSqm}
+                onChange={e => onUpdate({ unitSizeSqm: e.target.value })} />
+              {errors.unitSizeSqm && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqm}</p>}
             </div>
             <div>
               <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>

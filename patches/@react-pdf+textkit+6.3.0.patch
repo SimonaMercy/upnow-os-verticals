@@ -1,0 +1,12 @@
+diff --git a/node_modules/@react-pdf/textkit/lib/textkit.js b/node_modules/@react-pdf/textkit/lib/textkit.js
+index 0b8b6fa..12b2abf 100644
+--- a/node_modules/@react-pdf/textkit/lib/textkit.js
++++ b/node_modules/@react-pdf/textkit/lib/textkit.js
+@@ -1030,6 +1030,7 @@ const reorderLine = (line) => {
+         for (let i = 0; i < selectedIndices.length; i += 1) {
+             const index = selectedIndices[i];
+             const glyph = getItemAtIndex(line.runs, 'glyphs', index);
++            if (!glyph) continue; // ligature: secondary chars map to undefined glyph
+             if (addedGlyphs.has(glyph.id))
+                 continue;
+             updatedGlyphs.push(glyph);

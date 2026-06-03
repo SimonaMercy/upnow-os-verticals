@@ -3361,7 +3361,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '0 0 12px', letterSpacing: '-0.015em' }}>Contract documents</p>
             <div style={{ display: 'grid', gap: 8 }}>
               {[
-                { label: 'Signed tenancy contract',   href: `/dashboard/customer/contracts/${c.id}` },
+                { label: 'Signed tenancy contract',   href: `/dashboard/customer/contracts/${c.id}/print` },
                 { label: 'Move-in inspection report', href: `/dashboard/customer/contracts/${c.id}/inspection?type=move_in` },
               ].map((d, i) => (
                 <Link key={i} href={d.href} style={{

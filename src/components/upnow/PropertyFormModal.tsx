@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { apiGet, apiPost } from '@/lib/api';
 
 // ─── Types from backend location endpoints ────────────────
+interface Country   { id: number; nameEn: string; code: string; }
 interface Emirate   { id: number; nameEn: string; }
 interface Community { id: number; nameEn: string; }
 
@@ -563,10 +564,12 @@ export const SPACE_CATEGORIES = [
 export interface PropertyFormData {
   buildingName: string;
   spaceCategory: string;
-  // Structured location (FK IDs)
+  // Structured location (FK IDs) — Country → Emirate → Community
+  countryId: number | null;
   emirateId: number | null;
   communityId: number | null;
   // Display labels (kept for fullAddress composition)
+  countryName: string;
   emirateName: string;
   communityName: string;
   // Free-text
@@ -587,8 +590,8 @@ export interface PropertyFormData {
 
 const EMPTY: PropertyFormData = {
   buildingName: '', spaceCategory: '',
-  emirateId: null, communityId: null,
-  emirateName: '', communityName: '',
+  countryId: null, emirateId: null, communityId: null,
+  countryName: '', emirateName: '', communityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '',
   latitude: null, longitude: null,
@@ -626,29 +629,49 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
   const [showMap, setShowMap] = useState(!!(initial?.latitude && initial?.longitude));
 
   // Location data
+  const [countries,         setCountries]         = useState<Country[]>([]);
   const [emirates,          setEmirates]          = useState<Emirate[]>([]);
   const [communities,       setCommunities]       = useState<Community[]>([]);
   const [loadingComms,      setLoadingComms]      = useState(false);
-  // Drives community loading independently of form.emirateId to avoid stale-closure issues
+  // Drive cascade loads independently of form state to avoid stale-closure issues
+  const [loadEmiratesFor,   setLoadEmiratesFor]   = useState<number | null>(null);
   const [loadCommsFor,      setLoadCommsFor]      = useState<number | null>(null);
+  const defaultCountryIdRef = useRef<number | null>(null);
 
   const pendingCommunityRef = useRef<string>('');
 
-  // Load emirates once on mount
+  // Load countries once on mount; auto-select UAE
   useEffect(() => {
-    apiGet<Emirate[]>('/locations/emirates').then(setEmirates).catch(() => {});
+    apiGet<Country[]>('/locations/countries').then(cs => {
+      setCountries(cs);
+      const ae = cs.find(c => c.code === 'AE');
+      if (ae) {
+        defaultCountryIdRef.current = ae.id;
+        setLoadEmiratesFor(ae.id);
+        setForm(prev => prev.countryId ? prev : { ...prev, countryId: ae.id, countryName: ae.nameEn });
+      }
+    }).catch(() => {});
   }, []);
 
-  // Reset form when modal opens — resolve emirateName immediately from already-loaded list
+  // Load emirates when country changes
+  useEffect(() => {
+    if (!loadEmiratesFor) { setEmirates([]); return; }
+    apiGet<Emirate[]>(`/locations/countries/${loadEmiratesFor}/emirates`)
+      .then(setEmirates).catch(() => {});
+  }, [loadEmiratesFor]);
+
+  // Reset form when modal opens — resolve names immediately from already-loaded lists
   useEffect(() => {
     if (!open) return;
-    const emirateName = initial?.emirateId
-      ? (emirates.find(e => e.id === initial.emirateId)?.nameEn ?? '')
-      : '';
-    setForm({ ...EMPTY, ...initial, emirateName, communityName: '' });
+    const countryId   = initial?.countryId   ?? defaultCountryIdRef.current;
+    const emirateId   = initial?.emirateId   ?? null;
+    const countryName = countryId ? (countries.find(c => c.id === countryId)?.nameEn ?? '') : '';
+    const emirateName = emirateId ? (emirates.find(e => e.id === emirateId)?.nameEn  ?? '') : '';
+    setForm({ ...EMPTY, ...initial, countryId, countryName, emirateName, communityName: '' });
     setAutoFilled(false);
     setCommunities([]);
-    setLoadCommsFor(initial?.emirateId ?? null);
+    setLoadEmiratesFor(countryId);
+    setLoadCommsFor(emirateId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -693,6 +716,19 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
   const upd = <K extends keyof PropertyFormData>(k: K, v: PropertyFormData[K]) => {
     setForm(prev => ({ ...prev, [k]: v }));
     setErrors(prev => ({ ...prev, [k]: undefined }));
+  };
+
+  const handleCountryChange = (val: string) => {
+    const country = countries.find(c => c.id === Number(val));
+    setForm(prev => ({
+      ...prev,
+      countryId: val ? Number(val) : null, countryName: country?.nameEn ?? '',
+      emirateId: null, emirateName: '',
+      communityId: null, communityName: '',
+    }));
+    setLoadEmiratesFor(val ? Number(val) : null);
+    setLoadCommsFor(null);
+    setCommunities([]);
   };
 
   const handleEmirateChange = (val: string) => {
@@ -858,16 +894,28 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
             )}
           </div>
 
-          {/* Emirate | Community — auto-filled from search */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Country | Emirate | Community — auto-filled from search */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <FieldLabel label="Emirate" required />
+              <FieldLabel label="Country" required />
               <select
-                className={cn(SELECT, errors.emirateId && 'border-red-400')}
+                className={SELECT}
+                value={form.countryId ?? ''}
+                onChange={e => handleCountryChange(e.target.value)}
+              >
+                <option value="">Select Country</option>
+                {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+              </select>
+            </div>
+            <div>
+              <FieldLabel label="Emirate / Region" required />
+              <select
+                className={cn(SELECT, errors.emirateId && 'border-red-400', !form.countryId && DISABLED_CLS)}
                 value={form.emirateId ?? ''}
                 onChange={e => handleEmirateChange(e.target.value)}
+                disabled={!form.countryId}
               >
-                <option value="">Select Emirate</option>
+                <option value="">{form.countryId ? 'Select Emirate' : 'Select Country first'}</option>
                 {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
               </select>
               {errors.emirateId && <p className="text-xs text-red-500 mt-1">{errors.emirateId}</p>}

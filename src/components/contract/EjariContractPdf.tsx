@@ -27,6 +27,12 @@ Font.registerHyphenationCallback((w) => [w]);
 const NAVY = '#1a3c6e';
 const AR = 'Amiri';
 
+// Detects Arabic/RTL text — Helvetica has no Arabic glyphs, must use Amiri.
+// Covers Arabic (0600-06FF), Supplement (0750-077F), Extended-A (08A0-08FF),
+// Presentation Forms-A (FB50-FDFF), Presentation Forms-B (FE70-FEFF).
+const isArabic = (s?: string | null) =>
+  /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(s || '');
+
 export interface EjariParty { name: string | null; email: string | null; phone: string | null; companyName?: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null }
 export interface EjariContractData {
   ref: string;
@@ -131,14 +137,19 @@ const S = {
 const Bar = ({ en, ar }: { en: string; ar: string }) => (
   <View style={S.bar as any}><Text style={S.barEn}>{en}</Text><Text style={S.barAr}>{ar}</Text></View>
 );
-const Field = ({ label, ar, value, half }: { label: string; ar: string; value?: string | null; half?: boolean }) => (
-  <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4, width: half ? '50%' : '100%', paddingRight: half ? 6 : 0 }}>
-    <Text style={S.enLbl}>{label}</Text>
-    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-    <Text style={S.line as any}>{value || ' '}</Text>
-    <Text style={S.arLbl}>{ar}</Text>
-  </View>
-);
+const Field = ({ label, ar, value, half }: { label: string; ar: string; value?: string | null; half?: boolean }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lineStyle: any = isArabic(value)
+    ? { ...S.line, fontFamily: AR, textAlign: 'right' }
+    : S.line;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4, width: half ? '50%' : '100%', paddingRight: half ? 6 : 0 }}>
+      <Text style={S.enLbl}>{label}</Text>
+      <Text style={lineStyle}>{value || ' '}</Text>
+      <Text style={S.arLbl}>{ar}</Text>
+    </View>
+  );
+};
 // Small grey "Incase of a Company / في حال كانت شركة" hint under the License row,
 // mirroring the official DLD form (one half under License No., one under Authority).
 const CompanyCaption = () => (
@@ -359,7 +370,8 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           {clauses.map((c, i) => (
             <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 7 }}>
               <Text style={{ fontSize: 8 }}>{i + 1}.</Text>
-              <Text style={{ flexGrow: 1, fontSize: 8, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginLeft: 4, paddingBottom: 1 }}>{c || ' '}</Text>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              <Text style={{ flexGrow: 1, fontSize: 8, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginLeft: 4, paddingBottom: 1, ...(isArabic(c) ? { fontFamily: AR, textAlign: 'right' } : {}) } as any}>{c || ' '}</Text>
             </View>
           ))}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
@@ -380,13 +392,14 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         return (
           <Page key={a.id} size="A4" style={S.page}>
             <Header date={date} j={j} />
-            <Bar en={`Addendum ${idx + 1} of ${addendums.length} — ${a.name}`} ar="ملحق العقد" />
+            <Bar en={`Addendum ${idx + 1} of ${addendums.length}`} ar={`ملحق العقد — ${a.name}`} />
             {hasText ? (
               <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
                 {a.lines!.map((l, i) => (
                   isHeading(l)
-                    ? <Text key={i} style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
-                    : <Text key={i} style={{ fontSize: 8, marginBottom: 3, textAlign: 'justify', lineHeight: 1.3 }}>{l}</Text>
+                    ? <Text key={i} style={{ fontSize: 9, fontFamily: isArabic(l) ? AR : 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    : <Text key={i} style={{ fontSize: 8, marginBottom: 3, lineHeight: 1.3, ...(isArabic(l) ? { fontFamily: AR, textAlign: 'right' } : { textAlign: 'justify' }) } as any}>{l}</Text>
                 ))}
               </View>
             ) : (
