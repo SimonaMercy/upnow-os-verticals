@@ -576,6 +576,9 @@ export default function CustomerProfilePage() {
               </div>
             </div>
 
+            {/* Renting as individual / company (commercial tenants) */}
+            <CompanyTenantCard />
+
             {/* Additional / Rental Documents */}
             <div className={s.card}>
               <div className={s.cardH}>
@@ -1180,5 +1183,110 @@ function VerifRow({ Icon, title, sub, state, badgeLabel }: {
         {badgeLabel ?? defaultLabel}
       </span>
     </li>
+  );
+}
+
+/**
+ * "Renting as" card — lets a customer declare individual vs company and, for a
+ * company, capture the company name + trade licence used as the tenant party on
+ * the Ejari tenancy contract. Self-contained: reads/writes /profiles/customer/me.
+ */
+function CompanyTenantCard() {
+  const [loading, setLoading] = useState(true);
+  const [isCompany, setIsCompany] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [licenseNo, setLicenseNo] = useState('');
+  const [licenseAuth, setLicenseAuth] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiGet<{ profile: { entityType?: string; companyName?: string | null; tradeLicenseNumber?: string | null; tradeLicenseAuthority?: string | null } }>('/profiles/customer/me')
+      .then(({ profile }) => {
+        if (!alive) return;
+        setIsCompany(profile?.entityType === 'company');
+        setCompanyName(profile?.companyName ?? '');
+        setLicenseNo(profile?.tradeLicenseNumber ?? '');
+        setLicenseAuth(profile?.tradeLicenseAuthority ?? '');
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      await apiPatch('/profiles/customer/me', {
+        entityType: isCompany ? 'company' : 'individual',
+        companyName: isCompany ? companyName.trim() : '',
+        tradeLicenseNumber: isCompany ? licenseNo.trim() : '',
+        tradeLicenseAuthority: isCompany ? licenseAuth.trim() : '',
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return null;
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '9px 11px', borderRadius: 9,
+    border: '1px solid #e8e6e0', fontSize: 13, color: '#1a1916', outline: 'none',
+  };
+  const seg = (active: boolean): React.CSSProperties => ({
+    flex: 1, padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    border: `1px solid ${active ? '#2e9f82' : '#e8e6e0'}`,
+    background: active ? 'rgba(46,159,130,0.08)' : '#fff',
+    color: active ? '#1a6b57' : '#6b6860',
+  });
+
+  return (
+    <div className={s.card}>
+      <div className={s.cardH}>
+        <span className={s.cardHIc}><FileText size={15} /></span>
+        <h2>Renting as</h2>
+      </div>
+      <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={() => setIsCompany(false)} style={seg(!isCompany)}>Individual</button>
+          <button type="button" onClick={() => setIsCompany(true)} style={seg(isCompany)}>Company</button>
+        </div>
+        {isCompany && (
+          <>
+            <div>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b6860', marginBottom: 4 }}>Company Name</label>
+              <input style={inputStyle} placeholder="As on the trade licence" value={companyName} onChange={e => setCompanyName(e.target.value)} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b6860', marginBottom: 4 }}>Trade License No.</label>
+                <input style={inputStyle} placeholder="e.g. CN-1234567" value={licenseNo} onChange={e => setLicenseNo(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b6860', marginBottom: 4 }}>Licensing Authority</label>
+                <input style={inputStyle} placeholder="e.g. DED Dubai" value={licenseAuth} onChange={e => setLicenseAuth(e.target.value)} />
+              </div>
+            </div>
+            <p style={{ fontSize: 11, color: '#9b9890', margin: 0 }}>
+              Used as the tenant on your tenancy contract. For commercial / industrial leases your Trade License & MOA become required documents.
+            </p>
+          </>
+        )}
+        {err && <p style={{ fontSize: 12, color: '#c0392b', margin: 0 }}>{err}</p>}
+        <div>
+          <button onClick={save} disabled={saving}
+            style={{ padding: '9px 18px', borderRadius: 10, border: 'none', background: '#2e9f82', color: '#fff', fontWeight: 700, fontSize: 13, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
