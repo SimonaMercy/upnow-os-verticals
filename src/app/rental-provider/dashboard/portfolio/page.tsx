@@ -69,6 +69,7 @@ interface Unit {
   unitType: string;
   unitTier: string;
   floor: string | null;
+  premiseNumber: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
   unitSizeSqft: number | null;
@@ -228,6 +229,7 @@ function unitFormToDto(data: UnitFormData) {
     unitType: data.unitType,
     unitTier: data.unitTier || 'standard',
     floor: data.floor || undefined,
+    premiseNumber: data.premiseNumber || undefined,
     unitSizeSqft: data.unitSizeSqft ? Number(data.unitSizeSqft) : undefined,
     bedrooms: data.bedrooms && data.bedrooms !== 'Studio' ? Number(data.bedrooms) : undefined,
     bathrooms: data.bathrooms ? Number(data.bathrooms) : undefined,
@@ -920,6 +922,7 @@ export default function PortfolioPage() {
             unitType:         unitModal.editingUnit.unitType,
             unitTier:         unitModal.editingUnit.unitTier,
             floor:            unitModal.editingUnit.floor ?? '',
+            premiseNumber:    unitModal.editingUnit.premiseNumber ?? '',
             bedrooms:         unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : '1',
             bathrooms:        unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
             unitSizeSqft:     unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',

@@ -32,7 +32,7 @@ export interface EjariContractData {
   modeOfPayment: string | null; customClauses?: string[]; notes?: string | null;
   landlord: EjariParty;
   tenant: EjariParty;
-  property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null };
+  property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
   unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null };
   signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[];
 }
@@ -206,8 +206,13 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   const cval = data.contractValue != null ? Number(data.contractValue) : rent;
   const dep = data.securityDepositAmount != null ? Number(data.securityDepositAmount) : 0;
   const landlordName = data.landlord.companyName || data.landlord.name || '';
+  // Usage comes from the property's space category (residential/commercial/
+  // industrial); fall back to matching the unit type string if it's absent.
+  const sc = (data.property.spaceCategory || '').toLowerCase();
   const ut = (data.unit.type || '').toLowerCase();
-  const kind = ut.includes('commercial') ? 'commercial' : ut.includes('industrial') ? 'industrial' : 'residential';
+  const kind = sc.includes('commercial') || ut.includes('commercial') ? 'commercial'
+    : sc.includes('industrial') || ut.includes('industrial') ? 'industrial'
+    : 'residential';
   const dewa = data.unit.dewaPremiseNumber || data.property.premisesNumber || '';
   const date = fmtDate(data.createdAt) || fmtDate(new Date().toISOString());
   const tSig = (data.signatures || []).find((s) => s.role === 'tenant');

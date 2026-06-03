@@ -73,6 +73,7 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
       plotNumber: c.property?.plotNumber ?? null,
       makaniNumber: c.property?.makaniNumber ?? null,
       premisesNumber: c.property?.premisesNumber ?? null,
+      spaceCategory: c.property?.spaceCategory ?? null,
     },
     unit: {
       number: c.unit?.number ?? null,

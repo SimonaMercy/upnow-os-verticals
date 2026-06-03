@@ -62,6 +62,7 @@ interface UnitRow {
   unitType: string;
   unitNumber: string;
   floor: string;
+  premiseNumber: string;
   bedrooms: string;
   bathrooms: string;
   unitSizeSqft: string;
@@ -85,7 +86,7 @@ function emptyRow(expanded = true): UnitRow {
     id: Math.random().toString(36).slice(2),
     expanded,
     unitName: '', unitType: '', unitNumber: '',
-    floor: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '',
+    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '',
     furnishing: 'Unfurnished', rentalPrice: '',
     securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
     view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
@@ -468,6 +469,7 @@ export default function AddListingPage() {
             unitType:         r.unitType,
             unitNumber:       r.unitNumber,
             floor:            r.floor           || undefined,
+            premiseNumber:    r.premiseNumber   || undefined,
             bedrooms:         r.bedrooms && r.bedrooms !== 'Studio' ? Number(r.bedrooms) : undefined,
             bathrooms:        r.bathrooms       ? Number(r.bathrooms)       : undefined,
             unitSizeSqft:     r.unitSizeSqft    ? Number(r.unitSizeSqft)    : undefined,
@@ -582,6 +584,7 @@ export default function AddListingPage() {
             unitType:         row.unit_type    || 'apartment',
             unitNumber:       row.unit_number,
             floor:            row.floor        || undefined,
+            premiseNumber:    row.premise_number || row.dewa_premises_no || undefined,
             bedrooms:         row.bedrooms     ? Number(row.bedrooms)  : undefined,
             bathrooms:        row.bathrooms    ? Number(row.bathrooms) : undefined,
             unitSizeSqft:     row.size_sqft    ? Number(row.size_sqft) : undefined,
@@ -1265,6 +1268,11 @@ function UnitCard({
               <label className="block text-xs font-medium text-[#6b6860] mb-1">Floor</label>
               <input className={INPUT_C} placeholder="e.g. G, 1, 2…"
                 value={row.floor} onChange={e => onUpdate({ floor: e.target.value })} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">DEWA Premises No.</label>
+              <input className={INPUT_C} placeholder="e.g. 1234567"
+                value={row.premiseNumber} onChange={e => onUpdate({ premiseNumber: e.target.value })} />
             </div>
           </div>
 
