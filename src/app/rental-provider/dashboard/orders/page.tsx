@@ -11,9 +11,10 @@
  *     upcoming_renewal computed bucket)
  *   - Filter row: search across ref/customer/email/unit/property,
  *     property selector, reset, results count
- *   - Single table card with click-to-expand rows. Expanded body shows
- *     a contract-details grid + a lifecycle timeline + per-status
- *     action buttons (View / Issue / Renew / Terminate / …)
+ *   - Single table card. Each row is a Link that navigates to the v2
+ *     Quest layout at /rental-provider/dashboard/contracts/[id]/v2,
+ *     since v2 is the canonical detail page; the design's inline
+ *     row-body is unused here so the page doesn't duplicate v2.
  *   - Pagination (10 per page)
  *
  * Data fetch and the canonical `displayStatusOf` derivation are unchanged
@@ -27,7 +28,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Search, Plus, X, FileText, ChevronLeft, ChevronRight,
-  Bell, Download, Clock, RotateCcw, Shield, Coins, Building2, Eye,
+  Bell, Download, Clock, RotateCcw, Shield, Coins,
 } from 'lucide-react';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -148,144 +149,25 @@ function statusLabel(c: Contract): string {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Lifecycle timeline (per display status)
-// ────────────────────────────────────────────────────────────────────────────
-
-type TLState = 'past' | 'current' | 'future' | 'alert';
-interface TLItem { nm: string; t: string; state: TLState }
-
-function lifecycle(c: Contract): TLItem[] {
-  const ds = displayStatusOf(c);
-  const ejariReg = c.ejariStatus === 'registered';
-  const base: TLItem[] = [
-    { nm: 'Lease drafted',           t: `Created ${fmtDate(c.startDate)}`, state: 'past' },
-    { nm: 'Contract issued',         t: 'Sent to customer',                 state: 'past' },
-    { nm: 'Signed & countersigned',  t: 'Both parties',                     state: 'past' },
-    { nm: 'Ejari registered',        t: ejariReg ? 'Confirmed' : '—',       state: ejariReg ? 'past' : 'future' },
-    { nm: 'Active tenancy',          t: `${fmtDate(c.startDate)} → ${fmtDate(c.endDate)}`, state: 'current' },
-  ];
-  switch (ds) {
-    case 'pending':
-      return [
-        { nm: 'Lease drafted',          t: 'Awaiting issue', state: 'current' },
-        { nm: 'Contract issued',        t: 'Upcoming',       state: 'future'  },
-        { nm: 'Signed & countersigned', t: 'Upcoming',       state: 'future'  },
-        { nm: 'Active tenancy',         t: 'Upcoming',       state: 'future'  },
-      ];
-    case 'issued':
-      return [
-        { nm: 'Lease drafted',          t: 'Completed',           state: 'past'    },
-        { nm: 'Contract issued',        t: 'Awaiting signature',   state: 'current' },
-        { nm: 'Ejari registration',     t: 'Upcoming',             state: 'future'  },
-        { nm: 'Active tenancy',         t: `Starts ${fmtDate(c.startDate)}`, state: 'future' },
-      ];
-    case 'terminating':
-      return [
-        ...base.slice(0, 4),
-        { nm: 'Active tenancy',          t: 'In progress', state: 'past'  },
-        { nm: 'Termination accepted',    t: `Effective ${fmtDate(c.termination?.effectiveDate ?? null)}`, state: 'alert' },
-        { nm: 'Move-out & closeout',     t: 'Upcoming',     state: 'future' },
-      ];
-    case 'renewal_pending':
-      return [
-        { nm: 'Renewal proposed',  t: 'Sent to customer',        state: 'past'    },
-        { nm: 'Customer decision', t: 'Awaiting response',       state: 'current' },
-        { nm: 'New term begins',   t: fmtDate(c.startDate),      state: 'future'  },
-      ];
-    case 'declined':
-      return [
-        { nm: 'Renewal proposed', t: 'Sent to customer', state: 'past'    },
-        { nm: 'Customer declined', t: 'Renewal closed',  state: 'alert'   },
-        { nm: 'Move-out scheduled', t: 'On expiry',      state: 'future'  },
-      ];
-    case 'superseded':
-      return [
-        { nm: 'Lease drafted',          t: 'Completed',        state: 'past'  },
-        { nm: 'Unit leased elsewhere', t: 'Draft archived',   state: 'alert' },
-      ];
-    case 'expired':
-      return [
-        ...base.slice(0, 4).map(x => ({ ...x, state: x.state === 'future' ? 'past' as TLState : x.state })),
-        { nm: 'Tenancy ended', t: `Expired ${fmtDate(c.endDate)}`, state: 'past' },
-      ];
-    case 'terminated':
-      return [
-        ...base.slice(0, 4).map(x => ({ ...x, state: 'past' as TLState })),
-        { nm: 'Terminated early', t: `Closed ${fmtDate(c.endDate)}`, state: 'alert' },
-      ];
-    default:
-      return base;
-  }
-}
-
-interface RowAction {
-  label: string;
-  variant: 'primary' | 'ghost' | 'danger';
-  href?: string;
-}
-
-/** Action buttons shown in the expanded row body — per display status,
- *  matching the design's intent (one primary CTA + supporting actions). */
-function bodyActions(c: Contract): RowAction[] {
-  const ds = displayStatusOf(c);
-  const detailHref = `/rental-provider/dashboard/contracts/${c.id}`;
-  switch (ds) {
-    case 'active':          return [
-      { label: 'View contract',       variant: 'primary', href: detailHref },
-      { label: 'Propose renewal',     variant: 'ghost',   href: detailHref + '#renew' },
-      { label: 'Request termination', variant: 'danger',  href: detailHref + '#terminate' },
-    ];
-    case 'terminating':     return [
-      { label: 'View contract',     variant: 'primary', href: detailHref },
-      { label: 'Confirm move-out',  variant: 'ghost',   href: detailHref + '#moveout' },
-    ];
-    case 'pending':         return [
-      { label: 'Issue contract', variant: 'primary', href: detailHref + '#issue' },
-      { label: 'Edit draft',     variant: 'ghost',   href: detailHref },
-    ];
-    case 'issued':          return [
-      { label: 'Resend for signature', variant: 'primary', href: detailHref + '#sign' },
-      { label: 'View draft',           variant: 'ghost',   href: detailHref },
-    ];
-    case 'renewal_pending': return [
-      { label: 'Send reminder', variant: 'primary', href: detailHref + '#remind' },
-      { label: 'View proposal', variant: 'ghost',   href: detailHref },
-    ];
-    case 'declined':        return [
-      { label: 'Re-propose renewal', variant: 'primary', href: detailHref + '#renew' },
-      { label: 'View contract',      variant: 'ghost',   href: detailHref },
-    ];
-    case 'superseded':      return [
-      { label: 'View archived draft', variant: 'ghost', href: detailHref },
-    ];
-    case 'expired':         return [
-      { label: 'Start renewal', variant: 'primary', href: detailHref + '#renew' },
-      { label: 'View contract', variant: 'ghost',   href: detailHref },
-    ];
-    case 'terminated':      return [
-      { label: 'View contract', variant: 'ghost', href: detailHref },
-    ];
-    default:                return [
-      { label: 'View contract', variant: 'primary', href: detailHref },
-    ];
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // Row component
 // ────────────────────────────────────────────────────────────────────────────
 
 function Row({
-  contract, open, onToggle, now, in60,
-}: { contract: Contract; open: boolean; onToggle: () => void; now: Date; in60: Date }) {
+  contract, now, in60,
+}: { contract: Contract; now: Date; in60: Date }) {
   const c = contract;
   const ds = displayStatusOf(c);
   const soon = isExpiringSoon(c, now, in60);
   const d = soon ? daysTo(c.endDate, now) : null;
   const isRenewal = c.contractType === 'renewal';
+  // Inner page = the v2 Quest layout. Each row navigates straight there
+  // instead of expanding an inline body — the v2 page already provides
+  // the full contract context (timeline, parties, payments, addendums,
+  // etc.) we'd otherwise duplicate inside the row.
+  const href = `/rental-provider/dashboard/contracts/${c.id}/v2`;
 
   return (
-    <div className={'row ' + (open ? 'expanded' : '')} onClick={onToggle}>
+    <Link href={href} className="row">
       <div className="col-ref">
         <div className="av">{initials(c.tenant.name)}</div>
         <div className="info">
@@ -323,56 +205,7 @@ function Row({
           <ChevronRight size={14} />
         </span>
       </div>
-
-      {open && (
-        <div className="row-body" onClick={e => e.stopPropagation()}>
-          <div className="blk">
-            <div className="h"><span className="icw"><FileText size={13} /></span> Contract details</div>
-            <div className="det-grid">
-              <div className="det"><span className="k">Reference</span><span className="v mono">{c.ref}</span></div>
-              <div className="det"><span className="k">Type</span><span className="v" style={{ textTransform: 'capitalize' }}>{c.contractType ?? '—'}</span></div>
-              <div className="det"><span className="k">Customer</span><span className="v">{c.tenant.name ?? '—'}</span></div>
-              <div className="det"><span className="k">Email</span><span className="v" style={{ fontWeight: 500, color: 'var(--ink-2)' }}>{c.tenant.email ?? '—'}</span></div>
-              <div className="det"><span className="k">Unit</span><span className="v">{c.unit.number ? `Unit ${c.unit.number}` : '—'} · {c.property.buildingName ?? '—'}</span></div>
-              <div className="det"><span className="k">Annual rent</span><span className="v">AED {fmtAedAmt(c.annualRent)}</span></div>
-              <div className="det"><span className="k">Term</span><span className="v">{fmtDate(c.startDate)} → {fmtDate(c.endDate)}</span></div>
-              <div className="det">
-                <span className="k">Ejari</span>
-                <span className={'ejari ' + (c.ejariStatus === 'registered' ? 'registered' : c.ejariStatus === 'pending' ? 'pending' : 'none')}>
-                  <Shield size={11} />
-                  {c.ejariStatus === 'registered' ? 'Registered' : c.ejariStatus === 'pending' ? 'Pending' : 'Not registered'}
-                </span>
-              </div>
-            </div>
-            <div className="body-actions">
-              {bodyActions(c).map((a, i) => (
-                <Link
-                  key={i}
-                  href={a.href ?? '#'}
-                  className={'ba ' + (a.variant === 'ghost' ? 'ghost' : a.variant === 'danger' ? 'danger' : '')}
-                >
-                  {a.label.includes('renewal') && <RotateCcw size={12} />}
-                  {a.label === 'View contract' && <Eye size={12} />}
-                  {a.label}
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          <div className="blk">
-            <div className="h"><span className="icw"><Clock size={12} /></span> Lifecycle</div>
-            <div className="timeline">
-              {lifecycle(c).map((s, i) => (
-                <div key={i} className={'tl-item ' + s.state}>
-                  <div className="nm">{s.nm}</div>
-                  <div className="t">{s.t}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </Link>
   );
 }
 
@@ -387,7 +220,6 @@ export default function OrdersPage() {
   const [filterAsset, setFilterAsset] = useState('all');
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [page, setPage] = useState(1);
-  const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
@@ -565,14 +397,7 @@ export default function OrdersPage() {
             </div>
             <div className="rows">
               {rows.map(c => (
-                <Row
-                  key={c.id}
-                  contract={c}
-                  open={openId === c.id}
-                  onToggle={() => setOpenId(openId === c.id ? null : c.id)}
-                  now={now}
-                  in60={in60}
-                />
+                <Row key={c.id} contract={c} now={now} in60={in60} />
               ))}
             </div>
             {totalPages > 1 && (
