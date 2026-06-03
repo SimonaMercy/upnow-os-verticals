@@ -68,16 +68,38 @@ export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
   { key: 'utility_clearance', label: 'Previous Utility Closing',    category: 'legal',   required: false, hint: 'Previous Utility clearance' },
 ];
 
-export function getRentalSectionDocs(unitType: string | null | undefined): DocReq[] {
+/** Keys that become REQUIRED for a company tenant on a commercial/industrial
+ *  lease (the company's legal/licensing pack the Ejari registration needs). */
+const COMPANY_REQUIRED_KEYS = ['trade_license', 'moa', 'business_license'];
+
+export function getRentalSectionDocs(
+  unitType: string | null | undefined,
+  entityType?: 'individual' | 'company' | null,
+): DocReq[] {
   const t = unitType ?? '';
-  if (COMMERCIAL_TYPES.includes(t)) return COMMERCIAL_RENTAL_DOCS;
-  if (INDUSTRIAL_TYPES.includes(t)) return INDUSTRIAL_RENTAL_DOCS;
-  return RESIDENTIAL_RENTAL_DOCS;
+  const isCommercial = COMMERCIAL_TYPES.includes(t);
+  const isIndustrial = INDUSTRIAL_TYPES.includes(t);
+  const base = isCommercial ? COMMERCIAL_RENTAL_DOCS
+    : isIndustrial ? INDUSTRIAL_RENTAL_DOCS
+    : RESIDENTIAL_RENTAL_DOCS;
+
+  // A company renting a commercial/industrial space must provide its licensing
+  // pack — promote those rows to required (mirrors the backend CUSTOMER_COMPANY
+  // requirement). Individuals and residential leases are unchanged.
+  if (entityType === 'company' && (isCommercial || isIndustrial)) {
+    return base.map(d =>
+      COMPANY_REQUIRED_KEYS.includes(d.key) ? { ...d, required: true } : d,
+    );
+  }
+  return base;
 }
 
 /** All docs (KYC + rental) combined — used by the spaces page journey tracker. */
-export function getRequiredDocs(unitType: string | null | undefined): DocReq[] {
-  return [...KYC_DOCS, ...getRentalSectionDocs(unitType)];
+export function getRequiredDocs(
+  unitType: string | null | undefined,
+  entityType?: 'individual' | 'company' | null,
+): DocReq[] {
+  return [...KYC_DOCS, ...getRentalSectionDocs(unitType, entityType)];
 }
 
 /**
