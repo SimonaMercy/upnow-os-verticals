@@ -249,7 +249,12 @@ test.describe('Book Now — InquireModal', () => {
   });
 
   // ── 9. Non-customer role blocked ──────────────────────────────────────────
-  test('15 — rental provider sees role error, not auth modal', async ({ request, page }) => {
+  // Phase 6c — listing CTAs are hidden entirely for operator accounts
+  // (rental_provider/manager/admin/super_admin). Instead of clicking Book
+  // Now and seeing a role error, RPs land on the listing and see a
+  // "sign in with a customer account" notice. See
+  // ListingPageClient.tsx → canBook derivation.
+  test('15 — rental provider does not see Book Now CTA, gets switch-account notice', async ({ request, page }) => {
     const rpEmail = freshEmail('rp');
     const rpReg = await request.post(`${BACKEND}/auth/register/rental-provider`, {
       data: { email: rpEmail, phone: '+971501299001' },
@@ -257,12 +262,14 @@ test.describe('Book Now — InquireModal', () => {
     const rpBody = await rpReg.json() as { access_token: string };
     await injectCookie(page, rpBody.access_token);
 
-    await openBookNow(page);
-    await page.locator('input[type="date"]').fill(tomorrow());
-    await page.locator('button').filter({ hasText: 'Submit Application' }).click();
+    await page.goto(UNIT_URL);
+    await page.waitForLoadState('networkidle');
 
-    await expect(page.locator('text=/Only customer accounts/i')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('button').filter({ hasText: 'Create account' })).not.toBeVisible();
+    // Book Now / Schedule Viewing CTAs are hidden …
+    await expect(page.locator('button').filter({ hasText: /^Book Now$/ })).toHaveCount(0);
+    await expect(page.locator('button').filter({ hasText: /^Schedule Viewing$/ })).toHaveCount(0);
+    // … and the operator notice is shown instead.
+    await expect(page.locator('text=/sign in with a customer account/i')).toBeVisible({ timeout: 5000 });
   });
 
   // ── 10. Back button in OTP step ────────────────────────────────────────────
@@ -368,8 +375,13 @@ test.describe('Book Now — InquireModal', () => {
     await expect(page).toHaveURL(/dashboard\/customer\/spaces/, { timeout: 8000 });
   });
 
-  // ── 16. Modal error clears on reopen (BUG-3 not present) ─────────────────
-  test('22 — modal error is cleared when closed and reopened', async ({ request, page }) => {
+  // ── 16. Operator notice persists across reload ──────────────────────────
+  // Phase 6c — replaces the old "modal error clears on reopen" test, since
+  // RP accounts no longer see the Book Now / Schedule Viewing modals at all
+  // (CTAs hidden, contextual notice shown instead). This verifies the
+  // canBook derivation isn't a render-time fluke: a hard reload keeps RPs
+  // in the notice state, never showing CTAs.
+  test('22 — operator notice persists across page reload, CTAs never appear', async ({ request, page }) => {
     const rpEmail = freshEmail('rp2');
     const rpReg = await request.post(`${BACKEND}/auth/register/rental-provider`, {
       data: { email: rpEmail, phone: '+971509990002' },
@@ -377,23 +389,15 @@ test.describe('Book Now — InquireModal', () => {
     const rpBody = await rpReg.json() as { access_token: string };
     await injectCookie(page, rpBody.access_token);
 
-    await openBookNow(page);
-    await page.locator('input[type="date"]').fill(tomorrow());
-    await page.locator('button').filter({ hasText: 'Submit Application' }).click();
-    await expect(page.locator('text=/Only customer accounts/i')).toBeVisible({ timeout: 5000 });
+    await page.goto(UNIT_URL);
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('text=/sign in with a customer account/i')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button').filter({ hasText: /^Book Now$/ })).toHaveCount(0);
 
-    // Close via X button (Escape doesn't work — BUG-1)
-    await closeModal(page);
-    await expect(page.locator('h3').filter({ hasText: 'Book Now' })).not.toBeVisible({ timeout: 3000 });
-
-    // Reopen
-    await page.locator('button').filter({ hasText: /^Book Now$/ }).first().click();
-    await expect(page.locator('h3').filter({ hasText: 'Book Now' })).toBeVisible({ timeout: 5000 });
-
-    // Error is correctly cleared on reopen — modal state resets properly
-    const errorVisible = await page.locator('text=/Only customer accounts/i').isVisible();
-    console.log(`Error cleared on modal reopen = ${!errorVisible}  (expected: true — working correctly)`);
-    expect(errorVisible).toBe(false);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('text=/sign in with a customer account/i')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button').filter({ hasText: /^Book Now$/ })).toHaveCount(0);
   });
 
   // ── 17. Both Book Now and Schedule Viewing use unified auth ───────────────

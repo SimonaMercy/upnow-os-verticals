@@ -48,14 +48,10 @@ test.describe.serial('Notifications bell — unread count + mark-read', () => {
   test('1. set up fixture RP, fresh customer, and a published unit', async ({ request }) => {
     rpToken = await loginOtp(request, RP_EMAIL);
 
-    // Register fresh customer
+    // Register fresh customer — the DTO accepts email (or phone) only;
+    // firstName/lastName/password were removed when the flow moved to OTP.
     const reg = await request.post(`${BACKEND}/auth/register/customer`, {
-      data: {
-        email: CUSTOMER_EMAIL,
-        firstName: 'Notif',
-        lastName: 'Smoke',
-        password: 'Test1234!',
-      },
+      data: { email: CUSTOMER_EMAIL },
     });
     expect(reg.ok(), `customer register: ${reg.status()} ${await reg.text()}`).toBeTruthy();
     customerToken = await loginOtp(request, CUSTOMER_EMAIL);

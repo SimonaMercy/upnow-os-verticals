@@ -28,62 +28,61 @@ async function fillOtp(page: Page, otp: string) {
 
 // ─── Customer registration ────────────────────────────────────────────────────
 
-test.describe('Customer registration — email OTP flow', () => {
-  test('shows email/phone field and OAuth buttons on /register/customer', async ({ page }) => {
+// Customer registration is phone-only (CustomerRegisterForm.tsx). Email path
+// is exposed indirectly via the unified Book Now / Schedule Viewing modals on
+// listing pages; the standalone /register/customer page collects a phone
+// number and sends an SMS OTP. Tests below pin the phone flow.
+function uniquePhone(suffix: string) {
+  // +97150 prefix + 8 digits (7 from timestamp + 1 from suffix). The
+  // backend's E.164 validator accepts this format.
+  const tail = (Date.now() % 10_000_000).toString().padStart(7, '0');
+  const digit = suffix.charCodeAt(0) % 10;
+  return `+97150${tail}${digit}`;
+}
+
+test.describe('Customer registration — phone OTP flow', () => {
+  test('shows phone field and OAuth buttons on /register/customer', async ({ page }) => {
     await page.goto('/register/customer');
-    await expect(page.getByLabel('Email or phone number')).toBeVisible();
+    await expect(page.getByLabel('Phone number')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible();
     // OAuth buttons present (even if env vars not set, buttons always render)
     await expect(page.getByRole('button', { name: /continue with google/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /continue with apple/i })).toBeVisible();
   });
 
-  test('registers customer with email and completes OTP verification', async ({ page }) => {
-    const email = uniqueEmail('cust');
-
-    // Capture OTP verify response to debug redirect issues
-    const verifyResponses: { status: number; body: unknown }[] = [];
-    page.on('response', async resp => {
-      if (resp.url().includes('/auth/email/verify-otp')) {
-        try { verifyResponses.push({ status: resp.status(), body: await resp.json() }); } catch {}
-      }
-    });
+  test('registers customer with phone and completes OTP verification', async ({ page }) => {
+    const phone = uniquePhone('c');
 
     await page.goto('/register/customer');
-    await page.getByLabel('Email or phone number').fill(email);
+    await page.getByLabel('Phone number').fill(phone);
     await page.getByRole('button', { name: 'Create account' }).click();
 
-    // Should redirect to /verify-email?email=...&devOtp=...
-    await expect(page).toHaveURL(/\/verify-email/, { timeout: 10_000 });
+    // Phone registrations route to /verify (phone OTP), not /verify-email
+    await expect(page).toHaveURL(/\/verify/, { timeout: 10_000 });
 
     const url = new URL(page.url());
     const devOtp = url.searchParams.get('devOtp');
     expect(devOtp).toBeTruthy();
 
     await fillOtp(page, devOtp!);
-    await page.getByRole('button', { name: /verify email|create account|continue/i }).click();
+    await page.getByRole('button', { name: /verify|continue|create account/i }).click();
 
-    // Wait for URL to change away from verify-email, then check destination
-    await page.waitForURL(u => !u.toString().includes('/verify-email'), { timeout: 15_000 });
-    console.log('Verify responses:', JSON.stringify(verifyResponses));
-    console.log('Final URL:', page.url());
-
-    // Should redirect to customer dashboard
+    await page.waitForURL(u => !u.toString().includes('/verify'), { timeout: 15_000 });
     await expect(page).toHaveURL(/\/dashboard\/customer/, { timeout: 10_000 });
   });
 
-  test('shows error for duplicate email registration', async ({ page }) => {
-    const email = uniqueEmail('dup');
+  test('shows error for duplicate phone registration', async ({ page }) => {
+    const phone = uniquePhone('d');
 
     // First registration
     await page.goto('/register/customer');
-    await page.getByLabel('Email or phone number').fill(email);
+    await page.getByLabel('Phone number').fill(phone);
     await page.getByRole('button', { name: 'Create account' }).click();
-    await expect(page).toHaveURL(/\/verify-email/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/verify/, { timeout: 10_000 });
 
-    // Second registration with same email
+    // Second registration with same phone
     await page.goto('/register/customer');
-    await page.getByLabel('Email or phone number').fill(email);
+    await page.getByLabel('Phone number').fill(phone);
     await page.getByRole('button', { name: 'Create account' }).click();
 
     // Should stay on /register/customer and show conflict error
@@ -91,7 +90,7 @@ test.describe('Customer registration — email OTP flow', () => {
     await expect(page.getByText(/already exists|already registered/i)).toBeVisible({ timeout: 5_000 });
   });
 
-  test('shows error when email field left blank', async ({ page }) => {
+  test('shows error when phone field left blank', async ({ page }) => {
     await page.goto('/register/customer');
     await page.getByRole('button', { name: 'Create account' }).click();
     await expect(page.locator('[role="alert"]').first()).toBeVisible({ timeout: 3_000 });
@@ -159,18 +158,21 @@ test.describe('OTP login flow', () => {
     }
   });
 
+  // Login page (app/login/page.tsx) renders a plain <label>Phone or email</label>
+  // followed by an unlabeled <input>, so getByLabel can't find it. Match the
+  // input by placeholder instead. Submit button is "Send code".
   test('login page shows identifier field and send-code button', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByLabel('Email or phone number')).toBeVisible();
-    await expect(page.getByRole('button', { name: /send sign-in code/i })).toBeVisible();
+    await expect(page.getByPlaceholder(/or you@example/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /^send code/i })).toBeVisible();
     // No password field
     await expect(page.locator('input[type="password"]')).not.toBeVisible();
   });
 
   test('login with unknown email stays on login and shows error', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel('Email or phone number').fill('nobody_unknown@test.upnow.ae');
-    await page.getByRole('button', { name: /send sign-in code/i }).click();
+    await page.getByPlaceholder(/or you@example/i).fill('nobody_unknown@test.upnow.ae');
+    await page.getByRole('button', { name: /^send code/i }).click();
     await expect(page).toHaveURL(/\/login/, { timeout: 5_000 });
     await expect(page.locator('[role="alert"]').first()).toBeVisible({ timeout: 5_000 });
   });
@@ -194,8 +196,8 @@ test.describe('OTP login flow', () => {
     });
 
     await page.goto('/login');
-    await page.getByLabel('Email or phone number').fill(EXISTING_EMAIL);
-    await page.getByRole('button', { name: /send sign-in code/i }).click();
+    await page.getByPlaceholder(/or you@example/i).fill(EXISTING_EMAIL);
+    await page.getByRole('button', { name: /^send code/i }).click();
 
     // Should redirect to /verify-email?email=...&mode=login&devOtp=...
     await expect(page).toHaveURL(/\/verify-email.*mode=login/, { timeout: 10_000 });
