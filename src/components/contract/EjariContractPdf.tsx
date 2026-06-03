@@ -1,8 +1,10 @@
 /**
- * Dubai Unified Tenancy Contract (Ejari) — real vector PDF via @react-pdf/renderer.
- * Reliable multi-page, crisp text, correct Arabic (Amiri font) — no html2canvas.
- * Client-only (PDFViewer/PDFDownloadLink need the browser); load via next/dynamic
- * with ssr:false.
+ * UAE Unified Tenancy Contract — real vector PDF via @react-pdf/renderer.
+ * Emirate-aware: the registration system (Ejari / Tawtheeq / municipal), governing
+ * law, rental-dispute body, utility authority (DEWA/ADDC/SEWA/FEWA) and header
+ * branding are derived from the property's emirate via lib/tenancyJurisdiction
+ * (defaults to Dubai). Reliable multi-page, crisp text, Arabic (Amiri). Client-only
+ * (PDFViewer/PDFDownloadLink need the browser); load via next/dynamic ssr:false.
  */
 'use client';
 
@@ -10,6 +12,7 @@ import React from 'react';
 import {
   Document, Page, View, Text, Image, Font, PDFViewer, PDFDownloadLink,
 } from '@react-pdf/renderer';
+import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
 
 Font.register({
   family: 'Amiri',
@@ -94,6 +97,24 @@ const TERMS_AR = [
   'يتعهد المؤجر بتسجيل عقد الايجار في نظام إيجاري التابع لدائرة الأراضي و الأملاك و توفير كافة المستندات اللازمة لذلك.',
 ];
 
+// Terms 10 (dispute body), 11 (governing law) and 14 (registration system)
+// are jurisdiction-specific — substitute them from the property's emirate so the
+// contract isn't hard-wired to Dubai. The other terms are emirate-agnostic.
+function buildTermsEn(j: TenancyJurisdiction): string[] {
+  const t = [...TERMS_EN];
+  t[9] = `Any disagreement or dispute may arise from execution or interpretation of this contract shall be settled by ${j.disputeBodyEn}.`;
+  t[10] = j.governingLawEn;
+  t[13] = `The landlord undertakes to register this tenancy contract on ${j.registrationEn} affiliated to ${j.authorityEn} and provide with all required documents.`;
+  return t;
+}
+function buildTermsAr(j: TenancyJurisdiction): string[] {
+  const t = [...TERMS_AR];
+  t[9] = `أي خلاف أو نزاع قد ينشأ عن تنفيذ أو تفسير هذا العقد يعود البت فيه إلى ${j.disputeBodyAr}.`;
+  t[10] = j.governingLawAr;
+  t[13] = `يتعهد المؤجر بتسجيل عقد الايجار في ${j.registrationAr} التابع لـ${j.authorityAr} و توفير كافة المستندات اللازمة لذلك.`;
+  return t;
+}
+
 const S = {
   page: { paddingTop: 22, paddingBottom: 20, paddingHorizontal: 24, fontSize: 8, fontFamily: 'Helvetica', color: '#111' },
   bar: { backgroundColor: NAVY, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3, paddingHorizontal: 6 },
@@ -133,15 +154,15 @@ const CompanyCaption = () => (
 const Section = ({ en, ar, children }: { en: string; ar: string; children: React.ReactNode }) => (
   <View style={S.box} wrap={false}><Bar en={en} ar={ar} /><View style={S.pad}>{children}</View></View>
 );
-const TermsBlock = ({ start, end, header }: { start: number; end: number; header?: boolean }) => (
+const TermsBlock = ({ termsEn, termsAr, start, end, header }: { termsEn: string[]; termsAr: string[]; start: number; end: number; header?: boolean }) => (
   <View style={S.box} wrap={false}>
     {header && <Bar en="Terms and Conditions" ar="الأحكام و الشروط" />}
     <View style={{ flexDirection: 'row' }}>
       <View style={{ width: '50%', padding: 6, borderRightWidth: 1, borderRightColor: '#ddd' }}>
-        {TERMS_EN.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, textAlign: 'justify' }}>{start + i + 1}. {t}</Text>))}
+        {termsEn.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, textAlign: 'justify' }}>{start + i + 1}. {t}</Text>))}
       </View>
       <View style={{ width: '50%', padding: 6 }}>
-        {TERMS_AR.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, fontFamily: AR, textAlign: 'right' }}>{t} .{start + i + 1}</Text>))}
+        {termsAr.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, fontFamily: AR, textAlign: 'right' }}>{t} .{start + i + 1}</Text>))}
       </View>
     </View>
   </View>
@@ -168,15 +189,30 @@ const Signatures = ({ tenant, landlord }: { tenant?: { img?: string | null; date
     </View>
   </View>
 );
-const Header = ({ date }: { date: string }) => (
+const Header = ({ date, j }: { date: string; j: TenancyJurisdiction }) => (
   <View style={{ marginBottom: 8 }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-      <Image src="/dld/government-of-dubai.png" style={{ height: 46, objectFit: 'contain' }} />
+      {j.useDldLogos ? (
+        <Image src="/dld/government-of-dubai.png" style={{ height: 46, objectFit: 'contain' }} />
+      ) : (
+        // No official artwork for other emirates — render the government/authority as text.
+        <View style={{ width: 150 }}>
+          <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: NAVY }}>{j.governmentEn}</Text>
+          <Text style={{ fontSize: 7, color: '#555' }}>{j.authorityEn}</Text>
+          <Text style={{ fontSize: 8, fontFamily: AR, color: '#555' }}>{j.authorityAr}</Text>
+        </View>
+      )}
       <View style={{ alignItems: 'center' }}>
         <Text style={{ fontSize: 17, fontFamily: AR, color: NAVY }}>عقد إيجار</Text>
         <Text style={{ fontSize: 11, fontFamily: 'Times-Bold', color: NAVY, letterSpacing: 3, marginTop: 1 }}>TENANCY CONTRACT</Text>
       </View>
-      <Image src="/dld/land-department.png" style={{ height: 46, objectFit: 'contain' }} />
+      {j.useDldLogos ? (
+        <Image src="/dld/land-department.png" style={{ height: 46, objectFit: 'contain' }} />
+      ) : (
+        <View style={{ width: 150, alignItems: 'flex-end' }}>
+          <Text style={{ fontSize: 8, color: '#555' }}>Registration: {j.registrationEn}</Text>
+        </View>
+      )}
     </View>
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 6 }}>
       <Text style={{ fontSize: 9 }}>Date</Text>
@@ -214,6 +250,10 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
     : sc.includes('industrial') || ut.includes('industrial') ? 'industrial'
     : 'residential';
   const dewa = data.unit.dewaPremiseNumber || data.property.premisesNumber || '';
+  // Emirate-aware jurisdiction (Dubai/Ejari default; Abu Dhabi/Tawtheeq; others municipal).
+  const j = jurisdictionForEmirate(data.property.emirate);
+  const tEn = buildTermsEn(j);
+  const tAr = buildTermsAr(j);
   const date = fmtDate(data.createdAt) || fmtDate(new Date().toISOString());
   const tSig = (data.signatures || []).find((s) => s.role === 'tenant');
   const lSig = (data.signatures || []).find((s) => s.role === 'landlord');
@@ -223,7 +263,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   return (
     <Document>
       <Page size="A4" style={S.page}>
-        <Header date={date} />
+        <Header date={date} j={j} />
         <Section en="Owner / Lessor Information" ar="معلومات المالك / المؤجر">
           <Field label="Owner's Name" ar="اسم المالك" value={landlordName} />
           <Field label="Lessor's Name" ar="اسم المؤجر" value={landlordName} />
@@ -263,7 +303,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           </View>
           <View style={{ flexDirection: 'row' }}>
             <Field label="Location" ar="الموقع" value={data.property.fullAddress || data.property.community || data.property.emirate} half />
-            <Field label="Premises No. (DEWA)" ar="رقم المبنى (ديوا)" value={dewa} half />
+            <Field label={`Premises No. (${j.utilityAuthority})`} ar={`رقم المبنى (${j.utilityAuthorityAr})`} value={dewa} half />
           </View>
         </Section>
         <Section en="Contract Information" ar="معلومات العقد">
@@ -283,29 +323,27 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           </View>
           <Field label="Mode of Payment" ar="طريقة الدفع" value={data.modeOfPayment || ''} />
         </Section>
-        <TermsBlock start={0} end={3} header />
+        <TermsBlock termsEn={tEn} termsAr={tAr} start={0} end={3} header />
         <Signatures tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt) } : undefined} landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt) } : undefined} />
       </Page>
 
       <Page size="A4" style={S.page}>
-        <TermsBlock start={3} end={14} />
+        <TermsBlock termsEn={tEn} termsAr={tAr} start={3} end={14} />
         <Section en="Know your Rights" ar="لمعرفة حقوق الأطراف">
           <View style={{ flexDirection: 'row' }}>
             <View style={{ width: '50%', paddingRight: 6, borderRightWidth: 1, borderRightColor: '#ddd' }}>
-              <Text style={{ fontSize: 7.5, marginBottom: 3 }}>• Visit Rental Dispute Center via www.dubailand.gov.ae in case of any rental dispute.</Text>
-              <Text style={{ fontSize: 7.5, marginBottom: 3 }}>• Law No 26 of 2007 regulating landlord–tenant relationship.</Text>
-              <Text style={{ fontSize: 7.5, marginBottom: 3 }}>• Law No 33 of 2008 amending law 26 of 2007.</Text>
-              <Text style={{ fontSize: 7.5 }}>• Law No 43 of 2013 determining rent increases.</Text>
+              {j.rightsEn.map((r, i) => (
+                <Text key={i} style={{ fontSize: 7.5, marginBottom: i < j.rightsEn.length - 1 ? 3 : 0 }}>• {r}</Text>
+              ))}
             </View>
             <View style={{ width: '50%', paddingLeft: 6 }}>
-              <Text style={{ fontSize: 7.5, marginBottom: 3, fontFamily: AR, textAlign: 'right' }}>• زيارة موقع مركز فض المنازعات الإيجارية www.dubailand.gov.ae</Text>
-              <Text style={{ fontSize: 7.5, marginBottom: 3, fontFamily: AR, textAlign: 'right' }}>• قانون رقم 26 لسنة 2007 بشأن العلاقة بين المؤجرين والمستأجرين.</Text>
-              <Text style={{ fontSize: 7.5, marginBottom: 3, fontFamily: AR, textAlign: 'right' }}>• قانون رقم 33 لسنة 2008 المعدل لقانون 26 لعام 2007.</Text>
-              <Text style={{ fontSize: 7.5, fontFamily: AR, textAlign: 'right' }}>• قانون رقم 43 لسنة 2013 بشأن تحديد زيادة بدل الإيجار.</Text>
+              {j.rightsAr.map((r, i) => (
+                <Text key={i} style={{ fontSize: 7.5, marginBottom: i < j.rightsAr.length - 1 ? 3 : 0, fontFamily: AR, textAlign: 'right' }}>• {r}</Text>
+              ))}
             </View>
           </View>
         </Section>
-        <Section en="Attachments for Ejari Registration" ar="مرفقات التسجيل في إيجاري">
+        <Section en={`Attachments for ${j.registrationEn} Registration`} ar={`مرفقات التسجيل في ${j.registrationAr}`}>
           <View style={{ flexDirection: 'row' }}>
             <View style={{ width: '50%', paddingRight: 6, borderRightWidth: 1, borderRightColor: '#ddd' }}>
               <Text style={{ fontSize: 7.5, marginBottom: 2 }}>1. Original unified tenancy contract</Text>
@@ -331,7 +369,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         </Section>
         <Signatures tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt) } : undefined} landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt) } : undefined} />
         <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#bbb', paddingTop: 4, alignItems: 'center' }}>
-          <Text style={{ fontSize: 7, color: '#555' }}>Tel: 8004488  |  P.O.Box 1166, Dubai, U.A.E.  |  support@dubailand.gov.ae  |  www.dubailand.gov.ae</Text>
+          {j.footer && <Text style={{ fontSize: 7, color: '#555' }}>{j.footer}</Text>}
           <Text style={{ fontSize: 6.5, color: '#888', marginTop: 1 }}>Ref: {data.ref} · Generated: {fmtDate(new Date().toISOString())}</Text>
         </View>
       </Page>
@@ -341,7 +379,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
         return (
           <Page key={a.id} size="A4" style={S.page}>
-            <Header date={date} />
+            <Header date={date} j={j} />
             <Bar en={`Addendum ${idx + 1} of ${addendums.length} — ${a.name}`} ar="ملحق العقد" />
             {hasText ? (
               <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
@@ -375,8 +413,8 @@ export default function EjariContractViewer({ data, addendums = [], onClose }: {
     <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#52555a' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: '#fff', borderBottom: '1px solid #ddd' }}>
         <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Ejari Tenancy Contract — {data.ref}</p>
-          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>Official DLD format · vector PDF</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Tenancy Contract — {data.ref}</p>
+          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>UAE unified tenancy contract · vector PDF</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={() => (onClose ? onClose() : window.history.back())} style={{ padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, background: '#fff' }}>✕ Close</button>

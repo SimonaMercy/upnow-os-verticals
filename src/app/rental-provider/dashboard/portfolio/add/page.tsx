@@ -1270,7 +1270,7 @@ function UnitCard({
                 value={row.floor} onChange={e => onUpdate({ floor: e.target.value })} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">DEWA Premises No.</label>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Utility Premises No.</label>
               <input className={INPUT_C} placeholder="e.g. 1234567"
                 value={row.premiseNumber} onChange={e => onUpdate({ premiseNumber: e.target.value })} />
             </div>
