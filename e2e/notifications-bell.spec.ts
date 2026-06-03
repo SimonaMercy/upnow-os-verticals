@@ -48,44 +48,67 @@ test.describe.serial('Notifications bell — unread count + mark-read', () => {
   test('1. set up fixture RP, fresh customer, and a published unit', async ({ request }) => {
     rpToken = await loginOtp(request, RP_EMAIL);
 
-    // Register fresh customer — the DTO accepts email (or phone) only;
-    // firstName/lastName/password were removed when the flow moved to OTP.
+    // Register fresh customer. The DTO accepts email or phone (post-OTP
+    // migration); the response carries access_token + devOtp so we can
+    // complete email verification in-band and avoid a separate loginOtp
+    // round-trip (loginOtp on an unverified account hits 401 elsewhere).
     const reg = await request.post(`${BACKEND}/auth/register/customer`, {
       data: { email: CUSTOMER_EMAIL },
     });
     expect(reg.ok(), `customer register: ${reg.status()} ${await reg.text()}`).toBeTruthy();
-    customerToken = await loginOtp(request, CUSTOMER_EMAIL);
+    const regBody = await reg.json() as { access_token: string; devOtp?: string };
+    customerToken = regBody.access_token;
+    expect(customerToken, 'register should return access_token').toBeTruthy();
+    if (regBody.devOtp) {
+      // Email-verify so downstream endpoints that gate on emailVerified see green.
+      await request.post(`${BACKEND}/auth/email/verify-otp`, {
+        data: { email: CUSTOMER_EMAIL, code: regBody.devOtp },
+      });
+    }
 
-    // Create a published unit under the fixture RP's property
+    // Create a unit under the fixture RP's property. DTO shape matches
+    // the current CreateUnitDto + service requirements (premiseNumber is
+    // service-enforced even though it's @IsOptional on the DTO; all 4
+    // fee fields are required by the service layer).
     const unitRes = await request.post(`${BACKEND}/properties/${RP_PROPERTY_ID}/units`, {
       headers: auth(rpToken),
       data: {
         unitNumber: `N-BELL-${TS}`,
-        floor: 4,
-        bedroomCount: 1,
-        bathroomCount: 1,
-        areaSqm: 65,
-        annualRentFils: 8500000,
-        securityDepositFils: 850000,
-        status: 'available',
-        isPublished: true,
-        mandatoryFees: [],
+        unitType: 'apartment',
+        floor: '4',
+        rentalPrice: 8500000,
+        premiseNumber: String(1234500 + (TS % 100)),
+        securityDeposit: 5000,
+        adminFee: 500,
+        ejariFeeFils: 22000,
+        commission: 4250,
       },
     });
     expect(unitRes.ok(), `unit create: ${unitRes.status()} ${await unitRes.text()}`).toBeTruthy();
     unitId = ((await unitRes.json()) as { id: number }).id;
     expect(unitId).toBeGreaterThan(0);
+
+    // Publish the unit so customers can book viewings on it. Newly-created
+    // units default to is_listed=false / listing_status=DRAFT.
+    const togRes = await request.patch(
+      `${BACKEND}/properties/${RP_PROPERTY_ID}/units/${unitId}/toggle-listing`,
+      { headers: auth(rpToken) },
+    );
+    expect(togRes.ok(), `toggle-listing: ${togRes.status()} ${await togRes.text()}`).toBeTruthy();
   });
 
   // ─── 2. Trigger notification via booking a viewing ─────────────────────────
 
   test('2. book a viewing — fires viewingConfirmed notification', async ({ request }) => {
+    // CreateViewingDto wants `scheduledAt` (ISO 8601 with time) — preferredDate +
+    // preferredTime were collapsed into a single field. Schedule 2 days out at 10:00 UTC.
+    const scheduledAt = new Date(Date.now() + 2 * 86400_000);
+    scheduledAt.setUTCHours(10, 0, 0, 0);
     const res = await request.post(`${BACKEND}/leads/viewings`, {
       headers: auth(customerToken),
       data: {
         unitId,
-        preferredDate: new Date(Date.now() + 2 * 86400_000).toISOString().split('T')[0],
-        preferredTime: '10:00',
+        scheduledAt: scheduledAt.toISOString(),
         notes: 'Notification smoke test',
       },
     });

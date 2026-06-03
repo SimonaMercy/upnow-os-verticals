@@ -73,16 +73,28 @@ async function setupContractPreMoveIn(
   unitId: number,
   tenantProfileId: number = SEED_TENANT_ID,
 ): Promise<number> {
-  const today     = new Date().toISOString().split('T')[0];
-  const nextYear  = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0];
+  // Phase 6c — the booking-time overlap guard (docs/CONTRACT_LIFECYCLE.md
+  // §3.3) blocks new contracts whose window overlaps any ACTIVE contract on
+  // the same unit. UNIT_API/UI_T/UI_RP are shared fixture units and previous
+  // CI runs leave ACTIVE contracts on them. We dodge by picking a unique
+  // far-future window per run (5–10 years out), so newly-created contracts
+  // never overlap whatever stale state is on the unit.
+  const startOffsetYears = 5 + Math.floor(Math.random() * 5);
+  const startDate = new Date();
+  startDate.setFullYear(startDate.getFullYear() + startOffsetYears);
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = new Date(startDate);
+  endDate.setFullYear(endDate.getFullYear() + 1);
+  const startStr = startDate.toISOString().split('T')[0];
+  const endStr = endDate.toISOString().split('T')[0];
 
   const createRes = await request.post(`${BACKEND}/contracts`, {
     headers: authHdr(rpToken),
     data: {
       unitId,
       tenantId: tenantProfileId,
-      contractStartDate: today,
-      contractEndDate: nextYear,
+      contractStartDate: startStr,
+      contractEndDate: endStr,
       annualRent: 60000,
       numberOfInstallments: 2,
       modeOfPayment: 'cheque',
@@ -252,7 +264,7 @@ test.describe.serial('Move-In Journey — Backend API', () => {
     );
     expect(res.status()).toBe(400);
     const body = await res.json() as { message?: string };
-    expect(body.message).toMatch(/tenant must sign/i);
+    expect(body.message).toMatch(/(?:customer|tenant) must sign/i);
   });
 
   test('API-7: RP counter-sign auto-activates the contract', async ({ request }) => {
@@ -440,8 +452,12 @@ test.describe('Move-In Journey — Frontend: RP contract detail page', () => {
     await expect(page.locator('a', { hasText: /preview rental agreement/i })).toBeVisible({ timeout: 8_000 });
     await expect(page.locator('a', { hasText: /preview receipt/i })).toBeVisible({ timeout: 8_000 });
 
-    // ── Step 4: Move-In inspection signing progress ───────────────────────────
-    // All three indicators shown; the counter-sign one should be done (green)
-    await expect(page.locator('text=/rp counter-signed/i')).toBeVisible({ timeout: 8_000 });
+    // ── Step 5: Move-In Inspection ─────────────────────────────────────────────
+    // The "Inspection signing progress" detail block is gated on the previous
+    // step (Utility) being done. This test doesn't drive utility submission,
+    // so we assert the inspection step's deep-link is present (proves the
+    // contract is far enough along to expose Step 5) rather than the
+    // counter-sign progress line, which lives inside the utility-gated block.
+    await expect(page.locator('a', { hasText: /move-in inspection/i })).toBeVisible({ timeout: 8_000 });
   });
 });

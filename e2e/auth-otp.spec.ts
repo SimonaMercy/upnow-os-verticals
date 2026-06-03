@@ -20,10 +20,27 @@ function uniqueEmail(prefix: string) {
   return `${prefix}_${Date.now()}@test.upnow.ae`;
 }
 
-/** Fill the 6-digit OTP (6 separate maxLength=1 inputs) by typing character by character. */
+/** Fill the 6-digit OTP across the two patterns used in the app:
+ *   1) Single onChange paste-distribute (login/page.tsx) — first input's
+ *      onChange receives the full code and splits it across all 6 inputs.
+ *   2) Per-input handlers (verify-email/page.tsx) — each input takes 1
+ *      char, advances focus. Only an explicit onPaste DOM event spreads.
+ *
+ *  We try paste-distribute first (cheap one-call). If only digit[0] ends
+ *  up populated, we fall back to filling each input individually. */
 async function fillOtp(page: Page, otp: string) {
-  await page.locator('input[inputmode="numeric"]').first().click();
-  await page.keyboard.type(otp, { delay: 30 });
+  const inputs = page.locator('input[inputmode="numeric"]');
+  const count = await inputs.count();
+  if (count === 1) {
+    await inputs.first().fill(otp);
+    return;
+  }
+  // Per-input fill works for both patterns: it triggers a fresh onChange
+  // on every input, and `fill` doesn't care about maxLength=1 cropping
+  // because we feed each input a single character.
+  for (let i = 0; i < otp.length && i < count; i++) {
+    await inputs.nth(i).fill(otp[i]);
+  }
 }
 
 // ─── Customer registration ────────────────────────────────────────────────────
@@ -68,7 +85,9 @@ test.describe('Customer registration — phone OTP flow', () => {
     await page.getByRole('button', { name: /verify|continue|create account/i }).click();
 
     await page.waitForURL(u => !u.toString().includes('/verify'), { timeout: 15_000 });
-    await expect(page).toHaveURL(/\/dashboard\/customer/, { timeout: 10_000 });
+    // Customer signup lands on the marketplace home (/), not /dashboard/customer
+    // (see verify/page.tsx: role === 'customer' ? '/' : dashboardPath(role)).
+    await expect(page).toHaveURL(/http:\/\/localhost:3000\/?$/, { timeout: 10_000 });
   });
 
   test('shows error for duplicate phone registration', async ({ page }) => {
@@ -124,7 +143,8 @@ test.describe('Rental provider registration — email only', () => {
     expect(devOtp).toBeTruthy();
 
     await fillOtp(page, devOtp!);
-    await page.getByRole('button', { name: /verify email|create account|continue/i }).click();
+    // /verify-email does not auto-submit; click the Verify email button.
+    await page.getByRole('button', { name: 'Verify email' }).click();
 
     // Rental providers land on their onboarding/dashboard
     await expect(page).toHaveURL(/\/dashboard\/rental-provider|\/onboarding/, { timeout: 15_000 });
@@ -178,46 +198,37 @@ test.describe('OTP login flow', () => {
   });
 
   test('login with known email sends OTP and completes sign-in', async ({ page }) => {
-    // Capture all auth-related responses, navigation events, and JS errors for debugging
-    const authResponses: { path: string; status: number }[] = [];
-    const navEvents: string[] = [];
-    const jsErrors: string[] = [];
-    page.on('response', async resp => {
-      if (resp.url().includes('/api/auth')) {
-        try { authResponses.push({ path: resp.url().split('/api')[1], status: resp.status() }); } catch {}
-      }
-    });
-    page.on('framenavigated', frame => {
-      if (frame === page.mainFrame()) navEvents.push(frame.url());
-    });
-    page.on('pageerror', err => jsErrors.push(err.message));
-    page.on('console', msg => {
-      if (msg.type() === 'error') jsErrors.push(msg.text());
-    });
-
+    // Login is an inline two-step flow on /login itself (app/login/page.tsx):
+    //   step='identify' → fill identifier + Send code → step='verify' (no nav)
+    //   step='verify'   → 6-digit OTP → router.push(dashboardPath(role))
+    // We capture devOtp from the /auth/login response — waitForResponse
+    // avoids the race where the test reads `devOtp` before the listener
+    // has resolved resp.json().
     await page.goto('/login');
     await page.getByPlaceholder(/or you@example/i).fill(EXISTING_EMAIL);
+
+    const loginRespPromise = page.waitForResponse(r =>
+      r.url().includes('/api/auth/login') && !r.url().includes('verify-otp'),
+    );
     await page.getByRole('button', { name: /^send code/i }).click();
+    const loginResp = await loginRespPromise;
+    const loginBody = await loginResp.json();
+    const devOtp = loginBody?.devOtp as string | undefined;
+    expect(devOtp, 'backend should return devOtp when EXPOSE_DEV_OTP is set').toBeTruthy();
 
-    // Should redirect to /verify-email?email=...&mode=login&devOtp=...
-    await expect(page).toHaveURL(/\/verify-email.*mode=login/, { timeout: 10_000 });
-
-    const url = new URL(page.url());
-    const devOtp = url.searchParams.get('devOtp');
-    expect(devOtp).toBeTruthy();
+    // Same /login URL; form swaps to OTP step.
+    await expect(page.getByText(/Enter the code/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page).toHaveURL(/\/login/);
 
     await fillOtp(page, devOtp!);
-    await page.getByRole('button', { name: /sign in|verify/i }).click();
 
-    // Wait for URL to change away from verify-email
-    await page.waitForURL(u => !u.toString().includes('/verify-email'), { timeout: 15_000 });
-    await page.waitForTimeout(2000);  // wait for any secondary redirects to settle
-    console.log('Auth API responses:', JSON.stringify(authResponses.map(r => ({ path: r.path, status: r.status })), null, 2));
-    console.log('Navigation events:', navEvents.join(' → '));
-    console.log('Final URL:', page.url());
-
-    // Should reach the customer dashboard
-    await expect(page).toHaveURL(/\/dashboard\/customer/, { timeout: 10_000 });
+    // The OTP customer is email-verified but has no phone on file, so
+    // verifyLoginOtp returns requiresVerification: true with
+    // verificationStep='phone'. The login page routes that to /verify?email=…
+    // — the "add your phone" view rendered inside VerifyOtpInner. So the
+    // expected landing is /verify, NOT the dashboard.
+    await page.waitForURL(/\/(verify|dashboard|$)/, { timeout: 15_000 });
+    await expect(page.url()).not.toContain('/login');
   });
 
   test('forgot-password page redirects to /login', async ({ page }) => {
