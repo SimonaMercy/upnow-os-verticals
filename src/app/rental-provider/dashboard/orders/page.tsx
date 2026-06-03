@@ -1,18 +1,40 @@
+/**
+ * RP Contracts ("Orders") list page
+ *
+ * Implements the "UpNow RP Orders" design (Jun 3 design package):
+ *   - Hero with eyebrow / display headline / tagline + Export & New CTAs
+ *   - 5 KPIs strip (Total / Active / Expiring 60d / Declined renewals /
+ *     Active rent per year — last one rendered as a dark accent card)
+ *   - Tab row with status counts (preserves the existing 9-status
+ *     synthetic set: active, terminating, pending, issued, expired,
+ *     renewal_pending, declined, superseded, terminated + an
+ *     upcoming_renewal computed bucket)
+ *   - Filter row: search across ref/customer/email/unit/property,
+ *     property selector, reset, results count
+ *   - Single table card with click-to-expand rows. Expanded body shows
+ *     a contract-details grid + a lifecycle timeline + per-status
+ *     action buttons (View / Issue / Renew / Terminate / …)
+ *   - Pagination (10 per page)
+ *
+ * Data fetch and the canonical `displayStatusOf` derivation are unchanged
+ * from the previous version of this file so the synthetic statuses
+ * (declined / renewal_pending / superseded / terminating) keep matching
+ * what the lifecycle spec (docs/CONTRACT_LIFECYCLE.md) prescribes.
+ */
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
-  Search, Plus, X, FileText, RefreshCw, ChevronRight,
-  ChevronLeft, ChevronRight as ChevronRightIcon,
+  Search, Plus, X, FileText, ChevronLeft, ChevronRight,
+  Bell, Download, Clock, RotateCcw, Shield, Coins, Building2, Eye,
 } from 'lucide-react';
 
+// ────────────────────────────────────────────────────────────────────────────
+// Status model (preserved from previous version)
+// ────────────────────────────────────────────────────────────────────────────
+
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
-/** Synthetic statuses surfaced ONLY on the orders page so the RP can tell a
- *  renewal proposal apart from a brand-new lease draft. The DB column stays
- *  'pending' / 'active' in these cases — we just re-label the row for the
- *  list view. See docs/CONTRACT_LIFECYCLE.md §7 for the full list. */
 type DisplayStatus = ContractStatus | 'declined' | 'renewal_pending' | 'superseded' | 'terminating';
 type TabKey = DisplayStatus | 'all' | 'upcoming_renewal';
 
@@ -28,40 +50,28 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   terminating:     'Terminating',
 };
 
-const STATUS_STYLE: Record<DisplayStatus, string> = {
-  active:          'bg-[#dbeafe] text-[#1e40af]',
-  expired:         'bg-[#e5e7eb] text-[#374151]',
-  terminated:      'bg-[#fee2e2] text-[#b91c1c]',
-  pending:         'bg-[#fef3c7] text-[#92400e]',
-  issued:          'bg-[#d8f2e8] text-[#1a7a5a]',
-  declined:        'bg-[#fee2e2] text-[#b91c1c]',
-  renewal_pending: 'bg-[#fef3c7] text-[#92400e]',
-  superseded:      'bg-[#f3e8ff] text-[#6b21a8]',
-  terminating:     'bg-[#ffedd5] text-[#9a3412]',
-};
-
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all',              label: 'All' },
   { key: 'active',           label: 'Active' },
   { key: 'terminating',      label: 'Terminating' },
   { key: 'pending',          label: 'Pending' },
   { key: 'issued',           label: 'In Progress' },
-  { key: 'expired',          label: 'Expired' },
   { key: 'upcoming_renewal', label: 'Upcoming Renewal' },
   { key: 'renewal_pending',  label: 'Renewal Pending' },
   { key: 'declined',         label: 'Declined' },
   { key: 'superseded',       label: 'Superseded' },
+  { key: 'expired',          label: 'Expired' },
   { key: 'terminated',       label: 'Terminated' },
 ];
 
-/** Map the raw DB status to a display status. Surfaces four synthetic labels
- *  on top of the DB enum (docs/CONTRACT_LIFECYCLE.md §3 + §4.3):
- *   - `declined`        — renewal child where `contractActive=false`
- *   - `renewal_pending` — renewal child still awaiting customer decision
- *   - `superseded`      — new-lease draft archived because the unit was
- *                         leased to a different customer first
- *   - `terminating`     — ACTIVE contract with accepted termination, still
- *                         winding down to its effective date */
+/** Map the raw DB status to a display status. Four synthetic labels on top
+ *  of the DB enum (docs/CONTRACT_LIFECYCLE.md §3 + §4.3):
+ *    - `declined`        — renewal child where `contractActive=false`
+ *    - `renewal_pending` — renewal child still awaiting customer decision
+ *    - `superseded`      — new-lease draft archived because the unit was
+ *                          leased to a different customer first
+ *    - `terminating`     — ACTIVE contract with accepted termination, still
+ *                          winding down to its effective date */
 function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contractActive' | 'termination'>): DisplayStatus {
   if (c.contractType === 'renewal' && c.contractActive === false) return 'declined';
   if (c.contractType === 'renewal' && c.status === 'pending') return 'renewal_pending';
@@ -76,7 +86,7 @@ function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contract
   return c.status;
 }
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 10;
 
 interface Contract {
   id: number;
@@ -100,19 +110,284 @@ interface Contract {
   } | null;
 }
 
-function fmt(dateStr: string | null) {
+// ────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────────
+
+function fmtDate(dateStr: string | null) {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function fmtShort(dateStr: string | null) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: '2-digit' });
+}
+
+function fmtAedAmt(n: number): string {
+  return n.toLocaleString('en-AE');
+}
+
+function initials(name: string | null): string {
+  if (!name) return '—';
+  return name.split(' ').map(p => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+}
+
+function isExpiringSoon(c: Contract, now: Date, in60: Date): boolean {
+  if (displayStatusOf(c) !== 'active') return false;
+  const e = new Date(c.endDate);
+  return e >= now && e <= in60;
+}
+
+function daysTo(iso: string, now: Date): number {
+  return Math.round((new Date(iso).getTime() - now.getTime()) / 86_400_000);
+}
+
+function statusLabel(c: Contract): string {
+  return STATUS_LABELS[displayStatusOf(c)];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Lifecycle timeline (per display status)
+// ────────────────────────────────────────────────────────────────────────────
+
+type TLState = 'past' | 'current' | 'future' | 'alert';
+interface TLItem { nm: string; t: string; state: TLState }
+
+function lifecycle(c: Contract): TLItem[] {
+  const ds = displayStatusOf(c);
+  const ejariReg = c.ejariStatus === 'registered';
+  const base: TLItem[] = [
+    { nm: 'Lease drafted',           t: `Created ${fmtDate(c.startDate)}`, state: 'past' },
+    { nm: 'Contract issued',         t: 'Sent to customer',                 state: 'past' },
+    { nm: 'Signed & countersigned',  t: 'Both parties',                     state: 'past' },
+    { nm: 'Ejari registered',        t: ejariReg ? 'Confirmed' : '—',       state: ejariReg ? 'past' : 'future' },
+    { nm: 'Active tenancy',          t: `${fmtDate(c.startDate)} → ${fmtDate(c.endDate)}`, state: 'current' },
+  ];
+  switch (ds) {
+    case 'pending':
+      return [
+        { nm: 'Lease drafted',          t: 'Awaiting issue', state: 'current' },
+        { nm: 'Contract issued',        t: 'Upcoming',       state: 'future'  },
+        { nm: 'Signed & countersigned', t: 'Upcoming',       state: 'future'  },
+        { nm: 'Active tenancy',         t: 'Upcoming',       state: 'future'  },
+      ];
+    case 'issued':
+      return [
+        { nm: 'Lease drafted',          t: 'Completed',           state: 'past'    },
+        { nm: 'Contract issued',        t: 'Awaiting signature',   state: 'current' },
+        { nm: 'Ejari registration',     t: 'Upcoming',             state: 'future'  },
+        { nm: 'Active tenancy',         t: `Starts ${fmtDate(c.startDate)}`, state: 'future' },
+      ];
+    case 'terminating':
+      return [
+        ...base.slice(0, 4),
+        { nm: 'Active tenancy',          t: 'In progress', state: 'past'  },
+        { nm: 'Termination accepted',    t: `Effective ${fmtDate(c.termination?.effectiveDate ?? null)}`, state: 'alert' },
+        { nm: 'Move-out & closeout',     t: 'Upcoming',     state: 'future' },
+      ];
+    case 'renewal_pending':
+      return [
+        { nm: 'Renewal proposed',  t: 'Sent to customer',        state: 'past'    },
+        { nm: 'Customer decision', t: 'Awaiting response',       state: 'current' },
+        { nm: 'New term begins',   t: fmtDate(c.startDate),      state: 'future'  },
+      ];
+    case 'declined':
+      return [
+        { nm: 'Renewal proposed', t: 'Sent to customer', state: 'past'    },
+        { nm: 'Customer declined', t: 'Renewal closed',  state: 'alert'   },
+        { nm: 'Move-out scheduled', t: 'On expiry',      state: 'future'  },
+      ];
+    case 'superseded':
+      return [
+        { nm: 'Lease drafted',          t: 'Completed',        state: 'past'  },
+        { nm: 'Unit leased elsewhere', t: 'Draft archived',   state: 'alert' },
+      ];
+    case 'expired':
+      return [
+        ...base.slice(0, 4).map(x => ({ ...x, state: x.state === 'future' ? 'past' as TLState : x.state })),
+        { nm: 'Tenancy ended', t: `Expired ${fmtDate(c.endDate)}`, state: 'past' },
+      ];
+    case 'terminated':
+      return [
+        ...base.slice(0, 4).map(x => ({ ...x, state: 'past' as TLState })),
+        { nm: 'Terminated early', t: `Closed ${fmtDate(c.endDate)}`, state: 'alert' },
+      ];
+    default:
+      return base;
+  }
+}
+
+interface RowAction {
+  label: string;
+  variant: 'primary' | 'ghost' | 'danger';
+  href?: string;
+}
+
+/** Action buttons shown in the expanded row body — per display status,
+ *  matching the design's intent (one primary CTA + supporting actions). */
+function bodyActions(c: Contract): RowAction[] {
+  const ds = displayStatusOf(c);
+  const detailHref = `/rental-provider/dashboard/contracts/${c.id}`;
+  switch (ds) {
+    case 'active':          return [
+      { label: 'View contract',       variant: 'primary', href: detailHref },
+      { label: 'Propose renewal',     variant: 'ghost',   href: detailHref + '#renew' },
+      { label: 'Request termination', variant: 'danger',  href: detailHref + '#terminate' },
+    ];
+    case 'terminating':     return [
+      { label: 'View contract',     variant: 'primary', href: detailHref },
+      { label: 'Confirm move-out',  variant: 'ghost',   href: detailHref + '#moveout' },
+    ];
+    case 'pending':         return [
+      { label: 'Issue contract', variant: 'primary', href: detailHref + '#issue' },
+      { label: 'Edit draft',     variant: 'ghost',   href: detailHref },
+    ];
+    case 'issued':          return [
+      { label: 'Resend for signature', variant: 'primary', href: detailHref + '#sign' },
+      { label: 'View draft',           variant: 'ghost',   href: detailHref },
+    ];
+    case 'renewal_pending': return [
+      { label: 'Send reminder', variant: 'primary', href: detailHref + '#remind' },
+      { label: 'View proposal', variant: 'ghost',   href: detailHref },
+    ];
+    case 'declined':        return [
+      { label: 'Re-propose renewal', variant: 'primary', href: detailHref + '#renew' },
+      { label: 'View contract',      variant: 'ghost',   href: detailHref },
+    ];
+    case 'superseded':      return [
+      { label: 'View archived draft', variant: 'ghost', href: detailHref },
+    ];
+    case 'expired':         return [
+      { label: 'Start renewal', variant: 'primary', href: detailHref + '#renew' },
+      { label: 'View contract', variant: 'ghost',   href: detailHref },
+    ];
+    case 'terminated':      return [
+      { label: 'View contract', variant: 'ghost', href: detailHref },
+    ];
+    default:                return [
+      { label: 'View contract', variant: 'primary', href: detailHref },
+    ];
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Row component
+// ────────────────────────────────────────────────────────────────────────────
+
+function Row({
+  contract, open, onToggle, now, in60,
+}: { contract: Contract; open: boolean; onToggle: () => void; now: Date; in60: Date }) {
+  const c = contract;
+  const ds = displayStatusOf(c);
+  const soon = isExpiringSoon(c, now, in60);
+  const d = soon ? daysTo(c.endDate, now) : null;
+  const isRenewal = c.contractType === 'renewal';
+
+  return (
+    <div className={'row ' + (open ? 'expanded' : '')} onClick={onToggle}>
+      <div className="col-ref">
+        <div className="av">{initials(c.tenant.name)}</div>
+        <div className="info">
+          <div className="ref">
+            {c.ref}
+            <span className={'type-chip ' + (isRenewal ? 'renewal' : '')}>{isRenewal ? 'Renewal' : 'New'}</span>
+          </div>
+          <div className="tenant">{c.tenant.name ?? '—'}</div>
+        </div>
+      </div>
+
+      <div className="col-prop">
+        <div className="unit">{c.unit.number ? `Unit ${c.unit.number}` : '—'}</div>
+        <div className="bldg">{c.property.buildingName ?? '—'}</div>
+      </div>
+
+      <div className="col-term">
+        <div className="span">{fmtShort(c.startDate)} – {fmtShort(c.endDate)}</div>
+        <div className={'end-note ' + (soon ? 'soon' : '')}>
+          {soon ? <span className="soon-pill">Expires {d}d</span> : <>Ends {fmtDate(c.endDate)}</>}
+        </div>
+      </div>
+
+      <div className="col-rent">
+        <div className="amt">AED {fmtAedAmt(c.annualRent)}</div>
+        <div className="per">per year</div>
+      </div>
+
+      <div className="col-status">
+        <span className={'status ' + ds}><span className="sd" />{statusLabel(c)}</span>
+      </div>
+
+      <div className="col-chev">
+        <span className="cv">
+          <ChevronRight size={14} />
+        </span>
+      </div>
+
+      {open && (
+        <div className="row-body" onClick={e => e.stopPropagation()}>
+          <div className="blk">
+            <div className="h"><span className="icw"><FileText size={13} /></span> Contract details</div>
+            <div className="det-grid">
+              <div className="det"><span className="k">Reference</span><span className="v mono">{c.ref}</span></div>
+              <div className="det"><span className="k">Type</span><span className="v" style={{ textTransform: 'capitalize' }}>{c.contractType ?? '—'}</span></div>
+              <div className="det"><span className="k">Customer</span><span className="v">{c.tenant.name ?? '—'}</span></div>
+              <div className="det"><span className="k">Email</span><span className="v" style={{ fontWeight: 500, color: 'var(--ink-2)' }}>{c.tenant.email ?? '—'}</span></div>
+              <div className="det"><span className="k">Unit</span><span className="v">{c.unit.number ? `Unit ${c.unit.number}` : '—'} · {c.property.buildingName ?? '—'}</span></div>
+              <div className="det"><span className="k">Annual rent</span><span className="v">AED {fmtAedAmt(c.annualRent)}</span></div>
+              <div className="det"><span className="k">Term</span><span className="v">{fmtDate(c.startDate)} → {fmtDate(c.endDate)}</span></div>
+              <div className="det">
+                <span className="k">Ejari</span>
+                <span className={'ejari ' + (c.ejariStatus === 'registered' ? 'registered' : c.ejariStatus === 'pending' ? 'pending' : 'none')}>
+                  <Shield size={11} />
+                  {c.ejariStatus === 'registered' ? 'Registered' : c.ejariStatus === 'pending' ? 'Pending' : 'Not registered'}
+                </span>
+              </div>
+            </div>
+            <div className="body-actions">
+              {bodyActions(c).map((a, i) => (
+                <Link
+                  key={i}
+                  href={a.href ?? '#'}
+                  className={'ba ' + (a.variant === 'ghost' ? 'ghost' : a.variant === 'danger' ? 'danger' : '')}
+                >
+                  {a.label.includes('renewal') && <RotateCcw size={12} />}
+                  {a.label === 'View contract' && <Eye size={12} />}
+                  {a.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <div className="blk">
+            <div className="h"><span className="icw"><Clock size={12} /></span> Lifecycle</div>
+            <div className="timeline">
+              {lifecycle(c).map((s, i) => (
+                <div key={i} className={'tl-item ' + s.state}>
+                  <div className="nm">{s.nm}</div>
+                  <div className="t">{s.t}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Main page
+// ────────────────────────────────────────────────────────────────────────────
+
 export default function OrdersPage() {
-  const router = useRouter();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAsset, setFilterAsset] = useState('all');
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [page, setPage] = useState(1);
+  const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
@@ -122,302 +397,729 @@ export default function OrdersPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Reset page when tab / filters change
   useEffect(() => { setPage(1); }, [activeTab, search, filterAsset]);
 
   const now = useMemo(() => new Date(), []);
   const in60 = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 60); return d; }, []);
 
   const assets = useMemo(
-    () => [...new Set(contracts.map(c => c.property.buildingName).filter(Boolean))],
+    () => [...new Set(contracts.map(c => c.property.buildingName).filter((s): s is string => Boolean(s)))],
     [contracts],
   );
 
-  // Counts per tab for badges
   const tabCounts = useMemo(() => {
     const counts: Partial<Record<TabKey, number>> = {};
     counts.all = contracts.length;
     for (const s of Object.keys(STATUS_LABELS) as DisplayStatus[]) {
       counts[s] = contracts.filter(c => displayStatusOf(c) === s).length;
     }
-    counts.upcoming_renewal = contracts.filter(c => {
-      if (displayStatusOf(c) !== 'active') return false;
-      const end = new Date(c.endDate);
-      return end >= now && end <= in60;
-    }).length;
+    counts.upcoming_renewal = contracts.filter(c => isExpiringSoon(c, now, in60)).length;
     return counts;
   }, [contracts, now, in60]);
 
-  // Stats
-  const activeCount   = tabCounts.active ?? 0;
-  const expiringCount = tabCounts.upcoming_renewal ?? 0;
-  const totalRent     = contracts
-    .filter(c => displayStatusOf(c) === 'active')
-    .reduce((s, c) => s + c.annualRent, 0);
-
-  const declinedCount = tabCounts.declined ?? 0;
-  const STATS = [
-    { label: 'Total Contracts',  value: contracts.length },
-    { label: 'Active',           value: activeCount },
-    { label: 'Expiring (60d)',   value: expiringCount },
-    { label: 'Declined Renewals', value: declinedCount },
-    { label: 'Active Rent / yr', value: `AED ${totalRent.toLocaleString('en-AE')}` },
-  ];
-
-  // Filter logic
-  const tabFiltered = useMemo(() => {
+  const filtered = useMemo(() => {
     return contracts.filter(c => {
-      const ds = displayStatusOf(c);
       if (activeTab === 'upcoming_renewal') {
-        if (ds !== 'active') return false;
-        const end = new Date(c.endDate);
-        if (!(end >= now && end <= in60)) return false;
+        if (!isExpiringSoon(c, now, in60)) return false;
       } else if (activeTab !== 'all') {
-        if (ds !== activeTab) return false;
+        if (displayStatusOf(c) !== activeTab) return false;
       }
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (
-          !c.ref.toLowerCase().includes(q) &&
-          !(c.tenant.name ?? '').toLowerCase().includes(q) &&
-          !(c.unit.name ?? '').toLowerCase().includes(q) &&
-          !(c.unit.number ?? '').toLowerCase().includes(q) &&
-          !(c.tenant.email ?? '').toLowerCase().includes(q)
-        ) return false;
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        const haystack = [
+          c.ref,
+          c.tenant.name,
+          c.tenant.email,
+          c.unit.number,
+          c.property.buildingName,
+        ].filter((s): s is string => Boolean(s)).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
       }
       return true;
     });
   }, [contracts, activeTab, filterAsset, search, now, in60]);
 
-  const totalPages = Math.max(1, Math.ceil(tabFiltered.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const pageRows = tabFiltered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const activeRent = useMemo(
+    () => contracts.filter(c => displayStatusOf(c) === 'active').reduce((s, c) => s + c.annualRent, 0),
+    [contracts],
+  );
 
   const hasFilters = filterAsset !== 'all' || search !== '';
-  const clearFilters = () => { setFilterAsset('all'); setSearch(''); };
+
+  const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode }[] = [
+    { lbl: 'Total',              val: String(contracts.length),       ic: <FileText size={12} /> },
+    { lbl: 'Active',             val: String(tabCounts.active ?? 0),   ic: <Shield size={12} /> },
+    { lbl: 'Expiring · 60d',     val: String(tabCounts.upcoming_renewal ?? 0), ic: <Clock size={12} /> },
+    { lbl: 'Declined renewals',  val: String(tabCounts.declined ?? 0), ic: <RotateCcw size={12} /> },
+    { lbl: 'Active rent / yr',   val: fmtAedAmt(activeRent), aed: true, accent: true, ic: <Coins size={12} /> },
+  ];
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Contracts</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">All tenancy agreements and their lifecycle status.</p>
+    <div className="orders-page">
+      <header className="topbar">
+        <div className="crumbs">Workspace / Leasing / <b>Contracts</b></div>
+        <div className="right">
+          <button className="icon-btn" aria-label="Notifications"><Bell size={18} /><span className="dot" /></button>
+          <button className="av-btn" aria-label="Profile">A</button>
         </div>
-        <Link
-          href="/rental-provider/dashboard/contracts/new"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white cursor-pointer"
-          style={{ background: '#2e9f82' }}
-        >
-          <Plus size={15} /> New Contract
-        </Link>
-      </div>
+      </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {STATS.map((s, i) => (
-          <div key={i} className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-xs text-[#6b6860] font-medium">{s.label}</div>
-            <div className="font-bold text-2xl text-[#1a1916] mt-1">
-              {loading ? <span className="animate-pulse text-[#9b9890]">—</span> : s.value}
-            </div>
+      <main className="main">
+        {/* Hero */}
+        <div className="hero">
+          <div className="left">
+            <div className="eyebrow"><FileText size={12} /> Leasing</div>
+            <h1>Tenancy <span className="accent">contracts</span></h1>
+            <p>Every agreement across your portfolio and where it sits in its lifecycle — from draft to Ejari, renewal and termination.</p>
           </div>
-        ))}
-      </div>
+          <div className="right">
+            <button type="button" className="btn btn-ghost"><Download size={14} /> Export</button>
+            <Link href="/rental-provider/dashboard/contracts/new" className="btn btn-primary"><Plus size={14} /> New contract</Link>
+          </div>
+        </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-1 mb-4 scrollbar-none">
-        {TABS.map(tab => {
-          const count = tabCounts[tab.key] ?? 0;
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                isActive
-                  ? 'bg-[#2e9f82] text-white'
-                  : 'bg-white text-[#6b6860] hover:bg-[#f4f3ef] border border-[#e8e6e0]'
-              }`}
-            >
-              {tab.label}
-              {!loading && (
-                <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-[#f4f3ef] text-[#6b6860]'
-                }`}>
-                  {count}
-                </span>
-              )}
+        {/* KPIs */}
+        <div className="kpis">
+          {kpis.map((k, i) => (
+            <div key={i} className={'kpi ' + (k.accent ? 'accent' : '')}>
+              <div className="lbl"><span className="ic">{k.ic}</span>{k.lbl}</div>
+              <div className={'val ' + (k.aed ? 'aed' : '')}>
+                {k.aed && <span className="cur">AED</span>}{k.val}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div className="rangetabs">
+          <div className="tabs">
+            {TABS.map(t => (
+              <button
+                key={t.key}
+                type="button"
+                className={activeTab === t.key ? 'active' : ''}
+                onClick={() => setActiveTab(t.key)}
+              >
+                {t.label}<span className="count">{tabCounts[t.key] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="filters">
+          <div className="search">
+            <span className="ic"><Search size={15} /></span>
+            <input
+              placeholder="Search ref, customer, unit or email…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {search && (
+              <button type="button" className="clear" onClick={() => setSearch('')}><X size={14} /></button>
+            )}
+          </div>
+          <div className="sel-wrap">
+            <select className="sel" value={filterAsset} onChange={e => setFilterAsset(e.target.value)}>
+              <option value="all">All properties</option>
+              {assets.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          {hasFilters && (
+            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setSearch(''); }}>
+              <X size={12} /> Reset
             </button>
-          );
-        })}
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input
-            type="text"
-            placeholder="Search by ref, customer or unit…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
-          />
+          )}
+          <span className="results">{filtered.length} of {contracts.length}</span>
         </div>
-        <select
-          value={filterAsset}
-          onChange={e => setFilterAsset(e.target.value)}
-          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]"
-        >
-          <option value="all">All Properties</option>
-          {assets.map(a => <option key={a!} value={a!}>{a}</option>)}
-        </select>
-        {hasFilters && (
-          <button
-            onClick={clearFilters}
-            className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto"
-          >
-            <X size={12} /> Reset
-          </button>
-        )}
-      </div>
 
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">
-          {loading ? 'Loading…' : `${tabFiltered.length} contract${tabFiltered.length !== 1 ? 's' : ''}`}
-        </span>
-        {!loading && totalPages > 1 && (
-          <span className="text-sm text-[#9b9890]">
-            Page {safePage} of {totalPages}
-          </span>
-        )}
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+        {/* Table */}
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <RefreshCw size={24} className="text-[#2e9f82] animate-spin mb-3" />
-            <p className="text-sm text-[#6b6860]">Loading contracts…</p>
-          </div>
-        ) : tabFiltered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-              <FileText size={24} className="text-[#2e9f82]" />
+          <div className="table-card">
+            <div className="empty">
+              <p>Loading contracts…</p>
             </div>
-            <p className="text-sm text-[#6b6860] mb-1">No contracts found</p>
-            <p className="text-xs text-[#9b9890]">
-              {hasFilters ? 'Try adjusting your filters' : 'No contracts in this category yet'}
-            </p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="table-card">
+            <div className="empty">
+              <div className="ic"><FileText size={20} /></div>
+              <h3>No contracts match</h3>
+              <p>Try clearing your search or selecting a different status above.</p>
+            </div>
           </div>
         ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left min-w-[1100px]">
-                <thead>
-                  <tr className="bg-[#f4f3ef]">
-                    {['Ref', 'Unit', 'Property', 'Customer', 'Email', 'Start', 'End', 'Annual Rent', 'Type', 'Status', ''].map(h => (
-                      <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.map(c => {
-                    const endDate = new Date(c.endDate);
-                    const ds = displayStatusOf(c);
-                    const isExpiringSoon = ds === 'active' && endDate >= now && endDate <= in60;
-                    return (
-                      <tr
-                        key={c.id}
-                        className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916] cursor-pointer"
-                        onClick={() => router.push(`/rental-provider/dashboard/contracts/${c.id}`)}
-                      >
-                        <td className="px-4 py-3.5 font-medium text-[#2e9f82] whitespace-nowrap">{c.ref}</td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">{c.unit.number ?? '—'}</td>
-                        <td className="px-4 py-3.5 text-[#6b6860] whitespace-nowrap">{c.property.buildingName ?? '—'}</td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">{c.tenant.name ?? '—'}</td>
-                        <td className="px-4 py-3.5 text-[#6b6860] text-xs">{c.tenant.email ?? '—'}</td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">{fmt(c.startDate)}</td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className={isExpiringSoon ? 'text-amber-600 font-medium' : ''}>{fmt(c.endDate)}</span>
-                          {isExpiringSoon && (
-                            <span className="ml-1 text-[10px] bg-amber-100 text-amber-700 rounded px-1">Soon</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5 font-medium whitespace-nowrap">
-                          AED {c.annualRent.toLocaleString('en-AE')}
-                        </td>
-                        <td className="px-4 py-3.5 capitalize text-[#6b6860]">{c.contractType ?? '—'}</td>
-                        <td className="px-4 py-3.5">
-                          <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[ds] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
-                            {STATUS_LABELS[ds] ?? ds}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <ChevronRight size={14} className="text-[#9b9890]" />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          <div className="table-card">
+            <div className="table-head">
+              <div>Contract</div>
+              <div className="col-prop">Property</div>
+              <div className="col-term">Term</div>
+              <div className="col-rent ar">Annual rent</div>
+              <div className="col-status">Status</div>
+              <div />
             </div>
-
-            {/* Pagination */}
+            <div className="rows">
+              {rows.map(c => (
+                <Row
+                  key={c.id}
+                  contract={c}
+                  open={openId === c.id}
+                  onToggle={() => setOpenId(openId === c.id ? null : c.id)}
+                  now={now}
+                  in60={in60}
+                />
+              ))}
+            </div>
             {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-[#e8e6e0]">
-                <span className="text-xs text-[#9b9890]">
-                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, tabFiltered.length)} of {tabFiltered.length}
+              <div className="pager">
+                <span className="info">
+                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="nums">
                   <button
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    type="button"
+                    className="pg"
                     disabled={safePage === 1}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    aria-label="Previous page"
                   >
-                    <ChevronLeft size={14} />
+                    <ChevronLeft size={13} />
                   </button>
-                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                    let p: number;
-                    if (totalPages <= 7) {
-                      p = i + 1;
-                    } else if (safePage <= 4) {
-                      p = i < 6 ? i + 1 : totalPages;
-                    } else if (safePage >= totalPages - 3) {
-                      p = i === 0 ? 1 : totalPages - 6 + i;
-                    } else {
-                      const mid = [1, safePage - 1, safePage, safePage + 1, totalPages];
-                      p = mid[Math.min(i, mid.length - 1)];
-                    }
-                    return (
-                      <button
-                        key={`pg-${p}-${i}`}
-                        onClick={() => setPage(p)}
-                        className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                          p === safePage
-                            ? 'bg-[#2e9f82] text-white'
-                            : 'border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={'pg ' + (p === safePage ? 'active' : '')}
+                      onClick={() => setPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
                   <button
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    type="button"
+                    className="pg"
                     disabled={safePage === totalPages}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    aria-label="Next page"
                   >
-                    <ChevronRightIcon size={14} />
+                    <ChevronRight size={13} />
                   </button>
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
-      </div>
+      </main>
+
+      <GlobalStyle />
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Scoped design tokens + component styles
+// ────────────────────────────────────────────────────────────────────────────
+
+function GlobalStyle() {
+  return (
+    <style jsx global>{`
+      .orders-page {
+        --green: #2e9f82;
+        --green-d: #1a7a5a;
+        --green-t: #d8f2e8;
+        --green-t2: #ebf8f2;
+
+        --ink: #1a1916; --ink-2: #3d3b35; --ink-3: #6b6860;
+        --mute: #9b9890; --mute-2: #b0ae9a;
+
+        --line: #e8e6e0; --line-2: #f0eeea;
+        --paper: #f4f3ef; --paper-2: #ebe9e3;
+        --card: #ffffff;
+
+        --warn-bg: #fef3c7; --warn-fg: #92400e; --warn-edge: #f4dd9b;
+        --info-bg: #dbeafe; --info-fg: #1e40af;
+        --purple-bg: #ede9fe; --purple-fg: #6d28d9;
+        --orange-bg: #ffedd5; --orange-fg: #9a3412;
+        --sky-bg: #e0f2fe; --sky-fg: #0369a1;
+        --danger-bg: #fee2e2; --danger-fg: #991b1b;
+
+        --r-card: 18px; --r-row: 14px; --r-input: 10px;
+        --sh-sm: 0 1px 2px rgba(26,25,22,.04);
+
+        background: var(--paper);
+        color: var(--ink);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        font-weight: 450;
+      }
+      .orders-page * { box-sizing: border-box; }
+      .orders-page button, .orders-page input, .orders-page select {
+        font-family: inherit; color: inherit;
+      }
+
+      .orders-page .topbar {
+        background: #fff; border-bottom: 1px solid var(--line);
+        position: sticky; top: 0; z-index: 20;
+        padding: 14px 36px;
+        display: flex; justify-content: space-between; align-items: center; gap: 14px;
+      }
+      @media (max-width: 720px) { .orders-page .topbar { padding: 14px 16px; } }
+      .orders-page .topbar .crumbs { font-size: 13px; color: var(--mute); font-weight: 500; }
+      .orders-page .topbar .crumbs b { color: var(--ink); font-weight: 700; }
+      .orders-page .topbar .right { display: flex; align-items: center; gap: 12px; }
+      .orders-page .icon-btn {
+        appearance: none; background: transparent; border: 0;
+        width: 34px; height: 34px; border-radius: 8px;
+        color: var(--ink-2); cursor: pointer;
+        display: grid; place-items: center; transition: background .15s; position: relative;
+      }
+      .orders-page .icon-btn:hover { background: var(--paper); }
+      .orders-page .icon-btn .dot {
+        position: absolute; top: 7px; right: 8px;
+        width: 7px; height: 7px; border-radius: 99px;
+        background: var(--green); border: 1.5px solid #fff;
+      }
+      .orders-page .av-btn {
+        width: 34px; height: 34px; border-radius: 99px;
+        background: linear-gradient(135deg, var(--green), #34c79f);
+        color: #fff; display: grid; place-items: center;
+        font-weight: 700; font-size: 13px; border: 0; cursor: pointer;
+      }
+
+      .orders-page .main {
+        padding: 32px 36px 64px; max-width: 1320px;
+        margin: 0 auto; width: 100%;
+      }
+      @media (max-width: 720px) { .orders-page .main { padding: 24px 16px 60px; } }
+
+      .orders-page .hero {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        gap: 18px; margin-bottom: 22px; flex-wrap: wrap;
+      }
+      .orders-page .hero .left { flex: 1; min-width: 280px; }
+      .orders-page .hero .eyebrow {
+        font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+        color: var(--green-d); font-weight: 700; margin-bottom: 8px;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .orders-page .hero h1 {
+        margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -.022em;
+        line-height: 1.1; color: var(--ink);
+      }
+      .orders-page .hero h1 .accent { color: var(--green-d); }
+      .orders-page .hero p {
+        margin: 10px 0 0; font-size: 15px; color: var(--ink-3);
+        max-width: 56ch; line-height: 1.55;
+      }
+      .orders-page .hero .right {
+        display: flex; align-items: center; gap: 10px;
+        flex-wrap: wrap; flex-shrink: 0;
+      }
+
+      .orders-page .kpis {
+        display: grid; grid-template-columns: repeat(5, 1fr);
+        gap: 12px; margin-bottom: 8px;
+      }
+      @media (max-width: 1100px) { .orders-page .kpis { grid-template-columns: repeat(3, 1fr); } }
+      @media (max-width: 640px) { .orders-page .kpis { grid-template-columns: repeat(2, 1fr); } }
+      .orders-page .kpi {
+        background: #fff; border: 1px solid var(--line);
+        border-radius: 14px; padding: 16px 18px; box-shadow: var(--sh-sm);
+        display: flex; flex-direction: column; gap: 7px; min-width: 0;
+      }
+      .orders-page .kpi .lbl {
+        font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+        color: var(--mute); font-weight: 700;
+        display: flex; align-items: center; gap: 6px; line-height: 1.2;
+      }
+      .orders-page .kpi .lbl .ic { color: var(--green-d); opacity: .85; flex-shrink: 0; }
+      .orders-page .kpi .val {
+        font-size: 25px; font-weight: 700; letter-spacing: -.025em;
+        color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums;
+      }
+      .orders-page .kpi .val.aed { font-size: 18px; letter-spacing: -.01em; }
+      .orders-page .kpi .val .cur {
+        font-size: 12px; color: var(--mute); font-weight: 700;
+        margin-right: 3px; letter-spacing: .02em;
+      }
+      .orders-page .kpi.accent {
+        background: linear-gradient(160deg, var(--ink) 0%, #23332d 100%);
+        border-color: transparent;
+      }
+      .orders-page .kpi.accent .lbl { color: rgba(255,255,255,.6); }
+      .orders-page .kpi.accent .lbl .ic { color: #7be1c2; }
+      .orders-page .kpi.accent .val { color: #fff; }
+      .orders-page .kpi.accent .val .cur { color: rgba(255,255,255,.55); }
+
+      .orders-page .rangetabs {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 18px; margin: 22px 0 16px;
+        border-bottom: 1px solid var(--line); flex-wrap: wrap;
+      }
+      .orders-page .rangetabs .tabs {
+        display: flex; align-items: stretch; gap: 0;
+        overflow-x: auto; flex: 1; min-width: 0;
+      }
+      .orders-page .rangetabs .tabs::-webkit-scrollbar { display: none; }
+      .orders-page .rangetabs button {
+        appearance: none; background: transparent; border: 0; cursor: pointer;
+        padding: 14px 15px 13px;
+        font-size: 13.5px; font-weight: 600; color: var(--mute);
+        border-bottom: 2px solid transparent; margin-bottom: -1px;
+        display: inline-flex; align-items: center; gap: 8px;
+        line-height: 1; white-space: nowrap;
+        transition: color .15s, border-color .15s; font-family: inherit;
+      }
+      .orders-page .rangetabs button:hover { color: var(--ink-2); }
+      .orders-page .rangetabs button.active {
+        color: var(--green-d); border-bottom-color: var(--green);
+      }
+      .orders-page .rangetabs button .count {
+        font-size: 10.5px; font-weight: 700;
+        padding: 2px 7px; border-radius: 99px;
+        background: var(--paper-2); color: var(--mute);
+      }
+      .orders-page .rangetabs button.active .count {
+        background: var(--green-t); color: var(--green-d);
+      }
+
+      .orders-page .filters {
+        display: flex; flex-wrap: wrap; align-items: center;
+        gap: 8px; margin-bottom: 16px;
+      }
+      .orders-page .search { position: relative; flex: 1; max-width: 380px; min-width: 200px; }
+      .orders-page .search input {
+        width: 100%; padding: 10px 12px 10px 36px;
+        font-size: 13.5px; border: 1px solid var(--line);
+        border-radius: 10px; background: #fff; outline: none;
+        transition: all .15s; font-family: inherit; color: var(--ink);
+      }
+      .orders-page .search input:focus {
+        border-color: var(--green);
+        box-shadow: 0 0 0 3px rgba(46,159,130,.08);
+      }
+      .orders-page .search input::placeholder { color: var(--mute-2); }
+      .orders-page .search .ic {
+        position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+        color: var(--mute); pointer-events: none;
+      }
+      .orders-page .search .clear {
+        position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+        background: transparent; border: 0; color: var(--mute); cursor: pointer;
+        width: 24px; height: 24px; border-radius: 6px;
+        display: grid; place-items: center;
+      }
+      .orders-page .search .clear:hover { background: var(--paper); }
+      .orders-page .sel {
+        appearance: none; padding: 10px 32px 10px 14px;
+        font-size: 13.5px; border: 1px solid var(--line);
+        border-radius: 10px; background: #fff; color: var(--ink-2);
+        cursor: pointer; font-family: inherit; outline: none;
+        transition: all .15s; font-weight: 500;
+      }
+      .orders-page .sel:hover { border-color: var(--ink-3); }
+      .orders-page .sel-wrap { position: relative; }
+      .orders-page .sel-wrap::after {
+        content: ''; position: absolute; right: 14px; top: 50%;
+        width: 6px; height: 6px;
+        border-right: 1.5px solid var(--mute);
+        border-bottom: 1.5px solid var(--mute);
+        transform: translateY(-65%) rotate(45deg); pointer-events: none;
+      }
+      .orders-page .filters .reset {
+        background: transparent; border: 0; color: var(--green-d);
+        font-weight: 600; font-size: 12.5px; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 6px 8px; border-radius: 7px;
+      }
+      .orders-page .filters .reset:hover { background: var(--green-t2); }
+      .orders-page .filters .results {
+        margin-left: auto; font-size: 12.5px; color: var(--mute); font-weight: 500;
+      }
+
+      .orders-page .btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        gap: 7px; padding: 11px 16px; border-radius: 10px;
+        font-weight: 600; font-size: 13.5px;
+        border: 1px solid transparent; cursor: pointer;
+        transition: all .15s; line-height: 1; white-space: nowrap;
+        font-family: inherit; text-decoration: none;
+      }
+      .orders-page .btn-primary {
+        background: var(--green); color: #fff; border-color: var(--green);
+      }
+      .orders-page .btn-primary:hover {
+        background: var(--green-d); border-color: var(--green-d);
+      }
+      .orders-page .btn-ghost {
+        background: #fff; color: var(--ink-2); border-color: var(--line);
+      }
+      .orders-page .btn-ghost:hover { border-color: var(--ink-3); color: var(--ink); }
+
+      .orders-page .table-card {
+        background: #fff; border: 1px solid var(--line);
+        border-radius: 16px; overflow: hidden; box-shadow: var(--sh-sm);
+      }
+      .orders-page .table-head, .orders-page .row {
+        display: grid;
+        grid-template-columns: minmax(230px, 2fr) minmax(170px, 1.4fr) 168px minmax(120px, 1fr) 132px 34px;
+        gap: 14px; align-items: center;
+      }
+      .orders-page .table-head {
+        padding: 14px 22px; background: var(--paper);
+        border-bottom: 1px solid var(--line);
+        font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+        color: var(--mute); font-weight: 700;
+      }
+      .orders-page .table-head .ar { text-align: right; }
+      @media (max-width: 1040px) {
+        .orders-page .table-head, .orders-page .row { grid-template-columns: 1fr auto 34px; gap: 10px; }
+        .orders-page .table-head .col-prop, .orders-page .table-head .col-term, .orders-page .table-head .col-rent,
+        .orders-page .row .col-prop, .orders-page .row .col-term, .orders-page .row .col-rent { display: none; }
+      }
+
+      .orders-page .rows { display: flex; flex-direction: column; }
+      .orders-page .row {
+        padding: 15px 22px; border-bottom: 1px solid var(--line-2);
+        transition: background .15s; cursor: pointer; min-height: 72px;
+      }
+      .orders-page .row:last-child { border-bottom: 0; }
+      .orders-page .row:hover { background: var(--paper); }
+      .orders-page .row.expanded { background: var(--green-t2); }
+
+      .orders-page .col-ref { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      .orders-page .av {
+        width: 38px; height: 38px; border-radius: 11px;
+        background: var(--green-t); color: var(--green-d);
+        display: grid; place-items: center;
+        font-weight: 700; font-size: 13px; letter-spacing: -.005em;
+        flex-shrink: 0; border: 1px solid #cfe7dc;
+      }
+      .orders-page .col-ref .info {
+        min-width: 0; flex: 1;
+        display: flex; flex-direction: column; justify-content: center; gap: 3px;
+      }
+      .orders-page .col-ref .ref {
+        font-family: 'DM Mono', ui-monospace, monospace;
+        font-size: 13px; font-weight: 500; color: var(--ink);
+        letter-spacing: -.01em; line-height: 1.2;
+        display: flex; align-items: center; gap: 7px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .orders-page .col-ref .tenant {
+        font-size: 12px; color: var(--mute); line-height: 1.2;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .orders-page .type-chip {
+        display: inline-flex; align-items: center; flex-shrink: 0;
+        font-size: 9px; letter-spacing: .06em; text-transform: uppercase;
+        color: var(--ink-3); font-weight: 700;
+        padding: 2px 6px; border-radius: 99px; background: var(--paper-2);
+      }
+      .orders-page .type-chip.renewal { background: var(--sky-bg); color: var(--sky-fg); }
+
+      .orders-page .col-prop {
+        min-width: 0; display: flex; flex-direction: column;
+        justify-content: center; gap: 3px;
+      }
+      .orders-page .col-prop .unit {
+        font-size: 13.5px; font-weight: 600; color: var(--ink-2);
+        letter-spacing: -.005em; line-height: 1.2;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .orders-page .col-prop .bldg {
+        font-size: 12px; color: var(--mute); line-height: 1.2;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+
+      .orders-page .col-term {
+        min-width: 0; display: flex; flex-direction: column;
+        justify-content: center; gap: 3px; font-variant-numeric: tabular-nums;
+      }
+      .orders-page .col-term .span {
+        font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+        line-height: 1.2; white-space: nowrap;
+      }
+      .orders-page .col-term .end-note {
+        font-size: 11px; color: var(--mute); line-height: 1.2;
+        display: flex; align-items: center; gap: 5px;
+      }
+      .orders-page .col-term .end-note.soon { color: var(--warn-fg); font-weight: 600; }
+      .orders-page .soon-pill {
+        display: inline-flex; align-items: center;
+        font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+        padding: 1px 6px; border-radius: 99px;
+        background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-edge);
+      }
+
+      .orders-page .col-rent {
+        min-width: 0; text-align: right; font-variant-numeric: tabular-nums;
+      }
+      .orders-page .col-rent .amt {
+        font-size: 14px; font-weight: 700; color: var(--ink);
+        letter-spacing: -.01em; line-height: 1.2; white-space: nowrap;
+      }
+      .orders-page .col-rent .per { font-size: 11px; color: var(--mute); line-height: 1.2; margin-top: 2px; }
+
+      .orders-page .col-status { display: flex; align-items: center; }
+      .orders-page .status {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-size: 11px; font-weight: 600;
+        padding: 4px 10px; border-radius: 99px;
+        letter-spacing: .01em; white-space: nowrap; border: 1px solid transparent;
+      }
+      .orders-page .status .sd {
+        width: 6px; height: 6px; border-radius: 99px;
+        background: currentColor; flex-shrink: 0; opacity: .85;
+      }
+      .orders-page .status.active      { background: var(--green-t); color: var(--green-d); border-color: #cfe7dc; }
+      .orders-page .status.terminating { background: var(--orange-bg); color: var(--orange-fg); border-color: #fbd0aa; }
+      .orders-page .status.pending     { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-edge); }
+      .orders-page .status.issued      { background: var(--info-bg); color: var(--info-fg); border-color: #c7d8f5; }
+      .orders-page .status.expired     { background: var(--paper-2); color: var(--ink-3); border-color: var(--line); }
+      .orders-page .status.renewal_pending { background: var(--sky-bg); color: var(--sky-fg); border-color: #bae0fa; }
+      .orders-page .status.declined    { background: var(--danger-bg); color: var(--danger-fg); border-color: #f1c5c2; }
+      .orders-page .status.superseded  { background: var(--purple-bg); color: var(--purple-fg); border-color: #d6cef9; }
+      .orders-page .status.terminated  { background: #ececec; color: #57534e; border-color: #ddd9d2; }
+
+      .orders-page .col-chev {
+        display: flex; align-items: center; justify-content: center; color: var(--mute);
+      }
+      .orders-page .col-chev .cv { transition: transform .2s; display: grid; place-items: center; }
+      .orders-page .row.expanded .col-chev .cv { transform: rotate(90deg); color: var(--green-d); }
+
+      .orders-page .row-body {
+        grid-column: 1 / -1;
+        border-top: 1px solid var(--line-2);
+        margin-top: 15px; padding-top: 18px;
+        display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px;
+      }
+      @media (max-width: 980px) { .orders-page .row-body { grid-template-columns: 1fr; } }
+      .orders-page .blk {
+        background: #fff; border: 1px solid var(--line);
+        border-radius: 12px; padding: 15px 16px;
+      }
+      .orders-page .blk .h {
+        font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+        color: var(--mute); font-weight: 700; margin-bottom: 12px;
+        display: flex; align-items: center; gap: 6px;
+      }
+      .orders-page .blk .h .icw { color: var(--green-d); }
+      .orders-page .det-grid {
+        display: grid; grid-template-columns: 1fr 1fr;
+        gap: 12px 18px;
+      }
+      .orders-page .det {
+        display: flex; flex-direction: column; gap: 3px; min-width: 0;
+      }
+      .orders-page .det .k { font-size: 11px; color: var(--mute); font-weight: 500; }
+      .orders-page .det .v {
+        font-size: 13px; color: var(--ink); font-weight: 600; letter-spacing: -.005em;
+      }
+      .orders-page .det .v.mono {
+        font-family: 'DM Mono', ui-monospace, monospace;
+        font-size: 12.5px; font-weight: 500;
+      }
+      .orders-page .ejari {
+        display: inline-flex; align-items: center; gap: 5px;
+        font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 99px; width: max-content;
+      }
+      .orders-page .ejari.registered { background: var(--green-t); color: var(--green-d); }
+      .orders-page .ejari.pending    { background: var(--warn-bg); color: var(--warn-fg); }
+      .orders-page .ejari.none       { background: var(--paper-2); color: var(--ink-3); }
+
+      .orders-page .body-actions {
+        display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+      }
+      .orders-page .ba {
+        appearance: none; display: inline-flex; align-items: center; gap: 6px;
+        font-size: 12.5px; font-weight: 600;
+        padding: 8px 13px; border-radius: 9px; cursor: pointer;
+        border: 1px solid var(--green); background: var(--green); color: #fff;
+        transition: all .15s; font-family: inherit; text-decoration: none;
+      }
+      .orders-page .ba:hover { background: var(--green-d); border-color: var(--green-d); }
+      .orders-page .ba.ghost { background: #fff; color: var(--ink-2); border-color: var(--line); }
+      .orders-page .ba.ghost:hover { border-color: var(--ink-3); color: var(--ink); }
+      .orders-page .ba.danger { background: #fff; color: var(--danger-fg); border-color: #f1c5c2; }
+      .orders-page .ba.danger:hover { background: var(--danger-bg); }
+
+      .orders-page .timeline {
+        display: flex; flex-direction: column; gap: 0;
+        position: relative; padding-left: 16px; margin-top: 2px;
+      }
+      .orders-page .timeline::before {
+        content: ''; position: absolute;
+        left: 4px; top: 8px; bottom: 8px;
+        width: 1.5px; background: var(--line);
+      }
+      .orders-page .tl-item { position: relative; padding: 6px 0 6px 18px; }
+      .orders-page .tl-item::before {
+        content: ''; position: absolute; left: -15px; top: 11px;
+        width: 9px; height: 9px; border-radius: 99px;
+        background: #fff; border: 1.5px solid var(--line);
+      }
+      .orders-page .tl-item.past::before { background: var(--green); border-color: var(--green); }
+      .orders-page .tl-item.current::before {
+        background: #fff; border-color: var(--green);
+        box-shadow: 0 0 0 3px var(--green-t2);
+      }
+      .orders-page .tl-item.alert::before { background: #e8a44a; border-color: #e0973a; }
+      .orders-page .tl-item .nm { font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+      .orders-page .tl-item:not(.past):not(.current):not(.alert) .nm { color: var(--mute); }
+      .orders-page .tl-item .t { font-size: 11px; color: var(--mute); margin-top: 2px; }
+
+      .orders-page .pager {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 22px; border-top: 1px solid var(--line);
+        gap: 12px; flex-wrap: wrap;
+      }
+      .orders-page .pager .info { font-size: 12px; color: var(--mute); font-weight: 500; }
+      .orders-page .pager .nums { display: flex; align-items: center; gap: 5px; }
+      .orders-page .pg {
+        min-width: 32px; height: 32px; padding: 0 6px;
+        display: grid; place-items: center;
+        border-radius: 8px; border: 1px solid var(--line);
+        background: #fff; color: var(--ink-2);
+        font-size: 12.5px; font-weight: 600; cursor: pointer;
+        transition: all .15s; font-family: inherit;
+      }
+      .orders-page .pg:hover:not(:disabled):not(.active) {
+        background: var(--paper); border-color: var(--ink-3);
+      }
+      .orders-page .pg.active {
+        background: var(--green); color: #fff; border-color: var(--green);
+      }
+      .orders-page .pg:disabled { opacity: .4; cursor: not-allowed; }
+
+      .orders-page .empty {
+        padding: 56px 24px; text-align: center; color: var(--mute);
+      }
+      .orders-page .empty .ic {
+        width: 48px; height: 48px; border-radius: 14px;
+        background: var(--green-t); color: var(--green-d);
+        display: grid; place-items: center; margin: 0 auto 12px;
+      }
+      .orders-page .empty h3 {
+        margin: 0 0 6px; font-size: 18px; font-weight: 700;
+        color: var(--ink); letter-spacing: -.01em;
+      }
+      .orders-page .empty p {
+        margin: 0; font-size: 13.5px; color: var(--ink-3);
+        line-height: 1.5; max-width: 42ch;
+        margin-left: auto; margin-right: auto;
+      }
+    `}</style>
   );
 }
