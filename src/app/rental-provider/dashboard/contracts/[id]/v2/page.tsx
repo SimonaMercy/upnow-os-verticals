@@ -362,18 +362,31 @@ function Completed({ title, sub, onUndo, undoLabel }: { title: string; sub?: str
 }
 
 function ChkRow({
-  on, label, hint, onToggle, actionLabel, onAction,
-}: { on: boolean; label: string; hint?: string | null; onToggle: () => void; actionLabel?: string; onAction?: () => void }) {
+  on, label, hint, onToggle, actionLabel, onAction, locked,
+}: {
+  on: boolean;
+  label: string;
+  hint?: string | null;
+  onToggle: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
+  /** When true: hide the right-side Undo/action button entirely and
+   *  make the checkbox a no-op. Used post-activation so the signing
+   *  record can't be silently un-signed. */
+  locked?: boolean;
+}) {
   return (
     <div className={'chkrow ' + (on ? 'on' : '')}>
-      <span className="cb" onClick={onToggle}>{on ? <Check size={12} /> : null}</span>
+      <span className="cb" onClick={locked ? undefined : onToggle}>
+        {on ? <Check size={12} /> : null}
+      </span>
       <span className="ct">
         {label}
         {hint && <span style={{ color: 'var(--mute)', fontWeight: 500 }}> — {hint}</span>}
       </span>
-      {on
+      {!locked && (on
         ? <button className="ca" onClick={onToggle}>Undo</button>
-        : onAction && <button className="ca" onClick={onAction}>{actionLabel}</button>}
+        : onAction && <button className="ca" onClick={onAction}>{actionLabel}</button>)}
     </div>
   );
 }
@@ -430,12 +443,26 @@ interface StepHandlers {
   signActionUrl: string;
   inspectionUrl: string;
   printUrl: string;
+  /** When true, all workflow rollback / re-do affordances are hidden:
+   *  the "Update" / "Re-upload" / "Revert to draft" buttons on completed
+   *  steps and the ChkRow undo toggles on the Sign step. Set to true
+   *  whenever the contract has reached its terminal lifecycle (active,
+   *  terminated, expired) so the activation history can't be rewritten
+   *  after the fact. Active-state actions in the Active step
+   *  (record payment / propose renewal / request termination) are
+   *  unaffected — those are live management, not workflow rollback. */
+  readOnlyWorkflow: boolean;
 }
 
 function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new' | 'renewal'): StepContent {
   const TEN = h.contract.tenant.name || 'the customer';
   const totalSteps = mode === 'renewal' ? 4 : 6;
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of ${totalSteps}`;
+
+  // Once a contract is active/terminated/expired, the activation steps
+  // are frozen: no Re-upload, no undo toggles, no "Revert to draft".
+  // Only the read-only "complete" panel shows.
+  const lock = h.readOnlyWorkflow;
 
   if (key === 'issue') {
     const done = isDone('issue', st);
@@ -445,7 +472,14 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           headline: 'Contract issued.',
           body: `Sent to ${TEN} — the signing process is underway.`,
           timing: null,
-          node: <Completed title="Issued to customer" sub="Signing in progress" onUndo={h.onRevertToDraft} undoLabel="Revert to draft" />,
+          node: (
+            <Completed
+              title="Issued to customer"
+              sub="Signing in progress"
+              onUndo={lock ? undefined : h.onRevertToDraft}
+              undoLabel="Revert to draft"
+            />
+          ),
         }
       : {
           tone: 'action', icon: 'document', sub: stopOf(1), label: 'Draft',
@@ -470,8 +504,8 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           timing: null,
           node: (
             <div className="chklist">
-              <ChkRow on label={`${TEN} signed`} onToggle={() => h.setState({ tenantSigned: false })} />
-              <ChkRow on label="Landlord signed" onToggle={() => h.setState({ landlordSigned: false })} />
+              <ChkRow on locked={lock} label={`${TEN} signed`} onToggle={() => h.setState({ tenantSigned: false })} />
+              <ChkRow on locked={lock} label="Landlord signed" onToggle={() => h.setState({ landlordSigned: false })} />
             </div>
           ),
         }
@@ -1512,6 +1546,14 @@ export default function ContractV2Page() {
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Respond failed'); }
   };
 
+  // Once the tenancy reaches a terminal lifecycle (active / expired /
+  // terminated) the workflow steps freeze — no "Revert to draft", no
+  // "Re-upload" on Ejari / Utility, no undo toggles on the Sign step.
+  // The Documents drawer tab stays editable (KYC approve/reject) and the
+  // active step's live-management actions (record payment, propose
+  // renewal, request termination) are unaffected.
+  const readOnlyWorkflow = contract.status === 'active' || contract.status === 'expired' || contract.status === 'terminated';
+
   // Step content + jump-to-step handler
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of 6`;
   const handlers: StepHandlers = {
@@ -1524,6 +1566,7 @@ export default function ContractV2Page() {
     signActionUrl: `/rental-provider/dashboard/contracts/${contract.id}`,
     inspectionUrl: `/rental-provider/dashboard/contracts/${contract.id}/inspection?type=move_in`,
     printUrl: `/rental-provider/dashboard/contracts/${contract.id}/print`,
+    readOnlyWorkflow,
   };
 
   let content: StepContent;
