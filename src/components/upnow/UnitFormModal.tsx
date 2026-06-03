@@ -491,7 +491,7 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
           {/* DEWA premises number — fills the Ejari contract "Premises No. (DEWA)" field */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">DEWA Premises No.</label>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Utility Premises No.</label>
               <input
                 className={INPUT}
                 placeholder="e.g. 1234567"
