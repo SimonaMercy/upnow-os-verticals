@@ -64,7 +64,8 @@ interface ContractPayment {
   description: string | null;
   paymentType: string | null;
   paymentMethod: string | null;
-  amountPaid: number;
+  amountPaid: number;        // gross (incl. rent VAT)
+  vatAmount?: number;        // rent VAT portion of amountPaid (0 = exempt)
   transactionDate: string | null;
   chequeStatus?: string | null;
   paidAt?: string | null;
@@ -94,6 +95,7 @@ interface ContractDetail {
   endDate: string;
   durationYears: number | null;
   annualRent: number;
+  rentVatRate?: number;
   contractValue: number | null;
   securityDepositAmount: number | null;
   numberOfInstallments: number | null;
@@ -803,7 +805,10 @@ function DetailCards({
         </button>
         <button type="button" className="dcard" onClick={() => onOpen('payments')}>
           <div className="dch"><span className="dci"><CreditCard size={16} /></span><span className="dct">Payments</span><span className="dca"><ChevronRight size={14} /></span></div>
-          <div className="drow"><span className="k">Annual rent</span><span className="v">{fmtAed(contract.annualRent)}</span></div>
+          <div className="drow"><span className="k">Annual rent{(contract.rentVatRate ?? 0) > 0 ? ' (net)' : ''}</span><span className="v">{fmtAed(contract.annualRent)}</span></div>
+          {(contract.rentVatRate ?? 0) > 0 && (
+            <div className="drow"><span className="k">+ VAT ({contract.rentVatRate}%)</span><span className="v">{fmtAed(Math.round(contract.annualRent * (contract.rentVatRate ?? 0)) / 100)}</span></div>
+          )}
           <div className="drow"><span className="k">Instalments</span><span className="v">{contract.numberOfInstallments ?? '—'}</span></div>
         </button>
         <button type="button" className="dcard" onClick={() => onOpen('documents')}>
@@ -816,7 +821,6 @@ function DetailCards({
           </div>
           <div className="drow"><span className="k">All documents</span><span className="v">{(contract.documents ?? []).length} files</span></div>
           <div className="drow"><span className="k">Customer KYC</span><span className="v">{kycDocs.length} files</span></div>
-          <span className="se-link" style={{ marginTop: 6, alignSelf: 'flex-start' }}>View all documents <ChevronRight size={13} /></span>
         </button>
         <button type="button" className="dcard" onClick={() => onOpen('period')}>
           <div className="dch"><span className="dci"><Calendar size={16} /></span><span className="dct">Period</span><span className="dca"><ChevronRight size={14} /></span></div>
@@ -854,13 +858,163 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 
 function DetailsDrawer({
   open, tab, setTab, onClose, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
+  onRecordPayment, onUpdatePaymentStatus, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
   onApproveDoc: (id: number) => void; onRejectDoc: (id: number) => void;
+  /** POST /api/contracts/:id/payments — record a new instalment / payment. */
+  onRecordPayment: (body: {
+    description?: string; amount: number; paymentType?: string; paymentMethod?: string;
+    chequeNumber?: string; transactionDate?: string;
+  }) => Promise<void>;
+  /** PATCH /api/contracts/:id/payments/:paymentId — change cheque status. */
+  onUpdatePaymentStatus: (paymentId: number, chequeStatus: string) => Promise<void>;
+  /** PATCH /api/contracts/:id/clauses — save edited custom clauses + notes. */
+  onSaveClauses: (customClauses: string[], notes: string | null) => Promise<void>;
+  /** PATCH /api/contracts/:id/confirm-pdc — confirm post-dated cheques received. */
+  onConfirmPdc: () => Promise<void>;
+  /** upload-url → PUT → POST /api/documents — attach a contract document. */
+  onUploadDoc: (file: File, meta: { key: string; label: string; category: string }, visibleToTenant: boolean, expiryDate: string) => Promise<void>;
+  /** POST /api/documents/request — request a document from the tenant. */
+  onRequestDoc: (label: string, notes: string) => Promise<void>;
 }) {
-  const rentTotal = payments.reduce((s, p) => s + (p.amountPaid || 0), 0);
   const depositRow = payments.find(p => p.paymentType === 'security_deposit');
+  // ── Record-payment form state (Flow 1) ──
+  const [showRec, setShowRec] = useState(false);
+  const [recBusy, setRecBusy] = useState(false);
+  const [recErr, setRecErr] = useState<string | null>(null);
+  const [rec, setRec] = useState({
+    description: '', amount: '', paymentType: 'rental_income',
+    paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
+  });
+  const [statusBusy, setStatusBusy] = useState<number | null>(null);
+  const submitRec = async () => {
+    const amt = Number(rec.amount);
+    if (!amt || amt <= 0) { setRecErr('Enter a valid amount'); return; }
+    setRecBusy(true); setRecErr(null);
+    try {
+      await onRecordPayment({
+        description: rec.description.trim() || undefined,
+        amount: amt,
+        paymentType: rec.paymentType,
+        paymentMethod: rec.paymentMethod,
+        chequeNumber: rec.chequeNumber.trim() || undefined,
+        transactionDate: rec.transactionDate || undefined,
+      });
+      setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '' });
+      setShowRec(false);
+    } catch (e) {
+      setRecErr(e instanceof Error ? e.message : 'Failed to record payment');
+    } finally {
+      setRecBusy(false);
+    }
+  };
+  const changeStatus = async (paymentId: number, status: string) => {
+    setStatusBusy(paymentId);
+    try { await onUpdatePaymentStatus(paymentId, status); }
+    finally { setStatusBusy(null); }
+  };
+  // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
+  const clausesEditable = contract.status === 'pending';
+  const [clauseList, setClauseList] = useState<string[]>(contract.customClauses ?? []);
+  const [clauseNotes, setClauseNotes] = useState(contract.notes ?? '');
+  const [clauseInput, setClauseInput] = useState('');
+  const [clauseBusy, setClauseBusy] = useState(false);
+  const [clauseSaved, setClauseSaved] = useState(false);
+  const [clauseErr, setClauseErr] = useState<string | null>(null);
+  // Keep the local editor in sync when the contract reloads.
+  useEffect(() => {
+    setClauseList(contract.customClauses ?? []);
+    setClauseNotes(contract.notes ?? '');
+  }, [contract.customClauses, contract.notes]);
+  const addClause = () => {
+    const t = clauseInput.trim();
+    if (t) { setClauseList(prev => [...prev, t]); setClauseInput(''); }
+  };
+  const saveClauses = async () => {
+    setClauseBusy(true); setClauseErr(null); setClauseSaved(false);
+    try {
+      await onSaveClauses(clauseList, clauseNotes || null);
+      setClauseSaved(true);
+      setTimeout(() => setClauseSaved(false), 2500);
+    } catch (e) {
+      setClauseErr(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setClauseBusy(false);
+    }
+  };
+  // ── Confirm PDC state (Flow 3) ──
+  const [pdcBusy, setPdcBusy] = useState(false);
+  const rentRows = payments.filter(p => p.paymentType !== 'security_deposit');
+  // Rent VAT (commercial/industrial): amounts are GROSS; split net vs VAT for display.
+  const rentGross = rentRows.reduce((s, p) => s + (p.amountPaid || 0), 0);
+  const rentVat   = rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0);
+  const rentNet   = rentGross - rentVat;
+  const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
+  const allRecorded = rentRows.length > 0;
+  const confirmPdc = async () => {
+    setPdcBusy(true);
+    try { await onConfirmPdc(); } finally { setPdcBusy(false); }
+  };
+  // ── Upload document state (Flow 5) ──
+  const docFileRef = useRef<HTMLInputElement>(null);
+  const [showUpload, setShowUpload] = useState(false);
+  const [upFile, setUpFile] = useState<File | null>(null);
+  const [upType, setUpType] = useState('');
+  const [upVisible, setUpVisible] = useState(false);
+  const [upExpiry, setUpExpiry] = useState('');
+  const [upBusy, setUpBusy] = useState(false);
+  const [upErr, setUpErr] = useState<string | null>(null);
+  const DOC_TYPES = [
+    { value: 'trade_license',          label: 'Trade License',          category: 'license',    needsExpiry: true  },
+    { value: 'initial_approval',       label: 'Initial Approval',       category: 'compliance', needsExpiry: false },
+    { value: 'trade_name_reservation', label: 'Trade Name Reservation', category: 'compliance', needsExpiry: false },
+    { value: 'passport',               label: 'Passport',               category: 'identity',   needsExpiry: true  },
+    { value: 'visa',                   label: 'Visa',                   category: 'identity',   needsExpiry: true  },
+    { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
+    { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: true  },
+    { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
+    { value: 'ejari',                  label: 'Ejari',                  category: 'property',   needsExpiry: true  },
+    { value: 'poa',                    label: 'POA',                    category: 'legal',      needsExpiry: false },
+    { value: 'pdc',                    label: 'PDC',                    category: 'payment',    needsExpiry: false },
+    { value: 'agreement',              label: 'Agreement',              category: 'contract',   needsExpiry: false },
+    { value: 'other',                  label: 'Others',                 category: 'other',      needsExpiry: false },
+  ] as const;
+  const upSelected = DOC_TYPES.find(t => t.value === upType);
+  const upShowExpiry = upSelected?.needsExpiry ?? false;
+  const submitUpload = async () => {
+    if (!upFile || !upType) return;
+    const meta = DOC_TYPES.find(t => t.value === upType)!;
+    setUpBusy(true); setUpErr(null);
+    try {
+      await onUploadDoc(upFile, { key: meta.value, label: meta.label, category: meta.category }, upVisible, upExpiry);
+      setShowUpload(false); setUpFile(null); setUpType(''); setUpVisible(false); setUpExpiry('');
+      if (docFileRef.current) docFileRef.current.value = '';
+    } catch (e) {
+      setUpErr(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUpBusy(false);
+    }
+  };
+  // ── Request document state (Flow 6) ──
+  const [reqLabel, setReqLabel] = useState('');
+  const [reqNotes, setReqNotes] = useState('');
+  const [reqBusy, setReqBusy] = useState(false);
+  const [reqErr, setReqErr] = useState<string | null>(null);
+  const submitRequest = async () => {
+    const label = reqLabel.trim();
+    if (!label) return;
+    setReqBusy(true); setReqErr(null);
+    try {
+      await onRequestDoc(label, reqNotes.trim());
+      setReqLabel(''); setReqNotes('');
+    } catch (e) {
+      setReqErr(e instanceof Error ? e.message : 'Failed to send request');
+    } finally {
+      setReqBusy(false);
+    }
+  };
   return (
     <>
       <div className={'scrim ' + (open ? 'open' : '')} onClick={onClose} />
@@ -947,24 +1101,122 @@ function DetailsDrawer({
                 </div>
               )}
               <div className="sec">
-                <div className="sech"><span className="si"><CreditCard size={16} /></span><span className="st">Rental instalments</span></div>
+                <div className="sech">
+                  <span className="si"><CreditCard size={16} /></span>
+                  <span className="st">Rental instalments</span>
+                  <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
+                    {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
+                  </button>
+                </div>
                 <div className="secb">
                   <table className="ptable">
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
                     <tbody>
-                      {payments.filter(p => p.paymentType !== 'security_deposit').map((p, i) => (
+                      {rentRows.map((p, i) => (
                         <tr key={p.id}>
                           <td>{i + 1}</td>
                           <td>{p.description ?? '—'}</td>
-                          <td className="amt">{fmtAed(p.amountPaid)}</td>
-                          <td><span className={'cstat ' + (p.chequeStatus ?? 'pending')}>{(p.chequeStatus ?? 'Pending').replace(/^./, c => c.toUpperCase())}</span></td>
+                          <td className="amt">
+                            {fmtAed(p.amountPaid)}
+                            {(p.vatAmount ?? 0) > 0 && (
+                              <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>
+                            )}
+                          </td>
+                          <td>
+                            <select
+                              className={'cstat ' + (p.chequeStatus ?? 'pending')}
+                              style={{ cursor: 'pointer' }}
+                              value={p.chequeStatus ?? 'pending'}
+                              disabled={statusBusy === p.id}
+                              onChange={e => void changeStatus(p.id, e.target.value)}
+                            >
+                              <option value="pending">Pending</option>
+                              <option value="cleared">Cleared</option>
+                              <option value="bounced">Bounced</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </td>
                         </tr>
                       ))}
+                      {rentRows.length === 0 && (
+                        <tr><td colSpan={4}><span className="note">No payments recorded yet.</span></td></tr>
+                      )}
                     </tbody>
                     <tfoot>
-                      <tr><td colSpan={2}>Total</td><td className="tot">{fmtAed(rentTotal)}</td><td /></tr>
+                      {showVat && (
+                        <>
+                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td /></tr>
+                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td /></tr>
+                        </>
+                      )}
+                      <tr><td colSpan={2}>{showVat ? 'Total (incl. VAT)' : 'Total'}</td><td className="tot">{fmtAed(rentGross)}</td><td /></tr>
                     </tfoot>
                   </table>
+
+                  {/* Record-payment form (Flow 1) */}
+                  {showRec && (
+                    <div style={{ marginTop: 14, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
+                      <p className="subhead">New payment</p>
+                      <div className="grid2">
+                        <div className="field"><label>Type</label>
+                          <select className="input" value={rec.paymentType} onChange={e => setRec(v => ({ ...v, paymentType: e.target.value }))}>
+                            <option value="rental_income">Rental income</option>
+                            <option value="security_deposit">Security deposit</option>
+                            <option value="admin_fee">Admin fee</option>
+                            <option value="maintenance_fee">Maintenance fee</option>
+                            <option value="service_charge">Service charge</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+                        <div className="field"><label>Method</label>
+                          <select className="input" value={rec.paymentMethod} onChange={e => setRec(v => ({ ...v, paymentMethod: e.target.value }))}>
+                            <option value="cheque">Cheque</option>
+                            <option value="bank_transfer">Bank transfer</option>
+                            <option value="cash">Cash</option>
+                            <option value="card">Card</option>
+                            <option value="online">Online</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="field"><label>Description</label>
+                        <input className="input" value={rec.description} placeholder={`Rental Instalment ${rentRows.length + 1}`} onChange={e => setRec(v => ({ ...v, description: e.target.value }))} />
+                      </div>
+                      <div className="grid2">
+                        <div className="field"><label>Amount (AED)</label>
+                          <input type="number" min="0" step="0.01" className="input" value={rec.amount} onChange={e => setRec(v => ({ ...v, amount: e.target.value }))} />
+                        </div>
+                        <div className="field"><label>Cheque / reference no.</label>
+                          <input className="input" value={rec.chequeNumber} placeholder="Cheque #, transfer ID…" onChange={e => setRec(v => ({ ...v, chequeNumber: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="field" style={{ margin: 0 }}><label>Date</label>
+                        <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
+                      </div>
+                      {recErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{recErr}</p>}
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button className="btn btn-jade btn-sm" disabled={recBusy || !rec.amount} onClick={() => void submitRec()}>
+                          <Check size={14} /> {recBusy ? 'Saving…' : 'Save payment'}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" disabled={recBusy} onClick={() => { setShowRec(false); setRecErr(null); }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Confirm PDC received (Flow 3) */}
+                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--mist-strong)' }}>
+                    {contract.pdcConfirmed ? (
+                      <p className="note" style={{ color: 'var(--jade-deep)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Check size={13} /> PDC collection confirmed{contract.pdcConfirmedAt ? ` on ${fmtDate(contract.pdcConfirmedAt)}` : ''}.
+                      </p>
+                    ) : (
+                      <>
+                        <button className="btn btn-jade btn-sm" disabled={pdcBusy || !allRecorded} onClick={() => void confirmPdc()}>
+                          <ClipboardCheck size={14} /> {pdcBusy ? 'Confirming…' : 'Confirm PDC received'}
+                        </button>
+                        {!allRecorded && <p className="note" style={{ marginTop: 6 }}>Record the rental cheques above first.</p>}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </>
@@ -983,11 +1235,16 @@ function DetailsDrawer({
                 <div className="sech">
                   <span className="si"><Paperclip size={16} /></span>
                   <span className="st">All documents ({all.length})</span>
-                  {all.length > 0 && (
-                    <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={openAll}>
-                      <ExternalLink size={12} /> View all together
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                    {all.length > 0 && (
+                      <button type="button" className="mini-btn view" onClick={openAll}>
+                        <ExternalLink size={12} /> View all
+                      </button>
+                    )}
+                    <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); }}>
+                      <UploadCloud size={12} /> Upload
                     </button>
-                  )}
+                  </div>
                 </div>
                 <div className="secb">
                   {all.length === 0 && <p className="note">No documents yet.</p>}
@@ -1022,6 +1279,68 @@ function DetailsDrawer({
                       </div>
                     </div>
                   ))}
+
+                  {/* Upload document (Flow 5) */}
+                  {showUpload && (
+                    <div style={{ margin: '6px 0 14px', padding: 14, border: '1px solid var(--mist-strong)', borderRadius: 12, background: 'var(--surface)' }}>
+                      <p className="subhead">Upload a document</p>
+                      <input ref={docFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: 'none' }}
+                        onChange={e => setUpFile(e.target.files?.[0] ?? null)} />
+                      <div className="field">
+                        <label>File</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => docFileRef.current?.click()}>Choose file</button>
+                          <span className="note" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{upFile ? upFile.name : 'No file chosen'}</span>
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label>Document type</label>
+                        <select className="input" value={upType} onChange={e => { setUpType(e.target.value); setUpExpiry(''); }}>
+                          <option value="">Select type…</option>
+                          {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Visibility</label>
+                        <div style={{ display: 'flex', gap: 18 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                            <input type="radio" name="v2DocVisibility" checked={!upVisible} onChange={() => setUpVisible(false)} /> Internal only
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                            <input type="radio" name="v2DocVisibility" checked={upVisible} onChange={() => setUpVisible(true)} /> Visible to customer
+                          </label>
+                        </div>
+                      </div>
+                      {upShowExpiry && (
+                        <div className="field">
+                          <label>Expiry date (required for {upSelected?.label})</label>
+                          <input type="date" className="input" value={upExpiry} onChange={e => setUpExpiry(e.target.value)} />
+                        </div>
+                      )}
+                      {upErr && <p className="note" style={{ color: 'var(--brick)' }}>{upErr}</p>}
+                      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                        <button className="btn btn-jade btn-sm" disabled={upBusy || !upFile || !upType || (upShowExpiry && !upExpiry)} onClick={() => void submitUpload()}>
+                          <UploadCloud size={14} /> {upBusy ? 'Uploading…' : 'Upload'}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" disabled={upBusy} onClick={() => { setShowUpload(false); setUpErr(null); }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Request a document from the tenant (Flow 6) */}
+                  <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px dashed var(--mist-strong)' }}>
+                    <p className="subhead">Request a document from {contract.tenant.name ?? 'the customer'}</p>
+                    <div className="field">
+                      <input className="input" value={reqLabel} placeholder="e.g. NOC from previous landlord" onChange={e => setReqLabel(e.target.value)} />
+                    </div>
+                    <div className="field">
+                      <input className="input" value={reqNotes} placeholder="Instructions for the customer (optional)" onChange={e => setReqNotes(e.target.value)} />
+                    </div>
+                    {reqErr && <p className="note" style={{ color: 'var(--brick)' }}>{reqErr}</p>}
+                    <button className="btn btn-jade btn-sm" disabled={!reqLabel.trim() || reqBusy} onClick={() => void submitRequest()}>
+                      <Paperclip size={14} /> {reqBusy ? 'Sending…' : 'Send request'}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -1030,18 +1349,60 @@ function DetailsDrawer({
             <div className="sec">
               <div className="sech"><span className="si"><ClipboardList size={16} /></span><span className="st">Clauses &amp; notes</span></div>
               <div className="secb">
-                {contract.customClauses.map((c, i) => (
-                  <div key={i} className="clause">
-                    <span className="cn">{i + 1}</span>
-                    <span className="ct">{c}</span>
-                  </div>
-                ))}
-                {contract.customClauses.length === 0 && <p className="note">No custom clauses on this contract.</p>}
-                {contract.notes && (
-                  <div className="field" style={{ marginTop: 12 }}>
-                    <label>Notes</label>
-                    <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: 'var(--ink-2)' }}>{contract.notes}</div>
-                  </div>
+                {clausesEditable ? (
+                  /* Editable (draft only) — Flow 2 */
+                  <>
+                    {clauseList.map((c, i) => (
+                      <div key={i} className="clause">
+                        <span className="cn">{i + 1}</span>
+                        <span className="ct">{c}</span>
+                        <button type="button" className="mini-btn no" style={{ marginLeft: 'auto' }} onClick={() => setClauseList(prev => prev.filter((_, j) => j !== i))}>
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                      <input
+                        className="input"
+                        value={clauseInput}
+                        placeholder="Type a clause and press Enter"
+                        onChange={e => setClauseInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addClause(); } }}
+                      />
+                      <button type="button" className="btn btn-jade btn-sm" onClick={addClause}>Add</button>
+                    </div>
+                    <div className="field">
+                      <label>Notes</label>
+                      <textarea className="input" value={clauseNotes} placeholder="Any additional notes for this contract…" onChange={e => setClauseNotes(e.target.value)} />
+                    </div>
+                    {clauseErr && <p className="note" style={{ color: 'var(--brick)' }}>{clauseErr}</p>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <button className="btn btn-jade btn-sm" disabled={clauseBusy} onClick={() => void saveClauses()}>
+                        <Check size={14} /> {clauseBusy ? 'Saving…' : 'Save clauses'}
+                      </button>
+                      {clauseSaved && <span className="note" style={{ color: 'var(--jade-deep)', fontWeight: 700 }}>Saved ✓</span>}
+                    </div>
+                  </>
+                ) : (
+                  /* Read-only (issued / active / terminated / expired) */
+                  <>
+                    {contract.customClauses.map((c, i) => (
+                      <div key={i} className="clause">
+                        <span className="cn">{i + 1}</span>
+                        <span className="ct">{c}</span>
+                      </div>
+                    ))}
+                    {contract.customClauses.length === 0 && <p className="note">No custom clauses on this contract.</p>}
+                    {contract.notes && (
+                      <div className="field" style={{ marginTop: 12 }}>
+                        <label>Notes</label>
+                        <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: 'var(--ink-2)' }}>{contract.notes}</div>
+                      </div>
+                    )}
+                    <p className="note" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <BadgeCheck size={12} style={{ color: 'var(--jade-deep)' }} /> Contract sent to customer — clauses are locked.
+                    </p>
+                  </>
                 )}
               </div>
             </div>
@@ -1289,8 +1650,8 @@ function RenewalProposeModal({
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const res = await fetch(`/api/contracts/${contract.id}/renew/propose`, {
-        method: 'POST',
+      const res = await fetch(`/api/contracts/${contract.id}/renewal/propose`, {
+        method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1409,6 +1770,11 @@ export default function ContractV2Page() {
   const [selKey, setSelKey] = useState<StepKey | null>(null);
   const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
   const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | null>(null);
+  // Ejari / DEWA-utility upload (ported from the old page so v2 is self-contained).
+  const ejariInputRef = useRef<HTMLInputElement>(null);
+  const utilityInputRef = useRef<HTMLInputElement>(null);
+  const [ejariUploading, setEjariUploading] = useState(false);
+  const [utilityUploading, setUtilityUploading] = useState(false);
 
   const reload = useCallback(() => {
     if (!params?.id) return;
@@ -1534,8 +1900,39 @@ export default function ContractV2Page() {
       else setLocalState({ status: 'pending' });
     } catch { setLocalState({ status: 'pending' }); }
   };
-  const onUploadEjari = () => {
-    router.push(`${contractsBase}/${contract.id}#ejari-upload`);
+  // Upload a file to GCS/local via presigned URL, then record the document row.
+  async function uploadContractDoc(file: File, displayName: string, keyPrefix: string) {
+    if (!contract) return;
+    const docKey = `${keyPrefix}_${Date.now()}`;
+    const urlRes = await fetch('/api/documents/upload-url', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
+    });
+    if (!urlRes.ok) throw new Error('Failed to get upload URL');
+    const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+    const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+    const putRes = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+    if (!putRes.ok) throw new Error('File upload failed');
+    const docRes = await fetch('/api/documents', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, category: 'property', documentKey: docKey, displayName, fileUrl, mimeType: file.type || 'application/octet-stream', isVisibleToTenant: true }),
+    });
+    if (!docRes.ok) throw new Error('Failed to record document');
+  }
+
+  const onUploadEjari = () => ejariInputRef.current?.click();
+  const onEjariFilePicked = async (file: File) => {
+    setEjariUploading(true);
+    try {
+      await uploadContractDoc(file, 'Ejari', 'ejari');
+      // Register Ejari once the certificate is on file.
+      await fetch(`/api/contracts/${contract.id}/ejari`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ejariStatus: 'registered' }),
+      });
+      void reload();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Ejari upload failed'); }
+    finally { setEjariUploading(false); if (ejariInputRef.current) ejariInputRef.current.value = ''; }
   };
   const onMarkEjari = async () => {
     try {
@@ -1544,8 +1941,14 @@ export default function ContractV2Page() {
       void reload();
     } catch { setLocalState({ ejariStatus: 'registered' }); }
   };
-  const onUploadUtility = () => {
-    router.push(`${contractsBase}/${contract.id}#utility-upload`);
+  const onUploadUtility = () => utilityInputRef.current?.click();
+  const onUtilityFilePicked = async (file: File) => {
+    setUtilityUploading(true);
+    try {
+      await uploadContractDoc(file, 'Utility Proof', 'utility');
+      void reload();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Utility upload failed'); }
+    finally { setUtilityUploading(false); if (utilityInputRef.current) utilityInputRef.current.value = ''; }
   };
   const onMarkUtility = async () => {
     try {
@@ -1569,6 +1972,122 @@ export default function ContractV2Page() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'rejected' }),
     }).then(r => { if (r.ok) void reload(); }).catch(() => {});
+  };
+
+  // ── Flow 1: record payment + update status ──
+  // POST /api/contracts/:id/payments  (mirrors old page addPaymentInstalment)
+  const onRecordPayment = async (body: {
+    description?: string; amount: number; paymentType?: string; paymentMethod?: string;
+    chequeNumber?: string; transactionDate?: string;
+  }) => {
+    const res = await fetch(`/api/contracts/${contract.id}/payments`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
+    void reload();
+  };
+  // PATCH /api/contracts/:id/payments/:paymentId  (mirrors old page updatePaymentStatus)
+  const onUpdatePaymentStatus = async (paymentId: number, chequeStatus: string) => {
+    const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chequeStatus }),
+    });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    void reload();
+  };
+
+  // ── Flow 2: edit clauses ──  PATCH /api/contracts/:id/clauses
+  const onSaveClauses = async (customClauses: string[], notes: string | null) => {
+    const res = await fetch(`/api/contracts/${contract.id}/clauses`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customClauses, notes }),
+    });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    void reload();
+  };
+
+  // ── Flow 3: confirm PDCs ──  PATCH /api/contracts/:id/confirm-pdc
+  const onConfirmPdc = async () => {
+    const res = await fetch(`/api/contracts/${contract.id}/confirm-pdc`, {
+      method: 'PATCH', credentials: 'include',
+    });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    void reload();
+  };
+
+  // ── Flow 4: Ejari reset / redo ──  PATCH /api/contracts/:id/ejari/reset
+  const onRedoEjari = async () => {
+    if (!confirm('Roll the tenancy back to issued and clear the existing Ejari? You will then be able to upload a corrected certificate.')) return;
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/ejari/reset`, { method: 'PATCH', credentials: 'include' });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      void reload();
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to reset Ejari'); }
+  };
+
+  // ── Flow 5: upload KYC / contract document ──
+  // upload-url → PUT → POST /api/documents (mirrors old page uploadDocument payload:
+  // ownerType 'tenancy_contract', ownerId = contract.id, with category/visibility/expiry).
+  const onUploadDoc = async (
+    file: File,
+    meta: { key: string; label: string; category: string },
+    visibleToTenant: boolean,
+    expiryDate: string,
+  ) => {
+    const docKey = `${meta.key}_${Date.now()}`;
+    const urlRes = await fetch('/api/documents/upload-url', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
+    });
+    if (!urlRes.ok) {
+      const b = await urlRes.json().catch(() => ({})) as { message?: string | string[] };
+      throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Error ${urlRes.status}`));
+    }
+    const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+    const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+    const putRes = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+    if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
+    const docBody: Record<string, unknown> = {
+      ownerType: 'tenancy_contract', ownerId: contract.id, category: meta.category,
+      documentKey: docKey, displayName: meta.label, fileUrl,
+      mimeType: file.type || 'application/octet-stream', isVisibleToTenant: visibleToTenant,
+    };
+    if (expiryDate) docBody.expiryDate = expiryDate;
+    const docRes = await fetch('/api/documents', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(docBody),
+    });
+    if (!docRes.ok) {
+      const b = await docRes.json().catch(() => ({})) as { message?: string | string[] };
+      throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Error ${docRes.status}`));
+    }
+    void reload();
+  };
+
+  // ── Flow 6: request a document from the tenant ──  POST /api/documents/request
+  const onRequestDoc = async (label: string, notes: string) => {
+    if (!contract.tenant.id) throw new Error('This contract has no linked customer.');
+    const docKey = label.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_' + Date.now();
+    const res = await fetch('/api/documents/request', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ownerType: 'customer',
+        ownerId: contract.tenant.id,
+        documentKey: docKey,
+        displayName: label,
+        category: 'contract',
+        notes: notes || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({})) as { message?: string | string[] };
+      throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Error ${res.status}`));
+    }
+    void reload();
   };
 
   // Termination response
@@ -1749,6 +2268,14 @@ export default function ContractV2Page() {
             </div>
             <p className="abody">{content.body}</p>
             <div className="action-body">{content.node}</div>
+            {/* Flow 4: Redo Ejari — roll back to issued so a corrected certificate
+                 can be uploaded. Shown on the Ejari step once it is registered and
+                 the workflow has not yet frozen (active / expired / terminated). */}
+            {selStep.key === 'ejari' && derived.ejariStatus === 'registered' && !readOnlyWorkflow && (
+              <button className="ca" style={{ justifySelf: 'start', marginTop: -4, padding: 0, color: 'var(--brick)' }} onClick={() => void onRedoEjari()}>
+                <RotateCcw size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} /> Redo Ejari (reset &amp; re-upload)
+              </button>
+            )}
             {content.timing && (
               <div className="timing"><Clock size={12} /> {content.timing}</div>
             )}
@@ -1779,11 +2306,28 @@ export default function ContractV2Page() {
         kycDocs={kycDocs}
         onApproveDoc={onApproveDoc}
         onRejectDoc={onRejectDoc}
+        onRecordPayment={onRecordPayment}
+        onUpdatePaymentStatus={onUpdatePaymentStatus}
+        onSaveClauses={onSaveClauses}
+        onConfirmPdc={onConfirmPdc}
+        onUploadDoc={onUploadDoc}
+        onRequestDoc={onRequestDoc}
       />
 
       {modal === 'sign' && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
       {modal === 'renew' && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+
+      {/* Hidden file pickers for inline Ejari / DEWA-utility upload (self-contained, no redirect to the old page). */}
+      <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void onEjariFilePicked(f); }} />
+      <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUtilityFilePicked(f); }} />
+      {(ejariUploading || utilityUploading) && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
+          Uploading {ejariUploading ? 'Ejari' : 'utility'} document…
+        </div>
+      )}
 
       <GlobalStyle />
     </div>
