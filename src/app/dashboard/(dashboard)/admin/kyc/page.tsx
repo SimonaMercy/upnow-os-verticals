@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef } from "react";
 import { apiGet, apiPatch } from "@/lib/api";
-import { TeamOversight } from "@/components/admin/TeamOversight";
 import {
   Building2, Wrench, Users, Clock, CheckCircle2, XCircle,
   AlertCircle, RefreshCw, ShieldCheck, FileText, User,
@@ -650,6 +649,250 @@ function TenantContentPanel({ tenant }: { tenant: Tenant }) {
   );
 }
 
+// ─── Team (managers / technicians) types + panels ───────────────────────────
+
+interface ManagerLandlord {
+  rentalProviderId: number; rpName: string;
+  grantedCount: number; permissions: Record<string, boolean>;
+}
+interface ManagerDoc {
+  id: number; documentKey: string; status: string;
+  displayName: string | null; createdAt: string;
+}
+interface ManagerRow {
+  id: number; assetManagerId: number | null; name: string; email: string; status: string;
+  createdAt: string; lastLoginAt: string | null;
+  landlordCount: number; landlords: ManagerLandlord[];
+  uploadedDocs: ManagerDoc[];
+}
+interface TechnicianRow {
+  id: number | null; name: string; email: string | null; status: string;
+  spName: string; createdAt: string;
+}
+
+function permLabel(k: string) {
+  return k.replace("can", "").replace(/([A-Z])/g, " $1").trim();
+}
+function accountBadge(status: string) {
+  const cfg = status === "active"
+    ? { bg: "#dcfce7", fg: "#166534", label: "Active" }
+    : status === "suspended" || status === "deactivated"
+      ? { bg: "#fef2f2", fg: "#b91c1c", label: status }
+      : { bg: "#fef9eb", fg: "#92400e", label: status.replace(/_/g, " ") };
+  return (
+    <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 capitalize shrink-0"
+      style={{ backgroundColor: cfg.bg, color: cfg.fg }}>{cfg.label}</span>
+  );
+}
+
+/** Queue card for managers/technicians — mirrors KycCard's style. */
+function TeamCard({
+  name, email, sub, status, date, selected, onClick,
+}: {
+  name: string; email?: string | null; sub: string; status: string;
+  date: string; selected: boolean; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick}
+      className="w-full text-left px-4 py-3.5 border-b transition-colors"
+      style={{
+        borderColor: "var(--color-base-100)",
+        backgroundColor: selected ? "var(--color-primary-50)" : "#fff",
+        borderLeft: selected ? "3px solid var(--color-primary)" : "3px solid transparent",
+      }}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <span className="text-sm font-semibold truncate" style={{ color: "var(--color-neutral-900)" }}>{name}</span>
+        {accountBadge(status)}
+      </div>
+      {email && <p className="text-xs truncate mb-1" style={{ color: "var(--color-neutral-400)" }}>{email}</p>}
+      <p className="text-xs" style={{ color: "var(--color-primary)" }}>{sub}</p>
+      <p className="text-xs mt-1" style={{ color: "var(--color-neutral-400)" }}>
+        {new Date(date).toLocaleDateString("en-AE")}
+      </p>
+    </button>
+  );
+}
+
+/** Column-2 summary for a selected manager. */
+function ManagerLeftPanel({ m }: { m: ManagerRow }) {
+  return (
+    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
+      <div className="px-3 pt-3 pb-2 shrink-0">
+        <div className="rounded-xl px-3 py-3 text-center" style={{ backgroundColor: "#eef6ff" }}>
+          <p className="text-3xl font-bold leading-none" style={{ color: "#1d4ed8" }}>{m.landlordCount}</p>
+          <p className="text-xs mt-1 font-medium" style={{ color: "#1e40af" }}>
+            Landlord{m.landlordCount !== 1 ? "s" : ""}
+          </p>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wide py-1" style={{ color: "var(--color-neutral-400)" }}>Account</p>
+        {[
+          { label: "Status", value: m.status },
+          { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE") },
+          { label: "Last login", value: m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString("en-AE") : "Never" },
+        ].map(({ label, value }) => (
+          <div key={label} className="rounded-xl p-2.5" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+            <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
+            <p className="text-xs font-semibold capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Column-3 detail for a selected manager — additional info under sections. */
+function ManagerContentPanel({ m }: { m: ManagerRow }) {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto p-4">
+        {/* Header */}
+        <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+            <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{m.name}</h2>
+            {accountBadge(m.status)}
+          </div>
+          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{m.email}</p>
+        </div>
+
+        {/* Section: Account */}
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>Account details</p>
+        <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {[
+            { label: "Role", value: "Asset Manager" },
+            { label: "Landlords managed", value: String(m.landlordCount) },
+            { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE") },
+            { label: "Last login", value: m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("en-AE") : "Never" },
+          ].map(({ label, value }) => (
+            <div key={label} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+              <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
+              <span className="text-xs font-semibold" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Section: Identity documents (optional) */}
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>
+            Identity documents
+          </p>
+          <span className="text-[10px]" style={{ color: "var(--color-neutral-400)" }}>Optional</span>
+        </div>
+        <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {[
+            { key: "emirates_id", label: "Emirates ID" },
+            { key: "passport", label: "Passport" },
+            { key: "visa", label: "UAE Residency Visa" },
+          ].map(({ key, label }) => {
+            const doc = m.uploadedDocs.find((d) => d.documentKey === key);
+            return (
+              <div key={key} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <FileText size={12} style={{ color: doc ? "var(--color-primary)" : "var(--color-neutral-300)" }} />
+                  <span className="text-xs" style={{ color: "var(--color-neutral-600)" }}>{label}</span>
+                </div>
+                {doc ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium capitalize"
+                    style={{ backgroundColor: "#dcfce7", color: "#15803d" }}>
+                    {String(doc.status).toLowerCase()}
+                  </span>
+                ) : (
+                  <span className="text-[10px]" style={{ color: "var(--color-neutral-300)" }}>Not uploaded</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Section: Landlords & permissions */}
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>
+          Landlords &amp; permissions
+        </p>
+        <div className="space-y-2.5">
+          {m.landlords.length === 0 && (
+            <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>Not attached to any landlord yet.</p>
+          )}
+          {m.landlords.map((l) => {
+            const granted = Object.entries(l.permissions).filter(([, v]) => v).map(([k]) => permLabel(k));
+            return (
+              <div key={l.rentalProviderId} className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Building2 size={13} style={{ color: "var(--color-primary)" }} />
+                  <span className="text-sm font-medium" style={{ color: "var(--color-neutral-900)" }}>{l.rpName}</span>
+                  <span className="text-[10px] ml-auto" style={{ color: "var(--color-neutral-400)" }}>
+                    {l.grantedCount} permission{l.grantedCount !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {granted.length === 0
+                    ? <span className="text-[11px]" style={{ color: "#b45309" }}>No permissions granted</span>
+                    : granted.map((p) => (
+                        <span key={p} className="text-[10px] rounded-full px-2 py-0.5"
+                          style={{ backgroundColor: "var(--color-primary-50)", color: "var(--color-primary-dark)", border: "1px solid var(--color-primary-light)" }}>{p}</span>
+                      ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Column-2 summary for a selected technician. */
+function TechnicianLeftPanel({ t }: { t: TechnicianRow }) {
+  return (
+    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
+      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-3 space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wide py-1" style={{ color: "var(--color-neutral-400)" }}>Account</p>
+        {[
+          { label: "Service provider", value: t.spName },
+          { label: "Status", value: t.status },
+          { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE") },
+        ].map(({ label, value }) => (
+          <div key={label} className="rounded-xl p-2.5" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+            <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
+            <p className="text-xs font-semibold capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Column-3 detail for a selected technician. */
+function TechnicianContentPanel({ t }: { t: TechnicianRow }) {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+            <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{t.name}</h2>
+            {accountBadge(t.status)}
+          </div>
+          {t.email && <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{t.email}</p>}
+        </div>
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>Account details</p>
+        <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {[
+            { label: "Role", value: "Technician" },
+            { label: "Service provider", value: t.spName },
+            { label: "Status", value: t.status },
+            { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE") },
+          ].map(({ label, value }) => (
+            <div key={label} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+              <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
+              <span className="text-xs font-semibold capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AdminKycPage() {
@@ -657,6 +900,8 @@ export default function AdminKycPage() {
   const [rps, setRps]         = useState<RentalProvider[]>([]);
   const [sps, setSps]         = useState<ServiceProvider[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [managers, setManagers]       = useState<ManagerRow[]>([]);
+  const [technicians, setTechnicians] = useState<TechnicianRow[]>([]);
   const [loading, setLoading]         = useState(false); // first page of a tab
   const [loadingMore, setLoadingMore] = useState(false); // appending next page
   const [error, setError]             = useState<string | null>(null);
@@ -721,11 +966,11 @@ export default function AdminKycPage() {
         loadPage("rental", 0, true),
         loadPage("service", 0, true),
         loadPage("tenants", 0, true),
-        // Team tabs (managers / technicians) — counts only; the cards render via TeamOversight
-        apiGet<unknown[]>("/admin/team/managers")
-          .then(d => setTotals(p => ({ ...p, managers: Array.isArray(d) ? d.length : 0 }))).catch(() => {}),
-        apiGet<unknown[]>("/admin/team/technicians")
-          .then(d => setTotals(p => ({ ...p, technicians: Array.isArray(d) ? d.length : 0 }))).catch(() => {}),
+        // Team tabs (managers / technicians) — same split-panel pattern as the others
+        apiGet<ManagerRow[]>("/admin/team/managers")
+          .then(d => { const a = Array.isArray(d) ? d : []; setManagers(a); setTotals(p => ({ ...p, managers: a.length })); }).catch(() => {}),
+        apiGet<TechnicianRow[]>("/admin/team/technicians")
+          .then(d => { const a = Array.isArray(d) ? d : []; setTechnicians(a); setTotals(p => ({ ...p, technicians: a.length })); }).catch(() => {}),
       ]);
     } finally {
       setLoading(false);
@@ -800,11 +1045,15 @@ export default function AdminKycPage() {
   const selectedRp     = selectedId !== null && tab === "rental"  ? rps.find((r)  => r.id === selectedId) ?? null : null;
   const selectedSp     = selectedId !== null && tab === "service" ? sps.find((s)  => s.id === selectedId) ?? null : null;
   const selectedTenant = selectedId !== null && tab === "tenants" ? tenants.find((t) => t.id === selectedId) ?? null : null;
-  const hasSelection   = !!(selectedRp || selectedSp || selectedTenant);
+  const selectedManager    = selectedId !== null && tab === "managers"    ? managers.find((m) => m.id === selectedId) ?? null : null;
+  const selectedTechnician = selectedId !== null && tab === "technicians" ? technicians.find((t) => t.id === selectedId) ?? null : null;
+  const hasSelection   = !!(selectedRp || selectedSp || selectedTenant || selectedManager || selectedTechnician);
 
-  const visibleList = tab === "rental" ? filteredRps : tab === "service" ? filteredSps : filteredTenants;
+  const visibleList = tab === "rental" ? filteredRps : tab === "service" ? filteredSps
+    : tab === "tenants" ? filteredTenants : tab === "managers" ? managers : technicians;
   // Raw loaded count (pre status-filter) — drives the lazy-load sentinel/footer.
-  const loadedCount = tab === "rental" ? rps.length : tab === "service" ? sps.length : tenants.length;
+  const loadedCount = tab === "rental" ? rps.length : tab === "service" ? sps.length
+    : tab === "tenants" ? tenants.length : tab === "managers" ? managers.length : technicians.length;
 
   return (
     <div className="flex flex-col h-full" style={{ padding: "12px 20px 16px" }}>
@@ -875,16 +1124,8 @@ export default function AdminKycPage() {
       {/* ── Filters + split panel ─────────────────────────── */}
       <div className="flex flex-col flex-1 min-h-0 mt-2">
 
-        {/* Managers / Technicians — delegated sub-accounts (no KYC). Profile
-            preview + which manager is attached to which rental provider. */}
-        {(tab === "managers" || tab === "technicians") && (
-          <div className="flex-1 overflow-y-auto mt-1 pr-1">
-            <TeamOversight kind={tab} />
-          </div>
-        )}
-
-        {/* Status chips — always available; list stays visible alongside detail */}
-        {tab !== "tenants" && tab !== "managers" && tab !== "technicians" && (
+        {/* Status chips — compliance filter applies to RP / SP only */}
+        {(tab === "rental" || tab === "service") && (
           <div className="flex flex-wrap gap-2 mb-2 flex-shrink-0">
             {([
               { id: "all"             as StatusFilter, label: "All" },
@@ -903,20 +1144,20 @@ export default function AdminKycPage() {
           </div>
         )}
 
-        {loading && tab !== "managers" && tab !== "technicians" && (
+        {loading && (
           <div className="rounded-2xl p-8 bg-white text-center text-sm flex-shrink-0"
             style={{ color: "var(--color-neutral-400)" }}>Loading…</div>
         )}
 
-        {tab !== "managers" && tab !== "technicians" && !loading && visibleList.length === 0 && (
+        {!loading && visibleList.length === 0 && (
           <div className="flex flex-col items-center justify-center flex-1 gap-2"
             style={{ color: "var(--color-neutral-400)" }}>
             <ShieldCheck size={28} strokeWidth={1.5} />
-            <p className="text-sm">No records match this filter.</p>
+            <p className="text-sm">No records in this tab.</p>
           </div>
         )}
 
-        {tab !== "managers" && tab !== "technicians" && !loading && visibleList.length > 0 && (
+        {!loading && visibleList.length > 0 && (
           <div className="flex rounded-2xl overflow-hidden border flex-1 min-h-0"
             style={{ borderColor: "var(--color-base-200)", boxShadow: "var(--shadow-sm)" }}>
 
@@ -957,6 +1198,23 @@ export default function AdminKycPage() {
                     onClick={() => setSelectedId(t.id)}
                   />
                 ))}
+                {tab === "managers" && managers.map((m) => (
+                  <TeamCard key={m.id}
+                    name={m.name} email={m.email}
+                    sub={`${m.landlordCount} landlord${m.landlordCount !== 1 ? "s" : ""}`}
+                    status={m.status} date={m.createdAt}
+                    selected={selectedId === m.id}
+                    onClick={() => setSelectedId(m.id)}
+                  />
+                ))}
+                {tab === "technicians" && technicians.map((t, i) => (
+                  <TeamCard key={t.id ?? i}
+                    name={t.name} email={t.email}
+                    sub={t.spName} status={t.status} date={t.createdAt}
+                    selected={selectedId === t.id}
+                    onClick={() => t.id != null && setSelectedId(t.id)}
+                  />
+                ))}
 
                 {/* Infinite-scroll sentinel + status footer */}
                 {loadedCount < totals[tab] && (
@@ -967,7 +1225,8 @@ export default function AdminKycPage() {
                 )}
                 {loadedCount > 0 && loadedCount >= totals[tab] && (
                   <p className="px-4 py-3 text-center text-xs" style={{ color: "var(--color-neutral-300)" }}>
-                    {totals[tab]} {tab === "tenants" ? "customers" : tab === "rental" ? "rental providers" : "service providers"}
+                    {totals[tab]} {tab === "tenants" ? "customers" : tab === "rental" ? "rental providers"
+                      : tab === "service" ? "service providers" : tab === "managers" ? "managers" : "technicians"}
                   </p>
                 )}
               </div>
@@ -983,6 +1242,10 @@ export default function AdminKycPage() {
                   <SpLeftPanel sp={selectedSp} />
                 ) : selectedTenant ? (
                   <TenantLeftPanel tenant={selectedTenant} />
+                ) : selectedManager ? (
+                  <ManagerLeftPanel m={selectedManager} />
+                ) : selectedTechnician ? (
+                  <TechnicianLeftPanel t={selectedTechnician} />
                 ) : null}
               </div>
             )}
@@ -1007,6 +1270,10 @@ export default function AdminKycPage() {
                 <SpContentPanel sp={selectedSp} />
               ) : selectedTenant ? (
                 <TenantContentPanel tenant={selectedTenant} />
+              ) : selectedManager ? (
+                <ManagerContentPanel m={selectedManager} />
+              ) : selectedTechnician ? (
+                <TechnicianContentPanel t={selectedTechnician} />
               ) : null}
             </div>
           </div>

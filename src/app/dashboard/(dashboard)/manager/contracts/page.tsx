@@ -11,10 +11,11 @@
  *     upcoming_renewal computed bucket)
  *   - Filter row: search across ref/customer/email/unit/property,
  *     property selector, reset, results count
- *   - Single table card. Each row is a Link that navigates to the v2
- *     Quest layout at /rental-provider/dashboard/contracts/[id]/v2,
- *     since v2 is the canonical detail page; the design's inline
- *     row-body is unused here so the page doesn't duplicate v2.
+ *   - Single table card. Each row is a Link that navigates to the
+ *     manager contract detail at /dashboard/manager/contracts/[id],
+ *     which re-exports the canonical landlord v2 Quest layout (scoped by
+ *     the now-manager-aware backend); the design's inline row-body is
+ *     unused here so the page doesn't duplicate v2.
  *   - Pagination (10 per page)
  *
  * Data fetch and the canonical `displayStatusOf` derivation are unchanged
@@ -26,6 +27,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Search, X, FileText, ChevronLeft, ChevronRight,
   Bell, Download, Clock, RotateCcw, Shield, Coins, Lock,
@@ -176,10 +178,11 @@ function Row({
   const soon = isExpiringSoon(c, now, in60);
   const d = soon ? daysTo(c.endDate, now) : null;
   const isRenewal = c.contractType === 'renewal';
-  // Manager view is read-only: rows display the landlord's contract summary but
-  // don't open the RP-only v2 detail page (managers can't access /rental-provider).
+  // The whole row links to the manager contract detail. That detail page reuses
+  // the landlord v2 page (re-exported under /dashboard/manager/contracts/[id])
+  // and is scoped by the now-manager-aware backend contract endpoints.
   return (
-    <div className="row">
+    <Link href={`/dashboard/manager/contracts/${c.id}/v2`} className="row">
       <div className="col-ref">
         <div className="av">{initials(c.tenant.name)}</div>
         <div className="info">
@@ -213,9 +216,9 @@ function Row({
       </div>
 
       <div className="col-chev">
-        <span className="cv" />
+        <span className="cv"><ChevronRight size={16} /></span>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -760,6 +763,7 @@ function GlobalStyle() {
       .orders-page .row {
         padding: 15px 22px; border-bottom: 1px solid var(--line-2);
         transition: background .15s; cursor: pointer; min-height: 72px;
+        text-decoration: none; color: inherit;
       }
       .orders-page .row:last-child { border-bottom: 0; }
       .orders-page .row:hover { background: var(--paper); }

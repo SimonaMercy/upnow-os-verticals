@@ -29,7 +29,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
@@ -1363,6 +1363,14 @@ function RenewalProposeModal({
 export default function ContractV2Page() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  // Context-aware navigation base: this page is reused by the manager route
+  // (/dashboard/manager/contracts/[id]) via re-export. When loaded there, all
+  // internal contract links must stay within the manager area instead of the
+  // landlord (rental-provider) area. Backend endpoints are already role-aware.
+  const pathname = usePathname();
+  const contractsBase = pathname.startsWith('/dashboard/manager')
+    ? '/dashboard/manager/contracts'
+    : '/rental-provider/dashboard/contracts';
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string }[]>([]);
   const [moveInInsp, setMoveInInsp] = useState<MoveInInsp | null>(null);
@@ -1497,7 +1505,7 @@ export default function ContractV2Page() {
     } catch { setLocalState({ status: 'pending' }); }
   };
   const onUploadEjari = () => {
-    router.push(`/rental-provider/dashboard/contracts/${contract.id}#ejari-upload`);
+    router.push(`${contractsBase}/${contract.id}#ejari-upload`);
   };
   const onMarkEjari = async () => {
     try {
@@ -1507,7 +1515,7 @@ export default function ContractV2Page() {
     } catch { setLocalState({ ejariStatus: 'registered' }); }
   };
   const onUploadUtility = () => {
-    router.push(`/rental-provider/dashboard/contracts/${contract.id}#utility-upload`);
+    router.push(`${contractsBase}/${contract.id}#utility-upload`);
   };
   const onMarkUtility = async () => {
     try {
@@ -1563,9 +1571,9 @@ export default function ContractV2Page() {
     openDrawer: setDrawerTab,
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onRevertToDraft,
-    signActionUrl: `/rental-provider/dashboard/contracts/${contract.id}`,
-    inspectionUrl: `/rental-provider/dashboard/contracts/${contract.id}/inspection?type=move_in`,
-    printUrl: `/rental-provider/dashboard/contracts/${contract.id}/print`,
+    signActionUrl: `${contractsBase}/${contract.id}`,
+    inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
+    printUrl: `${contractsBase}/${contract.id}/print`,
     readOnlyWorkflow,
   };
 
@@ -1577,7 +1585,7 @@ export default function ContractV2Page() {
       body: 'This draft is archived. Browse other listings to find a fresh unit for the customer.',
       timing: null,
       node: (
-        <Link href="/rental-provider/dashboard/contracts" className="btn btn-jade">
+        <Link href={contractsBase} className="btn btn-jade">
           <ChevronRight size={14} /> Back to contracts
         </Link>
       ),
@@ -1600,11 +1608,11 @@ export default function ContractV2Page() {
             </div>
           )}
           {contract.successorProposal ? (
-            <Link href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
+            <Link href={`${contractsBase}/${contract.successorProposal.id}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={15} /> View new proposal · CID-{contract.successorProposal.id}
             </Link>
           ) : contract.parentContractId ? (
-            <Link href={`/rental-provider/dashboard/contracts/${contract.parentContractId}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
+            <Link href={`${contractsBase}/${contract.parentContractId}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={15} /> Open original lease to re-propose
             </Link>
           ) : (
@@ -1670,10 +1678,10 @@ export default function ContractV2Page() {
             </div>
           </div>
           <div className="rhs">
-            <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
+            <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Eye size={14} /> Preview
             </Link>
-            <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
+            <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Download size={14} /> PDF
             </Link>
           </div>

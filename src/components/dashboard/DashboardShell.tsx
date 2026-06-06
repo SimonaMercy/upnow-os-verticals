@@ -99,8 +99,16 @@ const NAV: Record<UserRole, NavItem[]> = {
   manager: [
     { label: 'Overview',    href: '/dashboard/manager',            icon: LayoutDashboard },
     { label: 'Properties',  href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
+    { section: 'Leasing' },
     { label: 'Leads',       href: '/dashboard/manager/viewings',   icon: TrendingUp, requirePerm: 'canManageViewings' },
     { label: 'Contracts',   href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
+    { label: 'Customers',   href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
+    { section: 'Finance' },
+    { label: 'Receivables', href: '/dashboard/manager/receivables', icon: Receipt, requirePerm: 'canManageCollections' },
+    { label: 'Deposits',    href: '/dashboard/manager/deposits',   icon: Wallet,  requirePerm: 'canManageDeposits' },
+    { label: 'Reports',     href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
+    { section: 'Account' },
+    { label: 'My Documents', href: '/dashboard/manager/documents', icon: FileText },
   ],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
@@ -159,12 +167,23 @@ function Sidebar({
 }) {
   const managerPerms = useManagerNavPerms(role);
   const rawNav = NAV[role] ?? [];
-  // For managers: hide nav items whose requirePerm flag isn't granted
+  // For managers: hide nav items whose requirePerm flag isn't granted, then drop
+  // any section header left with no visible links under it (so a landlord that
+  // withholds, say, all Finance permissions doesn't leave an empty "Finance").
   const navItems = role === 'manager'
-    ? rawNav.filter(item => {
-        if (!('requirePerm' in item)) return true;
-        return managerPerms[(item as { requirePerm?: string }).requirePerm ?? ''] === true;
-      })
+    ? rawNav
+        .filter(item => {
+          if (!('requirePerm' in item)) return true;
+          return managerPerms[(item as { requirePerm?: string }).requirePerm ?? ''] === true;
+        })
+        .filter((item, i, arr) => {
+          if (!('section' in item)) return true;
+          for (let j = i + 1; j < arr.length; j++) {
+            if ('section' in arr[j]) return false;   // next section → this one is empty
+            if ('label' in arr[j]) return true;      // a visible link → keep header
+          }
+          return false;                              // trailing empty section
+        })
     : rawNav;
   const { user, signOut } = useAuth();
 
