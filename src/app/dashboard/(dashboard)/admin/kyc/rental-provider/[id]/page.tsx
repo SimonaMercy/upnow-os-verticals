@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { openDocsTogether } from "@/lib/openDocsTogether";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -512,7 +513,7 @@ export default function RpKycDetailPage() {
               </h2>
               {detail.uploadedDocs.length > 0 && (
                 <button
-                  onClick={() => detail.uploadedDocs.forEach((d) => d.fileUrl && window.open(d.fileUrl, "_blank", "noopener"))}
+                  onClick={() => openDocsTogether(detail.uploadedDocs)}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 flex-shrink-0"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />

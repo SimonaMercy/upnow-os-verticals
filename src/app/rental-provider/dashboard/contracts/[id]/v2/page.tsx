@@ -31,6 +31,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { openDocsTogether } from '@/lib/openDocsTogether';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
@@ -976,7 +977,7 @@ function DetailsDrawer({
               { key: 'deposit',  label: 'Deposit documents',  items: all.filter(d => d.ownerType === 'security_deposit') },
               { key: 'other',    label: 'Other documents',    items: all.filter(d => !['customer', 'tenant', 'tenancy_contract', 'security_deposit'].includes(d.ownerType)) },
             ].filter(g => g.items.length);
-            const openAll = () => all.forEach(d => d.fileUrl && window.open(d.fileUrl, '_blank', 'noopener'));
+            const openAll = () => openDocsTogether(all);
             return (
               <div className="sec">
                 <div className="sech">
