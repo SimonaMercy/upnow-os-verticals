@@ -30,7 +30,7 @@
 
   background: var(--paper);
   color: var(--ink);
-  font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  font-family: inherit;
   font-size: 14px;
   line-height: 1.5;
   font-weight: 450;
@@ -48,7 +48,8 @@
 .heroLeft { flex: 1; min-width: 280px; }
 .heroEyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--green-d); font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .heroTitle { margin: 0; font-size: 36px; font-weight: 700; letter-spacing: -.022em; line-height: 1.1; color: var(--ink); }
-.serif { font-family: 'Instrument Serif', 'Times New Roman', serif; font-weight: 400; font-style: italic; color: var(--green-d); }
+/* General portal font (Manrope) — not a serif — for consistency across the app. */
+.serif { font-family: inherit; font-weight: 700; font-style: normal; color: var(--green-d); }
 .heroDesc { margin: 10px 0 0; font-size: 15px; color: var(--ink-3); max-width: 54ch; line-height: 1.55; }
 .heroRight { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 

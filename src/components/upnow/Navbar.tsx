@@ -69,7 +69,13 @@ export function Navbar() {
         style={{ boxShadow: 'var(--shadow-sm)', height: 64 }}
       >
         <div className="container h-full flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold" style={{ color: 'var(--primary)' }}>
+          <Link href="/" className="flex items-center gap-2.5 text-xl font-bold" style={{ color: 'var(--primary)' }}>
+            <span style={{
+              width: 24, height: 24, borderRadius: 8, flexShrink: 0,
+              background: 'linear-gradient(135deg, #1f8a6e 0%, #34c79f 100%)',
+              color: '#fff', display: 'grid', placeItems: 'center',
+              fontSize: 13, fontWeight: 800,
+            }}>U</span>
             UpNow
           </Link>
 

@@ -12,7 +12,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   color: #14201c;
-  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 450;
   transition: padding 0.2s ease;
@@ -132,7 +132,7 @@
 .topbar {
   background: #fff;
   border-bottom: 1px solid #e8eae3;
-  font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  font-family: inherit;
 }
 
 /* Main canvas — paper background to blend with sidebar */

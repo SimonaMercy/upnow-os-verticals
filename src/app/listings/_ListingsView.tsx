@@ -13,6 +13,7 @@ const BACKEND_HOST = BACKEND.replace(/\/api$/, '');
 /* ── Shared location types ───────────────────────────────────── */
 export interface CountryItem { id: number; code: string; nameEn: string; }
 export interface EmirateItem { id: number; nameEn: string; slug: string; }
+export interface LocationOption { label: string; kind: 'community' | 'subCommunity' | 'building' | 'city'; }
 
 /* ── Types ───────────────────────────────────────────────────── */
 interface PublicUnit {
@@ -120,11 +121,23 @@ export default async function ListingsView({ country, emirate, searchParams }: P
   const page         = parseInt(sp.page ?? '1', 10);
 
   /* Fetch locations + listings in parallel */
-  const [countriesList, emiratesList, listingsData] = await Promise.all([
+  const [countriesList, emiratesList, locationOptions, listingsData] = await Promise.all([
     fetch(`${BACKEND}/locations/countries`, { cache: 'no-store' })
       .then(r => r.ok ? r.json() : []).catch(() => []) as Promise<CountryItem[]>,
     fetch(`${BACKEND}/locations/emirates`, { cache: 'no-store' })
       .then(r => r.ok ? r.json() : []).catch(() => []) as Promise<EmirateItem[]>,
+    (async () => {
+      const lq = new URLSearchParams({
+        ...(category && { category }),
+        ...(country  && { country }),
+        ...(emirate  && { emirate }),
+      });
+      try {
+        const res = await fetch(`${BACKEND}/listings/locations?${lq}`, { cache: 'no-store' });
+        if (res.ok) return await res.json() as LocationOption[];
+      } catch { /* fall back to empty pick-list */ }
+      return [] as LocationOption[];
+    })(),
     (async () => {
       const qs = new URLSearchParams({
         page: String(page), limit: '24', sort,
@@ -228,6 +241,7 @@ export default async function ListingsView({ country, emirate, searchParams }: P
               country={country}
               emirate={emirate}
               emiratesList={emiratesList}
+              locationOptions={locationOptions}
             />
           </Suspense>
         </div>

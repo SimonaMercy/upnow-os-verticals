@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Plus, Trash2, Upload, Download, CheckCircle2,
   AlertCircle, Loader2, FileSpreadsheet, ChevronDown, ChevronUp,
-  ImagePlus, X, Camera, Copy, MapPin,
+  ImagePlus, X, Camera, Copy, MapPin, Building2,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import {
@@ -45,9 +45,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /* ─── types ───────────────────────────────────────────────────────────────── */
-interface Country   { id: number; nameEn: string; code: string }
-interface Emirate   { id: number; nameEn: string }
-interface Community { id: number; nameEn: string }
+interface Country      { id: number; nameEn: string; code: string }
+interface Emirate      { id: number; nameEn: string }
+interface Community    { id: number; nameEn: string }
+interface SubCommunity { id: number; nameEn: string }
 interface WizardProperty {
   id: number; buildingName: string; spaceCategory: string; fullAddress: string | null;
   emirateId: number | null; communityId: number | null;
@@ -97,8 +98,8 @@ function emptyRow(expanded = true): UnitRow {
 
 const EMPTY_PROP: PropertyFormData = {
   buildingName: '', spaceCategory: '',
-  countryId: null, emirateId: null, communityId: null,
-  countryName: '', emirateName: '', communityName: '',
+  countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
+  countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
@@ -107,17 +108,17 @@ const EMPTY_PROP: PropertyFormData = {
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────────── */
 const CSV_TEMPLATE = [
-  'building_name,category,emirate,address,unit_name,unit_type,unit_number,floor,bedrooms,bathrooms,size_sqm,annual_rent_aed,security_deposit_aed,admin_fee_aed,ejari_fee_aed,commission_aed,furnishing,view,min_lease_months,notice_period_days,rent_escalation_pct,description',
-  'Marina Heights,residential,Dubai,Dubai Marina Building 5,Sea View Suite,apartment,101,1,2,1,1200,120000,6000,6000,220,6000,Unfurnished,Sea View,12,60,,Corner unit with balcony',
-  'Marina Heights,residential,Dubai,Dubai Marina Building 5,,apartment,102,1,1,1,800,85000,4250,4250,220,4250,Semi-Furnished,,12,60,,',
-  'Business Bay Tower,commercial,Dubai,Business Bay,,office_fitted,Office-5A,5,,,1500,200000,10000,10000,,10000,,City View,12,90,5,Fitted office space',
-  'Dubai Industrial City,industrial,Dubai,DIC Phase 2,,warehouse,WH-01,G,,,25000,350000,17500,17500,,17500,,Road View,24,90,5,Climate-controlled warehouse with dock',
-  'Creative Hub JLT,workspaces,Dubai,JLT Cluster X,,coworking_desk,Desk-22,3,,,80,18000,900,900,,900,,City View,1,30,,Hot desk in vibrant coworking space',
-  'Grand Ballroom Palace,venues,Dubai,Al Quoz,,event_hall,Main Hall,G,,,8000,500000,25000,25000,,25000,,,,0,14,,Premier event hall with full AV setup',
+  'building_name,category,emirate,community,address,unit_name,unit_type,unit_number,floor,bedrooms,bathrooms,size_sqm,annual_rent_aed,security_deposit_aed,admin_fee_aed,ejari_fee_aed,commission_aed,furnishing,view,min_lease_months,notice_period_days,rent_escalation_pct,description',
+  'Marina Heights,residential,Dubai,Dubai Marina,Dubai Marina Building 5,Sea View Suite,apartment,101,1,2,1,1200,120000,6000,6000,220,6000,Unfurnished,Sea View,12,60,,Corner unit with balcony',
+  'Marina Heights,residential,Dubai,Dubai Marina,Dubai Marina Building 5,,apartment,102,1,1,1,800,85000,4250,4250,220,4250,Semi-Furnished,,12,60,,',
+  'Business Bay Tower,commercial,Dubai,Business Bay,Business Bay,,office_fitted,Office-5A,5,,,1500,200000,10000,10000,,10000,,City View,12,90,5,Fitted office space',
+  'Dubai Industrial City,industrial,Dubai,Dubai Industrial City,DIC Phase 2,,warehouse,WH-01,G,,,25000,350000,17500,17500,,17500,,Road View,24,90,5,Climate-controlled warehouse with dock',
+  'Creative Hub JLT,workspaces,Dubai,Jumeirah Lake Towers,JLT Cluster X,,coworking_desk,Desk-22,3,,,80,18000,900,900,,900,,City View,1,30,,Hot desk in vibrant coworking space',
+  'Grand Ballroom Palace,venues,Dubai,Al Quoz,Al Quoz,,event_hall,Main Hall,G,,,8000,500000,25000,25000,,25000,,,,0,14,,Premier event hall with full AV setup',
 ].join('\n');
 
 interface CsvRow {
-  building_name: string; category: string; emirate: string; address: string;
+  building_name: string; category: string; emirate: string; community: string; address: string;
   unit_name: string; unit_type: string; unit_number: string; floor: string;
   bedrooms: string; bathrooms: string; size_sqm: string;
   annual_rent_aed: string;
@@ -126,6 +127,8 @@ interface CsvRow {
   furnishing: string; view: string;
   min_lease_months: string; notice_period_days: string; rent_escalation_pct: string;
   description: string;
+  // Airtable / legacy field aliases
+  dewa_premises_no?: string; premise_number?: string;
   _error?: string;
 }
 
@@ -191,6 +194,16 @@ function unitLabel(r: UnitRow) {
 /* ══════════════════════════════════════════════════════════════════════════ */
 export default function AddListingPage() {
   const router = useRouter();
+  // Manager listing on behalf of a landlord: ?rp=<id> scopes the new property
+  // to that landlord. Absent for normal RP owners (they list under themselves).
+  const actingRpId = typeof window !== 'undefined'
+    ? (new URLSearchParams(window.location.search).get('rp') ?? null)
+    : null;
+  // Where "back" / "done" returns to: a manager acting on behalf goes to their
+  // own portal; an RP owner goes to their portfolio.
+  const backHref = actingRpId
+    ? `/dashboard/manager/properties?rp=${actingRpId}`
+    : '/rental-provider/dashboard/portfolio';
   type Mode = 'new' | 'import';
   const [mode, setMode] = useState<Mode>('new');
 
@@ -200,8 +213,12 @@ export default function AddListingPage() {
   const [countries, setCountries]     = useState<Country[]>([]);
   const [emirates, setEmirates]       = useState<Emirate[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
+  const [subCommunities, setSubCommunities] = useState<SubCommunity[]>([]);
   const [loadingComms, setLoadingComms] = useState(false);
+  const [loadingSubs, setLoadingSubs] = useState(false);
+  // loadCommsFor holds an emirateId — communities loaded directly from emirate (city tier is internal-only)
   const [loadCommsFor, setLoadCommsFor] = useState<number | null>(null);
+  const [loadSubsFor, setLoadSubsFor] = useState<number | null>(null);
   const defaultCountryIdRef = useRef<number | null>(null);
   const [autoFilled, setAutoFilled]   = useState(false);
   const [showMap, setShowMap]         = useState(false);
@@ -234,6 +251,15 @@ export default function AddListingPage() {
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0 });
   const [importErrs, setImportErrs]     = useState<string[]>([]);
 
+  // When a manager opens this with ?rp=<id>, resolve the landlord name for the banner
+  const [actingRpName, setActingRpName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!actingRpId) return;
+    apiGet<{ rentalProviderId: number; rpName: string }[]>('/manager/my-rps')
+      .then(rps => setActingRpName(rps.find(r => r.rentalProviderId === Number(actingRpId))?.rpName ?? `Landlord #${actingRpId}`))
+      .catch(() => setActingRpName(`Landlord #${actingRpId}`));
+  }, [actingRpId]);
+
   useEffect(() => {
     apiGet<WizardProperty[]>('/properties').then(setExistingProps).catch(() => {});
     // Load countries then default to UAE
@@ -255,30 +281,76 @@ export default function AddListingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pf.countryId]);
 
+  // Community cascade — emirate-based (UAE city = emirate, so we skip the city tier in the UI)
   useEffect(() => {
     if (!loadCommsFor) { setCommunities([]); return; }
     setLoadingComms(true);
     apiGet<Community[]>(`/locations/emirates/${loadCommsFor}/communities`)
       .then(comms => {
         setCommunities(comms);
+        setPf(prev => {
+          if (prev.communityId) {
+            const match = comms.find(c => c.id === prev.communityId);
+            if (match) {
+              setLoadSubsFor(prev.communityId);
+              if (!prev.communityName) return { ...prev, communityName: match.nameEn };
+            }
+          }
+          return prev;
+        });
         if (pendingCommunityRef.current) {
-          const pending  = pendingCommunityRef.current.toLowerCase().trim();
-          const tokenize = (s: string) => s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
-          const pTokens  = tokenize(pending);
+          const pending   = pendingCommunityRef.current.toLowerCase().trim();
+          const normalize = (s: string) => s.replace(/[^a-z0-9]/g, '');
+          const tokenize  = (s: string) => s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
+          const pendNorm  = normalize(pending);
+          const pTokens   = tokenize(pending);
           let bestScore = 0; let bestMatch: Community | null = null;
           for (const c of comms) {
-            const dbT   = tokenize(c.nameEn.toLowerCase());
-            const score = pTokens.filter(t => dbT.includes(t)).length / Math.max(pTokens.length, dbT.length);
+            const dbLow  = c.nameEn.toLowerCase();
+            const dbNorm = normalize(dbLow);
+            const dbT    = tokenize(dbLow);
+            let score: number;
+            if (dbNorm === pendNorm) {
+              score = 1;
+            } else if (pendNorm.length >= 4 && (pendNorm.includes(dbNorm) || dbNorm.includes(pendNorm))) {
+              // substring containment — handles "businessbay" ↔ "businessbayresidences"
+              score = 0.8;
+            } else {
+              // token overlap with partial matching ("muweila" matches "muweilah")
+              score = pTokens.filter(t => dbT.some(dt => dt.includes(t) || t.includes(dt))).length /
+                      Math.max(pTokens.length, dbT.length);
+            }
             if (score > bestScore) { bestScore = score; bestMatch = c; }
           }
-          if (bestMatch && bestScore >= 0.5)
+          if (bestMatch && bestScore >= 0.4) {
             setPf(prev => ({ ...prev, communityId: bestMatch!.id, communityName: bestMatch!.nameEn }));
+            setLoadSubsFor(bestMatch!.id);
+          }
           pendingCommunityRef.current = '';
         }
       })
       .catch(() => {})
       .finally(() => setLoadingComms(false));
   }, [loadCommsFor]);
+
+  // Sub-Community cascade
+  useEffect(() => {
+    if (!loadSubsFor) { setSubCommunities([]); return; }
+    setLoadingSubs(true);
+    apiGet<SubCommunity[]>(`/locations/communities/${loadSubsFor}/sub-communities`)
+      .then(subs => {
+        setSubCommunities(subs);
+        setPf(prev => {
+          if (prev.subCommunityId && !prev.subCommunityName) {
+            const match = subs.find(s => s.id === prev.subCommunityId);
+            if (match) return { ...prev, subCommunityName: match.nameEn };
+          }
+          return prev;
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoadingSubs(false));
+  }, [loadSubsFor]);
 
   const updP = <K extends keyof PropertyFormData>(k: K, v: PropertyFormData[K]) => {
     setPf(prev => ({ ...prev, [k]: v }));
@@ -339,6 +411,9 @@ export default function AddListingPage() {
       }));
     }
 
+    // Load communities directly from emirate (city tier not needed for UAE).
+    setLoadSubsFor(null);
+    setSubCommunities([]);
     setLoadCommsFor(null);
     setTimeout(() => setLoadCommsFor(newEmirateId), 0);
     setAutoFilled(true);
@@ -456,11 +531,13 @@ export default function AddListingPage() {
       if (!selectedPropId) {
         const parts = [pf.street, pf.communityName, pf.emirateName].filter(Boolean);
         const created = await apiPost<WizardProperty>('/properties', {
+          ...(actingRpId ? { rentalProviderId: Number(actingRpId) } : {}),
           buildingName: pf.buildingName,
           spaceCategory: pf.spaceCategory,
           fullAddress: parts.join(', ') || undefined,
           emirateId: pf.emirateId ?? undefined,
           communityId: pf.communityId ?? undefined,
+          subCommunityId: pf.subCommunityId ?? undefined,
           latitude: pf.latitude ?? undefined,
           longitude: pf.longitude ?? undefined,
           numberOfFloors: pf.numberOfFloors || undefined,
@@ -573,16 +650,56 @@ export default function AddListingPage() {
     setImporting(true); setImportErrs([]);
     setImportProgress({ done: 0, total: valid.length });
     const propMap = new Map<string, number>();
+    // Cache communities per emirate to avoid redundant API calls
+    const communityCache = new Map<number, Community[]>();
     const errs: string[] = [];
+
+    const resolveEmirateId = (name: string) =>
+      emirates.find(e => e.nameEn.toLowerCase() === name.toLowerCase())?.id ?? null;
+
+    const resolveCommunityId = async (emirateId: number, communityName: string): Promise<number | null> => {
+      if (!communityName.trim()) return null;
+      let comms = communityCache.get(emirateId);
+      if (!comms) {
+        try {
+          comms = await apiGet<Community[]>(`/locations/emirates/${emirateId}/communities`);
+          communityCache.set(emirateId, comms);
+        } catch { return null; }
+      }
+      const needle   = communityName.toLowerCase().trim();
+      const normalize = (s: string) => s.replace(/[^a-z0-9]/g, '');
+      const needleN   = normalize(needle);
+      let best: Community | null = null; let bestScore = 0;
+      for (const c of comms) {
+        const dbN = normalize(c.nameEn.toLowerCase());
+        let score = 0;
+        if (dbN === needleN)                                             score = 1;
+        else if (needleN.length >= 4 && (dbN.includes(needleN) || needleN.includes(dbN))) score = 0.8;
+        else {
+          const toks = needle.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
+          const dbT  = c.nameEn.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
+          score = toks.filter(t => dbT.some(dt => dt.includes(t) || t.includes(dt))).length /
+                  Math.max(toks.length, dbT.length);
+        }
+        if (score > bestScore) { bestScore = score; best = c; }
+      }
+      return (best && bestScore >= 0.4) ? best.id : null;
+    };
+
     for (const row of valid) {
       if (!propMap.has(row.building_name)) {
-        const emirate = emirates.find(e => e.nameEn.toLowerCase() === (row.emirate ?? '').toLowerCase());
+        const emirateId = resolveEmirateId(row.emirate ?? '');
+        const communityId = emirateId && row.community
+          ? await resolveCommunityId(emirateId, row.community)
+          : null;
         try {
           const p = await apiPost<WizardProperty>('/properties', {
+            ...(actingRpId ? { rentalProviderId: Number(actingRpId) } : {}),
             buildingName: row.building_name || undefined,
             spaceCategory: row.category || 'residential',
             fullAddress: row.address || undefined,
-            emirateId: emirate?.id,
+            emirateId: emirateId ?? undefined,
+            communityId: communityId ?? undefined,
           });
           propMap.set(row.building_name, p.id);
         } catch (e) {
@@ -666,7 +783,7 @@ export default function AddListingPage() {
       {/* ── Top bar ── */}
       <div className="bg-white border-b border-[#e8e6e0] px-6 py-4 flex items-center gap-4">
         <button
-          onClick={() => router.push('/rental-provider/dashboard/portfolio')}
+          onClick={() => router.push(backHref)}
           className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] cursor-pointer"
         >
           <ArrowLeft size={16} /> Portfolio
@@ -676,6 +793,15 @@ export default function AddListingPage() {
           <h1 className="font-semibold text-[#1a1916] text-sm leading-tight">Add Listing</h1>
           <p className="text-xs text-[#9b9890]">Property + units in one go</p>
         </div>
+
+        {/* Manager acting-on-behalf banner */}
+        {actingRpId && (
+          <div className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full"
+            style={{ backgroundColor: 'var(--color-primary-50, #f0faf6)', color: 'var(--color-primary-dark, #1a5a4a)' }}>
+            <Building2 size={12} />
+            Listing on behalf of {actingRpName ?? '…'}
+          </div>
+        )}
 
         {/* Mode tabs */}
         {!done && (
@@ -726,7 +852,7 @@ export default function AddListingPage() {
                 Add Another Listing
               </button>
               <button
-                onClick={() => router.push('/rental-provider/dashboard/portfolio')}
+                onClick={() => router.push(backHref)}
                 className="px-5 py-2.5 rounded-lg text-white text-sm font-semibold cursor-pointer"
                 style={{ background: '#1a1916' }}
               >
@@ -831,16 +957,16 @@ export default function AddListingPage() {
                 )}
               </div>
 
-              {/* Country | Emirate | Community — auto-filled from search */}
-              <div className="grid grid-cols-3 gap-3">
+              {/* Location chain: Country → Emirate → Community → Sub-Community */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label t="Country" req />
                   <select className={SELECT} value={pf.countryId ?? ''} onChange={e => {
                     const id = e.target.value ? Number(e.target.value) : null;
                     const name = countries.find(c => c.id === id)?.nameEn ?? '';
-                    setPf(prev => ({ ...prev, countryId: id, countryName: name, emirateId: null, emirateName: '', communityId: null, communityName: '' }));
-                    setLoadCommsFor(null);
-                    setCommunities([]);
+                    setPf(prev => ({ ...prev, countryId: id, countryName: name, emirateId: null, emirateName: '', cityId: null, cityName: '', communityId: null, communityName: '', subCommunityId: null, subCommunityName: '' }));
+                    setLoadCommsFor(null); setLoadSubsFor(null);
+                    setCommunities([]); setSubCommunities([]);
                   }}>
                     <option value="">Select</option>
                     {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
@@ -851,26 +977,47 @@ export default function AddListingPage() {
                   <select className={SELECT} value={pf.emirateId ?? ''} disabled={!pf.countryId} onChange={e => {
                     const id = e.target.value ? Number(e.target.value) : null;
                     const name = emirates.find(em => em.id === id)?.nameEn ?? '';
-                    setPf(prev => ({ ...prev, emirateId: id, emirateName: name, communityId: null, communityName: '' }));
-                    setLoadCommsFor(id);
+                    setPf(prev => ({ ...prev, emirateId: id, emirateName: name, cityId: null, cityName: '', communityId: null, communityName: '', subCommunityId: null, subCommunityName: '' }));
+                    setLoadCommsFor(id); setLoadSubsFor(null);
+                    setCommunities([]); setSubCommunities([]);
                   }}>
                     <option value="">{pf.countryId ? 'Select' : 'Select country first'}</option>
                     {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
                   </select>
                   <FieldErr msg={pe.emirateId} />
                 </div>
+              </div>
+
+              <div className={`grid gap-3 ${pf.communityId && !loadingSubs && subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <div>
                   <Label t="Community / Area" />
                   <select className={SELECT} value={pf.communityId ?? ''} disabled={!pf.emirateId || loadingComms}
                     onChange={e => {
                       const id = e.target.value ? Number(e.target.value) : null;
                       const name = communities.find(c => c.id === id)?.nameEn ?? '';
-                      updP('communityId', id); updP('communityName', name);
+                      setPf(prev => ({ ...prev, communityId: id, communityName: name, subCommunityId: null, subCommunityName: '' }));
+                      setLoadSubsFor(id); setSubCommunities([]);
                     }}>
-                    <option value="">{loadingComms ? 'Loading…' : pf.emirateId ? 'Select community' : 'Select emirate first'}</option>
+                    <option value="">
+                      {loadingComms ? 'Loading…' : pf.emirateId ? 'Select community (optional)' : 'Select emirate first'}
+                    </option>
                     {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
                   </select>
                 </div>
+                {pf.communityId && !loadingSubs && subCommunities.length > 0 && (
+                  <div>
+                    <Label t="Sub-Community" />
+                    <select className={SELECT} value={pf.subCommunityId ?? ''}
+                      onChange={e => {
+                        const id = e.target.value ? Number(e.target.value) : null;
+                        const name = subCommunities.find(s => s.id === id)?.nameEn ?? '';
+                        updP('subCommunityId', id); updP('subCommunityName', name);
+                      }}>
+                      <option value="">Select (optional)</option>
+                      {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Building Name | Street — auto-filled from search */}
@@ -941,8 +1088,9 @@ export default function AddListingPage() {
                     <tbody className="divide-y divide-[#f0ede8]">
                       {[
                         ['building_name',        '✓', 'Groups rows into one property'],
-                        ['category',             '',  'residential | commercial | industrial'],
-                        ['emirate',              '',  'e.g. Dubai, Abu Dhabi'],
+                        ['category',             '',  'residential | commercial | industrial | workspaces | venues'],
+                        ['emirate',              '',  'e.g. Dubai, Abu Dhabi, Sharjah'],
+                        ['community',            '',  'Community / area name — matched to our database'],
                         ['address',              '',  'Full street address'],
                         ['unit_name',            '',  'Listing title / display name'],
                         ['unit_type',            '',  'apartment, villa, office_fitted …'],
@@ -1104,7 +1252,7 @@ export default function AddListingPage() {
         {!done && (
           <div className="flex items-center justify-between pb-8">
             <button
-              onClick={() => router.push('/rental-provider/dashboard/portfolio')}
+              onClick={() => router.push(backHref)}
               className="text-sm text-[#6b6860] hover:text-[#1a1916] px-4 py-2 cursor-pointer"
             >
               Cancel

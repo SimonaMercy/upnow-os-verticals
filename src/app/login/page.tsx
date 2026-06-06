@@ -11,7 +11,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, Suspense, FormEvent } from 'react';
-import { Manrope, Instrument_Serif } from 'next/font/google';
+import { Instrument_Serif } from 'next/font/google';
 import {
   Mail, Phone, ArrowRight, ArrowLeft, CheckCircle2, AlertCircle, MapPin, ShieldCheck,
   Sparkles, Wind, Paintbrush, Wrench, Zap, Home, Building2, Factory,
@@ -19,7 +19,6 @@ import {
 import { useAuth, dashboardPath, verificationPath, type AuthResponse } from '@/contexts/AuthContext';
 import s from './login.module.css';
 
-const manrope = Manrope({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], display: 'swap' });
 const instrumentSerif = Instrument_Serif({ subsets: ['latin'], weight: '400', style: ['normal', 'italic'], display: 'swap', variable: '--font-serif' });
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
@@ -191,7 +190,7 @@ function LoginForm() {
     return identifierRaw || 'your phone or email';
   })();
 
-  const fontClass = cn(manrope.className, instrumentSerif.variable);
+  const fontClass = instrumentSerif.variable;
 
   return (
     <div className={cn(s.page, fontClass)}>

@@ -62,8 +62,8 @@ export interface WizardProperty {
 
 const EMPTY_PROP: PropertyFormData = {
   buildingName: '', spaceCategory: '',
-  countryId: null, emirateId: null, communityId: null,
-  countryName: '', emirateName: '', communityName: '',
+  countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
+  countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
   googlePlaceId: null,

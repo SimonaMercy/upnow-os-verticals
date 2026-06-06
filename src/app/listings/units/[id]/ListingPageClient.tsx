@@ -943,7 +943,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   // Submission state
   const [submitting, setSubmitting]   = useState(false);
   const [error,      setError]        = useState<string | null>(null);
-  const [contractId, setContractId]   = useState<number | null>(null);
+  const [booked,     setBooked]       = useState(false);
 
   // Inline auth state — unified email-or-phone single-field flow
   type AuthStep = null | 'identify' | 'verify-otp';
@@ -957,25 +957,25 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   const [authError,        setAuthError]        = useState<string | null>(null);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([null,null,null,null,null,null]);
 
-  // ── Submit contract ────────────────────────────────────────────────────
-  async function submitContract(): Promise<boolean> {
+  // ── Submit Book Now — interested consent (no pending contract) ──────────
+  // Enters the SAME pipeline as Schedule Viewing: creates a lead at the
+  // "interested" stage + auto-generates the payment plan. Documents, cheques
+  // and the contract are handled downstream in My Spaces, identical to a
+  // viewing that reached "interested".
+  async function submitBookNow(): Promise<boolean> {
     setError(null);
     setSubmitting(true);
     try {
-      const start = new Date(moveIn);
-      const end   = new Date(start);
-      end.setFullYear(end.getFullYear() + 1);
-      end.setDate(end.getDate() - 1); // 1-year lease: end = start + 1yr - 1day
       const body = {
-        unitId:              unit.id,
-        contractStartDate:   moveIn,
-        contractEndDate:     end.toISOString().split('T')[0],
-        annualRent:          Number(unit.rentalPrice),
-        numberOfInstallments: Number(installments),
-
-        notes:               msg || undefined,
+        unitId:           unit.id,
+        contractStartDate: moveIn,                 // desired move-in
+        paymentsCount:     Number(installments),   // rent instalments
+        occupantsAdults:   Number(adults) || 1,
+        occupantsChildren: Number(children) || 0,
+        occupantsPets:     Number(pets) || 0,
+        occupantsDetails:  msg || undefined,
       };
-      const res = await fetch('/api/contracts/tenant/initiate', {
+      const res = await fetch('/api/leads/book-now', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -986,7 +986,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
         const m = Array.isArray(data.message) ? data.message.join(', ') : data.message ?? `Error ${res.status}`;
         throw new Error(m);
       }
-      setContractId(data.id ?? null);
+      setBooked(true);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -1009,7 +1009,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
       setError('Only customer accounts can submit rental applications. Please sign in as a customer.');
       return;
     }
-    await submitContract();
+    await submitBookNow();
   }
 
   // ── Step 1: unified email-or-phone identify ───────────────────────────
@@ -1122,8 +1122,8 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
       // Sync AuthContext so DashboardShell sees an authenticated user on navigation
       await refreshAuth();
 
-      const ok = await submitContract();
-      if (!ok) setAuthError('Verified! But could not create your reservation. Please try again.');
+      const ok = await submitBookNow();
+      if (!ok) setAuthError('Verified! But could not submit your booking. Please try again.');
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'Verification failed');
     } finally {
@@ -1147,22 +1147,27 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   const inputCls = 'w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30';
 
   // ── Success state ──────────────────────────────────────────────────────
-  if (contractId !== null) {
+  if (booked) {
     return (
       <ModalShell onClose={onClose}>
         <div className="text-center py-4">
           <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: '#d8f2e8' }}>
             <CheckCircle2 size={24} style={{ color: '#2e9f82' }} />
           </div>
-          <h3 className="font-bold text-xl text-[#1a1916] mb-2">Reservation Submitted!</h3>
-          <p className="text-sm text-[#6b6860] mb-1">Your application for <span className="font-medium text-[#1a1916]">{unit.unitName ?? `Unit ${unit.unitNumber}`}</span> has been received.</p>
-          <p className="text-xs text-[#9b9890] mb-6">Reference: <span className="font-mono font-medium">CID-{contractId}</span> · We&apos;ll be in touch within 24 hours.</p>
+          <h3 className="font-bold text-xl text-[#1a1916] mb-2">You&apos;re interested! 🎉</h3>
+          <p className="text-sm text-[#6b6860] mb-1">Your interest in <span className="font-medium text-[#1a1916]">{unit.unitName ?? `Unit ${unit.unitNumber}`}</span> is registered.</p>
+          {/* Next-step nudge — mirrors the Schedule Viewing flow */}
+          <div className="rounded-xl p-3 my-4 text-left" style={{ backgroundColor: '#f0faf6' }}>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#2e9f82' }}>Next step</p>
+            <p className="text-sm text-[#1a1916] font-medium mb-0.5">Upload your documents &amp; review your payment plan</p>
+            <p className="text-xs text-[#6b6860]">We&apos;ve prepared a payment plan from your preferences. Complete your documents in My Spaces to move toward your contract.</p>
+          </div>
           <button
             onClick={() => router.push('/dashboard/customer/spaces')}
             className="w-full py-3 rounded-xl text-sm font-semibold text-white"
             style={{ backgroundColor: '#2e9f82' }}
           >
-            View My Application &amp; Upload Documents
+            Continue in My Spaces
           </button>
           <button onClick={onClose} className="mt-2 w-full py-2.5 rounded-xl text-sm font-medium text-[#6b6860] bg-[#f4f3f0] hover:bg-[#ece9e3] transition-colors">
             Stay on this page
@@ -1261,7 +1266,18 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   return (
     <ModalShell onClose={onClose}>
       <h3 className="font-bold text-xl text-[#1a1916] mb-1">Book Now</h3>
-      <p className="text-sm text-[#9b9890] mb-5">{unit.unitName ?? `Unit ${unit.unitNumber}`} · {property.buildingName}</p>
+      <p className="text-sm text-[#9b9890] mb-4">{unit.unitName ?? `Unit ${unit.unitNumber}`} · {property.buildingName}</p>
+
+      {/* Booking summary */}
+      <div className="rounded-xl p-4 mb-5" style={{ backgroundColor: '#f0faf6' }}>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-[#6b6860]">Annual rent</span>
+          <span className="text-sm font-bold text-[#1a1916]">AED {fmt(Number(unit.rentalPrice))}/yr</span>
+        </div>
+        <p className="text-xs text-[#6b6860] leading-relaxed">
+          Tell us your preferences below and confirm your interest. We&apos;ll prepare your payment plan and guide you through documents — no payment is taken now.
+        </p>
+      </div>
 
       {error && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{error}</div>}
 
@@ -1290,15 +1306,20 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
       </div>
 
 
-      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Message <span className="text-[#9b9890] font-normal">(optional)</span></label>
+      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Notes <span className="text-[#9b9890] font-normal">(optional)</span></label>
       <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={2}
         placeholder="Any questions or requirements…"
-        className={`${inputCls} resize-none mb-5`} />
+        className={`${inputCls} resize-none mb-4`} />
+
+      {/* Interested consent */}
+      <p className="text-xs text-[#9b9890] mb-3 leading-relaxed">
+        By continuing you confirm you&apos;re interested in renting this unit. Next, you&apos;ll review your payment plan and upload your documents.
+      </p>
 
       <button disabled={!moveIn || Number(adults) < 1 || submitting} onClick={handleSubmit}
         className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
         style={{ backgroundColor: '#2e9f82' }}>
-        {submitting ? 'Submitting…' : 'Submit Application'}
+        {submitting ? 'Submitting…' : "I'm Interested — Continue"}
       </button>
     </ModalShell>
   );
@@ -1438,7 +1459,12 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-[#e8e6e0]">
         <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
           <Link href="/listings" className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-xl text-sm font-extrabold text-white" style={{ backgroundColor: '#2e9f82' }}>U</span>
+            <span style={{
+              width: 24, height: 24, borderRadius: 8, flexShrink: 0,
+              background: 'linear-gradient(135deg, #1f8a6e 0%, #34c79f 100%)',
+              color: '#fff', display: 'grid', placeItems: 'center',
+              fontSize: 13, fontWeight: 800,
+            }}>U</span>
             <span className="font-extrabold text-lg text-[#1a1916] tracking-tight">UpNow</span>
           </Link>
           <div className="hidden sm:flex items-center gap-4 text-sm text-[#6b6860]">

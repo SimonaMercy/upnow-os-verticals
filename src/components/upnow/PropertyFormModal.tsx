@@ -7,9 +7,11 @@ import { cn } from '@/lib/utils';
 import { apiGet, apiPost } from '@/lib/api';
 
 // ─── Types from backend location endpoints ────────────────
-interface Country   { id: number; nameEn: string; code: string; }
-interface Emirate   { id: number; nameEn: string; }
-interface Community { id: number; nameEn: string; }
+interface Country      { id: number; nameEn: string; code: string; }
+interface Emirate      { id: number; nameEn: string; }
+interface City         { id: number; nameEn: string; }
+interface Community    { id: number; nameEn: string; }
+interface SubCommunity { id: number; nameEn: string; }
 
 // ─── Google Places types ──────────────────────────────────
 interface GPlacePrediction {
@@ -564,14 +566,18 @@ export const SPACE_CATEGORIES = [
 export interface PropertyFormData {
   buildingName: string;
   spaceCategory: string;
-  // Structured location (FK IDs) — Country → Emirate → Community
+  // Structured location (FK IDs) — Country → Emirate → City → Community → Sub-Community
   countryId: number | null;
   emirateId: number | null;
+  cityId: number | null;
   communityId: number | null;
+  subCommunityId: number | null;
   // Display labels (kept for fullAddress composition)
   countryName: string;
   emirateName: string;
+  cityName: string;
   communityName: string;
+  subCommunityName: string;
   // Free-text
   street: string;
   makaniNumber: string;
@@ -590,8 +596,8 @@ export interface PropertyFormData {
 
 const EMPTY: PropertyFormData = {
   buildingName: '', spaceCategory: '',
-  countryId: null, emirateId: null, communityId: null,
-  countryName: '', emirateName: '', communityName: '',
+  countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
+  countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '',
   latitude: null, longitude: null,
@@ -628,14 +634,20 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
   // Only load Google Maps SDK after a search result is selected (or in edit mode with coords)
   const [showMap, setShowMap] = useState(!!(initial?.latitude && initial?.longitude));
 
-  // Location data
+  // Location data — full chain Country → Emirate → City → Community → Sub-Community
   const [countries,         setCountries]         = useState<Country[]>([]);
   const [emirates,          setEmirates]          = useState<Emirate[]>([]);
+  const [cities,            setCities]            = useState<City[]>([]);
   const [communities,       setCommunities]       = useState<Community[]>([]);
+  const [subCommunities,    setSubCommunities]    = useState<SubCommunity[]>([]);
+  const [loadingCities,     setLoadingCities]     = useState(false);
   const [loadingComms,      setLoadingComms]      = useState(false);
+  const [loadingSubs,       setLoadingSubs]       = useState(false);
   // Drive cascade loads independently of form state to avoid stale-closure issues
   const [loadEmiratesFor,   setLoadEmiratesFor]   = useState<number | null>(null);
+  const [loadCitiesFor,     setLoadCitiesFor]     = useState<number | null>(null);
   const [loadCommsFor,      setLoadCommsFor]      = useState<number | null>(null);
+  const [loadSubsFor,       setLoadSubsFor]       = useState<number | null>(null);
   const defaultCountryIdRef = useRef<number | null>(null);
 
   const pendingCommunityRef = useRef<string>('');
@@ -665,28 +677,63 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
     if (!open) return;
     const countryId   = initial?.countryId   ?? defaultCountryIdRef.current;
     const emirateId   = initial?.emirateId   ?? null;
+    const cityId      = initial?.cityId      ?? null;
     const countryName = countryId ? (countries.find(c => c.id === countryId)?.nameEn ?? '') : '';
     const emirateName = emirateId ? (emirates.find(e => e.id === emirateId)?.nameEn  ?? '') : '';
-    setForm({ ...EMPTY, ...initial, countryId, countryName, emirateName, communityName: '' });
+    setForm({ ...EMPTY, ...initial, countryId, countryName, emirateName, communityName: '', subCommunityName: '' });
     setAutoFilled(false);
+    setCities([]);
     setCommunities([]);
+    setSubCommunities([]);
     setLoadEmiratesFor(countryId);
-    setLoadCommsFor(emirateId);
+    setLoadCitiesFor(emirateId);
+    setLoadCommsFor(cityId);
+    setLoadSubsFor(initial?.communityId ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Community cascade — triggered by loadCommsFor (set on open and on emirate change)
+  // City cascade — triggered by loadCitiesFor (set on open and on emirate change).
+  // For the UAE every emirate has exactly one city, so we auto-select it to keep
+  // the flow feeling like Emirate → Community.
+  useEffect(() => {
+    if (!loadCitiesFor) { setCities([]); return; }
+    setLoadingCities(true);
+    apiGet<City[]>(`/locations/emirates/${loadCitiesFor}/cities`)
+      .then(cs => {
+        setCities(cs);
+        setForm(prev => {
+          // Backfill cityName on edit
+          if (prev.cityId && !prev.cityName) {
+            const match = cs.find(c => c.id === prev.cityId);
+            if (match) return { ...prev, cityName: match.nameEn };
+          }
+          // Auto-select the single city (UAE smooth path) when none chosen yet
+          if (!prev.cityId && cs.length === 1) {
+            setLoadCommsFor(cs[0].id);
+            return { ...prev, cityId: cs[0].id, cityName: cs[0].nameEn };
+          }
+          return prev;
+        });
+      })
+      .finally(() => setLoadingCities(false));
+  }, [loadCitiesFor]);
+
+  // Community cascade — triggered by loadCommsFor (set on city change / auto-select)
   useEffect(() => {
     if (!loadCommsFor) { setCommunities([]); return; }
     setLoadingComms(true);
-    apiGet<Community[]>(`/locations/emirates/${loadCommsFor}/communities`)
+    apiGet<Community[]>(`/locations/cities/${loadCommsFor}/communities`)
       .then(comms => {
         setCommunities(comms);
-        // Backfill communityName for edit flow
+        // Backfill communityName for edit / cache-autofill flow, and kick the
+        // sub-community cascade for the already-selected community.
         setForm(prev => {
-          if (prev.communityId && !prev.communityName) {
+          if (prev.communityId) {
             const match = comms.find(c => c.id === prev.communityId);
-            if (match) return { ...prev, communityName: match.nameEn };
+            if (match) {
+              setLoadSubsFor(prev.communityId);
+              if (!prev.communityName) return { ...prev, communityName: match.nameEn };
+            }
           }
           return prev;
         });
@@ -705,13 +752,33 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
           }
           console.log('[Community] pending:', pending, '| bestMatch:', bestMatch?.nameEn, '| score:', bestScore);
           console.log('[Community] all options:', comms.map(c => c.nameEn));
-          if (bestMatch && bestScore >= 0.5)
+          if (bestMatch && bestScore >= 0.5) {
             setForm(prev => ({ ...prev, communityId: bestMatch!.id, communityName: bestMatch!.nameEn }));
+            setLoadSubsFor(bestMatch!.id);
+          }
           pendingCommunityRef.current = '';
         }
       })
       .finally(() => setLoadingComms(false));
   }, [loadCommsFor]);
+
+  // Sub-Community cascade — triggered by loadSubsFor (set on community change)
+  useEffect(() => {
+    if (!loadSubsFor) { setSubCommunities([]); return; }
+    setLoadingSubs(true);
+    apiGet<SubCommunity[]>(`/locations/communities/${loadSubsFor}/sub-communities`)
+      .then(subs => {
+        setSubCommunities(subs);
+        setForm(prev => {
+          if (prev.subCommunityId && !prev.subCommunityName) {
+            const match = subs.find(s => s.id === prev.subCommunityId);
+            if (match) return { ...prev, subCommunityName: match.nameEn };
+          }
+          return prev;
+        });
+      })
+      .finally(() => setLoadingSubs(false));
+  }, [loadSubsFor]);
 
   const upd = <K extends keyof PropertyFormData>(k: K, v: PropertyFormData[K]) => {
     setForm(prev => ({ ...prev, [k]: v }));
@@ -724,11 +791,13 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
       ...prev,
       countryId: val ? Number(val) : null, countryName: country?.nameEn ?? '',
       emirateId: null, emirateName: '',
+      cityId: null, cityName: '',
       communityId: null, communityName: '',
+      subCommunityId: null, subCommunityName: '',
     }));
     setLoadEmiratesFor(val ? Number(val) : null);
-    setLoadCommsFor(null);
-    setCommunities([]);
+    setLoadCitiesFor(null); setLoadCommsFor(null); setLoadSubsFor(null);
+    setCities([]); setCommunities([]); setSubCommunities([]);
   };
 
   const handleEmirateChange = (val: string) => {
@@ -736,10 +805,27 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
     setForm(prev => ({
       ...prev,
       emirateId: val ? Number(val) : null, emirateName: em?.nameEn ?? '',
+      cityId: null, cityName: '',
       communityId: null, communityName: '',
+      subCommunityId: null, subCommunityName: '',
+    }));
+    setLoadCitiesFor(val ? Number(val) : null);
+    setLoadCommsFor(null); setLoadSubsFor(null);
+    setCommunities([]); setSubCommunities([]);
+    setErrors(prev => ({ ...prev, emirateId: undefined }));
+  };
+
+  const handleCityChange = (val: string) => {
+    const city = cities.find(c => c.id === Number(val));
+    setForm(prev => ({
+      ...prev,
+      cityId: val ? Number(val) : null, cityName: city?.nameEn ?? '',
+      communityId: null, communityName: '',
+      subCommunityId: null, subCommunityName: '',
     }));
     setLoadCommsFor(val ? Number(val) : null);
-    setErrors(prev => ({ ...prev, emirateId: undefined }));
+    setLoadSubsFor(null);
+    setSubCommunities([]);
   };
 
   const handleCommunityChange = (val: string) => {
@@ -747,6 +833,17 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
     setForm(prev => ({
       ...prev,
       communityId: val ? Number(val) : null, communityName: comm?.nameEn ?? '',
+      subCommunityId: null, subCommunityName: '',
+    }));
+    setLoadSubsFor(val ? Number(val) : null);
+    setSubCommunities([]);
+  };
+
+  const handleSubCommunityChange = (val: string) => {
+    const sub = subCommunities.find(s => s.id === Number(val));
+    setForm(prev => ({
+      ...prev,
+      subCommunityId: val ? Number(val) : null, subCommunityName: sub?.nameEn ?? '',
     }));
   };
 
@@ -803,7 +900,13 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
       }));
     }
 
-    setLoadCommsFor(newEmirateId);
+    // Trigger the city cascade for the resolved emirate. For the UAE this
+    // auto-selects the single city, which in turn loads communities — and the
+    // community cascade backfills / matches the pre-set communityId from cache.
+    setLoadCitiesFor(newEmirateId);
+    setLoadCommsFor(null);
+    setLoadSubsFor(null);
+    setSubCommunities([]);
     setAutoFilled(true);
     setShowMap(true);
     setErrors(prev => ({ ...prev, buildingName: undefined, emirateId: undefined }));
@@ -894,7 +997,9 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
             )}
           </div>
 
-          {/* Country | Emirate | Community — auto-filled from search */}
+          {/* Location chain: Country → Emirate → City → Community → Sub-Community.
+              Auto-filled from search where possible; City auto-selects its single
+              option for the UAE. */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <FieldLabel label="Country" required />
@@ -921,15 +1026,42 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
               {errors.emirateId && <p className="text-xs text-red-500 mt-1">{errors.emirateId}</p>}
             </div>
             <div>
+              <FieldLabel label="City" />
+              <select
+                className={cn(SELECT, (!form.emirateId || loadingCities) && DISABLED_CLS)}
+                value={form.cityId ?? ''}
+                onChange={e => handleCityChange(e.target.value)}
+                disabled={!form.emirateId || loadingCities}
+              >
+                <option value="">{loadingCities ? 'Loading…' : form.emirateId ? 'Select City' : 'Select Emirate first'}</option>
+                {cities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <FieldLabel label="Community / Area" />
               <select
-                className={cn(SELECT, (!form.emirateId || loadingComms) && DISABLED_CLS)}
+                className={cn(SELECT, (!form.cityId || loadingComms) && DISABLED_CLS)}
                 value={form.communityId ?? ''}
                 onChange={e => handleCommunityChange(e.target.value)}
-                disabled={!form.emirateId || loadingComms}
+                disabled={!form.cityId || loadingComms}
               >
-                <option value="">{loadingComms ? 'Loading…' : form.emirateId ? 'Select Community' : 'Select Emirate first'}</option>
+                <option value="">{loadingComms ? 'Loading…' : form.cityId ? 'Select Community' : 'Select City first'}</option>
                 {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+              </select>
+            </div>
+            <div>
+              <FieldLabel label="Sub-Community" />
+              <select
+                className={cn(SELECT, (!form.communityId || loadingSubs) && DISABLED_CLS)}
+                value={form.subCommunityId ?? ''}
+                onChange={e => handleSubCommunityChange(e.target.value)}
+                disabled={!form.communityId || loadingSubs}
+              >
+                <option value="">{loadingSubs ? 'Loading…' : form.communityId ? 'Select Sub-Community' : 'Select Community first'}</option>
+                {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
               </select>
             </div>
           </div>

@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Manrope, Instrument_Serif } from "next/font/google";
+import { Instrument_Serif } from "next/font/google";
 import { useRouter } from "next/navigation";
 import {
   Bell, AlertCircle, Briefcase, Check, ChevronRight, ChevronLeft,
@@ -18,7 +18,6 @@ import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import s from "./onboarding.module.css";
 
-const manrope = Manrope({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"], display: "swap" });
 const instrumentSerif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], display: "swap", variable: "--font-serif" });
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(" ");
@@ -480,7 +479,7 @@ export default function RentalProviderOnboardingPage() {
     return "locked";
   };
 
-  const fontClass = cn(manrope.className, instrumentSerif.variable);
+  const fontClass = instrumentSerif.variable;
 
   if (loadState === "loading") {
     return (

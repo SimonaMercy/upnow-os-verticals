@@ -174,20 +174,26 @@ function PriceRangeSlider({ rangeMax, low, high, onChange }: {
 }
 
 /* ── Hero search bar (exported, rendered in _ListingsView hero) ── */
-export function ListingsSearchBar({ defaultQ, country, emirate, emiratesList }: {
+export function ListingsSearchBar({ defaultQ, country, emirate, emiratesList, locationOptions = [] }: {
   defaultQ: string;
   country: string;
   emirate: string;
   emiratesList: { id: number; nameEn: string; slug: string }[];
+  locationOptions?: { label: string; kind: 'community' | 'subCommunity' | 'building' | 'city' }[];
 }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [inputQ, setInputQ] = useState(defaultQ);
   const [emirateSel, setEmirateSel] = useState(emirate);
 
-  function runSearch() {
+  const kindLabel: Record<string, string> = {
+    community: 'Area', subCommunity: 'Sub-area', building: 'Building', city: 'City',
+  };
+
+  function runSearch(qValue?: string) {
+    const term = (qValue ?? inputQ).trim();
     const next = new URLSearchParams(sp.toString());
-    if (inputQ.trim()) next.set('q', inputQ.trim());
+    if (term) next.set('q', term);
     else next.delete('q');
     next.delete('page');
     next.delete('country');
@@ -208,10 +214,21 @@ export function ListingsSearchBar({ defaultQ, country, emirate, emiratesList }: 
         <Search size={18} />
         <input
           value={inputQ}
-          onChange={e => setInputQ(e.target.value)}
+          list="lst-loc-options"
+          onChange={e => {
+            const v = e.target.value;
+            setInputQ(v);
+            // Picking an exact entry from the suggestion list searches immediately.
+            if (locationOptions.some(o => o.label.toLowerCase() === v.toLowerCase())) runSearch(v);
+          }}
           onKeyDown={e => e.key === 'Enter' && runSearch()}
-          placeholder="Search by building, area or unit…"
+          placeholder="Search by area, building or unit…"
         />
+        <datalist id="lst-loc-options">
+          {locationOptions.map(o => (
+            <option key={o.kind + '|' + o.label} value={o.label}>{kindLabel[o.kind] ?? o.kind}</option>
+          ))}
+        </datalist>
       </div>
       <div className="sdiv" />
       <div className="sselect">

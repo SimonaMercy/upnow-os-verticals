@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useRef } from "react";
 import { apiGet, apiPatch } from "@/lib/api";
+import { TeamOversight } from "@/components/admin/TeamOversight";
 import {
   Building2, Wrench, Users, Clock, CheckCircle2, XCircle,
   AlertCircle, RefreshCw, ShieldCheck, FileText, User,
-  CreditCard, MousePointerClick, ExternalLink, ChevronLeft,
+  CreditCard, MousePointerClick, ExternalLink, UserCheck,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -101,7 +102,7 @@ interface RpDetail {
   completionScore: number;
 }
 
-type Tab = "rental" | "service" | "tenants";
+type Tab = "rental" | "service" | "tenants" | "managers" | "technicians";
 type StatusFilter = "all" | "pending_review" | "action_required" | "compliant";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -178,11 +179,10 @@ function KycCard({
 // ─── LEFT panel: RP document checklist ───────────────────────────────────────
 
 function RpChecklistPanel({
-  detail, loading, onBack,
+  detail, loading,
 }: {
   detail: RpDetail | null;
   loading: boolean;
-  onBack: () => void;
 }) {
   const checklist = detail?.checklist ?? [];
   const checkPass = checklist.filter((c) => c.uploaded).length;
@@ -190,12 +190,6 @@ function RpChecklistPanel({
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-
-      <button onClick={onBack}
-        className="flex items-center gap-1.5 px-3 py-2.5 border-b text-xs font-medium shrink-0 w-full text-left"
-        style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-500)" }}>
-        <ChevronLeft size={13} /> Back to list
-      </button>
 
       {/* Score badge */}
       <div className="px-3 pt-3 pb-2 shrink-0">
@@ -258,15 +252,9 @@ function RpChecklistPanel({
 
 // ─── LEFT panel: SP summary ───────────────────────────────────────────────────
 
-function SpLeftPanel({ sp, onBack }: { sp: ServiceProvider; onBack: () => void }) {
+function SpLeftPanel({ sp }: { sp: ServiceProvider }) {
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-      <button onClick={onBack}
-        className="flex items-center gap-1.5 px-3 py-2.5 border-b text-xs font-medium shrink-0 w-full text-left"
-        style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-500)" }}>
-        <ChevronLeft size={13} /> Back to list
-      </button>
-
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         <div className="rounded-xl p-3 text-center"
           style={{ backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
@@ -300,15 +288,9 @@ function SpLeftPanel({ sp, onBack }: { sp: ServiceProvider; onBack: () => void }
 
 // ─── LEFT panel: Tenant summary ───────────────────────────────────────────────
 
-function TenantLeftPanel({ tenant, onBack }: { tenant: Tenant; onBack: () => void }) {
+function TenantLeftPanel({ tenant }: { tenant: Tenant }) {
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-      <button onClick={onBack}
-        className="flex items-center gap-1.5 px-3 py-2.5 border-b text-xs font-medium shrink-0 w-full text-left"
-        style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-500)" }}>
-        <ChevronLeft size={13} /> Back to list
-      </button>
-
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         <div className="rounded-xl p-3 text-center"
           style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}>
@@ -675,8 +657,15 @@ export default function AdminKycPage() {
   const [rps, setRps]         = useState<RentalProvider[]>([]);
   const [sps, setSps]         = useState<ServiceProvider[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [loading, setLoading]         = useState(false); // first page of a tab
+  const [loadingMore, setLoadingMore] = useState(false); // appending next page
+  const [error, setError]             = useState<string | null>(null);
+
+  // Per-tab total record counts (from the paginated API) — drives tab badges
+  // and the infinite-scroll "is there more?" check.
+  const [totals, setTotals] = useState<{ rental: number; service: number; tenants: number; managers: number; technicians: number }>({
+    rental: 0, service: 0, tenants: 0, managers: 0, technicians: 0,
+  });
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId]     = useState<number | null>(null);
@@ -686,26 +675,87 @@ export default function AdminKycPage() {
   const [rpDetailLoading, setRpDetailLoading] = useState(false);
   const [rpDetailError, setRpDetailError]     = useState<string | null>(null);
 
+  // Infinite-scroll plumbing for the queue column
+  const PAGE_SIZE = 10;
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef   = useRef<HTMLDivElement>(null);
+
+  // Paginated KYC tabs only — managers/technicians render via TeamOversight.
+  const TAB_PATH: Record<"rental" | "service" | "tenants", string> = {
+    rental:  "/admin/kyc/rental-providers",
+    service: "/admin/kyc/service-providers",
+    tenants: "/admin/kyc/tenants",
+  };
+
+  // Load one page (10 records) for a tab. reset=true replaces the list (initial
+  // load / refresh); reset=false appends the next page (lazy scroll).
+  async function loadPage(t: "rental" | "service" | "tenants", offset: number, reset: boolean) {
+    if (!reset) setLoadingMore(true); // initial/refresh loading owned by load()
+    try {
+      const res = await apiGet<{ data?: unknown[]; total?: number }>(
+        `${TAB_PATH[t]}?limit=${PAGE_SIZE}&offset=${offset}`,
+      );
+      const batch = (res.data ?? (res as unknown as unknown[])) ?? [];
+      const total = res.total ?? batch.length;
+      setTotals((prev) => ({ ...prev, [t]: total }));
+      if (t === "rental")
+        setRps((prev) => (reset ? (batch as RentalProvider[]) : [...prev, ...(batch as RentalProvider[])]));
+      else if (t === "service")
+        setSps((prev) => (reset ? (batch as ServiceProvider[]) : [...prev, ...(batch as ServiceProvider[])]));
+      else
+        setTenants((prev) => (reset ? (batch as Tenant[]) : [...prev, ...(batch as Tenant[])]));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      if (!reset) setLoadingMore(false);
+    }
+  }
+
+  // Initial: fetch the first page of all three tabs (so tab badges + RP/SP
+  // stats populate). The active tab then lazy-loads more on scroll.
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const [rpData, spData, tenantData] = await Promise.all([
-        apiGet<{ data: RentalProvider[] }>("/admin/kyc/rental-providers").then((r) => r.data ?? (r as unknown as RentalProvider[])),
-        apiGet<{ data: ServiceProvider[] }>("/admin/kyc/service-providers").then((r) => r.data ?? (r as unknown as ServiceProvider[])),
-        apiGet<{ data: Tenant[] }>("/admin/kyc/tenants").then((r) => r.data ?? (r as unknown as Tenant[])),
+      await Promise.all([
+        loadPage("rental", 0, true),
+        loadPage("service", 0, true),
+        loadPage("tenants", 0, true),
+        // Team tabs (managers / technicians) — counts only; the cards render via TeamOversight
+        apiGet<unknown[]>("/admin/team/managers")
+          .then(d => setTotals(p => ({ ...p, managers: Array.isArray(d) ? d.length : 0 }))).catch(() => {}),
+        apiGet<unknown[]>("/admin/team/technicians")
+          .then(d => setTotals(p => ({ ...p, technicians: Array.isArray(d) ? d.length : 0 }))).catch(() => {}),
       ]);
-      setRps(rpData ?? []);
-      setSps(spData ?? []);
-      setTenants(tenantData ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Infinite scroll — load the next page of the ACTIVE tab when the sentinel
+  // scrolls into view, until all records for that tab are loaded.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    // Team tabs (managers/technicians) render via TeamOversight — no pagination.
+    if (tab === "managers" || tab === "technicians") return;
+    const pagTab = tab;
+    const loaded = pagTab === "rental" ? rps.length : pagTab === "service" ? sps.length : tenants.length;
+    const total  = totals[pagTab];
+    if (loaded >= total) return; // nothing more to fetch
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingMore && !loading) {
+          void loadPage(pagTab, loaded, false);
+        }
+      },
+      { root: listScrollRef.current, rootMargin: "120px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [tab, rps.length, sps.length, tenants.length, totals, loadingMore, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch full RP detail whenever the selected RP changes.
   // AbortController cancels the in-flight request when selectedId changes quickly,
@@ -753,6 +803,8 @@ export default function AdminKycPage() {
   const hasSelection   = !!(selectedRp || selectedSp || selectedTenant);
 
   const visibleList = tab === "rental" ? filteredRps : tab === "service" ? filteredSps : filteredTenants;
+  // Raw loaded count (pre status-filter) — drives the lazy-load sentinel/footer.
+  const loadedCount = tab === "rental" ? rps.length : tab === "service" ? sps.length : tenants.length;
 
   return (
     <div className="flex flex-col h-full" style={{ padding: "12px 20px 16px" }}>
@@ -766,9 +818,11 @@ export default function AdminKycPage() {
         </span>
 
         {([
-          { id: "rental"  as Tab, label: "Rental Providers",  Icon: Building2, count: rps.length },
-          { id: "service" as Tab, label: "Service Providers", Icon: Wrench,    count: sps.length },
-          { id: "tenants" as Tab, label: "Customers",         Icon: Users,     count: tenants.length },
+          { id: "rental"      as Tab, label: "Rental Providers",  Icon: Building2, count: totals.rental },
+          { id: "service"     as Tab, label: "Service Providers", Icon: Wrench,    count: totals.service },
+          { id: "tenants"     as Tab, label: "Customers",         Icon: Users,     count: totals.tenants },
+          { id: "managers"    as Tab, label: "Managers",          Icon: UserCheck, count: totals.managers },
+          { id: "technicians" as Tab, label: "Technicians",       Icon: Wrench,    count: totals.technicians },
         ]).map(({ id, label, Icon, count }) => (
           <button key={id} onClick={() => handleTabChange(id)}
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-[9px] transition-colors"
@@ -821,8 +875,16 @@ export default function AdminKycPage() {
       {/* ── Filters + split panel ─────────────────────────── */}
       <div className="flex flex-col flex-1 min-h-0 mt-2">
 
-        {/* Status chips — shown only when browsing the list */}
-        {tab !== "tenants" && !hasSelection && (
+        {/* Managers / Technicians — delegated sub-accounts (no KYC). Profile
+            preview + which manager is attached to which rental provider. */}
+        {(tab === "managers" || tab === "technicians") && (
+          <div className="flex-1 overflow-y-auto mt-1 pr-1">
+            <TeamOversight kind={tab} />
+          </div>
+        )}
+
+        {/* Status chips — always available; list stays visible alongside detail */}
+        {tab !== "tenants" && tab !== "managers" && tab !== "technicians" && (
           <div className="flex flex-wrap gap-2 mb-2 flex-shrink-0">
             {([
               { id: "all"             as StatusFilter, label: "All" },
@@ -841,12 +903,12 @@ export default function AdminKycPage() {
           </div>
         )}
 
-        {loading && (
+        {loading && tab !== "managers" && tab !== "technicians" && (
           <div className="rounded-2xl p-8 bg-white text-center text-sm flex-shrink-0"
             style={{ color: "var(--color-neutral-400)" }}>Loading…</div>
         )}
 
-        {!loading && visibleList.length === 0 && !hasSelection && (
+        {tab !== "managers" && tab !== "technicians" && !loading && visibleList.length === 0 && (
           <div className="flex flex-col items-center justify-center flex-1 gap-2"
             style={{ color: "var(--color-neutral-400)" }}>
             <ShieldCheck size={28} strokeWidth={1.5} />
@@ -854,70 +916,84 @@ export default function AdminKycPage() {
           </div>
         )}
 
-        {!loading && (visibleList.length > 0 || hasSelection) && (
+        {tab !== "managers" && tab !== "technicians" && !loading && visibleList.length > 0 && (
           <div className="flex rounded-2xl overflow-hidden border flex-1 min-h-0"
             style={{ borderColor: "var(--color-base-200)", boxShadow: "var(--shadow-sm)" }}>
 
-            {/* LEFT: list when browsing — checklist/summary when a record is open */}
+            {/* COLUMN 1: user queue — ALWAYS visible, lazy-loaded 10 at a time */}
             <div className="flex flex-col shrink-0 border-r overflow-hidden"
               style={{ width: 280, borderColor: "var(--color-base-200)", backgroundColor: "#fff" }}>
+              <div ref={listScrollRef} className="flex-1 overflow-y-auto">
+                {tab === "rental" && filteredRps.map((rp) => (
+                  <KycCard key={rp.id}
+                    name={providerName(rp, `RP #${rp.id}`)}
+                    email={rp.user?.email}
+                    status={rp.complianceStatus}
+                    score={kycScore(rp)}
+                    date={rp.createdAt}
+                    selected={selectedId === rp.id}
+                    onClick={() => setSelectedId(rp.id)}
+                  />
+                ))}
+                {tab === "service" && filteredSps.map((sp) => (
+                  <KycCard key={sp.id}
+                    name={sp.businessName ?? sp.ownerName ?? providerName(sp, `SP #${sp.id}`)}
+                    email={sp.user?.email}
+                    status={sp.complianceStatus}
+                    score={spScore(sp)}
+                    date={sp.createdAt}
+                    selected={selectedId === sp.id}
+                    onClick={() => setSelectedId(sp.id)}
+                  />
+                ))}
+                {tab === "tenants" && filteredTenants.map((t) => (
+                  <KycCard key={t.id}
+                    name={providerName(t, `Customer #${t.id}`)}
+                    email={t.user?.email}
+                    status={"pending_review"}
+                    score={t.documentStatus === "complete" ? 100 : 40}
+                    date={t.createdAt}
+                    selected={selectedId === t.id}
+                    onClick={() => setSelectedId(t.id)}
+                  />
+                ))}
 
-              {hasSelection && selectedRp ? (
-                <RpChecklistPanel
-                  detail={rpDetail}
-                  loading={rpDetailLoading}
-                  onBack={() => setSelectedId(null)}
-                />
-              ) : hasSelection && selectedSp ? (
-                <SpLeftPanel sp={selectedSp} onBack={() => setSelectedId(null)} />
-              ) : hasSelection && selectedTenant ? (
-                <TenantLeftPanel tenant={selectedTenant} onBack={() => setSelectedId(null)} />
-              ) : (
-                <div className="flex-1 overflow-y-auto">
-                  {tab === "rental" && filteredRps.map((rp) => (
-                    <KycCard key={rp.id}
-                      name={providerName(rp, `RP #${rp.id}`)}
-                      email={rp.user?.email}
-                      status={rp.complianceStatus}
-                      score={kycScore(rp)}
-                      date={rp.createdAt}
-                      selected={selectedId === rp.id}
-                      onClick={() => setSelectedId(rp.id)}
-                    />
-                  ))}
-                  {tab === "service" && filteredSps.map((sp) => (
-                    <KycCard key={sp.id}
-                      name={sp.businessName ?? sp.ownerName ?? providerName(sp, `SP #${sp.id}`)}
-                      email={sp.user?.email}
-                      status={sp.complianceStatus}
-                      score={spScore(sp)}
-                      date={sp.createdAt}
-                      selected={selectedId === sp.id}
-                      onClick={() => setSelectedId(sp.id)}
-                    />
-                  ))}
-                  {tab === "tenants" && filteredTenants.map((t) => (
-                    <KycCard key={t.id}
-                      name={providerName(t, `Customer #${t.id}`)}
-                      email={t.user?.email}
-                      status={"pending_review"}
-                      score={t.documentStatus === "complete" ? 100 : 40}
-                      date={t.createdAt}
-                      selected={selectedId === t.id}
-                      onClick={() => setSelectedId(t.id)}
-                    />
-                  ))}
-                </div>
-              )}
+                {/* Infinite-scroll sentinel + status footer */}
+                {loadedCount < totals[tab] && (
+                  <div ref={sentinelRef} className="px-4 py-3 text-center text-xs"
+                    style={{ color: "var(--color-neutral-400)" }}>
+                    {loadingMore ? "Loading more…" : "Scroll to load more"}
+                  </div>
+                )}
+                {loadedCount > 0 && loadedCount >= totals[tab] && (
+                  <p className="px-4 py-3 text-center text-xs" style={{ color: "var(--color-neutral-300)" }}>
+                    {totals[tab]} {tab === "tenants" ? "customers" : tab === "rental" ? "rental providers" : "service providers"}
+                  </p>
+                )}
+              </div>
             </div>
 
-            {/* RIGHT: detail content */}
+            {/* COLUMN 2: checklist / summary for the selected record */}
+            {hasSelection && (
+              <div className="flex flex-col shrink-0 border-r overflow-hidden"
+                style={{ width: 240, borderColor: "var(--color-base-200)" }}>
+                {selectedRp ? (
+                  <RpChecklistPanel detail={rpDetail} loading={rpDetailLoading} />
+                ) : selectedSp ? (
+                  <SpLeftPanel sp={selectedSp} />
+                ) : selectedTenant ? (
+                  <TenantLeftPanel tenant={selectedTenant} />
+                ) : null}
+              </div>
+            )}
+
+            {/* COLUMN 3: detail content */}
             <div className="flex-1 overflow-hidden" style={{ backgroundColor: "#fafafa" }}>
               {!hasSelection ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3"
                   style={{ color: "var(--color-neutral-400)" }}>
                   <MousePointerClick size={32} strokeWidth={1.5} />
-                  <p className="text-sm">Select a record to review</p>
+                  <p className="text-sm">Select a user to review their details</p>
                 </div>
               ) : selectedRp ? (
                 <RpContentPanel

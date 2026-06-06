@@ -27,7 +27,7 @@
   --color-warning:       #e8a020;
 
   /* === Font === */
-  --font-sans: 'DM Sans', sans-serif;
+  --font-sans: 'Manrope', sans-serif;
 }
 
 :root {
@@ -120,7 +120,7 @@ input[type="range"].dual-range:focus::-webkit-slider-thumb {
 }
 
 html, body {
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Manrope', sans-serif;
   font-size: 18px;
   background-color: #fafaf8;
   color: #1a1916;
@@ -166,7 +166,7 @@ html, body {
   --rdp-day-width:               38px;
   --rdp-day_button-height:       36px;
   --rdp-day_button-width:        36px;
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Manrope', sans-serif;
   font-size: 0.875rem;
   color: #1a1916;
 }
@@ -262,13 +262,10 @@ html, body {
   color: #1f7e66; text-decoration: none; flex-shrink: 0;
 }
 .l-brand-mark {
-  width: 30px; height: 30px; border-radius: 9px;
-  background: #2e9f82; position: relative; overflow: hidden; flex-shrink: 0;
-}
-.l-brand-mark::before {
-  content: ""; position: absolute; inset: 7px;
-  border: 2.5px solid #fff; border-radius: 4px;
-  border-bottom: 0; border-right: 0; transform: rotate(45deg);
+  width: 24px; height: 24px; border-radius: 8px;
+  background: linear-gradient(135deg, #1f8a6e 0%, #34c79f 100%);
+  color: #fff; display: grid; place-items: center;
+  font-size: 13px; font-weight: 800; flex-shrink: 0;
 }
 .l-nav-center { display: flex; align-items: center; gap: 4px; }
 .l-nav-tab {
@@ -295,7 +292,11 @@ html, body {
 
 /* -- Hero --------------------------------------------------- */
 .l-hero {
-  position: relative; overflow: hidden; padding: 40px 0 30px;
+  /* overflow stays visible so the Location / Budget search dropdowns can
+     extend past the hero's bottom edge without being clipped. The radial
+     gradient below is a background, which is always clipped to the
+     border-box regardless of overflow, so it is unaffected. */
+  position: relative; overflow: visible; padding: 40px 0 30px;
   background:
     radial-gradient(900px 420px at 50% -20%, #e7f5f0 0%, transparent 60%),
     linear-gradient(180deg, #fff 0, #fff 70%, #fafbf9 100%);
@@ -375,6 +376,34 @@ html, body {
   .l-search .field + .field::before { left: 18px; right: 18px; top: 0; bottom: auto; width: auto; height: 1px; }
   .l-search .go { min-width: auto; margin: 10px 14px 14px; }
   .l-search .go .gtxt { display: inline; }
+}
+
+/* -- Location / budget dropdowns ----------------------------- */
+.loc-dropdown {
+  position: absolute; top: calc(100% + 10px); z-index: 200;
+  background: #fff; border: 1px solid #e8ece9; border-radius: 16px;
+  box-shadow: 0 12px 40px -8px rgba(15,30,25,.18);
+  overflow: hidden; padding: 6px 0;
+}
+.loc-dropdown--left  { left: 0; width: max(280px, 45%); }
+.loc-dropdown--right { right: 64px; width: 248px; }
+.loc-option {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 10px 16px; border: none; background: transparent;
+  text-align: left; cursor: pointer; transition: background .12s;
+  font-size: 14px; font-family: inherit; color: #0e1a16;
+}
+.loc-option:hover { background: #f5faf8; }
+.loc-option.sel { background: #f0faf6; }
+.loc-pin { color: #2e9f82; flex-shrink: 0; }
+.loc-name { font-weight: 600; }
+.loc-sub  { color: #6b7a74; }
+.l-budget-display {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 14px; font-weight: 500; width: 100%;
+}
+@media (max-width: 760px) {
+  .loc-dropdown--left, .loc-dropdown--right { left: 0; right: 0; width: auto; }
 }
 
 /* -- Category chips ----------------------------------------- */

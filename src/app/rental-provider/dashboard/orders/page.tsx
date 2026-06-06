@@ -89,6 +89,20 @@ function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contract
 
 const PAGE_SIZE = 10;
 
+/** Compact page list: 1 … current-1 current current+1 … last (max 7 chips),
+ *  so tabs with many pages (e.g. 200+ expired) don't stretch a full-width row. */
+function pageWindow(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | '…')[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) out.push('…');
+  for (let p = start; p <= end; p++) out.push(p);
+  if (end < total - 1) out.push('…');
+  out.push(total);
+  return out;
+}
+
 interface Contract {
   id: number;
   ref: string;
@@ -415,16 +429,20 @@ export default function OrdersPage() {
                   >
                     <ChevronLeft size={13} />
                   </button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                    <button
-                      key={p}
-                      type="button"
-                      className={'pg ' + (p === safePage ? 'active' : '')}
-                      onClick={() => setPage(p)}
-                    >
-                      {p}
-                    </button>
-                  ))}
+                  {pageWindow(safePage, totalPages).map((p, i) =>
+                    p === '…' ? (
+                      <span key={`gap${i}`} className="pg-gap" aria-hidden="true">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        type="button"
+                        className={'pg ' + (p === safePage ? 'active' : '')}
+                        onClick={() => setPage(p)}
+                      >
+                        {p}
+                      </button>
+                    ),
+                  )}
                   <button
                     type="button"
                     className="pg"
@@ -482,7 +500,7 @@ function GlobalStyle() {
         display: flex;
         flex-direction: column;
         min-width: 0;
-        font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+        font-family: inherit;
         font-size: 14px;
         line-height: 1.5;
         font-weight: 450;
@@ -911,7 +929,11 @@ function GlobalStyle() {
         gap: 12px; flex-wrap: wrap;
       }
       .orders-page .pager .info { font-size: 12px; color: var(--mute); font-weight: 500; }
-      .orders-page .pager .nums { display: flex; align-items: center; gap: 5px; }
+      .orders-page .pager .nums { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; }
+      .orders-page .pg-gap {
+        min-width: 20px; height: 32px; display: grid; place-items: center;
+        color: var(--mute); font-size: 12.5px; font-weight: 600; user-select: none;
+      }
       .orders-page .pg {
         min-width: 32px; height: 32px; padding: 0 6px;
         display: grid; place-items: center;

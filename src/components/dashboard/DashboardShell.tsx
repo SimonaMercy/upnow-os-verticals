@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, type ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   LayoutDashboard, Home, Search, Building2, Layers, FileText,
@@ -16,12 +16,46 @@ import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { buildDisplayName } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import shell from './DashboardShell.module.css';
+import { apiGet } from '@/lib/api';
+
+// ── Manager permission cache (loaded once per session) ──────────────────────
+// Keeps the FULL per-landlord permission set so the nav can re-scope to the
+// landlord chosen in the LandlordSwitcher (?rp=). With a landlord selected, a
+// section shows only if THAT landlord granted the flag; with "All landlords"
+// selected we show the union (any landlord grants it).
+type RpPerm = { rentalProviderId: number; permissions: Record<string, boolean> };
+let _managerRps: RpPerm[] | null = null;
+let _managerPermsLoaded = false;
+function useManagerNavPerms(role: UserRole): Record<string, boolean> {
+  const [rps, setRps] = useState<RpPerm[]>([]);
+  const searchParams = useSearchParams();
+  const selectedRp = searchParams.get('rp');
+  useEffect(() => {
+    if (role !== 'manager') return;
+    if (_managerPermsLoaded) { setRps(_managerRps ?? []); return; }
+    apiGet<RpPerm[]>('/manager/my-rps')
+      .then(data => {
+        _managerRps = data;
+        _managerPermsLoaded = true;
+        setRps(data);
+      })
+      .catch(() => { _managerPermsLoaded = true; });
+  }, [role]);
+
+  if (selectedRp) {
+    const one = rps.find(r => String(r.rentalProviderId) === selectedRp);
+    return one?.permissions ?? {};
+  }
+  const merged: Record<string, boolean> = {};
+  rps.forEach(r => Object.entries(r.permissions).forEach(([k, v]) => { if (v) merged[k] = true; }));
+  return merged;
+}
 
 /* ─────────────────────────────────────────────
    Nav definitions per role
 ───────────────────────────────────────────── */
 type NavItem =
-  | { label: string; href: string; icon: React.ElementType; soon?: boolean }
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string }
   | { divider: true }
   | { section: string };
 
@@ -63,12 +97,10 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Settings',         href: '/dashboard/service-provider/settings', icon: Settings, soon: true },
   ],
   manager: [
-    { label: 'Overview',         href: '/dashboard/manager',                   icon: LayoutDashboard },
-    { label: 'Properties',       href: '/dashboard/manager/properties',        icon: Building2 },
-    { label: 'Contracts',        href: '/dashboard/manager/contracts',         icon: FileText },
-    { label: 'Maintenance',      href: '/dashboard/manager/maintenance',       icon: Wrench },
-    { divider: true },
-    { label: 'Settings',         href: '/dashboard/manager/settings',          icon: Settings, soon: true },
+    { label: 'Overview',    href: '/dashboard/manager',            icon: LayoutDashboard },
+    { label: 'Properties',  href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
+    { label: 'Leads',       href: '/dashboard/manager/viewings',   icon: TrendingUp, requirePerm: 'canManageViewings' },
+    { label: 'Contracts',   href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
   ],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
@@ -125,7 +157,15 @@ function Sidebar({
   onClose?: () => void;
   collapsed?: boolean;
 }) {
-  const navItems = NAV[role] ?? [];
+  const managerPerms = useManagerNavPerms(role);
+  const rawNav = NAV[role] ?? [];
+  // For managers: hide nav items whose requirePerm flag isn't granted
+  const navItems = role === 'manager'
+    ? rawNav.filter(item => {
+        if (!('requirePerm' in item)) return true;
+        return managerPerms[(item as { requirePerm?: string }).requirePerm ?? ''] === true;
+      })
+    : rawNav;
   const { user, signOut } = useAuth();
 
   const displayName = buildDisplayName(user, 'User');
@@ -456,8 +496,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           )}
 
           <div className="flex items-center gap-3">
-            {/* KYC warning badge — only for non-customer roles */}
-            {role !== 'customer' && user.kycStatus && !['verified', 'approved'].includes(user.kycStatus) && (
+            {/* KYC warning badge — only for roles that actually undergo KYC.
+                Managers & technicians are invited sub-accounts and never do KYC. */}
+            {['rental_provider', 'service_provider'].includes(role) && user.kycStatus && !['verified', 'approved'].includes(user.kycStatus) && (
               <Link
                 href={`${dashboardPath(role)}/documents`}
                 className="hidden sm:flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full"

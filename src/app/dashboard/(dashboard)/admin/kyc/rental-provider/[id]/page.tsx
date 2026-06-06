@@ -478,10 +478,14 @@ export default function RpKycDetailPage() {
             ) : (
               <>
                 <InfoRow label="Entity Type" value={profile.entityType?.replace(/_/g, " ")} />
-                <InfoRow label="Company Name" value={profile.companyName} />
-                <InfoRow label="Trade License No." value={profile.tradeLicenseNumber} />
-                <InfoRow label="License Authority" value={profile.tradeLicenseAuthority} />
-                <InfoRow label="Authorised Signatory" value={profile.authorizedSignatoryName} />
+                {profile.entityType === "company" && (
+                  <>
+                    <InfoRow label="Company Name" value={profile.companyName} />
+                    <InfoRow label="Trade License No." value={profile.tradeLicenseNumber} />
+                    <InfoRow label="License Authority" value={profile.tradeLicenseAuthority} />
+                    <InfoRow label="Authorised Signatory" value={profile.authorizedSignatoryName} />
+                  </>
+                )}
                 <InfoRow label="Emirates ID" value={profile.emiratesIdNumber} />
                 <InfoRow label="Passport No." value={profile.passportNumber} />
                 <InfoRow label="Nationality" value={profile.nationality} />
@@ -501,10 +505,21 @@ export default function RpKycDetailPage() {
 
           {/* Document Checklist */}
           <div className="bg-white border border-gray-200 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-4">
-              <FileText className="h-4 w-4 text-gray-400" />
-              KYC Document Checklist
-            </h2>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-gray-400" />
+                KYC Document Checklist
+              </h2>
+              {detail.uploadedDocs.length > 0 && (
+                <button
+                  onClick={() => detail.uploadedDocs.forEach((d) => d.fileUrl && window.open(d.fileUrl, "_blank", "noopener"))}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 flex-shrink-0"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  View all documents ({detail.uploadedDocs.length})
+                </button>
+              )}
+            </div>
             <div className="space-y-2">
               {checklist.map((item) => (
                 <div key={item.key} className={`flex items-start justify-between gap-3 p-3 rounded-lg ${item.uploaded ? "bg-emerald-50" : item.required ? "bg-red-50" : "bg-gray-50"}`}>

@@ -42,7 +42,9 @@ interface Property {
   spaceCategory: string;
   fullAddress: string | null;
   emirateId: number | null;
+  cityId: number | null;
   communityId: number | null;
+  subCommunityId: number | null;
   emirateName: string | null;
   communityName: string | null;
   street: string | null;
@@ -208,7 +210,9 @@ function formToCreateDto(data: PropertyFormData) {
     spaceCategory: data.spaceCategory,
     fullAddress: parts.join(', ') || undefined,
     emirateId: data.emirateId ?? undefined,
+    cityId: data.cityId ?? undefined,
     communityId: data.communityId ?? undefined,
+    subCommunityId: data.subCommunityId ?? undefined,
     numberOfFloors: data.numberOfFloors || undefined,
     makaniNumber: data.makaniNumber || undefined,
     plotNumber: data.plotNumber || undefined,
@@ -721,7 +725,7 @@ export default function PortfolioPage() {
         <div className={s.hero}>
           <div className={s.heroLeft}>
             <div className={s.heroEyebrow}><Building2 size={12} /> Portfolio</div>
-            <h1 className={s.heroTitle}>Your <span className={s.serif}>properties</span></h1>
+            <h1 className={s.heroTitle}>Your properties</h1>
             <p className={s.heroDesc}>
               {totalProperties === 0
                 ? "You haven't added a property yet — once you do, manage all buildings, units, and listings from this dashboard."
@@ -896,7 +900,9 @@ export default function PortfolioPage() {
             buildingName:        propertyModal.editing.buildingName,
             spaceCategory:       propertyModal.editing.spaceCategory,
             emirateId:           propertyModal.editing.emirateId ?? null,
+            cityId:              propertyModal.editing.cityId ?? null,
             communityId:         propertyModal.editing.communityId ?? null,
+            subCommunityId:      propertyModal.editing.subCommunityId ?? null,
             makaniNumber:        propertyModal.editing.makaniNumber ?? '',
             plotNumber:          propertyModal.editing.plotNumber ?? '',
             propertyDescription: propertyModal.editing.propertyDescription ?? '',

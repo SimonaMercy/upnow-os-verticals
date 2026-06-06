@@ -1771,7 +1771,7 @@ function GlobalStyle() {
         --sh-hero: 0 24px 60px -32px rgba(26,23,20,.2);
         --sh-pop:  0 30px 70px -24px rgba(26,23,20,.34);
         background: var(--surface); color: var(--ink); min-height: 100vh;
-        font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+        font-family: inherit;
       }
       .quest-page .wrap { max-width: 1240px; margin: 0 auto; padding: 26px 28px 64px; width: 100%; }
       .quest-page button, .quest-page input, .quest-page select, .quest-page textarea { font-family: inherit; color: inherit; }

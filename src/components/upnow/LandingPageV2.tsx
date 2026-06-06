@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Menu, X, LogOut, Building2, Home, Factory, Wrench, Leaf, Wind,
-  Star, MapPin, Heart, Search, ArrowRight,
+  Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check,
   User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3,
 } from 'lucide-react';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
@@ -412,7 +412,7 @@ function LandingNav({
         <div className="l-nav-inner">
           {/* Brand */}
           <Link href="/" className="l-brand">
-            <span className="l-brand-mark" />
+            <span className="l-brand-mark">U</span>
             UpNow
           </Link>
 
@@ -651,6 +651,28 @@ function LandingNav({
   );
 }
 
+// ─── Location autocomplete + budget filter ────────────────────────────────────
+
+interface EmirateOption { id: number; nameEn: string; slug: string; }
+interface LocationSuggestion {
+  label: string;
+  type: 'emirate' | 'community';
+  communityName: string | null;
+  emirateSlug: string;
+  emirateName: string;
+}
+interface BudgetRange { label: string; min: string; max: string; }
+
+const BUDGET_BRACKETS: BudgetRange[] = [
+  { label: 'Any budget',          min: '',       max: ''       },
+  { label: 'Up to AED 30K/yr',   min: '',       max: '30000'  },
+  { label: 'AED 30K – 60K/yr',   min: '30000',  max: '60000'  },
+  { label: 'AED 60K – 120K/yr',  min: '60000',  max: '120000' },
+  { label: 'AED 120K – 250K/yr', min: '120000', max: '250000' },
+  { label: 'AED 250K – 500K/yr', min: '250000', max: '500000' },
+  { label: 'AED 500K+/yr',       min: '500000', max: ''       },
+];
+
 // ─── HERO ─────────────────────────────────────────────────────────────────────
 
 function Hero({
@@ -665,20 +687,101 @@ function Hero({
   setActiveCat: (c: string) => void;
 }) {
   const router = useRouter();
-  const [location, setLocation] = useState('');
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  const [locationText, setLocationText] = useState('');
+  const [locationSel, setLocationSel] = useState<LocationSuggestion | null>(null);
+  const [locOpen, setLocOpen] = useState(false);
+  const [budgetSel, setBudgetSel] = useState<BudgetRange>(BUDGET_BRACKETS[0]);
+  const [budgetOpen, setBudgetOpen] = useState(false);
   const [secondary, setSecondary] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+
+  useEffect(() => { setLocOpen(false); setBudgetOpen(false); }, [mode]);
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (!searchRef.current?.contains(e.target as Node)) {
+        setLocOpen(false);
+        setBudgetOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  useEffect(() => {
+    const API = `${BACKEND}/api`;
+    (async () => {
+      try {
+        const emirates: EmirateOption[] = await fetch(`${API}/locations/emirates`)
+          .then(r => r.ok ? r.json() : []);
+
+        const emirateSuggestions: LocationSuggestion[] = emirates.map(em => ({
+          label: em.nameEn,
+          type: 'emirate' as const,
+          communityName: null,
+          emirateSlug: em.slug,
+          emirateName: em.nameEn,
+        }));
+
+        const communityLists: { nameEn: string }[][] = await Promise.all(
+          emirates.map(em =>
+            fetch(`${API}/locations/emirates/${em.id}/communities`)
+              .then(r => r.ok ? r.json() : [])
+              .catch(() => [])
+          )
+        );
+
+        const commSuggestions: LocationSuggestion[] = [];
+        communityLists.forEach((communities, i) => {
+          const em = emirates[i];
+          communities.forEach(c => {
+            commSuggestions.push({
+              label: `${c.nameEn}, ${em.nameEn}`,
+              type: 'community',
+              communityName: c.nameEn,
+              emirateSlug: em.slug,
+              emirateName: em.nameEn,
+            });
+          });
+        });
+
+        setLocationSuggestions([...emirateSuggestions, ...commSuggestions]);
+      } catch { /* silent — search still works without suggestions */ }
+    })();
+  }, []);
+
+  const locFiltered = locationText.trim().length >= 1
+    ? locationSuggestions
+        .filter(s => s.label.toLowerCase().includes(locationText.toLowerCase()))
+        .slice(0, 7)
+    : [];
+
+  const handleSearch = () => {
+    const params = new URLSearchParams();
+    let base = mode === 'spaces' ? '/listings' : '/services';
+
+    if (mode === 'spaces') {
+      if (locationSel?.emirateSlug) {
+        base = `/listings/ae/${locationSel.emirateSlug}`;
+        if (locationSel.communityName) params.set('q', locationSel.communityName);
+      } else if (locationText.trim()) {
+        params.set('q', locationText.trim());
+      }
+      if (budgetSel.min) params.set('minPrice', budgetSel.min);
+      if (budgetSel.max) params.set('maxPrice', budgetSel.max);
+    } else {
+      if (locationText.trim()) params.set('location', locationText.trim());
+      if (secondary.trim()) params.set('when', secondary.trim());
+    }
+
+    router.push(`${base}${params.toString() ? `?${params.toString()}` : ''}`);
+  };
 
   const cats: { id: string; label: string }[] = mode === 'spaces' ? SPACE_CAT_DEFS : SERVICE_CATS;
   const catIcons = mode === 'spaces' ? SPACE_CAT_ICONS : SERVICE_CAT_ICONS;
   const allLabel = `All ${mode === 'spaces' ? 'spaces' : 'services'}`;
-
-  const handleSearch = () => {
-    const params = new URLSearchParams();
-    if (location) params.set('location', location);
-    if (secondary) params.set(mode === 'spaces' ? 'budget' : 'when', secondary);
-    const base = mode === 'spaces' ? '/listings' : '/services';
-    router.push(`${base}${params.toString() ? `?${params.toString()}` : ''}`);
-  };
 
   return (
     <section className="l-hero" id="top">
@@ -706,32 +809,107 @@ function Hero({
           </button>
         </div>
 
-        {/* Search bar */}
-        <div className="l-search">
-          <div className="field">
-            <div className="lbl">Location</div>
-            <input
-              type="text"
-              placeholder={mode === 'spaces' ? 'Dubai, UAE' : 'Your area'}
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
+        {/* Search bar + dropdowns rendered outside the pill to avoid overflow:hidden clipping */}
+        <div ref={searchRef} style={{ position: 'relative', maxWidth: 880, margin: '20px auto 0', width: '100%' }}>
+          <div className="l-search" style={{ margin: 0 }}>
+            {/* Location field */}
+            <div className="field">
+              <div className="lbl">Location</div>
+              <input
+                type="text"
+                placeholder={mode === 'spaces' ? 'Area, community or emirate' : 'Your area'}
+                value={locationText}
+                autoComplete="off"
+                onChange={e => {
+                  setLocationText(e.target.value);
+                  setLocationSel(null);
+                  setLocOpen(true);
+                  setBudgetOpen(false);
+                }}
+                onFocus={() => { if (locationText.trim()) setLocOpen(true); }}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') setLocOpen(false);
+                  if (e.key === 'Enter') { setLocOpen(false); handleSearch(); }
+                }}
+              />
+            </div>
+
+            {/* Budget / When field */}
+            <div
+              className="field"
+              style={{ cursor: mode === 'spaces' ? 'pointer' : 'text' }}
+              onClick={() => {
+                if (mode === 'spaces') {
+                  setBudgetOpen(v => !v);
+                  setLocOpen(false);
+                }
+              }}
+            >
+              <div className="lbl">{mode === 'spaces' ? 'Budget' : 'When'}</div>
+              {mode === 'spaces' ? (
+                <div className="l-budget-display">
+                  <span style={{ color: budgetSel.min === '' && budgetSel.max === '' ? '#6b7a74' : '#0e1a16' }}>
+                    {budgetSel.label}
+                  </span>
+                  <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="Anytime"
+                  value={secondary}
+                  onChange={e => setSecondary(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                />
+              )}
+            </div>
+
+            <button className="go" onClick={handleSearch} aria-label="Search">
+              <Search size={18} />
+              <span className="gtxt">Search</span>
+            </button>
           </div>
-          <div className="field">
-            <div className="lbl">{mode === 'spaces' ? 'Budget' : 'When'}</div>
-            <input
-              type="text"
-              placeholder={mode === 'spaces' ? 'Any budget' : 'Anytime'}
-              value={secondary}
-              onChange={(e) => setSecondary(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
-          </div>
-          <button className="go" onClick={handleSearch} aria-label="Search">
-            <Search size={18} />
-            <span className="gtxt">Search</span>
-          </button>
+
+          {/* Location suggestions dropdown */}
+          {locOpen && locFiltered.length > 0 && (
+            <div className="loc-dropdown loc-dropdown--left">
+              {locFiltered.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="loc-option"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => { setLocationText(s.label); setLocationSel(s); setLocOpen(false); }}
+                >
+                  <MapPin size={13} className="loc-pin" />
+                  <span>
+                    <span className="loc-name">{s.communityName ?? s.emirateName}</span>
+                    {s.communityName && <span className="loc-sub">, {s.emirateName}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Budget range dropdown */}
+          {budgetOpen && (
+            <div className="loc-dropdown loc-dropdown--right">
+              {BUDGET_BRACKETS.map((b, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`loc-option${budgetSel.label === b.label ? ' sel' : ''}`}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => { setBudgetSel(b); setBudgetOpen(false); }}
+                >
+                  <span>{b.label}</span>
+                  {budgetSel.label === b.label && (
+                    <Check size={13} style={{ marginLeft: 'auto', color: '#2e9f82', flexShrink: 0 }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Category chip row */}

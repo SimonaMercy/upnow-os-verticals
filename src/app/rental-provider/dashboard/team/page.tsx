@@ -16,18 +16,31 @@ import { DashboardPage, SectionHeader } from '@/components/dashboard/DashboardWi
 interface ManagerPermissions {
   id: number;
   managerUserId: number;
-  canListProperties: boolean;
-  canEditProperties: boolean;
-  canManageViewings: boolean;
-  canManageAgreements: boolean;
-  canManageDeposits: boolean;
+  // Properties
+  canListProperties:    boolean;
+  canEditProperties:    boolean;
+  canPublishListings:   boolean;
+  // Viewings
+  canManageViewings:    boolean;
+  // Contracts & signing
+  canManageAgreements:  boolean;
+  canCreateContracts:   boolean;
+  canManageRenewals:    boolean;
+  canSignDocuments:     boolean;
+  canSignAddenda:       boolean;
+  canActAsPoa:          boolean;
+  // Finance
+  canManageDeposits:    boolean;
   canManageCollections: boolean;
-  canManageRenewals: boolean;
-  canManageDocuments: boolean;
-  canViewFinancials: boolean;
+  canViewFinancials:    boolean;
+  canViewReports:       boolean;
+  // Operations
+  canManageDocuments:   boolean;
+  canManageMaintenance: boolean;
+  // Communication & admin
   canCommunicateTenants: boolean;
-  canEscalateToAdmin: boolean;
-  canInviteManager: boolean;
+  canEscalateToAdmin:    boolean;
+  canInviteManager:      boolean;
 }
 
 interface ManagerMember {
@@ -53,34 +66,57 @@ interface Invitation {
 const PERM_GROUPS = [
   {
     label: 'Properties',
+    description: 'Listing and property management',
     perms: [
-      { key: 'canListProperties',    label: 'List properties' },
-      { key: 'canEditProperties',    label: 'Edit properties' },
-      { key: 'canManageViewings',    label: 'Manage viewings' },
+      { key: 'canListProperties',    label: 'View properties',        meta: 'can_list_properties' },
+      { key: 'canEditProperties',    label: 'Edit property details',  meta: 'can_edit_properties' },
+      { key: 'canPublishListings',   label: 'Publish / unpublish listings', meta: 'can_publish_listings' },
     ],
   },
   {
-    label: 'Agreements',
+    label: 'Viewings',
+    description: 'Customer appointments',
     perms: [
-      { key: 'canManageAgreements',  label: 'Manage agreements' },
-      { key: 'canManageDeposits',    label: 'Manage deposits' },
-      { key: 'canManageRenewals',    label: 'Manage renewals' },
+      { key: 'canManageViewings',    label: 'Schedule & manage viewings', meta: 'can_manage_viewings' },
+    ],
+  },
+  {
+    label: 'Contracts & Signing',
+    description: 'Tenancy agreements and legal documents',
+    perms: [
+      { key: 'canManageAgreements',  label: 'View & manage contracts',       meta: 'can_manage_agreements' },
+      { key: 'canCreateContracts',   label: 'Create new contracts',          meta: 'can_create_contracts' },
+      { key: 'canManageRenewals',    label: 'Manage contract renewals',      meta: 'can_manage_renewals' },
+      { key: 'canSignDocuments',     label: 'Sign tenancy contracts',        meta: 'can_sign_documents' },
+      { key: 'canSignAddenda',       label: 'Sign addenda & amendments',     meta: 'can_sign_addenda' },
+      { key: 'canActAsPoa',          label: 'Act with full POA (Power of Attorney)', meta: 'can_act_as_poa' },
     ],
   },
   {
     label: 'Finance',
+    description: 'Payments, collections and reports',
     perms: [
-      { key: 'canManageCollections', label: 'Manage collections' },
-      { key: 'canViewFinancials',    label: 'View financials' },
+      { key: 'canManageDeposits',    label: 'Manage security deposits',   meta: 'can_manage_deposits' },
+      { key: 'canManageCollections', label: 'Manage rent collections',    meta: 'can_manage_collections' },
+      { key: 'canViewFinancials',    label: 'View financial statements',  meta: 'can_view_financials' },
+      { key: 'canViewReports',       label: 'View analytics & reports',   meta: 'can_view_reports' },
     ],
   },
   {
-    label: 'Admin',
+    label: 'Operations',
+    description: 'Documents and maintenance',
     perms: [
-      { key: 'canManageDocuments',   label: 'Manage documents' },
-      { key: 'canCommunicateTenants', label: 'Communicate with customers' },
-      { key: 'canEscalateToAdmin',   label: 'Escalate to admin' },
-      { key: 'canInviteManager',     label: 'Invite other managers' },
+      { key: 'canManageDocuments',    label: 'Upload & manage documents',   meta: 'can_manage_documents' },
+      { key: 'canManageMaintenance',  label: 'Handle maintenance requests', meta: 'can_manage_maintenance' },
+    ],
+  },
+  {
+    label: 'Communication & Admin',
+    description: 'Tenant communication and delegation',
+    perms: [
+      { key: 'canCommunicateTenants', label: 'Communicate with tenants',  meta: 'can_communicate_tenants' },
+      { key: 'canEscalateToAdmin',    label: 'Escalate issues to admin',  meta: 'can_escalate_to_admin' },
+      { key: 'canInviteManager',      label: 'Invite sub-managers',       meta: 'can_invite_manager' },
     ],
   },
 ] as const;
@@ -88,18 +124,25 @@ const PERM_GROUPS = [
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
 const metaDefaults = {
-  can_list_properties: false,
-  can_edit_properties: false,
-  can_manage_viewings: false,
-  can_manage_agreements: false,
-  can_manage_deposits: false,
+  can_list_properties:    false,
+  can_edit_properties:    false,
+  can_publish_listings:   false,
+  can_manage_viewings:    false,
+  can_manage_agreements:  false,
+  can_create_contracts:   false,
+  can_manage_renewals:    false,
+  can_sign_documents:     false,
+  can_sign_addenda:       false,
+  can_act_as_poa:         false,
+  can_manage_deposits:    false,
   can_manage_collections: false,
-  can_manage_renewals: false,
-  can_manage_documents: false,
-  can_view_financials: false,
+  can_view_financials:    false,
+  can_view_reports:       false,
+  can_manage_documents:   false,
+  can_manage_maintenance: false,
   can_communicate_tenants: false,
-  can_escalate_to_admin: false,
-  can_invite_manager: false,
+  can_escalate_to_admin:  false,
+  can_invite_manager:     false,
 };
 
 const inviteSchema = z.object({
@@ -108,18 +151,25 @@ const inviteSchema = z.object({
   lastName: z.string().max(100).optional(),
   phone: z.string().optional(),
   metadata: z.object({
-    can_list_properties: z.boolean(),
-    can_edit_properties: z.boolean(),
-    can_manage_viewings: z.boolean(),
-    can_manage_agreements: z.boolean(),
-    can_manage_deposits: z.boolean(),
+    can_list_properties:    z.boolean(),
+    can_edit_properties:    z.boolean(),
+    can_publish_listings:   z.boolean(),
+    can_manage_viewings:    z.boolean(),
+    can_manage_agreements:  z.boolean(),
+    can_create_contracts:   z.boolean(),
+    can_manage_renewals:    z.boolean(),
+    can_sign_documents:     z.boolean(),
+    can_sign_addenda:       z.boolean(),
+    can_act_as_poa:         z.boolean(),
+    can_manage_deposits:    z.boolean(),
     can_manage_collections: z.boolean(),
-    can_manage_renewals: z.boolean(),
-    can_manage_documents: z.boolean(),
-    can_view_financials: z.boolean(),
+    can_view_financials:    z.boolean(),
+    can_view_reports:       z.boolean(),
+    can_manage_documents:   z.boolean(),
+    can_manage_maintenance: z.boolean(),
     can_communicate_tenants: z.boolean(),
-    can_escalate_to_admin: z.boolean(),
-    can_invite_manager: z.boolean(),
+    can_escalate_to_admin:  z.boolean(),
+    can_invite_manager:     z.boolean(),
   }),
 }).refine(
   (d) => Object.values(d.metadata).some(Boolean),
@@ -246,23 +296,30 @@ function InviteManagerModal({ onClose }: { onClose: () => void }) {
             {metaError && (
               <p className="text-xs mb-2" style={{ color: 'var(--color-error)' }}>{metaError}</p>
             )}
-            <div className="space-y-4">
+            <div className="space-y-5">
               {PERM_GROUPS.map((group) => (
                 <div key={group.label}>
-                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-neutral-400)' }}>
-                    {group.label}
-                  </p>
-                  <div className="space-y-2.5">
-                    {group.perms.map(({ key, label }) => {
-                      const metaKey = key.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^can/, 'can') as keyof typeof metaDefaults;
+                  <div className="mb-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-neutral-500)' }}>
+                      {group.label}
+                    </p>
+                    {'description' in group && (
+                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>
+                        {(group as { description?: string }).description}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2.5 pl-1">
+                    {group.perms.map((perm) => {
+                      const metaKey = perm.meta as keyof typeof metaDefaults;
                       return (
                         <Controller
-                          key={key}
+                          key={perm.key}
                           control={control}
                           name={`metadata.${metaKey}` as `metadata.${keyof typeof metaDefaults}`}
                           render={({ field }) => (
                             <PermToggle
-                              label={label}
+                              label={perm.label}
                               value={field.value}
                               onChange={field.onChange}
                             />
