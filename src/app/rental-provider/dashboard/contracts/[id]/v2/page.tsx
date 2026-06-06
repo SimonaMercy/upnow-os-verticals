@@ -784,7 +784,6 @@ function DetailCards({
   contract, payments, kycDocs, onOpen,
 }: { contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[]; onOpen: (t: DrawerTab) => void }) {
   const pendingKyc = kycDocs.filter(d => d.status === 'pending').length;
-  const approved   = kycDocs.filter(d => d.status === 'approved').length;
   const landlordShort = (contract.landlord.companyName ?? contract.landlord.name ?? '—').split(' ')[0];
   return (
     <div className="details-wrap">
@@ -814,8 +813,9 @@ function DetailCards({
               ? <span className="dbadge">{pendingKyc} to review</span>
               : <span className="dca"><ChevronRight size={14} /></span>}
           </div>
+          <div className="drow"><span className="k">All documents</span><span className="v">{(contract.documents ?? []).length} files</span></div>
           <div className="drow"><span className="k">Customer KYC</span><span className="v">{kycDocs.length} files</span></div>
-          <div className="drow"><span className="k">Approved</span><span className="v">{approved}</span></div>
+          <span className="se-link" style={{ marginTop: 6, alignSelf: 'flex-start' }}>View all documents <ChevronRight size={13} /></span>
         </button>
         <button type="button" className="dcard" onClick={() => onOpen('period')}>
           <div className="dch"><span className="dci"><Calendar size={16} /></span><span className="dct">Period</span><span className="dca"><ChevronRight size={14} /></span></div>
@@ -968,34 +968,63 @@ function DetailsDrawer({
               </div>
             </>
           )}
-          {tab === 'documents' && (
-            <div className="sec">
-              <div className="sech"><span className="si"><Paperclip size={16} /></span><span className="st">Customer documents</span></div>
-              <div className="secb">
-                <div className="doclist">
-                  {kycDocs.map(d => {
-                    const stt = d.status === 'approved' ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
-                    const lbl = d.status === 'approved' ? 'Approved' : d.status === 'rejected' ? 'Rejected' : 'Pending review';
-                    return (
-                      <div key={d.id} className={'docitem ' + stt}>
-                        <FileText size={16} />
-                        <div>
-                          <div className="dn">{d.displayName ?? d.documentKey}</div>
-                          <div className="ds">{lbl}</div>
-                        </div>
-                        <div className="dacts">
-                          <a href={d.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> View</a>
-                          {d.status !== 'approved' && <button className="mini-btn ok" onClick={() => onApproveDoc(d.id)}><Check size={12} /></button>}
-                          {d.status !== 'rejected' && <button className="mini-btn no" onClick={() => onRejectDoc(d.id)}><X size={12} /></button>}
-                        </div>
+          {tab === 'documents' && (() => {
+            const all = contract.documents ?? [];
+            const groups = [
+              { key: 'customer', label: 'Customer documents', items: all.filter(d => d.ownerType === 'customer' || d.ownerType === 'tenant') },
+              { key: 'contract', label: 'Contract documents', items: all.filter(d => d.ownerType === 'tenancy_contract') },
+              { key: 'deposit',  label: 'Deposit documents',  items: all.filter(d => d.ownerType === 'security_deposit') },
+              { key: 'other',    label: 'Other documents',    items: all.filter(d => !['customer', 'tenant', 'tenancy_contract', 'security_deposit'].includes(d.ownerType)) },
+            ].filter(g => g.items.length);
+            const openAll = () => all.forEach(d => d.fileUrl && window.open(d.fileUrl, '_blank', 'noopener'));
+            return (
+              <div className="sec">
+                <div className="sech">
+                  <span className="si"><Paperclip size={16} /></span>
+                  <span className="st">All documents ({all.length})</span>
+                  {all.length > 0 && (
+                    <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={openAll}>
+                      <ExternalLink size={12} /> View all together
+                    </button>
+                  )}
+                </div>
+                <div className="secb">
+                  {all.length === 0 && <p className="note">No documents yet.</p>}
+                  {groups.map(g => (
+                    <div key={g.key} style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '4px 0 8px' }}>
+                        {g.label} ({g.items.length})
                       </div>
-                    );
-                  })}
-                  {kycDocs.length === 0 && <p className="note">No customer documents yet.</p>}
+                      <div className="doclist">
+                        {g.items.map(d => {
+                          const isKyc = d.ownerType === 'customer' || d.ownerType === 'tenant';
+                          const ok  = ['approved', 'processed', 'complete'].includes(d.status);
+                          const stt = ok ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
+                          const lbl = ok ? (d.status === 'approved' ? 'Approved' : 'On file')
+                            : d.status === 'rejected' ? 'Rejected' : 'Pending review';
+                          const exp = d.expiryDate ? ' · exp ' + new Date(d.expiryDate).toLocaleDateString('en-AE') : '';
+                          return (
+                            <div key={d.id} className={'docitem ' + stt}>
+                              <FileText size={16} />
+                              <div>
+                                <div className="dn">{d.displayName ?? d.documentKey.replace(/_/g, ' ')}</div>
+                                <div className="ds">{lbl}{exp}</div>
+                              </div>
+                              <div className="dacts">
+                                <a href={d.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> View</a>
+                                {isKyc && d.status !== 'approved' && <button className="mini-btn ok" onClick={() => onApproveDoc(d.id)}><Check size={12} /></button>}
+                                {isKyc && d.status !== 'rejected' && <button className="mini-btn no" onClick={() => onRejectDoc(d.id)}><X size={12} /></button>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           {tab === 'clauses' && (
             <div className="sec">
               <div className="sech"><span className="si"><ClipboardList size={16} /></span><span className="st">Clauses &amp; notes</span></div>

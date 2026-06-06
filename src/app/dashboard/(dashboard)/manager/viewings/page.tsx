@@ -12,7 +12,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Search, X, Loader2, Lock, Clock, Calendar, Building2 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
 
 interface Lead {
   id: number;
@@ -119,7 +118,6 @@ export default function ManagerLeadsPage() {
             {scoped.length} lead{scoped.length !== 1 ? 's' : ''} in pipeline
           </p>
         </div>
-        <LandlordSwitcher />
       </div>
 
       {/* Stage tabs */}

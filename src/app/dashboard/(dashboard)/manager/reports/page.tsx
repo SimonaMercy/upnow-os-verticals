@@ -34,7 +34,6 @@ import {
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Report-card grid (mirrors the landlord reports landing page)
@@ -565,7 +564,6 @@ export default function ManagerReportsPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">Interactive portfolio reports — view inline, download CSV, or print as PDF.</p>
         </div>
-        <LandlordSwitcher />
       </div>
 
       <div className="relative max-w-sm mb-6">

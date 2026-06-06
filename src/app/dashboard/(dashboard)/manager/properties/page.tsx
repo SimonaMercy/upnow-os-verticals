@@ -15,7 +15,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
 import { PropertyFormModal, type PropertyFormData } from '@/components/upnow/PropertyFormModal';
 import s from '@/app/rental-provider/dashboard/portfolio/portfolio.module.css';
 
@@ -185,7 +184,6 @@ export default function ManagerPropertiesPage() {
             </p>
           </div>
           <div className={s.heroRight}>
-            <LandlordSwitcher />
             {can('canEditProperties') && (
               <button
                 type="button"
