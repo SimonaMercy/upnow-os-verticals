@@ -32,7 +32,7 @@ const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean)
 
 const NATIONALITIES = [
   'Afghan','Albanian','Algerian','American','Angolan','Argentinian','Armenian','Australian','Austrian',
-  'Azerbaijani','Bahraini','Bangladeshi','Belgian','Bolivian','Bosnian','Brazilian','British','Bulgarian',
+  'Azerbaijani','Bahraini','Bangladeshi','Belgian','Bolivian','Bosnian','Brazilian','British','Bulgarian','Burmese',
   'Cambodian','Cameroonian','Canadian','Chilean','Chinese','Colombian','Congolese','Croatian','Cuban',
   'Czech','Danish','Egyptian','Emirati','Ethiopian','Filipino','Finnish','French','Georgian','German',
   'Ghanaian','Greek','Guatemalan','Haitian','Honduran','Hungarian','Indian','Indonesian','Iranian','Iraqi',
