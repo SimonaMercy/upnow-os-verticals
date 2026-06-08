@@ -339,8 +339,25 @@ interface Resolved {
   paymentPlan: ApiPaymentPlan | null;
   stage: string | null;
   allRequiredDocsUploaded: boolean;
+  /** Customer has explicitly clicked "Submit documents" (client-side gate,
+   *  persisted in localStorage). Until then docs are NOT shown as under review,
+   *  even when every required file is uploaded. */
+  docsSubmitted?: boolean;
   tenantProfileId: number | null;
   myDocs: TenantDoc[];
+}
+
+// Customer "submit documents" gate — persisted per-space in localStorage. The
+// uploaded files are already visible to the RP; this just lets the customer
+// decide WHEN their docs flip from "upload" to "submitted / under review",
+// instead of auto-advancing the moment the last file lands.
+const docsSubmitKey = (spaceKey: string) => `upnow_docs_submitted_${spaceKey}`;
+function readDocsSubmitted(spaceKey: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try { return window.localStorage.getItem(docsSubmitKey(spaceKey)) === '1'; } catch { return false; }
+}
+function writeDocsSubmitted(spaceKey: string) {
+  try { window.localStorage.setItem(docsSubmitKey(spaceKey), '1'); } catch { /* ignore */ }
 }
 
 /**
@@ -453,13 +470,13 @@ function deriveStateKey(r: Resolved): StateKey {
   // customer refresh we drop into the `payment_plan_shared` branch
   // below and Step 3 unlocks.
   if (stage === 'interested') {
-    return r.allRequiredDocsUploaded ? 'docs_under_review' : 'docs_required';
+    return (r.allRequiredDocsUploaded && r.docsSubmitted) ? 'docs_under_review' : 'docs_required';
   }
 
   // 5c. Documents-collection stage (legacy path before the 'interested'
   // stage existed) — same gate as above.
   if (stage === 'documents_collection') {
-    return r.allRequiredDocsUploaded ? 'docs_under_review' : 'docs_required';
+    return (r.allRequiredDocsUploaded && r.docsSubmitted) ? 'docs_under_review' : 'docs_required';
   }
 
   // 5d. Plan-issued / approved — RP has explicitly shared the plan or
@@ -472,7 +489,7 @@ function deriveStateKey(r: Resolved): StateKey {
   // hold the customer at docs_under_review until RP/admin signals
   // approval explicitly. Avoids the previous bug where the auto-plan
   // alone teleported the customer past the review gate.
-  if (r.paymentPlan && r.allRequiredDocsUploaded) return 'docs_under_review';
+  if (r.paymentPlan && r.allRequiredDocsUploaded && r.docsSubmitted) return 'docs_under_review';
   if (r.paymentPlan) return 'docs_required';
 
   // ── 6. Step 1 — booked. Customer hasn't expressed Interest yet (or hasn't
@@ -2019,10 +2036,14 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
         </KycSection>
       )}
 
-      {/* Continue */}
-      <PrimaryBtn onClick={onRefresh} disabled={!allRequiredDone}>
+      {/* Submit — explicit gate. Uploading the last file no longer auto-advances;
+          the customer must click here to submit their documents for review. */}
+      <PrimaryBtn
+        onClick={() => { if (allRequiredDone) writeDocsSubmitted(resolved.spaceKey); onRefresh(); }}
+        disabled={!allRequiredDone}
+      >
         {allRequiredDone ? <CheckCircle2 size={16} /> : <Info size={16} />}
-        {allRequiredDone ? 'Continue to plan setup' : `Upload all required docs (${doneCount}/${totalCount} done)`}
+        {allRequiredDone ? 'Submit documents for review' : `Upload all required docs (${doneCount}/${totalCount} done)`}
       </PrimaryBtn>
     </div>
   );
@@ -4161,7 +4182,7 @@ export default function CustomerSpaceV2Page() {
       const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => isDocKeySatisfied(k, uploadedKeys));
       const paymentPlan = lead?.paymentPlan ?? viewing?.lead?.paymentPlan ?? null;
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
-      setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, tenantProfileId, myDocs: docs });
+      setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, docsSubmitted: readDocsSubmitted(spaceKey), tenantProfileId, myDocs: docs });
       setLoading(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
