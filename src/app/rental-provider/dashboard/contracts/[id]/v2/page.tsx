@@ -91,6 +91,7 @@ interface ContractDetail {
   pdcConfirmedAt: string | null;
   tenantChequesSubmittedAt: string | null;
   utilityStatus?: string | null;
+  utilityAccountNumber?: string | null;
   startDate: string;
   endDate: string;
   durationYears: number | null;
@@ -351,7 +352,7 @@ function HeroIcon({ tone, icon }: { tone: Tone; icon: IconKey }) {
   return <div className={'heroicon ' + tone}><Ic size={26} /></div>;
 }
 
-function Completed({ title, sub, onUndo, undoLabel }: { title: string; sub?: string; onUndo?: () => void; undoLabel?: string }) {
+function Completed({ title, sub, onUndo, undoLabel, viewUrl, viewLabel }: { title: string; sub?: string; onUndo?: () => void; undoLabel?: string; viewUrl?: string | null; viewLabel?: string }) {
   return (
     <div className="donepanel">
       <span className="dp-ic"><Check size={18} /></span>
@@ -359,8 +360,32 @@ function Completed({ title, sub, onUndo, undoLabel }: { title: string; sub?: str
         <div className="dp-t">{title}</div>
         {sub && <div className="dp-s">{sub}</div>}
       </div>
-      {onUndo && <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={onUndo}>{undoLabel || 'Update'}</button>}
+      {viewUrl && <a href={viewUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}><ExternalLink size={13} /> {viewLabel || 'View'}</a>}
+      {onUndo && <button className="btn btn-ghost btn-sm" style={{ marginLeft: viewUrl ? 8 : 'auto' }} onClick={onUndo}>{undoLabel || 'Update'}</button>}
     </div>
+  );
+}
+
+/** RP review of the customer-uploaded utility proof: view the bill + confirm. */
+function UtilityReview({ proof, accountNumber, onConfirm, onUpload, lock }: {
+  proof: ContractDoc; accountNumber?: string | null; onConfirm: () => void; onUpload: () => void; lock?: boolean;
+}) {
+  return (
+    <>
+      <div className="upbox">
+        <span className="uf">
+          <span className="ufi"><FileText size={15} /></span>
+          {proof.displayName ?? 'Utility proof'}{accountNumber ? ` · ${accountNumber}` : ''}
+        </span>
+        <a href={proof.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view" style={{ marginLeft: 'auto' }}><ExternalLink size={12} /> View bill</a>
+      </div>
+      {!lock && (
+        <button className="btn btn-jade btn-sm" style={{ justifySelf: 'start', marginTop: 6 }} onClick={onConfirm}>
+          <Check size={13} /> Confirm utility account
+        </button>
+      )}
+      {!lock && <button className="ca" style={{ justifySelf: 'start', marginTop: 4, padding: 0 }} onClick={onUpload}>Upload a different proof</button>}
+    </>
   );
 }
 
@@ -442,6 +467,7 @@ interface StepHandlers {
   onMarkEjari: () => Promise<void>;
   onUploadUtility: () => void;
   onMarkUtility: () => Promise<void>;
+  onVerifyUtility: () => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   signActionUrl: string;
   inspectionUrl: string;
@@ -558,20 +584,29 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
 
   if (key === 'utility') {
     const done = isDone('utility', st);
+    // Customer uploads "utility_proof_of_payment" (owner customer); RP may upload "utility".
+    const proof = (h.contract.documents || []).find(d =>
+      d.documentKey === 'utility_proof_of_payment' || d.documentKey === 'utility' || /utility|dewa/i.test(d.documentKey));
+    const acc = h.contract.utilityAccountNumber;
+    const accSub = acc ? `DEWA account ${acc}` : 'DEWA activation proof on file';
     return done
       ? {
           tone: 'celebrate', icon: 'bolt', sub: 'Stop 4 · complete', label: 'Utility',
           headline: 'Utility account confirmed.',
-          body: 'DEWA activation proof is on file.',
+          body: proof ? `${TEN}'s utility proof is on file.` : 'DEWA activation proof is on file.',
           timing: null,
-          node: <Completed title="DEWA proof uploaded" sub="DEWA-activation.pdf" />,
+          node: <Completed title="Utility account confirmed" sub={accSub} viewUrl={proof?.fileUrl} viewLabel="View bill" />,
         }
       : {
           tone: 'action', icon: 'bolt', sub: stopOf(4), label: 'Utility',
-          headline: 'Attach the utility activation.',
-          body: `Add the DEWA proof, let ${TEN} upload it, or mark it on file for imported leases.`,
-          timing: 'Takes ~1 min',
-          node: <UploadAction fileLabel="DEWA-activation.pdf" onUpload={h.onUploadUtility} onMark={() => h.onMarkUtility()} />,
+          headline: proof ? `${TEN} uploaded the utility proof.` : 'Attach the utility activation.',
+          body: proof
+            ? 'Review the proof the customer uploaded, then confirm the utility account to advance.'
+            : `Add the DEWA proof, let ${TEN} upload it, or mark it on file for imported leases.`,
+          timing: proof ? null : 'Takes ~1 min',
+          node: proof
+            ? <UtilityReview proof={proof} accountNumber={acc} onConfirm={() => h.onVerifyUtility()} onUpload={h.onUploadUtility} lock={lock} />
+            : <UploadAction fileLabel="DEWA-activation.pdf" onUpload={h.onUploadUtility} onMark={() => h.onMarkUtility()} />,
         };
   }
 
@@ -2011,6 +2046,13 @@ export default function ContractV2Page() {
       void reload();
     } catch { setLocalState({ utilityDoc: true }); }
   };
+  const onVerifyUtility = async () => {
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/utility/verify`, { method: 'PATCH', credentials: 'include' });
+      if (!res.ok) throw new Error(`Confirm utility failed: ${res.status}`);
+      void reload();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Could not confirm utility'); }
+  };
 
   // KYC approve / reject (uses existing /api/documents/:id endpoint)
   const onApproveDoc = (id: number) => {
@@ -2173,7 +2215,7 @@ export default function ContractV2Page() {
     openModal: setModal,
     openDrawer: setDrawerTab,
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
     signActionUrl: `${contractsBase}/${contract.id}`,
     inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
     printUrl: `${contractsBase}/${contract.id}/print`,
