@@ -711,7 +711,10 @@ function Hero({
   }, []);
 
   useEffect(() => {
-    const API = `${BACKEND}/api`;
+    // Same-origin proxy (/api) — never an absolute backend URL. In the browser
+    // this avoids CORS and works in every environment without a build-time
+    // NEXT_PUBLIC_* var (which is how this hit localhost:3001 in production).
+    const API = '/api';
     (async () => {
       try {
         const emirates: EmirateOption[] = await fetch(`${API}/locations/emirates`)
@@ -1052,7 +1055,7 @@ export function LandingPageV2() {
   useEffect(() => {
     Promise.all(
       SPACE_CAT_DEFS.map((def) =>
-        fetch(`${BACKEND}/api/listings/units?category=${def.id}&limit=4`)
+        fetch(`/api/listings/units?category=${def.id}&limit=4`)
           .then((r) => r.json())
           .then((data: { items: ListingItem[] }) => ({
             ...def,
