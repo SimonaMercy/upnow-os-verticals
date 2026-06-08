@@ -27,7 +27,7 @@ const FIELDS = [
   ['building_name',0,90,163,546.2],['property_no',0,353,175,546.2],
   ['property_type',0,87,169,569.2],['property_area',0,378,112,569.2],
   ['location',0,69,198,592.2],['dewa_no',0,385,120,592.2],
-  ['period_from',0,149,52,657.9],['period_to',0,229,71,657.9],
+  ['period_from',0,108,85,647.6],['period_to',0,193,57,647.6],
   ['contract_value',0,360,164,649.2],['annual_rent',0,81,165,674.2],
   ['security_deposit',0,396,126,674.2],['mode_of_payment',0,101,420,696.2],
   ['sig_tenant_date',0,200,70,806.2],['sig_lessor_date',0,473,69,806.2],

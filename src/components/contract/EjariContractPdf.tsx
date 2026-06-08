@@ -10,9 +10,11 @@
 
 import React from 'react';
 import {
-  Document, Page, View, Text, Image, Font, PDFViewer, PDFDownloadLink,
+  Document, Page, View, Text, Image, Font, PDFViewer, PDFDownloadLink, pdf,
 } from '@react-pdf/renderer';
 import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
+import { isDubaiContract } from '@/lib/ejariFill';
+import { useFilledEjari } from './useFilledEjari';
 
 Font.register({
   family: 'Amiri',
@@ -420,57 +422,108 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         </View>
       </Page>
 
-      {addendums.map((a, idx) => {
-        const hasText = !!(a.lines && a.lines.length);
-        const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
-        return (
-          <Page key={a.id} size="A4" style={S.page}>
-            <Header date={date} j={j} />
-            <Bar en={`Addendum ${idx + 1} of ${addendums.length}`} ar={`ملحق العقد — ${a.name}`} />
-            {hasText ? (
-              <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
-                {a.lines!.map((l, i) => (
-                  isHeading(l)
-                    ? <Text key={i} style={{ fontSize: 9, fontFamily: isArabic(l) ? AR : 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    : <Text key={i} style={{ fontSize: 8, marginBottom: 3, lineHeight: 1.3, ...(isArabic(l) ? { fontFamily: AR, textAlign: 'right' } : { textAlign: 'justify' }) } as any}>{l}</Text>
-                ))}
-              </View>
-            ) : (
-              <View wrap={false} style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 12, minHeight: 320, alignItems: 'center' }}>
-                {isImg
-                  ? <Image src={a.fileUrl} style={{ maxHeight: 460, objectFit: 'contain' }} />
-                  : <Text style={{ fontSize: 9, color: '#333' }}>Attached document: {a.fileUrl}</Text>}
-              </View>
-            )}
-            <Signatures
-              tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
-              landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
-          </Page>
-        );
-      })}
+      {addendumPages(addendums, j, date)}
     </Document>
   );
 }
 
-/** Full-screen viewer overlay with a real PDF preview + reliable download. */
+/** The addendum <Page> elements, shared by the full contract doc and the
+ *  standalone AddendumDoc that the template-fill flow appends. */
+function addendumPages(addendums: EjariAddendum[], j: TenancyJurisdiction, date: string) {
+  return addendums.map((a, idx) => {
+    const hasText = !!(a.lines && a.lines.length);
+    const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
+    return (
+      <Page key={a.id} size="A4" style={S.page}>
+        <Header date={date} j={j} />
+        <Bar en={`Addendum ${idx + 1} of ${addendums.length}`} ar={`ملحق العقد — ${a.name}`} />
+        {hasText ? (
+          <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
+            {a.lines!.map((l, i) => (
+              isHeading(l)
+                ? <Text key={i} style={{ fontSize: 9, fontFamily: isArabic(l) ? AR : 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                : <Text key={i} style={{ fontSize: 8, marginBottom: 3, lineHeight: 1.3, ...(isArabic(l) ? { fontFamily: AR, textAlign: 'right' } : { textAlign: 'justify' }) } as any}>{l}</Text>
+            ))}
+          </View>
+        ) : (
+          <View wrap={false} style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 12, minHeight: 320, alignItems: 'center' }}>
+            {isImg
+              ? <Image src={a.fileUrl} style={{ maxHeight: 460, objectFit: 'contain' }} />
+              : <Text style={{ fontSize: 9, color: '#333' }}>Attached document: {a.fileUrl}</Text>}
+          </View>
+        )}
+        <Signatures
+          tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
+          landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
+      </Page>
+    );
+  });
+}
+
+/** Standalone document of just the addendum pages — appended after the filled
+ *  official template (Dubai). @react-pdf shapes Arabic correctly. */
+export function AddendumDoc({ data, addendums }: { data: EjariContractData; addendums: EjariAddendum[] }) {
+  const j = jurisdictionForEmirate(data.property.emirate);
+  const date = fmtDate(data.createdAt) || fmtDate(new Date().toISOString());
+  return <Document>{addendumPages(addendums, j, date)}</Document>;
+}
+
+/** Render the addendum pages to raw PDF bytes (for pdf-lib to append). */
+export async function renderAddendumPdf(data: EjariContractData, addendums: EjariAddendum[]): Promise<Uint8Array> {
+  const blob = await pdf(<AddendumDoc data={data} addendums={addendums} />).toBlob();
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+const VIEWER_WRAP = { position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#52555a' } as const;
+const VIEWER_BAR = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: '#fff', borderBottom: '1px solid #ddd' } as const;
+const CLOSE_BTN = { padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, background: '#fff' } as const;
+const DL_BTN = { padding: '6px 16px', background: NAVY, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' } as const;
+const ViewerHeader = ({ data, onClose, children }: { data: EjariContractData; onClose?: () => void; children?: React.ReactNode }) => (
+  <div style={VIEWER_BAR}>
+    <div>
+      <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Tenancy Contract — {data.ref}</p>
+      <p style={{ margin: 0, fontSize: 12, color: '#666' }}>UAE unified tenancy contract</p>
+    </div>
+    <div style={{ display: 'flex', gap: 10 }}>
+      <button onClick={() => (onClose ? onClose() : window.history.back())} style={CLOSE_BTN}>✕ Close</button>
+      {children}
+    </div>
+  </div>
+);
+
+/** Full-screen viewer. Dubai → filled official PDF in an iframe; else → react-pdf. */
 export default function EjariContractViewer({ data, addendums = [], onClose }: { data: EjariContractData; addendums?: EjariAddendum[]; onClose?: () => void }) {
+  return isDubaiContract(data)
+    ? <DubaiFullscreen data={data} addendums={addendums} onClose={onClose} />
+    : <ReactPdfFullscreen data={data} addendums={addendums} onClose={onClose} />;
+}
+
+function DubaiFullscreen({ data, addendums, onClose }: { data: EjariContractData; addendums: EjariAddendum[]; onClose?: () => void }) {
+  const { url, error } = useFilledEjari(data, addendums);
+  return (
+    <div style={VIEWER_WRAP}>
+      <ViewerHeader data={data} onClose={onClose}>
+        {url && <a href={url} download={`tenancy-contract-${data.ref}.pdf`} style={DL_BTN}>⬇ Download PDF</a>}
+      </ViewerHeader>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        {error ? <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#fff' }}>Failed to render contract: {error}</div>
+          : url ? <iframe src={url} title="Tenancy Contract" width="100%" height="100%" style={{ border: 'none' }} />
+            : <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#fff' }}>Preparing contract…</div>}
+      </div>
+    </div>
+  );
+}
+
+function ReactPdfFullscreen({ data, addendums, onClose }: { data: EjariContractData; addendums: EjariAddendum[]; onClose?: () => void }) {
   const doc = <EjariContractDoc data={data} addendums={addendums} />;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#52555a' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: '#fff', borderBottom: '1px solid #ddd' }}>
-        <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Tenancy Contract — {data.ref}</p>
-          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>UAE unified tenancy contract · vector PDF</p>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => (onClose ? onClose() : window.history.back())} style={{ padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, background: '#fff' }}>✕ Close</button>
-          <PDFDownloadLink document={doc} fileName={`tenancy-contract-${data.ref}.pdf`}
-            style={{ padding: '6px 16px', background: NAVY, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
-            {({ loading }) => (loading ? '⏳ Preparing…' : '⬇ Download PDF')}
-          </PDFDownloadLink>
-        </div>
-      </div>
+    <div style={VIEWER_WRAP}>
+      <ViewerHeader data={data} onClose={onClose}>
+        <PDFDownloadLink document={doc} fileName={`tenancy-contract-${data.ref}.pdf`} style={DL_BTN}>
+          {({ loading }) => (loading ? '⏳ Preparing…' : '⬇ Download PDF')}
+        </PDFDownloadLink>
+      </ViewerHeader>
       <div style={{ flex: 1, minHeight: 0 }}>
         <PDFViewer width="100%" height="100%" style={{ border: 'none' }} showToolbar>{doc}</PDFViewer>
       </div>
