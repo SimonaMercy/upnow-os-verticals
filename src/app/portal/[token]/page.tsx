@@ -6,7 +6,7 @@
  * dedicated review-and-sign page at /portal/<token>/contract/<id>.
  */
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   UploadCloud, CheckCircle2, ExternalLink, Loader2, FileText,
   ShieldCheck, AlertTriangle,
@@ -17,6 +17,8 @@ interface Portal {
   tenant: { name: string; email: string | null; entityType: string };
   kycDocuments: DocItem[];
   otherDocuments: DocItem[];
+  purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
+  contractId?: number | null;
   expiresAt: string;
 }
 
@@ -25,10 +27,20 @@ const greetName = (n?: string | null) => (!n || /^\+?\d[\d\s-]{6,}$/.test(n) ? '
 
 export default function TenantPortalPage() {
   const token = String(useParams().token);
+  const router = useRouter();
   const [data, setData] = useState<Portal | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+
+  // Contract-scoped links belong on the dedicated review/sign page. The backend
+  // already deep-links them there; this redirect is a safety net if someone
+  // opens the bare /portal/<token> for a non-documents link.
+  useEffect(() => {
+    if (data?.contractId && data.purpose && ['contract', 'move_in', 'move_out'].includes(data.purpose)) {
+      router.replace(`/portal/${token}/contract/${data.contractId}`);
+    }
+  }, [data, token, router]);
 
   const load = useCallback(() => {
     setLoading(true);

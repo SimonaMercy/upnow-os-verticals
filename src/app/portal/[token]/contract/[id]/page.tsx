@@ -26,6 +26,7 @@ interface Detail {
   signatures: Sig[];
   tenantSigned: boolean;
   moveInAvailable: boolean;
+  purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
 }
 
 const API = (token: string, path: string) => `/api/portal/${token}${path}`;
@@ -72,6 +73,12 @@ export default function ContractReviewPage() {
   const ejari = toEjari(d.contract, d.signatures);
   const addendums: EjariAddendum[] = [];
 
+  // Each link is scoped to one action; 'all' = legacy link that shows everything.
+  const purpose = d.purpose ?? 'all';
+  const showContract = purpose === 'contract' || purpose === 'all';
+  const showMoveIn = (purpose === 'move_in' || purpose === 'all') && d.moveInAvailable;
+  const showMoveOut = purpose === 'move_out';
+
   return (
     <div className="min-h-screen bg-[#f7f6f2]">
       <div className="max-w-3xl mx-auto px-4 py-8">
@@ -97,19 +104,28 @@ export default function ContractReviewPage() {
           </div>
         )}
 
-        {/* Sign */}
-        <Card title="Sign the contract" icon={PenLine}>
-          {d.tenantSigned ? (
-            <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this contract.</p>
-          ) : (
-            <SignBox token={token} contractId={id} kind="contract" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
-          )}
-        </Card>
+        {/* Sign the contract */}
+        {showContract && (
+          <Card title="Sign the contract" icon={PenLine}>
+            {d.tenantSigned ? (
+              <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this contract.</p>
+            ) : (
+              <SignBox token={token} contractId={id} kind="contract" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
+            )}
+          </Card>
+        )}
 
-        {d.moveInAvailable && (
+        {showMoveIn && (
           <Card title="Move-in inspection" icon={CheckCircle2}>
             <p className="text-xs text-[#6b6860] mb-2">Confirm and sign your move-in inspection.</p>
             <SignBox token={token} contractId={id} kind="move_in" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
+          </Card>
+        )}
+
+        {showMoveOut && (
+          <Card title="Move-out inspection" icon={CheckCircle2}>
+            <p className="text-xs text-[#6b6860] mb-2">Confirm and sign your move-out inspection.</p>
+            <SignBox token={token} contractId={id} kind="move_out" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
           </Card>
         )}
 
@@ -134,7 +150,7 @@ function Card({ title, icon: Icon, children }: { title: string; icon: React.Comp
 }
 
 function SignBox({ token, contractId, kind, defaultName, onSigned }: {
-  token: string; contractId: number; kind: 'contract' | 'move_in'; defaultName: string; onSigned: () => void;
+  token: string; contractId: number; kind: 'contract' | 'move_in' | 'move_out'; defaultName: string; onSigned: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
@@ -158,7 +174,9 @@ function SignBox({ token, contractId, kind, defaultName, onSigned }: {
     try {
       const signatureImage = canvasRef.current!.toDataURL('image/png');
       const url = kind === 'contract' ? `/contracts/${contractId}/sign` : `/contracts/${contractId}/inspection/sign`;
-      const body = kind === 'contract' ? { signatureImage, signatoryName: name.trim() } : { type: 'move_in', signatureImage };
+      const body = kind === 'contract'
+        ? { signatureImage, signatoryName: name.trim() }
+        : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage };
       const res = await fetch(API(token, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
       onSigned();
@@ -182,7 +200,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned }: {
       </div>
       {err && <p className="text-xs text-[#b91c1c]">{err}</p>}
       <button onClick={submit} disabled={busy} className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60 bg-[#2e9f82] inline-flex items-center gap-1.5">
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : 'Sign move-in'}
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : kind === 'move_out' ? 'Sign move-out' : 'Sign move-in'}
       </button>
     </div>
   );

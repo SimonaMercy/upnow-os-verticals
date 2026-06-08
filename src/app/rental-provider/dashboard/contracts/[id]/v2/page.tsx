@@ -787,7 +787,7 @@ type DrawerTab = 'parties' | 'property' | 'period' | 'payments' | 'documents' | 
  *  relevant to where it's shown (documents vs the contract review/sign page),
  *  and shows the link so the RP can copy/share it directly (e.g. WhatsApp). */
 function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link' }: {
-  tenantId: number; contractId: number; section?: 'documents' | 'contract'; label?: string;
+  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string;
 }) {
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [link, setLink] = useState('');
@@ -799,12 +799,13 @@ function SendTenantLinkButton({ tenantId, contractId, section = 'documents', lab
     try {
       const res = await fetch('/api/portal/generate', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId, contractId }),
+        // Each link is scoped to one purpose — the backend enforces it and
+        // returns a ready-to-share URL already deep-linked to the right page.
+        body: JSON.stringify({ tenantId, contractId, purpose: section }),
       });
       if (!res.ok) throw new Error();
       const d = await res.json();
-      // Deep-link to the relevant section: contract review/sign vs documents.
-      const finalLink = d.link ? (section === 'contract' ? `${d.link}/contract/${contractId}` : d.link) : '';
+      const finalLink = d.link ?? '';
       setLink(finalLink); setEmail(d.email ?? null); setState('done');
       if (finalLink) { try { await navigator.clipboard.writeText(finalLink); setCopied(true); } catch { /* ignore */ } }
     } catch { setState('error'); }
@@ -2326,9 +2327,14 @@ export default function ContractV2Page() {
             {(selStep.key === 'sign' || selStep.key === 'movein') && contract.tenant.id && !readOnlyWorkflow && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
-                  Customer signing link
+                  {selStep.key === 'movein' ? 'Customer move-in signing link' : 'Customer contract signing link'}
                 </div>
-                <SendTenantLinkButton tenantId={contract.tenant.id} contractId={contract.id} section="contract" label="Send signing link" />
+                <SendTenantLinkButton
+                  tenantId={contract.tenant.id}
+                  contractId={contract.id}
+                  section={selStep.key === 'movein' ? 'move_in' : 'contract'}
+                  label={selStep.key === 'movein' ? 'Send move-in link' : 'Send signing link'}
+                />
               </div>
             )}
             {/* Flow 4: Redo Ejari — roll back to issued so a corrected certificate

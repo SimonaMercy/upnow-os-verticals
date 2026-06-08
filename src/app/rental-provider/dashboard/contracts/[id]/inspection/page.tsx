@@ -5,7 +5,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import {
   Plus, Trash2, Save, Printer, ArrowLeft, CheckCircle, Loader2,
   AlertCircle, RotateCcw, UploadCloud, X, Camera, Paperclip, Images,
-  FileSignature,
+  FileSignature, Send,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -61,8 +61,49 @@ interface ContractMeta {
   property: string;
   unit: string;
   tenantName: string;
+  tenantId?: number | null;
   moveInDate: string | null;
   moveOutDate: string | null;
+}
+
+/** Generate + copy a purpose-scoped tenant portal link (move-in / move-out
+ *  inspection signing) right from the inspection workspace. */
+function PortalLinkButton({ tenantId, contractId, purpose, label }: {
+  tenantId: number; contractId: number; purpose: 'move_in' | 'move_out'; label: string;
+}) {
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [link, setLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  const send = async () => {
+    setState('sending');
+    try {
+      const res = await fetch('/api/portal/generate', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId, contractId, purpose }),
+      });
+      if (!res.ok) throw new Error();
+      const d = await res.json();
+      setLink(d.link ?? ''); setState('done');
+      if (d.link) { try { await navigator.clipboard.writeText(d.link); setCopied(true); } catch { /* ignore */ } }
+    } catch { setState('error'); }
+  };
+  if (state === 'done' && link) {
+    return (
+      <div className="mt-2 flex items-center gap-2 print:hidden">
+        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
+          className="flex-1 text-[11px] px-2 py-1.5 rounded-lg border border-[#e8e6e0] bg-[#fafaf8] text-[#1a1916]" />
+        <button type="button"
+          onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } }}
+          className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-[#2e9f82] text-white">{copied ? 'Copied ✓' : 'Copy'}</button>
+      </div>
+    );
+  }
+  return (
+    <button type="button" onClick={send} disabled={state === 'sending'}
+      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#2e9f82] text-[#2e9f82] disabled:opacity-60 print:hidden">
+      <Send size={12} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : label}
+    </button>
+  );
 }
 
 // ─── Default items ────────────────────────────────────────────────────────────
@@ -676,6 +717,7 @@ export default function InspectionPage() {
           property:    c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit:        c.unit?.number ?? c.unit?.unitNumber ?? '',
           tenantName:  c.tenant?.name ?? '',
+          tenantId:    c.tenant?.id ?? null,
           moveInDate:  startDate,
           moveOutDate: c.endDate ?? c.contractEndDate ?? null,
         });
@@ -810,9 +852,17 @@ export default function InspectionPage() {
       {!tenantSigned && formLocked && (
         <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3 print:hidden">
           <CheckCircle size={14} className="text-[#2e9f82] shrink-0 mt-0.5" />
-          <div>
+          <div className="min-w-0">
             <p className="font-semibold text-[#1a7a5a]">Inspection submitted — awaiting tenant counter-signature</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">The tenant will sign from their portal. You can counter-sign once they do.</p>
+            <p className="text-xs text-[#1a7a5a] mt-0.5">Send the tenant a secure link to sign this {isMoveIn ? 'move-in' : 'move-out'} inspection from their portal. You can counter-sign once they do.</p>
+            {meta?.tenantId && contractId && (
+              <PortalLinkButton
+                tenantId={meta.tenantId}
+                contractId={Number(contractId)}
+                purpose={inspType}
+                label={`Send ${isMoveIn ? 'move-in' : 'move-out'} signing link`}
+              />
+            )}
           </div>
         </div>
       )}
