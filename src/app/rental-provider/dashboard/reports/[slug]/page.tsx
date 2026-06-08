@@ -350,12 +350,16 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Current calendar year — the default period for every date-range report.
+const CURRENT_YEAR = new Date().getFullYear();
+const YEAR_START = `${CURRENT_YEAR}-01-01`;
+const YEAR_END = `${CURRENT_YEAR}-12-31`;
 const RANGE_PRESETS: { label: string; range: () => { from: string; to: string } }[] = [
-  { label: 'All',        range: () => ({ from: '', to: '' }) },
+  { label: 'This year',  range: () => ({ from: YEAR_START, to: YEAR_END }) },
   { label: 'This month', range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: isoLocal(n) }; } },
   { label: '3 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 3); return { from: isoLocal(f), to: isoLocal(n) }; } },
   { label: '6 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 6); return { from: isoLocal(f), to: isoLocal(n) }; } },
-  { label: 'This year',  range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), 0, 1)), to: isoLocal(n) }; } },
+  { label: 'All',        range: () => ({ from: '', to: '' }) },
 ];
 
 function fmtAed(fils: number | null | undefined): string {
@@ -448,8 +452,9 @@ export default function ReportDetailPage() {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [leaseWindow, setLeaseWindow] = useState<number>(() => Number(sp?.get('window') ?? 90));
-  const [from, setFrom] = useState<string>(sp?.get('from') ?? '');
-  const [to, setTo]     = useState<string>(sp?.get('to') ?? '');
+  // Default every date-range report to the current calendar year (URL overrides).
+  const [from, setFrom] = useState<string>(sp?.get('from') ?? YEAR_START);
+  const [to, setTo]     = useState<string>(sp?.get('to') ?? YEAR_END);
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
