@@ -11,7 +11,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import {
   Search, X, FileText, BarChart2, Building2, AlertCircle, CalendarClock,
-  RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart,
+  RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart, ScrollText,
 } from 'lucide-react';
 
 interface ReportTile {
@@ -27,11 +27,13 @@ const REPORTS: ReportTile[] = [
   { slug: 'receivables',        title: 'Receivables Summary',      description: 'Outstanding cheques aged 0-30 / 31-60 / 61-90 / 90+.',                Icon: Wallet,       available: true  },
   { slug: 'lease-expiry',       title: 'Lease Expiry Report',      description: 'Active contracts ending within 30 / 60 / 90 / 180 / 365 days.',       Icon: CalendarClock, available: true },
   { slug: 'renewal-forecast',   title: 'Renewal Forecast',         description: 'Leases coming up for renewal each month, with annual rent at stake.',  Icon: RefreshCw,    available: true  },
-  { slug: 'collection-rate',    title: 'Collection Rate Report',   description: 'Collected vs scheduled rent, by period.',                              Icon: BarChart2,    available: false },
-  { slug: 'security-deposits',  title: 'Security Deposits Report', description: 'Deposits held, status, and refund obligations.',                       Icon: ShieldCheck,  available: false },
-  { slug: 'vacancy-analysis',   title: 'Vacancy Analysis',         description: 'Time-on-market, turnover, and listing price changes.',                 Icon: MapPin,       available: false },
-  { slug: 'tenant-ledger',      title: 'Customer Ledger',          description: 'Per-customer payment history and balance.',                            Icon: FileText,     available: false },
-  { slug: 'portfolio-overview', title: 'Portfolio Overview',       description: 'Properties, units, types, and emirate breakdown.',                     Icon: FileBarChart, available: false },
+  { slug: 'cheque-register',    title: 'PDC / Cheque Register',    description: 'Every cheque with its status — pending, cleared, bounced, cancelled.', Icon: ScrollText,   available: true  },
+  { slug: 'collection-rate',    title: 'Collection Rate Report',   description: 'Monthly collected vs scheduled rent, with collection %.',              Icon: BarChart2,    available: true  },
+  { slug: 'security-deposits',  title: 'Security Deposits Report', description: 'Deposit register with lifecycle — held, returned, forfeited.',         Icon: ShieldCheck,  available: true  },
+  { slug: 'vacancy-analysis',   title: 'Vacancy Analysis',         description: 'Vacant units, asking rent at stake, and listing status.',              Icon: MapPin,       available: true  },
+  { slug: 'leasing-activity',   title: 'Leasing Activity',         description: 'New leases per month, rent signed, and Ejari status.',                 Icon: CalendarClock, available: true },
+  { slug: 'tenant-ledger',      title: 'Customer Ledger',          description: 'Per-customer rent collected, outstanding, and last payment.',          Icon: FileText,     available: true  },
+  { slug: 'portfolio-overview', title: 'Portfolio Overview',       description: 'Units by type, occupancy, and annual asking rent.',                    Icon: FileBarChart, available: true  },
   { slug: 'income-statement',   title: 'Income Statement',         description: 'Revenue by stream — rent, admin, ejari, deposits.',                    Icon: BarChart2,    available: false },
   { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false },
   { slug: 'manager-performance', title: 'Manager Performance Report', description: 'Per-asset-manager activity and deal velocity.',                     Icon: Users,        available: false },

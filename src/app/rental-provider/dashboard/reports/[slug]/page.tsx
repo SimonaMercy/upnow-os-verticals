@@ -19,7 +19,7 @@ import {
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
 } from 'lucide-react';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -40,7 +40,7 @@ interface ReportDef {
   columns: Column[];
   totals: TotalSpec[];
   /** Optional control rendered above the table (e.g. window-days for lease expiry). */
-  controlKey?: 'leaseExpiryWindow';
+  controlKey?: 'leaseExpiryWindow' | 'dateRange';
   /** When set, table rows expand into a modal listing their child items. */
   drilldown?: DrilldownSpec;
   /**
@@ -181,7 +181,182 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   // renewal-pipeline kept so older links/bookmarks still work).
   'renewal-forecast': RENEWAL_FORECAST_DEF,
   'renewal-pipeline': RENEWAL_FORECAST_DEF,
+  'security-deposits': {
+    title: 'Security Deposits Report',
+    description: 'Deposit register with full lifecycle — held, returned, partial-return and forfeited — with cheque/receipt reference and the net refund liability. A deposit is collected at lease start and refundable at lease end; the date range filters by when it was taken.',
+    endpoint: '/api/reports/security-deposits',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'contractRef', label: 'Contract' },
+      { key: 'tenantName', label: 'Customer' },
+      { key: 'unitLabel', label: 'Unit' },
+      { key: 'buildingName', label: 'Property' },
+      { key: 'depositFils', label: 'Deposit', align: 'right', type: 'aed' },
+      { key: 'reference', label: 'Cheque / Ref' },
+      { key: 'status', label: 'Status', type: 'stage' },
+      { key: 'takenOn', label: 'Taken on', type: 'date' },
+      { key: 'leaseEnd', label: 'Refundable at', type: 'date' },
+    ],
+    totals: [
+      { key: 'held', label: 'Held (count)', type: 'number' },
+      { key: 'heldFils', label: 'Held', type: 'aed' },
+      { key: 'returnedFils', label: 'Returned', type: 'aed' },
+      { key: 'forfeitedFils', label: 'Forfeited', type: 'aed' },
+      { key: 'netHeldFils', label: 'Net liability (held)', type: 'aed' },
+      { key: 'totalFils', label: 'Total', type: 'aed' },
+    ],
+  },
+
+  'cheque-register': {
+    title: 'PDC / Cheque Register',
+    description: 'Every cheque on file with its lifecycle — pending, cleared, bounced or cancelled. Post-dated cheques are simply those with a future cheque date. The date range filters by cheque date.',
+    endpoint: '/api/reports/cheque-register',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'chequeDate', label: 'Cheque date', type: 'date' },
+      { key: 'tenantName', label: 'Customer' },
+      { key: 'unitLabel', label: 'Unit' },
+      { key: 'buildingName', label: 'Property' },
+      { key: 'chequeNumber', label: 'Cheque #' },
+      { key: 'paymentType', label: 'Type', type: 'stage' },
+      { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+      { key: 'status', label: 'Status', type: 'stage' },
+    ],
+    totals: [
+      { key: 'cheques', label: 'Cheques', type: 'number' },
+      { key: 'clearedFils', label: 'Cleared', type: 'aed' },
+      { key: 'pendingFils', label: 'Pending', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
+      { key: 'cancelledFils', label: 'Cancelled', type: 'aed' },
+      { key: 'totalFils', label: 'Total', type: 'aed' },
+    ],
+  },
+
+  'collection-rate': {
+    title: 'Collection Rate Report',
+    description: 'Monthly rent collection performance — cheques due each month, how much cleared (collected), what is still pending, what bounced, and the collection rate. Anchored on the cheque date; use the date range to scope the period.',
+    endpoint: '/api/reports/collection-rate',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'label', label: 'Month' },
+      { key: 'scheduled', label: 'Cheques due', align: 'right', type: 'number' },
+      { key: 'scheduledFils', label: 'Scheduled', align: 'right', type: 'aed' },
+      { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
+      { key: 'outstandingFils', label: 'Outstanding', align: 'right', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
+      { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
+    ],
+    totals: [
+      { key: 'scheduled', label: 'Cheques due', type: 'number' },
+      { key: 'scheduledFils', label: 'Scheduled', type: 'aed' },
+      { key: 'collectedFils', label: 'Collected', type: 'aed' },
+      { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
+      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
+  'tenant-ledger': {
+    title: 'Customer Ledger',
+    description: 'Per-customer rent cashflow — what was scheduled, collected, is still outstanding and bounced, with each customer\'s collection rate and last payment. Sorted by who owes the most. Use the date range to scope the period.',
+    endpoint: '/api/reports/tenant-ledger',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'tenantName', label: 'Customer' },
+      { key: 'unitLabel', label: 'Unit' },
+      { key: 'buildingName', label: 'Property' },
+      { key: 'cheques', label: 'Cheques', align: 'right', type: 'number' },
+      { key: 'scheduledFils', label: 'Scheduled', align: 'right', type: 'aed' },
+      { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
+      { key: 'outstandingFils', label: 'Outstanding', align: 'right', type: 'aed' },
+      { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
+      { key: 'lastPaymentDate', label: 'Last payment', type: 'date' },
+    ],
+    totals: [
+      { key: 'customers', label: 'Customers', type: 'number' },
+      { key: 'scheduledFils', label: 'Scheduled', type: 'aed' },
+      { key: 'collectedFils', label: 'Collected', type: 'aed' },
+      { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
+      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
+  'portfolio-overview': {
+    title: 'Portfolio Overview',
+    description: 'Portfolio composition by unit type — how many units of each type, how many are occupied, and the annual asking rent they represent, split by residential / commercial. A current snapshot of what you own and what it\'s worth.',
+    endpoint: '/api/reports/portfolio-overview',
+    columns: [
+      { key: 'spaceCategory', label: 'Category', type: 'stage' },
+      { key: 'unitType', label: 'Unit type', type: 'stage' },
+      { key: 'units', label: 'Units', align: 'right', type: 'number' },
+      { key: 'occupied', label: 'Occupied', align: 'right', type: 'number' },
+      { key: 'vacant', label: 'Vacant', align: 'right', type: 'number' },
+      { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
+      { key: 'askingRentFils', label: 'Annual asking rent', align: 'right', type: 'aed' },
+      { key: 'avgAskingFils', label: 'Avg / unit', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'properties', label: 'Properties', type: 'number' },
+      { key: 'units', label: 'Units', type: 'number' },
+      { key: 'occupied', label: 'Occupied', type: 'number' },
+      { key: 'vacant', label: 'Vacant', type: 'number' },
+      { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
+      { key: 'askingRentFils', label: 'Annual asking rent', type: 'aed' },
+    ],
+  },
+
+  'vacancy-analysis': {
+    title: 'Vacancy Analysis',
+    description: 'Vacant units to action — each available unit with its annual asking rent (revenue at stake) and listing status, plus overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
+    endpoint: '/api/reports/vacancy-analysis',
+    columns: [
+      { key: 'buildingName', label: 'Property' },
+      { key: 'unitLabel', label: 'Unit' },
+      { key: 'unitType', label: 'Type', type: 'stage' },
+      { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
+      { key: 'listingStatus', label: 'Listing', type: 'stage' },
+      { key: 'askingRentFils', label: 'Asking rent / yr', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'vacant', label: 'Vacant units', type: 'number' },
+      { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
+      { key: 'listed', label: 'Listed', type: 'number' },
+      { key: 'unlisted', label: 'Unlisted', type: 'number' },
+      { key: 'vacantAskingFils', label: 'Rent at stake / yr', type: 'aed' },
+    ],
+  },
+
+  'leasing-activity': {
+    title: 'Leasing Activity',
+    description: 'Monthly leasing velocity — new leases commencing each month, the annual rent they represent, and Ejari registration status. Anchored on the lease start date. Note: historical renewals were imported without a renewal link, so they appear here as new leases.',
+    endpoint: '/api/reports/leasing-activity',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'label', label: 'Month' },
+      { key: 'newLeases', label: 'New leases', align: 'right', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent signed', align: 'right', type: 'aed' },
+      { key: 'ejariRegistered', label: 'Ejari registered', align: 'right', type: 'number' },
+      { key: 'ejariPending', label: 'Ejari pending', align: 'right', type: 'number' },
+    ],
+    totals: [
+      { key: 'newLeases', label: 'New leases', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent signed', type: 'aed' },
+      { key: 'ejariRegistered', label: 'Ejari registered', type: 'number' },
+      { key: 'ejariPending', label: 'Ejari pending', type: 'number' },
+    ],
+  },
 };
+
+// Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
+const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const RANGE_PRESETS: { label: string; range: () => { from: string; to: string } }[] = [
+  { label: 'All',        range: () => ({ from: '', to: '' }) },
+  { label: 'This month', range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: isoLocal(n) }; } },
+  { label: '3 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 3); return { from: isoLocal(f), to: isoLocal(n) }; } },
+  { label: '6 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 6); return { from: isoLocal(f), to: isoLocal(n) }; } },
+  { label: 'This year',  range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), 0, 1)), to: isoLocal(n) }; } },
+];
 
 function fmtAed(fils: number | null | undefined): string {
   const n = Number(fils ?? 0);
@@ -273,21 +448,29 @@ export default function ReportDetailPage() {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [leaseWindow, setLeaseWindow] = useState<number>(() => Number(sp?.get('window') ?? 90));
+  const [from, setFrom] = useState<string>(sp?.get('from') ?? '');
+  const [to, setTo]     = useState<string>(sp?.get('to') ?? '');
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!def) return;
     setLoading(true); setError(null);
-    const url = def.controlKey === 'leaseExpiryWindow'
-      ? `${def.endpoint}?window=${leaseWindow}`
-      : def.endpoint;
+    let url = def.endpoint;
+    if (def.controlKey === 'leaseExpiryWindow') {
+      url = `${def.endpoint}?window=${leaseWindow}`;
+    } else if (def.controlKey === 'dateRange') {
+      const qs = new URLSearchParams();
+      if (from) qs.set('from', from);
+      if (to) qs.set('to', to);
+      if ([...qs.keys()].length) url = `${def.endpoint}?${qs.toString()}`;
+    }
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, leaseWindow]);
+  }, [def, leaseWindow, from, to]);
 
   const filtered = useMemo(() => {
     if (!data?.rows) return [];
@@ -424,6 +607,27 @@ export default function ReportDetailPage() {
               {w} days
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Date-range control (day / month / 3-6 mo / year / custom) */}
+      {def.controlKey === 'dateRange' && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Period:</span>
+          {RANGE_PRESETS.map(p => {
+            const r = p.range();
+            const active = from === r.from && to === r.to;
+            return (
+              <button key={p.label} onClick={() => { setFrom(r.from); setTo(r.to); }}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${active ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+                {p.label}
+              </button>
+            );
+          })}
+          <span className="text-xs text-[#9b9890] ml-1">Custom:</span>
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
+          <span className="text-xs text-[#9b9890]">→</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
         </div>
       )}
 
