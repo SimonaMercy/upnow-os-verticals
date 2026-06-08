@@ -9,7 +9,7 @@ import {
   Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, ChevronRight, X, ShieldCheck,
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
-import { DashboardPage, SectionHeader } from '@/components/dashboard/DashboardWidgets';
+import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -455,7 +455,7 @@ function StatusChip({ status }: { status: string }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function RpTeamPage() {
+export function TeamPanel() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedManager, setSelectedManager] = useState<ManagerMember | null>(null);
   const qc = useQueryClient();
@@ -486,10 +486,12 @@ export default function RpTeamPage() {
   };
 
   return (
-    <DashboardPage
-      title="My Team"
-      subtitle="Manage the asset managers working under your account"
-      actions={
+    // Embedded in Settings → Team tab: render plain content (no DashboardPage
+    // chrome) so the layout matches the General and Rules tabs. Invite action
+    // sits inline, right-aligned.
+    <div>
+      <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
+        <p className="text-sm text-[#6b6860]">Manage the asset managers working under your account.</p>
         <button
           onClick={() => setShowInviteModal(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
@@ -498,8 +500,7 @@ export default function RpTeamPage() {
           <Plus className="w-4 h-4" />
           Invite Manager
         </button>
-      }
-    >
+      </div>
       {showInviteModal && <InviteManagerModal onClose={() => setShowInviteModal(false)} />}
       {selectedManager && (
         <PermissionsPanel
@@ -611,6 +612,6 @@ export default function RpTeamPage() {
           </div>
         </section>
       )}
-    </DashboardPage>
+    </div>
   );
 }

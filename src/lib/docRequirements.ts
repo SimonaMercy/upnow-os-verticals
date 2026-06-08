@@ -13,19 +13,32 @@ export const COMMERCIAL_TYPES = [
 ];
 export const INDUSTRIAL_TYPES = ['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
 
-/** Shared identity docs — required for every booking type. Emirates ID
- *  is a single slot that accepts the customer's natural format: a
- *  combined PDF (most common — UAE Pass / wallet apps export it as
- *  one PDF with both sides) or a single image showing both sides. If
- *  only one side is uploaded, admin requests the other through the
- *  RP-requested-docs flow during review. */
+/** Shared identity docs — required for every booking type. Emirates ID is
+ *  captured as two separate slots (Front + Back) to avoid the "is this one
+ *  file or two?" confusion. A legacy combined `emirates_id` upload still
+ *  counts (see isDocKeySatisfied) so existing customers aren't forced to
+ *  re-upload. */
 export const KYC_DOCS: DocReq[] = [
-  { key: 'emirates_id', label: 'Emirates ID — Front + Back', category: 'identity', required: true, hint: 'One PDF with both sides (UAE Pass export), or a clear photo showing the front and back together' },
-  { key: 'passport',    label: 'Passport',                    category: 'identity', required: true, hint: 'Bio-data page of your valid passport' },
-  { key: 'uae_visa',    label: 'UAE Visa / Residency',        category: 'identity', required: true, hint: 'UAE residence visa page (not required for UAE nationals)' },
+  { key: 'emirates_id_front', label: 'Emirates ID — Front', category: 'identity', required: true, hint: 'Clear photo or scan of the FRONT of your Emirates ID' },
+  { key: 'emirates_id_back',  label: 'Emirates ID — Back',  category: 'identity', required: true, hint: 'Clear photo or scan of the BACK of your Emirates ID' },
+  { key: 'passport',          label: 'Passport',            category: 'identity', required: true, hint: 'Bio-data page of your valid passport' },
+  { key: 'uae_visa',          label: 'UAE Visa / Residency', category: 'identity', required: true, hint: 'UAE residence visa page (not required for UAE nationals)' },
 ];
 
 export const KYC_DOC_KEYS = new Set(KYC_DOCS.map(d => d.key));
+
+/** Emirates ID is satisfied by both sides (front + back), or a legacy combined file. */
+export function emiratesIdSatisfied(keys: Set<string>): boolean {
+  return (keys.has('emirates_id_front') && keys.has('emirates_id_back')) || keys.has('emirates_id');
+}
+
+/** Whether a required doc key is satisfied. The EID side keys also accept a
+ *  legacy combined `emirates_id` upload so existing customers stay complete. */
+export function isDocKeySatisfied(key: string, keys: Set<string>): boolean {
+  if (key === 'emirates_id_front' || key === 'emirates_id_back') return keys.has(key) || keys.has('emirates_id');
+  if (key === 'emirates_id') return emiratesIdSatisfied(keys);
+  return keys.has(key);
+}
 
 /**
  * Residential rental docs. For v1, ALL of these are optional — only

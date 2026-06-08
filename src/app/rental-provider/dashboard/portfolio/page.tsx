@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import {
   Building2, MapPin, Plus, Pencil, Trash2, Search,
   ChevronDown, Loader2, AlertCircle, Camera, X, ImagePlus, Trash, Eye, FileText,
+  LayoutGrid, Map as MapIcon,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
@@ -61,6 +62,8 @@ interface Property {
   createdAt: string;
   unitCount?: number;
   listedCount?: number;
+  occupiedCount?: number;
+  rentTotal?: number;
 }
 
 interface Unit {
@@ -89,6 +92,8 @@ interface Unit {
   description: string | null;
   isListed: boolean;
   listingStatus: 'draft' | 'pending' | 'in_review' | 'published' | 'expired' | 'rejected';
+  planLabel?: string | null;
+  floorPlanUrl?: string | null;
 }
 
 interface ContractSummary {
@@ -379,12 +384,28 @@ function PropertyCard({
   onSubmitListing: (u: Unit) => void; onWithdrawListing: (u: Unit) => void;
   onManagePhotos: (u: Unit) => void;
 }) {
-  const totalRent = units.reduce((sum, u) => sum + (Number(u.rentalPrice ?? u.marketPrice) || 0), 0);
-  const occupied = units.filter((u) => u.availability === 'occupied').length;
+  // Units load lazily on expand. Until then, fall back to the property-level
+  // aggregates returned by GET /properties so the collapsed card shows real
+  // numbers (count, occupancy, rent) by default — not 0.
+  const unitsLoaded = units.length > 0;
+  const totalRent = unitsLoaded
+    ? units.reduce((sum, u) => sum + (Number(u.rentalPrice ?? u.marketPrice) || 0), 0)
+    : (property.rentTotal ?? 0);
+  const occupied = unitsLoaded
+    ? units.filter((u) => u.availability === 'occupied').length
+    : (property.occupiedCount ?? 0);
   const available = units.filter((u) => u.availability === 'available').length;
   const maintenance = units.filter((u) => u.availability === 'maintenance').length;
   const totalUnits = property.unitCount ?? units.length;
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [planFilter, setPlanFilter] = useState<string>('all');
+
+  // Distinct plans in this property (for the plan-wise filter), ordered by plan number.
+  const planOptions = [...new Map(
+    units.filter(u => u.planLabel)
+      .map(u => [u.planLabel as string, u] as const)
+  ).keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const visibleUnits = planFilter === 'all' ? units : units.filter(u => u.planLabel === planFilter);
 
   return (
     <div className={cn(s.prop, expanded && s.expanded)}>
@@ -447,12 +468,31 @@ function PropertyCard({
       {expanded && (
         <div className={s.propBody}>
           <div className={s.unitH}>
-            <div className={s.unitHTtl}>Units ({units.length})</div>
-            {!property.isStandaloneUnit && (
-              <button type="button" className={cn(s.btn, s.btnPrimary, s.btnSm)} onClick={onAddUnit}>
-                <Plus size={13} /> Add unit
-              </button>
-            )}
+            <div className={s.unitHTtl}>
+              Units ({planFilter === 'all' ? units.length : `${visibleUnits.length} of ${units.length}`})
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {planOptions.length > 0 && (
+                <div style={{ position: 'relative' }}>
+                  <select value={planFilter} onChange={e => setPlanFilter(e.target.value)}
+                    style={{ appearance: 'none', border: '1px solid #d8d6d0', borderRadius: 8, padding: '6px 28px 6px 10px', fontSize: 12.5, color: '#1a1916', background: '#fff', cursor: 'pointer' }}
+                    title="Filter units by floor plan">
+                    <option value="all">All plans</option>
+                    {planOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <ChevronDown size={14} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', color: '#9b9890', pointerEvents: 'none' }} />
+                </div>
+              )}
+              <Link href={`/listings/floor-plans?propertyId=${property.id}`} target="_blank"
+                className={cn(s.btn, s.btnSm)} title="See units grouped by floor plan">
+                <LayoutGrid size={13} /> Floor plans
+              </Link>
+              {!property.isStandaloneUnit && (
+                <button type="button" className={cn(s.btn, s.btnPrimary, s.btnSm)} onClick={onAddUnit}>
+                  <Plus size={13} /> Add unit
+                </button>
+              )}
+            </div>
           </div>
 
           {units.length === 0 ? (
@@ -472,9 +512,16 @@ function PropertyCard({
                 </button>
               )}
             </div>
+          ) : visibleUnits.length === 0 ? (
+            <div className={s.empty}>
+              <div className={s.emptyIc}><LayoutGrid size={20} /></div>
+              <h3 className={s.emptyTtl}>No units in {planFilter}</h3>
+              <p className={s.emptyDesc}>No units match this plan filter.</p>
+              <button type="button" className={cn(s.btn)} onClick={() => setPlanFilter('all')}>Show all plans</button>
+            </div>
           ) : (
             <div className={s.units}>
-              {units.map((u) => {
+              {visibleUnits.map((u) => {
                 const contract = contracts.find((c) => c.unit?.id === u.id && c.contractActive);
                 const tenant = contract?.tenant?.name ?? null;
                 const contractEnd = contract?.endDate
@@ -513,6 +560,9 @@ function PropertyCard({
                         {u.bathrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bathrooms} BA</span></>)}
                         {sizeStr && (<><span className={s.unitDot} /><span className={s.unitSpec}>{sizeStr}</span></>)}
                         {u.view && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.view}</span></>)}
+                        {u.planLabel && (
+                          <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: '#2e9f82', background: '#f0faf6', borderRadius: 6, padding: '1px 7px' }}>{u.planLabel}</span>
+                        )}
                       </div>
                       {tenant && (
                         <div className={s.unitBottom}>
@@ -554,9 +604,14 @@ function PropertyCard({
                           <Eye size={14} />
                         </Link>
                         {contract && (
-                          <Link href={`/rental-provider/dashboard/contracts/${contract.id}`} className={s.actsBtn} title="View contract">
+                          <Link href={`/rental-provider/dashboard/contracts/${contract.id}/v2`} className={s.actsBtn} title="View contract">
                             <FileText size={14} />
                           </Link>
+                        )}
+                        {u.floorPlanUrl && (
+                          <a href={u.floorPlanUrl} target="_blank" rel="noreferrer" className={s.actsBtn} title="View floor plan">
+                            <MapIcon size={14} />
+                          </a>
                         )}
                         <button type="button" className={s.actsBtn} onClick={() => onManagePhotos(u)} title="Manage photos">
                           <Camera size={14} />
@@ -698,15 +753,26 @@ export default function PortfolioPage() {
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
 
-  const handleSaveUnit = useCallback(async (data: UnitFormData) => {
+  const handleSaveUnit = useCallback(async (data: UnitFormData, floorPlan?: File | null) => {
     if (!unitModal.propertyId) return;
     const dto = unitFormToDto(data);
-    if (unitModal.editingUnit) {
-      await updateUnit.mutateAsync({ propertyId: unitModal.propertyId, unitId: unitModal.editingUnit.id, dto });
-    } else {
-      await createUnit.mutateAsync({ propertyId: unitModal.propertyId, dto });
+    const saved = unitModal.editingUnit
+      ? await updateUnit.mutateAsync({ propertyId: unitModal.propertyId, unitId: unitModal.editingUnit.id, dto })
+      : await createUnit.mutateAsync({ propertyId: unitModal.propertyId, dto });
+    if (floorPlan && saved?.id) {
+      try {
+        const fd = new FormData();
+        fd.append('file', floorPlan);
+        const res = await fetch(`/api/properties/${unitModal.propertyId}/units/${saved.id}/floor-plan`, {
+          method: 'POST', credentials: 'include', body: fd,
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        // non-fatal: the unit saved; only the floor-plan upload failed
+      }
+      qc.invalidateQueries({ queryKey: ['units', unitModal.propertyId] });
     }
-  }, [unitModal, createUnit, updateUnit]);
+  }, [unitModal, createUnit, updateUnit, qc]);
 
   // ── Aggregated KPIs (from the loaded properties list) ──
   const totalProperties = properties.length;
@@ -945,6 +1011,7 @@ export default function PortfolioPage() {
             rentEscalationPct: '',
             description:      unitModal.editingUnit.description ?? '',
           } : undefined}
+          existingFloorPlanUrl={unitModal.editingUnit?.floorPlanUrl ?? null}
           onClose={() => setUnitModal({ open: false })}
           onSave={handleSaveUnit}
         />

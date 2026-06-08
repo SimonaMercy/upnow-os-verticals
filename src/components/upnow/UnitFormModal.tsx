@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Loader2 } from 'lucide-react';
+import { X, Loader2, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
@@ -245,8 +245,10 @@ interface Props {
   open: boolean;
   propertyCategory: string;
   initial?: Partial<UnitFormData>;
+  /** URL of a floor plan already attached (edit mode) — shows "current" state. */
+  existingFloorPlanUrl?: string | null;
   onClose: () => void;
-  onSave: (data: UnitFormData) => Promise<void>;
+  onSave: (data: UnitFormData, floorPlan?: File | null) => Promise<void>;
   title?: string;
 }
 
@@ -298,10 +300,12 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
 const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
 const INPUT_ERR = 'w-full border border-red-400 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-red-400';
 
-export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave, title }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof UnitFormData, string>>>({});
   const [saving, setSaving] = useState(false);
+  const [floorPlan, setFloorPlan] = useState<File | null>(null);
+  const floorPlanInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -313,6 +317,7 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
       };
       setForm({ ...defaults, ...initial });
       setErrors({});
+      setFloorPlan(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -358,7 +363,7 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
     e.preventDefault();
     if (!validate()) return;
     setSaving(true);
-    try { await onSave(form); onClose(); }
+    try { await onSave(form, floorPlan); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -622,6 +627,42 @@ export function UnitFormModal({ open, propertyCategory, initial, onClose, onSave
               value={form.description}
               onChange={e => upd('description', e.target.value)}
             />
+          </div>
+
+          {/* Floor plan */}
+          <div>
+            <input
+              ref={floorPlanInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              className="sr-only"
+              onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setFloorPlan(f); e.target.value = ''; }}
+            />
+            <label className="block text-xs font-medium text-[#6b6860] mb-1.5">
+              Floor plan <span className="text-[#9b9890] font-normal">(optional)</span>
+            </label>
+            {floorPlan ? (
+              <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+                <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                <span className="text-sm text-[#1a1916] truncate flex-1">{floorPlan.name}</span>
+                <button type="button" onClick={() => floorPlanInputRef.current?.click()} className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
+                <button type="button" onClick={() => setFloorPlan(null)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => floorPlanInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+              >
+                <Upload size={15} className="text-[#c8c6c0]" />
+                {existingFloorPlanUrl ? 'Replace floor plan (PDF or image)' : 'Attach a floor plan (PDF or image)'}
+              </button>
+            )}
+            {existingFloorPlanUrl && !floorPlan && (
+              <a href={existingFloorPlanUrl} target="_blank" rel="noreferrer" className="inline-block mt-1 text-[11px] text-[#2e9f82] hover:underline">
+                A floor plan is already attached — view current
+              </a>
+            )}
           </div>
 
           {/* Actions */}

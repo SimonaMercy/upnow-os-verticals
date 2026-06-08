@@ -37,7 +37,7 @@ import {
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
   User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check,
-  UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck,
+  UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send,
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 
@@ -64,12 +64,12 @@ interface ContractPayment {
   description: string | null;
   paymentType: string | null;
   paymentMethod: string | null;
-  amountPaid: number;        // gross (incl. rent VAT)
-  vatAmount?: number;        // rent VAT portion of amountPaid (0 = exempt)
+  amount: number;            // gross (incl. rent VAT) — matches API field name
+  vatAmount?: number;        // rent VAT portion of amount (0 = exempt)
   transactionDate: string | null;
   chequeStatus?: string | null;
   paidAt?: string | null;
-  reference?: string | null;
+  chequeNumber?: string | null;
 }
 
 interface MoveInInsp {
@@ -688,7 +688,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           <div className="stats">
             <div className="stat">
               <div className="sl">Next payment</div>
-              <div className="sv">{next ? fmtAed(next.amountPaid) : '—'}</div>
+              <div className="sv">{next ? fmtAed(next.amount) : '—'}</div>
             </div>
             <div className="stat">
               <div className="sl">Due</div>
@@ -782,6 +782,56 @@ function MissingStrip({
 // ────────────────────────────────────────────────────────────────────────────
 
 type DrawerTab = 'parties' | 'property' | 'period' | 'payments' | 'documents' | 'clauses';
+
+/** Generates + emails the tenant a secure magic link, deep-linked to the section
+ *  relevant to where it's shown (documents vs the contract review/sign page),
+ *  and shows the link so the RP can copy/share it directly (e.g. WhatsApp). */
+function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link' }: {
+  tenantId: number; contractId: number; section?: 'documents' | 'contract'; label?: string;
+}) {
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [link, setLink] = useState('');
+  const [email, setEmail] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const send = async () => {
+    setState('sending');
+    try {
+      const res = await fetch('/api/portal/generate', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId, contractId }),
+      });
+      if (!res.ok) throw new Error();
+      const d = await res.json();
+      // Deep-link to the relevant section: contract review/sign vs documents.
+      const finalLink = d.link ? (section === 'contract' ? `${d.link}/contract/${contractId}` : d.link) : '';
+      setLink(finalLink); setEmail(d.email ?? null); setState('done');
+      if (finalLink) { try { await navigator.clipboard.writeText(finalLink); setCopied(true); } catch { /* ignore */ } }
+    } catch { setState('error'); }
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } };
+
+  if (state === 'done' && link) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end', maxWidth: 360 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+          <input readOnly value={link} onFocus={e => e.currentTarget.select()}
+            style={{ flex: 1, fontSize: 11, padding: '4px 8px', border: '1px solid var(--line, #e8e6e0)', borderRadius: 8, background: '#fafaf8', color: '#1a1916' }} />
+          <button type="button" className="mini-btn ok" onClick={copy}>{copied ? 'Copied ✓' : 'Copy'}</button>
+          <a href={link} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> Open</a>
+        </div>
+        <span style={{ fontSize: 10.5, color: 'var(--mute, #9b9890)' }}>
+          {email ? `Emailed to ${email} · ` : ''}share this link with the customer to upload & sign (valid 14 days)
+        </span>
+      </div>
+    );
+  }
+  return (
+    <button type="button" className="mini-btn view" onClick={send} disabled={state === 'sending'} title="Generate a secure link for the tenant">
+      <Send size={12} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : label}
+    </button>
+  );
+}
 
 function DetailCards({
   contract, payments, kycDocs, onOpen,
@@ -948,7 +998,7 @@ function DetailsDrawer({
   const [pdcBusy, setPdcBusy] = useState(false);
   const rentRows = payments.filter(p => p.paymentType !== 'security_deposit');
   // Rent VAT (commercial/industrial): amounts are GROSS; split net vs VAT for display.
-  const rentGross = rentRows.reduce((s, p) => s + (p.amountPaid || 0), 0);
+  const rentGross = rentRows.reduce((s, p) => s + (p.amount || 0), 0);
   const rentVat   = rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
@@ -1090,8 +1140,8 @@ function DetailsDrawer({
                       <thead><tr><th>Amount</th><th>Reference</th><th>Date</th><th>Status</th></tr></thead>
                       <tbody>
                         <tr>
-                          <td className="amt">{fmtAed(depositRow.amountPaid)}</td>
-                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.reference ?? '—'}</td>
+                          <td className="amt">{fmtAed(depositRow.amount)}</td>
+                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
                           <td>{fmtDate(depositRow.transactionDate)}</td>
                           <td><span className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}>{(depositRow.chequeStatus ?? 'Cleared').replace(/^./, c => c.toUpperCase())}</span></td>
                         </tr>
@@ -1110,18 +1160,20 @@ function DetailsDrawer({
                 </div>
                 <div className="secb">
                   <table className="ptable">
-                    <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
+                    <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
                       {rentRows.map((p, i) => (
                         <tr key={p.id}>
                           <td>{i + 1}</td>
                           <td>{p.description ?? '—'}</td>
                           <td className="amt">
-                            {fmtAed(p.amountPaid)}
+                            {fmtAed(p.amount)}
                             {(p.vatAmount ?? 0) > 0 && (
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>
                             )}
                           </td>
+                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}</td>
+                          <td>{fmtDate(p.transactionDate)}</td>
                           <td>
                             <select
                               className={'cstat ' + (p.chequeStatus ?? 'pending')}
@@ -1139,17 +1191,17 @@ function DetailsDrawer({
                         </tr>
                       ))}
                       {rentRows.length === 0 && (
-                        <tr><td colSpan={4}><span className="note">No payments recorded yet.</span></td></tr>
+                        <tr><td colSpan={6}><span className="note">No payments recorded yet.</span></td></tr>
                       )}
                     </tbody>
                     <tfoot>
                       {showVat && (
                         <>
-                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td /></tr>
-                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td /></tr>
+                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td colSpan={3} /></tr>
+                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td colSpan={3} /></tr>
                         </>
                       )}
-                      <tr><td colSpan={2}>{showVat ? 'Total (incl. VAT)' : 'Total'}</td><td className="tot">{fmtAed(rentGross)}</td><td /></tr>
+                      <tr><td colSpan={2}>{showVat ? 'Total (incl. VAT)' : 'Total'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={3} /></tr>
                     </tfoot>
                   </table>
 
@@ -1244,6 +1296,7 @@ function DetailsDrawer({
                     <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); }}>
                       <UploadCloud size={12} /> Upload
                     </button>
+                    {contract.tenant.id && <SendTenantLinkButton tenantId={contract.tenant.id} contractId={contract.id} section="documents" label="Send docs link" />}
                   </div>
                 </div>
                 <div className="secb">
@@ -2268,6 +2321,16 @@ export default function ContractV2Page() {
             </div>
             <p className="abody">{content.body}</p>
             <div className="action-body">{content.node}</div>
+            {/* Send the customer a secure link to upload documents + sign — shown
+                 at the Signatures / Move-in steps where tenant action is needed. */}
+            {(selStep.key === 'sign' || selStep.key === 'movein') && contract.tenant.id && !readOnlyWorkflow && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+                  Customer signing link
+                </div>
+                <SendTenantLinkButton tenantId={contract.tenant.id} contractId={contract.id} section="contract" label="Send signing link" />
+              </div>
+            )}
             {/* Flow 4: Redo Ejari — roll back to issued so a corrected certificate
                  can be uploaded. Shown on the Ejari step once it is registered and
                  the workflow has not yet frozen (active / expired / terminated). */}

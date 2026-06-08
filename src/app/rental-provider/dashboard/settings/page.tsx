@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Settings, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, CreditCard, Flag, Lock } from 'lucide-react';
+import { Settings, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock } from 'lucide-react';
+import { TeamPanel } from '@/components/dashboard/rp/TeamPanel';
 
 /* ─────────────────────────────────────────────────────────────
    General settings types
@@ -21,7 +22,7 @@ const NOTIF_KEYS: NotifKey[] = ['newInquiry', 'chequeReminder', 'renewalAlert', 
 /* ─────────────────────────────────────────────────────────────
    Fee rules types
 ───────────────────────────────────────────────────────────── */
-type FeeType = 'ejari_fee' | 'admin_fee' | 'commission' | 'security_deposit';
+type FeeType = 'ejari_fee' | 'admin_fee' | 'commission' | 'security_deposit' | 'rent_vat';
 type FeeValueType = 'fixed_aed' | 'percentage';
 type ContractType = 'new' | 'renewal';
 
@@ -37,13 +38,14 @@ interface FeeRuleDto {
 type CategoryMap = Record<FeeType, FeeRuleDto>;
 const FEE_CATEGORIES = ['residential', 'commercial', 'industrial'] as const;
 type FeeCategory = (typeof FEE_CATEGORIES)[number];
-const FEE_ORDER: FeeType[] = ['ejari_fee', 'admin_fee', 'commission', 'security_deposit'];
+const FEE_ORDER: FeeType[] = ['ejari_fee', 'admin_fee', 'commission', 'security_deposit', 'rent_vat'];
 
 const FEE_META: Record<FeeType, { title: string; description: string; tag: string; tagStyle: 'default' | 'green'; refundable?: boolean; newOnly?: boolean }> = {
   ejari_fee:        { title: 'Ejari Fee',        description: 'Government Ejari registration charge',          tag: 'UAE default',  tagStyle: 'green' },
   admin_fee:        { title: 'Admin Fee',         description: 'Processing fee charged by your company',        tag: 'Customisable', tagStyle: 'default' },
   commission:       { title: 'Commission',        description: 'Brokerage commission on annual contract value',  tag: 'Customisable', tagStyle: 'default' },
   security_deposit: { title: 'Security Deposit',  description: 'Refundable deposit held for contract duration',  tag: 'Refundable',   tagStyle: 'green', refundable: true, newOnly: true },
+  rent_vat:         { title: 'VAT on Rent',       description: 'UAE 5% VAT on rent — exempt for residential, applies to commercial & industrial. Added to each rent cheque and tracked separately.', tag: 'Tax', tagStyle: 'default' },
 };
 
 const UAE_DEFAULTS: Record<FeeCategory, CategoryMap> = {
@@ -52,18 +54,21 @@ const UAE_DEFAULTS: Record<FeeCategory, CategoryMap> = {
     admin_fee:        { feeType: 'admin_fee',         valueType: 'fixed_aed',  value: 1000, vatApplicable: true,  vatRate: 5, isActive: true },
     commission:       { feeType: 'commission',        valueType: 'percentage', value: 5,    vatApplicable: true,  vatRate: 5, isActive: true },
     security_deposit: { feeType: 'security_deposit',  valueType: 'percentage', value: 5,    vatApplicable: false, vatRate: 0, isActive: true },
+    rent_vat:         { feeType: 'rent_vat',          valueType: 'percentage', value: 0,    vatApplicable: false, vatRate: 0, isActive: true },
   },
   commercial: {
     ejari_fee:        { feeType: 'ejari_fee',        valueType: 'fixed_aed',  value: 500,  vatApplicable: false, vatRate: 0, isActive: true },
     admin_fee:        { feeType: 'admin_fee',         valueType: 'fixed_aed',  value: 2000, vatApplicable: true,  vatRate: 5, isActive: true },
     commission:       { feeType: 'commission',        valueType: 'percentage', value: 5,    vatApplicable: true,  vatRate: 5, isActive: true },
     security_deposit: { feeType: 'security_deposit',  valueType: 'percentage', value: 10,   vatApplicable: false, vatRate: 0, isActive: true },
+    rent_vat:         { feeType: 'rent_vat',          valueType: 'percentage', value: 0,    vatApplicable: true,  vatRate: 5, isActive: true },
   },
   industrial: {
     ejari_fee:        { feeType: 'ejari_fee',        valueType: 'fixed_aed',  value: 500,  vatApplicable: false, vatRate: 0, isActive: true },
     admin_fee:        { feeType: 'admin_fee',         valueType: 'fixed_aed',  value: 2500, vatApplicable: true,  vatRate: 5, isActive: true },
     commission:       { feeType: 'commission',        valueType: 'percentage', value: 5,    vatApplicable: true,  vatRate: 5, isActive: true },
     security_deposit: { feeType: 'security_deposit',  valueType: 'percentage', value: 10,   vatApplicable: false, vatRate: 0, isActive: true },
+    rent_vat:         { feeType: 'rent_vat',          valueType: 'percentage', value: 0,    vatApplicable: true,  vatRate: 5, isActive: true },
   },
 };
 
@@ -118,6 +123,50 @@ function FeeRow({ rule, rent, onChange, isRenewal }: {
 }) {
   const meta     = FEE_META[rule.feeType];
   const disabled = !!meta.newOnly && isRenewal;
+
+  // Rent VAT is special: it is the VAT itself (a % charged ON the rent), not a
+  // fee that carries its own VAT. Render a focused Exempt / rate control that
+  // maps to vatApplicable + vatRate (what computeFees reads on the backend).
+  if (rule.feeType === 'rent_vat') {
+    const on = rule.isActive && rule.vatApplicable;
+    const vatOnRent = on ? Math.round((rent * rule.vatRate) / 100) : 0;
+    const setOn = (v: boolean) => onChange({
+      ...rule, isActive: true, valueType: 'percentage', value: 0,
+      vatApplicable: v, vatRate: v ? (rule.vatRate || 5) : 0,
+    });
+    return (
+      <div className={`grid grid-cols-1 xl:grid-cols-[minmax(220px,1fr)_auto] gap-4 py-[18px] px-6 border-b border-[#eef1ee] last:border-b-0 transition-opacity ${on ? '' : 'opacity-[0.82]'}`}
+        style={on ? undefined : { background: 'repeating-linear-gradient(135deg,#fff 0 8px,#fcfcfb 8px 16px)' }}>
+        <div className="flex gap-3.5 items-start">
+          <Toggle value={on} onChange={setOn} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`font-bold text-[15px] whitespace-nowrap ${on ? 'text-[#0e1a16]' : 'text-[#6b7a74]'}`}>{meta.title}</span>
+              <span className="inline-flex items-center text-[10.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border text-[#6b7a74] bg-[#f6f7f4] border-[#e6ebe7]">{meta.tag}</span>
+            </div>
+            <p className="text-[12.5px] text-[#6b7a74] mt-0.5 leading-[1.4]">{meta.description}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 justify-end flex-wrap xl:justify-end">
+          <div className={`inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white ${on ? '' : 'opacity-40 pointer-events-none'}`}>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={rule.vatRate}
+              onChange={e => onChange({ ...rule, isActive: true, valueType: 'percentage', value: 0, vatApplicable: true, vatRate: parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0 })}
+              className="w-16 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent"
+            />
+            <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">% of rent</span>
+          </div>
+          <div className="min-w-[110px] text-right tabular-nums">
+            <div className="text-[17px] font-bold text-[#0e1a16]">{on ? `AED ${fmtN(vatOnRent)}` : 'Exempt'}</div>
+            <div className="text-[11px] text-[#6b7a74] mt-0.5">{on ? `${rule.vatRate}% × AED ${fmtN(rent)}` : 'No VAT on rent'}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const off      = !rule.isActive || disabled;
 
   const base   = rule.valueType === 'fixed_aed' ? rule.value : Math.round((rent * rule.value) / 100);
@@ -258,7 +307,9 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
   saved: boolean;
   error: string | null;
 }) {
-  const lines = FEE_ORDER.map(ft => {
+  // Rent VAT is recurring on each rent cheque (not a one-off upfront fee), so it
+  // is configured in its own row but excluded from this upfront-cost breakdown.
+  const lines = FEE_ORDER.filter(ft => ft !== 'rent_vat').map(ft => {
     const rule = rules[ft];
     const meta = FEE_META[ft];
     const renewalDeposit = contractType === 'renewal' && !!meta.newOnly;
@@ -354,6 +405,19 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
             </span>
           </div>
 
+          {/* Recurring rent VAT note (charged on each rent cheque, not upfront) */}
+          {rules.rent_vat?.isActive && rules.rent_vat?.vatApplicable && rules.rent_vat?.vatRate > 0 && (
+            <div className="mt-1.5 p-2.5 bg-[#f6f7f4] rounded-[10px] grid grid-cols-[1fr_auto] items-baseline gap-2.5 border border-[#e6ebe7]">
+              <span className="text-[12px] font-semibold text-[#2b3a34]">
+                + {rules.rent_vat.vatRate}% VAT on rent
+                <span className="block text-[11px] text-[#6b7a74] font-medium mt-0.5">Added to each rent cheque</span>
+              </span>
+              <span className="text-[14px] font-bold text-[#0e1a16] tabular-nums">
+                AED {fmtN(Math.round((rent * rules.rent_vat.vatRate) / 100))}/yr
+              </span>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="mt-3.5 grid gap-2">
             <button
@@ -391,7 +455,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules';
+type MainTab = 'general' | 'fee_rules' | 'team';
 
 const EMIRATES_LIST = ['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','Fujairah','Umm Al Quwain'] as const;
 
@@ -422,12 +486,26 @@ export default function SettingsPage() {
   const [savingBiz, setSavingBiz]           = useState(false);
   const [bizSaved, setBizSaved]             = useState(false);
   const [bizError, setBizError]             = useState<string | null>(null);
+  // Additional landlord-profile fields (merged from the standalone Profile page)
+  const [authorizedSignatoryName, setAuthorizedSignatoryName] = useState('');
+  const [passportNumber, setPassportNumber] = useState('');
+  const [legalNoticesAddress, setLegalNoticesAddress] = useState('');
+  const [hasPoa, setHasPoa]                 = useState(false);
+  const [poaPersonPhone, setPoaPersonPhone] = useState('');
+  const [poaPersonEmail, setPoaPersonEmail] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankIban, setBankIban]             = useState('');
+  const [bankName, setBankName]             = useState('');
 
   // ── Contract date config ─────────────────────────────────────
   const [preferredDays,    setPreferredDays]    = useState<number[]>([]);
   const [daysSaving,       setDaysSaving]       = useState(false);
   const [daysSaved,        setDaysSaved]        = useState(false);
   const [daysError,        setDaysError]        = useState<string | null>(null);
+  const [chequeDays,       setChequeDays]       = useState<number[]>([]);
+  const [chequeSaving,     setChequeSaving]     = useState(false);
+  const [chequeSaved,      setChequeSaved]      = useState(false);
+  const [chequeError,      setChequeError]      = useState<string | null>(null);
 
   // ── Renewal defaults (Phase 6) ──────────────────────────────
   // Default % bump applied to the previous annual rent when proposing a
@@ -463,6 +541,9 @@ export default function SettingsPage() {
   const [feesSaved, setFeesSaved]       = useState(false);
   const [feesError, setFeesError]       = useState<string | null>(null);
 
+  // Phone lives on the auth/user record (editable here, saved via /auth/me)
+  const [phone, setPhone] = useState('');
+
   // Load KYC profile on mount
   useEffect(() => {
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
@@ -478,7 +559,17 @@ export default function SettingsPage() {
         const ct = p.companyType as 'landlord' | 'brokerage' | 'agents' | null | undefined;
         if (ct) setCompanyType(ct);
         if (p.parentBrokerageName) setParentBrokerageName(p.parentBrokerageName as string);
+        setAuthorizedSignatoryName((p.authorizedSignatoryName as string) ?? '');
+        setPassportNumber((p.passportNumber as string) ?? '');
+        setLegalNoticesAddress((p.legalNoticesAddress as string) ?? '');
+        setHasPoa(Boolean(p.hasPoa));
+        setPoaPersonPhone((p.poaPersonPhone as string) ?? '');
+        setPoaPersonEmail((p.poaPersonEmail as string) ?? '');
+        setBankAccountName((p.bankAccountName as string) ?? '');
+        setBankIban((p.bankIban as string) ?? '');
+        setBankName((p.bankName as string) ?? '');
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
+        if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
@@ -494,6 +585,9 @@ export default function SettingsPage() {
       .finally(() => setProfileLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the editable phone field in sync with the auth session
+  useEffect(() => { setPhone(user?.phone ?? ''); }, [user?.phone]);
 
   useEffect(() => {
     if (mainTab !== 'fee_rules' || feesLoading) return;
@@ -562,6 +656,17 @@ export default function SettingsPage() {
         payload.emiratesIdNumber = emiratesId || null;
         payload.nationality = nationality || null;
       }
+      // Additional landlord-profile fields (shared across entity types)
+      payload.authorizedSignatoryName = authorizedSignatoryName || null;
+      payload.passportNumber = passportNumber || null;
+      payload.legalNoticesAddress = legalNoticesAddress || null;
+      payload.hasPoa = hasPoa;
+      payload.poaPersonName = authorizedSignatoryName || null;
+      payload.poaPersonPhone = hasPoa ? (poaPersonPhone || null) : null;
+      payload.poaPersonEmail = hasPoa ? (poaPersonEmail || null) : null;
+      payload.bankAccountName = bankAccountName || null;
+      payload.bankIban = bankIban || null;
+      payload.bankName = bankName || null;
       const res = await fetch('/api/profiles/rental-provider/me', {
         method: 'PATCH',
         credentials: 'include',
@@ -569,6 +674,23 @@ export default function SettingsPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
+      // Phone is an auth/user field (not on the RP entity) — persist it
+      // separately when changed. Backend validates uniqueness and resets phone
+      // verification (phoneVerified = false) on change.
+      if (phone.trim() !== (user?.phone ?? '').trim()) {
+        const pRes = await fetch('/api/auth/me', {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone.trim() }),
+        });
+        if (!pRes.ok) {
+          const body = await pRes.json().catch(() => ({}));
+          setBizError(typeof body.message === 'string' ? body.message : 'Failed to update phone number');
+          setSavingBiz(false);
+          return;
+        }
+      }
       // Re-fetch auth session so sidebar + header reflect any name changes
       await refresh();
       setBizSaved(true);
@@ -579,7 +701,8 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveDays = async () => {
+  const handleSaveDays = async (e: React.FormEvent) => {
+    e.preventDefault();
     setDaysSaving(true);
     setDaysError(null);
     setDaysSaved(false);
@@ -596,6 +719,27 @@ export default function SettingsPage() {
       setDaysError('Failed to save. Please try again.');
     } finally {
       setDaysSaving(false);
+    }
+  }
+
+  const handleSaveChequeDays = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChequeSaving(true);
+    setChequeError(null);
+    setChequeSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferredChequeDays: chequeDays }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setChequeSaved(true);
+    } catch {
+      setChequeError('Failed to save. Please try again.');
+    } finally {
+      setChequeSaving(false);
     }
   }
 
@@ -640,7 +784,7 @@ export default function SettingsPage() {
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#1a1916]">Settings</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">Manage your business details, fee rules, and preferences.</p>
+        <p className="text-sm text-[#6b6860] mt-0.5">Manage your business details, rules, and preferences.</p>
       </div>
 
       {/* Top-level tabs */}
@@ -659,9 +803,20 @@ export default function SettingsPage() {
             mainTab === 'fee_rules' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
           }`}
         >
-          <Percent size={14} /> Fee Rules
+          <Percent size={14} /> Rules
+        </button>
+        <button
+          onClick={() => setMainTab('team')}
+          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+            mainTab === 'team' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+          }`}
+        >
+          <Users size={14} /> Team
         </button>
       </div>
+
+      {/* ── Team tab ───────────────────────────────────────────── */}
+      {mainTab === 'team' && <TeamPanel />}
 
       {/* ── General tab ────────────────────────────────────────── */}
       {mainTab === 'general' && (
@@ -765,11 +920,11 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Phone <Lock size={10} className="text-[#c9c7c1]" />
+                        Phone
                       </label>
                       <div className="relative">
-                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#c9c7c1]" />
-                        <input readOnly value={user?.phone ?? ''} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-[#f9f8f6] text-[#9b9890] cursor-not-allowed" />
+                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+                        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
                       </div>
                     </div>
                     <div>
@@ -854,11 +1009,11 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Phone <Lock size={10} className="text-[#c9c7c1]" />
+                        Phone
                       </label>
                       <div className="relative">
-                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#c9c7c1]" />
-                        <input readOnly value={user?.phone ?? ''} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-[#f9f8f6] text-[#9b9890] cursor-not-allowed" />
+                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+                        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
                       </div>
                     </div>
                     <div>
@@ -905,11 +1060,61 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {/* Authorized signatory, POA & banking — merged from the standalone Profile page */}
+              <div className="mt-6 pt-5 border-t border-[#eef0ec] space-y-4">
+                <h3 className="text-sm font-semibold text-[#1a1916]">Authorized Signatory &amp; Power of Attorney</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Authorized Signatory Name</label>
+                    <input value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Person who signs on your behalf" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Passport No.</label>
+                    <input value={passportNumber} onChange={e => { setPassportNumber(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="e.g. A12345678" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Legal Notices Address</label>
+                  <input value={legalNoticesAddress} onChange={e => { setLegalNoticesAddress(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Address where legal correspondence should be sent" />
+                </div>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input type="checkbox" checked={hasPoa} onChange={e => { setHasPoa(e.target.checked); setBizSaved(false); }} className="w-4 h-4 accent-[#2e9f82]" />
+                  <span className="text-sm text-[#3d3b35]">A Power of Attorney holder acts on my behalf</span>
+                </label>
+                {hasPoa && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Phone</label>
+                      <input value={poaPersonPhone} onChange={e => { setPoaPersonPhone(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="+971 50 123 4567" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Email</label>
+                      <input value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="signatory@example.com" />
+                    </div>
+                  </div>
+                )}
+                <h3 className="text-sm font-semibold text-[#1a1916] pt-2">Banking Details</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Account Holder Name</label>
+                    <input value={bankAccountName} onChange={e => { setBankAccountName(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Name on bank account" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Bank Name</label>
+                    <input value={bankName} onChange={e => { setBankName(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="e.g. Emirates NBD" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[#6b6860] block mb-1">IBAN</label>
+                  <input value={bankIban} onChange={e => { setBankIban(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="AE07 0331 2345 6789 0123 456" />
+                </div>
+              </div>
+
               <div className="flex items-center gap-3 mt-5 flex-wrap">
                 {bizError && <p className="text-xs text-red-600 flex-1">{bizError}</p>}
                 {bizSaved && !savingBiz && <p className="text-xs text-[#2e9f82] flex-1">Profile saved.</p>}
                 <p className="text-xs text-[#9b9890] flex items-center gap-1">
-                  <Lock size={11} /> Phone &amp; email changes require account verification.
+                  <Lock size={11} /> Email changes require account verification.
                 </p>
                 <SaveButton saving={savingBiz} label="Save Profile" />
               </div>
@@ -932,73 +1137,21 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Contract Date Configuration */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <div className="mb-4">
-              <h2 className="font-semibold text-base text-[#1a1916]">Contract Start Days</h2>
-              <p className="text-xs text-[#9b9890] mt-0.5">
-                Select the days of the month when contracts can start. Customers will only be able to pick these days in the booking calendar. Leave empty to allow any date.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mb-4">
-              {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
-                const active = preferredDays.includes(day);
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => {
-                      setPreferredDays(prev =>
-                        prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
-                      );
-                      setDaysSaved(false);
-                    }}
-                    className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
-                      ${active
-                        ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
-                        : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
-                  >
-                    {day}
-                  </button>
-                );
-              })}
-            </div>
-
-            {preferredDays.length > 0 && (
-              <p className="text-xs text-[#2e9f82] mb-3">
-                Selected: {preferredDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each month
-              </p>
-            )}
-
-            <div className="flex items-center gap-3 flex-wrap">
-              {daysError  && <p className="text-xs text-red-600 flex-1">{daysError}</p>}
-              {daysSaved  && !daysSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-              {preferredDays.length > 0 && (
-                <button type="button" onClick={() => { setPreferredDays([]); setDaysSaved(false); }}
-                  className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
-                  Clear all
-                </button>
-              )}
-              <SaveButton saving={daysSaving} label="Save Start Days" />
-            </div>
-          </div>
-
-          {/* Team Management */}
+          {/* Team Management — now a dedicated tab */}
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-base text-[#1a1916]">Team Management</h2>
               <button
-                onClick={() => setShowInvite(true)}
+                onClick={() => setMainTab('team')}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-white cursor-pointer"
                 style={{ background: '#2e9f82' }}
               >
-                <Plus size={13} /> Invite User
+                <Users size={13} /> Manage Team
               </button>
             </div>
             <p className="text-sm text-[#6b6860]">
-              Manage your managers and team members from the{' '}
-              <a href="/rental-provider/dashboard/team" className="text-[#2e9f82] underline">Team page</a>.
+              Invite managers and team members and set their permissions in the{' '}
+              <button type="button" onClick={() => setMainTab('team')} className="text-[#2e9f82] underline cursor-pointer">Team tab</button>.
             </p>
           </div>
         </div>
@@ -1007,6 +1160,113 @@ export default function SettingsPage() {
       {/* ── Fee Rules tab ───────────────────────────────────────── */}
       {mainTab === 'fee_rules' && (
         <div>
+          {/* Contract scheduling — moved from General */}
+          <div className="space-y-6 mb-5">
+            {/* Contract Date Configuration */}
+            <form onSubmit={handleSaveDays} className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="mb-4">
+                <h2 className="font-semibold text-base text-[#1a1916]">Contract Start Days</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">
+                  Select the days of the month when contracts can start. Customers will only be able to pick these days in the booking calendar. Leave empty to allow any date.
+                </p>
+              </div>
+  
+              <div className="flex flex-wrap gap-2 mb-4">
+                {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
+                  const active = preferredDays.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => {
+                        setPreferredDays(prev =>
+                          prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
+                        );
+                        setDaysSaved(false);
+                      }}
+                      className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
+                        ${active
+                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
+                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+  
+              {preferredDays.length > 0 && (
+                <p className="text-xs text-[#2e9f82] mb-3">
+                  Selected: {preferredDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each month
+                </p>
+              )}
+  
+              <div className="flex items-center gap-3 flex-wrap">
+                {daysError  && <p className="text-xs text-red-600 flex-1">{daysError}</p>}
+                {daysSaved  && !daysSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+                {preferredDays.length > 0 && (
+                  <button type="button" onClick={() => { setPreferredDays([]); setDaysSaved(false); }}
+                    className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
+                    Clear all
+                  </button>
+                )}
+                <SaveButton saving={daysSaving} label="Save Start Days" />
+              </div>
+            </form>
+  
+            {/* Cheque / Installment Due Days */}
+            <form onSubmit={handleSaveChequeDays} className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="mb-4">
+                <h2 className="font-semibold text-base text-[#1a1916]">Cheque Due Days</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">
+                  Select the days of the month your cheque / installment payments should fall on (e.g. 1st, 10th, 25th). Auto-generated payment plans snap each recurring cheque to the nearest of these days, so collections land on a consistent day every period. Leave empty to use the contract start day.
+                </p>
+              </div>
+  
+              <div className="flex flex-wrap gap-2 mb-4">
+                {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
+                  const active = chequeDays.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => {
+                        setChequeDays(prev =>
+                          prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
+                        );
+                        setChequeSaved(false);
+                      }}
+                      className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
+                        ${active
+                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
+                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+  
+              {chequeDays.length > 0 && (
+                <p className="text-xs text-[#2e9f82] mb-3">
+                  Cheques due on the {chequeDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each period
+                </p>
+              )}
+  
+              <div className="flex items-center gap-3 flex-wrap">
+                {chequeError && <p className="text-xs text-red-600 flex-1">{chequeError}</p>}
+                {chequeSaved && !chequeSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+                {chequeDays.length > 0 && (
+                  <button type="button" onClick={() => { setChequeDays([]); setChequeSaved(false); }}
+                    className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
+                    Clear all
+                  </button>
+                )}
+                <SaveButton saving={chequeSaving} label="Save Cheque Days" />
+              </div>
+            </form>
+          </div>
+
           {/* Contract type switcher */}
           <div className="grid grid-cols-2 gap-2 p-1.5 bg-white border border-[#e6ebe7] rounded-[14px] mb-5">
             {([

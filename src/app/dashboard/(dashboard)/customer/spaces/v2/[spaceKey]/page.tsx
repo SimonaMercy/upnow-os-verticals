@@ -36,7 +36,7 @@ import {
   Sparkles, ArrowRight, Camera, Trash2,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
-import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount } from '@/lib/docRequirements';
+import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -189,7 +189,8 @@ interface ApiContract {
   ejariFeeFils?: number | null;
   tenantSignedAt: string | null;
   landlordSignedAt: string | null;
-  unit: { id: number | null };
+  unit: { id: number | null; number?: string | null; name?: string | null; unitNumber?: string | null; unitName?: string | null; unitType?: string | null; bedrooms?: number | null };
+  property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null } | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   moveInInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
   termination?: ApiTermination | null;
@@ -245,7 +246,7 @@ const STATE_DEFS: Record<StateKey, StateDef> = {
   booked:                        { label: 'Viewing booked',                sub: 'Step 1 of 8',                     mode: 'new',     currentIndex: 0,  tone: 'action',    headline: 'Your viewing is confirmed.',                              body: 'Look over the cost summary below. Tap “I’m Interested” when you’re ready to commit to this unit.',                                                                                              timing: null },
   docs_required:                 { label: 'Documents required',            sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'action',    headline: 'Almost there. Let us gather your paperwork.',             body: 'Add the missing identity and supporting documents below. Most customers finish in under 5 minutes.',                                                                                            timing: 'Takes ~5 min' },
   docs_under_review:             { label: 'Documents under review',        sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'waiting',   headline: 'Your documents are with our team.',                       body: 'Once approved, your payment summary and contract preview unlock so you can prepare payments.',                                                                                                  timing: 'Usually within 1 business day' },
-  payment_review:                { label: 'Payment & references',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your payments accordingly.', body: 'Attach a reference for each one — cheque photo, transfer screenshot, card slip or cash receipt — so it can be verified.',                                                                       timing: 'Takes ~5 min' },
+  payment_review:                { label: 'Payment & references',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your cheques or payments accordingly.', body: 'Attach a reference for each one — cheque photo, transfer screenshot, card slip or cash receipt — so it can be verified.',                                                                       timing: 'Takes ~5 min' },
   awaiting_rp_confirm:           { label: 'Payments under review',         sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is reviewing your payments.',       body: 'Each reference is being verified against your contract before it’s issued for signature.',                                                                                                       timing: 'Usually within 1 business day' },
   signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'One signature stands between you and the keys.',          body: 'Open the final contract, then add your signature below.',                                                                                                                                         timing: 'Takes ~2 min' },
   ejari:                         { label: 'Ejari in progress',             sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is registering Ejari.',              body: 'The certificate will appear here for download the moment it’s uploaded.',                                                                                                                       timing: '2-5 business days' },
@@ -960,9 +961,25 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   // Defaults align with what the InterestedPopup pre-fills, so the on-screen
   // summary matches what the customer will commit to if they tap through.
   const defaultStart = (() => {
-    if (v?.desiredMoveIn) return v.desiredMoveIn.slice(0, 10);
+    const allowed = (unit?.property?.rentalProvider ?? unit?.property?.rental_provider)?.preferredStartDays ?? [];
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const desired = v?.desiredMoveIn?.slice(0, 10);
+    // Keep the customer's desired move-in only if it lands on an allowed start day.
+    if (desired) {
+      const dy = parseInt(desired.slice(8, 10), 10);
+      if (allowed.length === 0 || allowed.includes(dy)) return desired;
+    }
+    // Otherwise preselect the nearest upcoming allowed start day.
+    if (allowed.length > 0) {
+      const d = new Date(); d.setHours(0, 0, 0, 0);
+      for (let i = 0; i < 366; i++) {
+        if (allowed.includes(d.getDate())) return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        d.setDate(d.getDate() + 1);
+      }
+    }
+    if (desired) return desired;
     const d = new Date(); d.setDate(d.getDate() + 30);
-    return d.toISOString().slice(0, 10);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   })();
   const defaultPayments = v?.preferredChequeCount ?? 4;
 
@@ -1646,6 +1663,7 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
   );
 }
 
+
 function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const { user, refresh: refreshUser } = useAuth();
   const tenantProfileId = resolved.tenantProfileId;
@@ -1793,15 +1811,16 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   // rows to this list would block submission for customers who upload
   // their KYC but don't (e.g.) have an employment letter handy.
   const allRequired      = [...kycRequired];
-  const allRequiredDone  = allRequired.every(d => uploadedKeys.has(d.key));
+  // Emirates ID counts as done via a combined file OR both sides (isDocKeySatisfied).
+  const allRequiredDone  = allRequired.every(d => isDocKeySatisfied(d.key, uploadedKeys));
 
-  const doneCount = allRequired.filter(d => uploadedKeys.has(d.key)).length;
+  const doneCount = allRequired.filter(d => isDocKeySatisfied(d.key, uploadedKeys)).length;
   const totalCount = allRequired.length;
 
   // Per-section completion flags drive the KycSection "Done ✓" collapse
   // so finished work stays visible (collapsed, with a green pill) instead
   // of vanishing.
-  const kycAllDone      = kycRequired.every(d => uploadedKeys.has(d.key));
+  const kycAllDone      = kycRequired.every(d => isDocKeySatisfied(d.key, uploadedKeys));
   const supportingDocs  = financialReq;
   const supportingAllDone = supportingDocs.every(d => uploadedKeys.has(d.key));
   const occupantsAllDone  = occupantDocList.length > 0 && occupantDocList.every(d => uploadedKeys.has(d.key));
@@ -2475,8 +2494,8 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const items = sortPlanItems(plan.items ?? []);
   const firstDue = items.find(i => i.dueDate)?.dueDate ?? null;
   const typeMeta = (t?: string) => {
-    if (t === 'security_deposit') return { label: 'Deposit',  bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
-    if (t === 'first_bundle')     return { label: 'Move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
+    if (t === 'security_deposit') return { label: 'Before move-in',  bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
+    if (t === 'first_bundle')     return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
     if (t === 'extra_installment')return { label: 'Extra',    bg: 'var(--jade-soft)',    fg: 'var(--jade-deep)' };
     return                               { label: 'Rent',     bg: 'var(--surface)',      fg: 'var(--mute)'      };
   };
@@ -2566,8 +2585,14 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
               <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
                 {c.imageUrl ? (
                   <a href={c.imageUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={c.imageUrl} alt="cheque" style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                    {c.imageUrl.split('?')[0].toLowerCase().endsWith('.pdf') ? (
+                      <span style={{ width: 44, height: 30, borderRadius: 4, background: 'var(--mist)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--jade-deep)' }}>
+                        <FileText size={16} />
+                      </span>
+                    ) : (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={c.imageUrl} alt="cheque" style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                    )}
                   </a>
                 ) : null}
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -3075,8 +3100,16 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
           {cheques.map((c, i) => (
             <div key={c.id} style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '10px 14px', background: 'var(--paper)', display: 'flex', gap: 12, alignItems: 'center' }}>
               {c.imageUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={c.imageUrl} alt="cheque" style={{ width: 56, height: 36, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                <a href={c.imageUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                  {c.imageUrl.split('?')[0].toLowerCase().endsWith('.pdf') ? (
+                    <span style={{ width: 56, height: 36, borderRadius: 6, background: 'var(--mist)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--jade-deep)' }}>
+                      <FileText size={18} />
+                    </span>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.imageUrl} alt="cheque" style={{ width: 56, height: 36, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                  )}
+                </a>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Cheque ${i + 1}`}</p>
@@ -4083,22 +4116,40 @@ export default function CustomerSpaceV2Page() {
       ]);
       const docs = docsResp.documents ?? [];
       const tenantProfileId = (docsResp as { tenantProfileId?: number | null }).tenantProfileId ?? null;
-      const kind = spaceKey.startsWith('v-') ? 'viewing' : spaceKey.startsWith('d-') ? 'direct' : null;
-      const leadId = Number(spaceKey.slice(2));
+      const kind = spaceKey.startsWith('v-') ? 'viewing' : spaceKey.startsWith('d-') ? 'direct' : spaceKey.startsWith('c-') ? 'contract' : null;
+      const refId = Number(spaceKey.slice(2));
       let unit: ApiUnit | null = null;
       let viewing: ApiViewing | null = null;
       let lead: ApiLead | null = null;
       if (kind === 'viewing') {
-        const grouped = viewings.filter(v => (v.leadId ?? v.lead?.id) === leadId);
+        const grouped = viewings.filter(v => (v.leadId ?? v.lead?.id) === refId);
         viewing = grouped.sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt))[0] ?? null;
         unit = viewing?.unit ?? null;
       } else if (kind === 'direct') {
-        lead = leads.find(l => l.id === leadId) ?? null;
+        lead = leads.find(l => l.id === refId) ?? null;
         unit = lead?.unit ?? null;
+      } else if (kind === 'contract') {
+        // Contract-only entry (no lead/viewing behind it). Build the unit from
+        // the contract's own unit + property payload.
+        const cFound = contracts.find(c => c.id === refId);
+        if (cFound) {
+          const cu = cFound.unit ?? null;
+          unit = cu ? {
+            id: cu.id ?? 0,
+            unitNumber: cu.unitNumber ?? cu.number ?? '',
+            unitName: cu.unitName ?? cu.name ?? null,
+            unitType: cu.unitType ?? null,
+            bedrooms: cu.bedrooms ?? null,
+            property: cFound.property ? {
+              buildingName: cFound.property.buildingName ?? undefined,
+              fullAddress: cFound.property.fullAddress ?? null,
+            } : undefined,
+          } : null;
+        }
       }
       if (!unit) { setError('Space not found.'); setLoading(false); return; }
       const allForUnit = contracts.filter(c => c.unit?.id === unit?.id);
-      const contract = allForUnit.find(c => !c.parentContractId) ?? null;
+      const contract = allForUnit.find(c => !c.parentContractId) ?? allForUnit[0] ?? null;
       const renewalContract = contract ? (allForUnit.find(c => c.parentContractId === contract.id) ?? null) : null;
       // Docs-complete gate combines KYC identity + financial/business docs.
       // Use getRequiredDocs (which prepends KYC_DOCS to the rental section)
@@ -4106,7 +4157,8 @@ export default function CustomerSpaceV2Page() {
       // routed to docs_required, not payment_review.
       const requiredKeys = getRequiredDocs(unit.unitType).filter(d => d.required).map(d => d.key);
       const uploadedKeys = new Set(docs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
-      const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => uploadedKeys.has(k));
+      // Emirates ID is satisfied by a combined file OR both separate sides.
+      const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => isDocKeySatisfied(k, uploadedKeys));
       const paymentPlan = lead?.paymentPlan ?? viewing?.lead?.paymentPlan ?? null;
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
       setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, tenantProfileId, myDocs: docs });

@@ -232,6 +232,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAsset, setFilterAsset] = useState('all');
+  const [filterYear, setFilterYear] = useState('all');
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [page, setPage] = useState(1);
 
@@ -243,13 +244,22 @@ export default function OrdersPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { setPage(1); }, [activeTab, search, filterAsset]);
+  useEffect(() => { setPage(1); }, [activeTab, search, filterAsset, filterYear]);
 
   const now = useMemo(() => new Date(), []);
   const in60 = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 60); return d; }, []);
 
   const assets = useMemo(
     () => [...new Set(contracts.map(c => c.property.buildingName).filter((s): s is string => Boolean(s)))],
+    [contracts],
+  );
+
+  // Year options derived from contract start years (newest first). Parsed from
+  // the ISO date prefix to avoid any timezone drift.
+  const yearOf = (d: string | null) => (d && /^\d{4}/.test(d) ? d.slice(0, 4) : null);
+  const years = useMemo(
+    () => [...new Set(contracts.map(c => yearOf(c.startDate)).filter((s): s is string => Boolean(s)))]
+      .sort((a, b) => b.localeCompare(a)),
     [contracts],
   );
 
@@ -271,6 +281,7 @@ export default function OrdersPage() {
         if (displayStatusOf(c) !== activeTab) return false;
       }
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
+      if (filterYear !== 'all' && yearOf(c.startDate) !== filterYear) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         const haystack = [
@@ -284,7 +295,7 @@ export default function OrdersPage() {
       }
       return true;
     });
-  }, [contracts, activeTab, filterAsset, search, now, in60]);
+  }, [contracts, activeTab, filterAsset, filterYear, search, now, in60]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -295,7 +306,7 @@ export default function OrdersPage() {
     [contracts],
   );
 
-  const hasFilters = filterAsset !== 'all' || search !== '';
+  const hasFilters = filterAsset !== 'all' || filterYear !== 'all' || search !== '';
 
   const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode }[] = [
     { lbl: 'Total',              val: String(contracts.length),       ic: <FileText size={12} /> },
@@ -376,8 +387,14 @@ export default function OrdersPage() {
               {assets.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
+          <div className="sel-wrap">
+            <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)}>
+              <option value="all">All years</option>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
           {hasFilters && (
-            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setSearch(''); }}>
+            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setFilterYear('all'); setSearch(''); }}>
               <X size={12} /> Reset
             </button>
           )}

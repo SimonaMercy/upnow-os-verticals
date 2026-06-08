@@ -197,7 +197,7 @@ export default function DepositsPage() {
                     <td className="px-4 py-3.5 font-medium font-mono text-xs">{d.depositRef}</td>
                     <td className="px-4 py-3.5">
                       {d.contractId ? (
-                        <Link href={`/rental-provider/dashboard/contracts/${d.contractId}`}
+                        <Link href={`/rental-provider/dashboard/contracts/${d.contractId}/v2`}
                           onClick={e => e.stopPropagation()}
                           className="text-[#2e9f82] font-medium hover:underline">{d.contractRef}</Link>
                       ) : <span className="text-[#9b9890]">—</span>}
@@ -271,7 +271,7 @@ export default function DepositsPage() {
                 </div>
               )}
               {detail.contractId && (
-                <Link href={`/rental-provider/dashboard/contracts/${detail.contractId}`}
+                <Link href={`/rental-provider/dashboard/contracts/${detail.contractId}/v2`}
                   className="flex items-center gap-2 text-sm font-semibold text-[#2e9f82] hover:underline mt-2">
                   <ExternalLink size={14} /> Open Contract
                 </Link>

@@ -16,10 +16,22 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Search, Download, Printer, Loader2, FileSpreadsheet,
-  BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus,
+  BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
 } from 'lucide-react';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast';
+
+interface DrilldownSpec {
+  /** Row field holding the array of child items. */
+  childKey: string;
+  /** Row field used for the modal title (e.g. the month label). */
+  titleKey: string;
+  /** Plural noun for the count, e.g. "leases". */
+  countLabel: string;
+  columns: Column[];
+  /** Item field whose value is a contract id → row links to the contract. */
+  contractIdKey?: string;
+}
 
 interface ReportDef {
   title: string;
@@ -29,6 +41,14 @@ interface ReportDef {
   totals: TotalSpec[];
   /** Optional control rendered above the table (e.g. window-days for lease expiry). */
   controlKey?: 'leaseExpiryWindow';
+  /** When set, table rows expand into a modal listing their child items. */
+  drilldown?: DrilldownSpec;
+  /**
+   * 'table' (default) = one flat table. 'grouped' = render each row as a
+   * section (using its summary columns as the header) with its drilldown
+   * children listed inline beneath — everything on one page, no modal.
+   */
+  layout?: 'table' | 'grouped';
 }
 
 interface Column {
@@ -44,6 +64,43 @@ interface TotalSpec {
   label: string;
   type?: 'aed' | 'number' | 'rate';
 }
+
+const RENEWAL_FORECAST_DEF: ReportDef = {
+  title: 'Renewal Forecast',
+  description: 'Leases coming up for renewal each month — count, annual rent at stake, and how many are already in progress. Lapsed leases on occupied units show as Overdue.',
+  endpoint: '/api/reports/renewal-forecast',
+  layout: 'grouped',
+  columns: [
+    { key: 'monthLabel', label: 'Month' },
+    { key: 'leases', label: 'Leases up for renewal', align: 'right', type: 'number' },
+    { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+    { key: 'inProgress', label: 'In progress', align: 'right', type: 'number' },
+    { key: 'notStarted', label: 'Not started', align: 'right', type: 'number' },
+  ],
+  totals: [
+    { key: 'overdue', label: 'Overdue', type: 'number' },
+    { key: 'next90', label: 'Next 90 days', type: 'number' },
+    { key: 'next12mo', label: 'Next 12 months', type: 'number' },
+    { key: 'totalLeases', label: 'Total leases', type: 'number' },
+    { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
+    { key: 'notStarted', label: 'Not started', type: 'number' },
+  ],
+  drilldown: {
+    childKey: 'items',
+    titleKey: 'monthLabel',
+    countLabel: 'leases',
+    contractIdKey: 'contractId',
+    columns: [
+      { key: 'contractRef', label: 'Contract' },
+      { key: 'tenantName', label: 'Customer' },
+      { key: 'unitLabel', label: 'Unit' },
+      { key: 'buildingName', label: 'Property' },
+      { key: 'endDate', label: 'Lease ends', type: 'date' },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      { key: 'stage', label: 'Renewal', type: 'stage' },
+    ],
+  },
+};
 
 const REPORTS: Record<ReportSlug, ReportDef> = {
   occupancy: {
@@ -120,33 +177,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'contractedRentFils', label: 'Contracted Rent', type: 'aed' },
     ],
   },
-  'renewal-pipeline': {
-    title: 'Renewal Pipeline Report',
-    description: 'Every renewal in flight — proposed, accepted, signed, active — with the change in annual rent.',
-    endpoint: '/api/reports/renewal-pipeline',
-    columns: [
-      { key: 'parentRef', label: 'Original' },
-      { key: 'childRef', label: 'Renewal' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
-      { key: 'originalEndDate', label: 'Original ends', type: 'date' },
-      { key: 'proposedStart', label: 'New start', type: 'date' },
-      { key: 'proposedEnd', label: 'New end', type: 'date' },
-      { key: 'oldRentFils', label: 'Old rent', align: 'right', type: 'aed' },
-      { key: 'newRentFils', label: 'New rent', align: 'right', type: 'aed' },
-      { key: 'rentDeltaFils', label: 'Δ', align: 'right', type: 'delta' },
-      { key: 'stage', label: 'Stage', type: 'stage' },
-    ],
-    totals: [
-      { key: 'proposed', label: 'Proposed', type: 'number' },
-      { key: 'accepted', label: 'Accepted', type: 'number' },
-      { key: 'signed', label: 'Signed', type: 'number' },
-      { key: 'active', label: 'Active', type: 'number' },
-      { key: 'rejected', label: 'Rejected', type: 'number' },
-      { key: 'pipelineRentFils', label: 'Pipeline Rent', type: 'aed' },
-    ],
-  },
+  // Both slugs resolve to the same forecast (renewal-forecast is canonical;
+  // renewal-pipeline kept so older links/bookmarks still work).
+  'renewal-forecast': RENEWAL_FORECAST_DEF,
+  'renewal-pipeline': RENEWAL_FORECAST_DEF,
 };
 
 function fmtAed(fils: number | null | undefined): string {
@@ -239,6 +273,8 @@ export default function ReportDetailPage() {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [leaseWindow, setLeaseWindow] = useState<number>(() => Number(sp?.get('window') ?? 90));
+  const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!def) return;
@@ -285,16 +321,48 @@ export default function ReportDetailPage() {
     else { setSortKey(key); setSortDir('asc'); }
   }
 
+  function toggleGroup(key: string) {
+    setCollapsed(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  }
+
+  // Grouped layout: each row is a month bucket; filter its child leases by the
+  // search needle and drop buckets with no matching leases.
+  const groups = useMemo(() => {
+    const dd = def?.drilldown;
+    if (def?.layout !== 'grouped' || !dd || !data?.rows) return [];
+    const needle = search.trim().toLowerCase();
+    return data.rows
+      .map(row => {
+        const items = (row[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
+        const matched = !needle ? items : items.filter(it =>
+          dd.columns.some(c => String(it[c.key] ?? '').toLowerCase().includes(needle)));
+        return { row, items: matched };
+      })
+      .filter(g => g.items.length > 0);
+  }, [def, data, search]);
+
   function handleCsv() {
     if (!data) return;
-    const headers = def.columns.map(c => c.label);
-    const rows = sorted.map(row => def.columns.map(c => {
-      const raw = row[c.key];
-      if (c.type === 'aed') return raw == null ? '' : (Number(raw) / 100).toFixed(2);
-      if (c.type === 'date') return raw ? new Date(String(raw)).toISOString().slice(0, 10) : '';
-      return raw ?? '';
-    }));
     const datestamp = new Date(data.generatedAt).toISOString().slice(0, 10);
+    const fmtCell = (raw: unknown, type?: Column['type']) => {
+      if (type === 'aed') return raw == null ? '' : (Number(raw) / 100).toFixed(2);
+      if (type === 'date') return raw ? new Date(String(raw)).toISOString().slice(0, 10) : '';
+      return raw ?? '';
+    };
+
+    // Grouped layout: export one row per child lease, prefixed with its group.
+    if (def.layout === 'grouped' && def.drilldown) {
+      const dd = def.drilldown;
+      const headers = ['Month', ...dd.columns.map(c => c.label)];
+      const rows = groups.flatMap(g =>
+        g.items.map(it => [String(g.row[dd.titleKey] ?? ''), ...dd.columns.map(c => fmtCell(it[c.key], c.type))]),
+      );
+      downloadCsv(`${slug}-${datestamp}.csv`, headers, rows);
+      return;
+    }
+
+    const headers = def.columns.map(c => c.label);
+    const rows = sorted.map(row => def.columns.map(c => fmtCell(row[c.key], c.type)));
     downloadCsv(`${slug}-${datestamp}.csv`, headers, rows);
   }
 
@@ -399,11 +467,79 @@ export default function ReportDetailPage() {
         <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 flex items-center justify-center">
           <Loader2 size={20} className="animate-spin text-[#2e9f82]" />
         </div>
-      ) : sorted.length === 0 ? (
+      ) : (def.layout === 'grouped' ? groups.length === 0 : sorted.length === 0) ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
           <BarChart2 size={32} className="mx-auto text-[#c8c6c0] mb-3" />
           <p className="text-sm font-semibold text-[#1a1916]">No data</p>
           <p className="text-xs text-[#9b9890] mt-1">{search ? 'Nothing matches your search.' : 'No matching records found.'}</p>
+        </div>
+      ) : def.layout === 'grouped' && def.drilldown ? (
+        <div className="space-y-3">
+          {groups.map((g, gi) => {
+            const dd = def.drilldown!;
+            const key = String(g.row[dd.titleKey] ?? gi);
+            const isCollapsed = collapsed.has(key);
+            const isOverdue = g.row['month'] === 'overdue';
+            return (
+              <div key={key} className={`bg-white rounded-2xl border overflow-hidden ${isOverdue ? 'border-[#fca5a5]' : 'border-[#e8e6e0]'} print:break-inside-avoid`}>
+                {/* Month header */}
+                <button
+                  onClick={() => toggleGroup(key)}
+                  className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left hover:bg-[#fafaf8] print:hover:bg-transparent">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <ChevronRight size={16} className={`text-[#9b9890] transition-transform print:hidden ${isCollapsed ? '' : 'rotate-90'}`} />
+                    <span className={`text-sm font-bold ${isOverdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`}>{String(g.row[dd.titleKey] ?? '')}</span>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0">
+                    {def.columns.filter(c => c.key !== dd.titleKey).map(c => (
+                      <span key={c.key} className="text-xs whitespace-nowrap hidden sm:inline">
+                        <span className="text-[#9b9890]">{c.label}: </span>
+                        <span className="font-semibold text-[#1a1916]"><CellValue value={g.row[c.key]} type={c.type} /></span>
+                      </span>
+                    ))}
+                  </div>
+                </button>
+                {/* Leases in this month */}
+                {!isCollapsed && (
+                  <div className="overflow-x-auto border-t border-[#f0ede8]">
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                        <tr>
+                          {dd.columns.map(c => (
+                            <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                          ))}
+                          {dd.contractIdKey && <th className="px-3 py-2.5 print:hidden" aria-hidden />}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.items.map((it, idx) => (
+                          <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                            {dd.columns.map(c => (
+                              <td key={c.key} className={`px-4 py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                                <CellValue value={it[c.key]} type={c.type} />
+                              </td>
+                            ))}
+                            {dd.contractIdKey && (
+                              <td className="px-3 py-2.5 text-right print:hidden">
+                                {it[dd.contractIdKey] != null && (
+                                  <Link
+                                    href={`/rental-provider/dashboard/contracts/${it[dd.contractIdKey]}/v2`}
+                                    className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                                    title="Open contract">
+                                    Open <ExternalLink size={12} />
+                                  </Link>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
@@ -420,18 +556,31 @@ export default function ReportDetailPage() {
                       {sortKey === c.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                     </th>
                   ))}
+                  {def.drilldown && <th className="px-3 py-3 print:hidden" aria-hidden />}
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row, i) => (
-                  <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
-                    {def.columns.map(c => (
-                      <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
-                        <CellValue value={row[c.key]} type={c.type} />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {sorted.map((row, i) => {
+                  const items = def.drilldown ? (row[def.drilldown.childKey] as unknown[] | undefined) : undefined;
+                  const canDrill = !!def.drilldown && Array.isArray(items) && items.length > 0;
+                  return (
+                    <tr
+                      key={i}
+                      onClick={canDrill ? () => setDrill(row) : undefined}
+                      className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
+                      {def.columns.map(c => (
+                        <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
+                          <CellValue value={row[c.key]} type={c.type} />
+                        </td>
+                      ))}
+                      {def.drilldown && (
+                        <td className="px-3 py-3 text-right text-[#c8c6c0] print:hidden">
+                          {canDrill && <ChevronRight size={15} className="inline" />}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -440,9 +589,67 @@ export default function ReportDetailPage() {
 
       {data && (
         <p className="text-[11px] text-[#9b9890] mt-3 print:mt-4">
-          {sorted.length} row{sorted.length === 1 ? '' : 's'} · Generated {new Date(data.generatedAt).toLocaleString('en-AE')}
+          {def.layout === 'grouped'
+            ? `${groups.reduce((n, g) => n + g.items.length, 0)} leases across ${groups.length} month${groups.length === 1 ? '' : 's'}`
+            : `${sorted.length} row${sorted.length === 1 ? '' : 's'}`} · Generated {new Date(data.generatedAt).toLocaleString('en-AE')}
         </p>
       )}
+
+      {/* Drill-down modal — lists the child items of the clicked row */}
+      {def.drilldown && drill && (() => {
+        const dd = def.drilldown;
+        const items = (drill[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={() => setDrill(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
+                <div>
+                  <h3 className="text-base font-bold text-[#1a1916]">{String(drill[dd.titleKey] ?? '')}</h3>
+                  <p className="text-xs text-[#6b6860] mt-0.5">{items.length} {dd.countLabel} up for renewal</p>
+                </div>
+                <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                    <tr>
+                      {dd.columns.map(c => (
+                        <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                      ))}
+                      {dd.contractIdKey && <th className="px-3 py-2.5" aria-hidden />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((it, idx) => (
+                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        {dd.columns.map(c => (
+                          <td key={c.key} className={`px-4 py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                            <CellValue value={it[c.key]} type={c.type} />
+                          </td>
+                        ))}
+                        {dd.contractIdKey && (
+                          <td className="px-3 py-2.5 text-right">
+                            {it[dd.contractIdKey] != null && (
+                              <Link
+                                href={`/rental-provider/dashboard/contracts/${it[dd.contractIdKey]}/v2`}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                                title="Open contract">
+                                Open <ExternalLink size={12} />
+                              </Link>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

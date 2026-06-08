@@ -26,7 +26,7 @@ const REPORTS: ReportTile[] = [
   { slug: 'occupancy',          title: 'Occupancy Report',         description: 'Units, occupied counts, and contracted rent per property.',           Icon: Building2,    available: true  },
   { slug: 'receivables',        title: 'Receivables Summary',      description: 'Outstanding cheques aged 0-30 / 31-60 / 61-90 / 90+.',                Icon: Wallet,       available: true  },
   { slug: 'lease-expiry',       title: 'Lease Expiry Report',      description: 'Active contracts ending within 30 / 60 / 90 / 180 / 365 days.',       Icon: CalendarClock, available: true },
-  { slug: 'renewal-pipeline',   title: 'Renewal Pipeline Report',  description: 'Renewals by stage with annual rent delta.',                           Icon: RefreshCw,    available: true  },
+  { slug: 'renewal-forecast',   title: 'Renewal Forecast',         description: 'Leases coming up for renewal each month, with annual rent at stake.',  Icon: RefreshCw,    available: true  },
   { slug: 'collection-rate',    title: 'Collection Rate Report',   description: 'Collected vs scheduled rent, by period.',                              Icon: BarChart2,    available: false },
   { slug: 'security-deposits',  title: 'Security Deposits Report', description: 'Deposits held, status, and refund obligations.',                       Icon: ShieldCheck,  available: false },
   { slug: 'vacancy-analysis',   title: 'Vacancy Analysis',         description: 'Time-on-market, turnover, and listing price changes.',                 Icon: MapPin,       available: false },

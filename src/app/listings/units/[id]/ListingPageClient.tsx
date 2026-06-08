@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, dashboardPath, type UserRole } from '@/contexts/AuthContext';
 import {
@@ -289,7 +288,20 @@ function InquiryPanel({
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-function MiniCalendar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/** Nearest upcoming date (today or later) whose day-of-month is allowed.
+ *  '' when there is no restriction (so no preselection). */
+function nextAllowedDate(allowedDays?: number[]): string {
+  if (!Array.isArray(allowedDays) || allowedDays.length === 0) return '';
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 366; i++) {
+    if (allowedDays.includes(d.getDate())) return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    d.setDate(d.getDate() + 1);
+  }
+  return '';
+}
+
+function MiniCalendar({ value, onChange, allowedDays, compact }: { value: string; onChange: (v: string) => void; allowedDays?: number[]; compact?: boolean }) {
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
   const selected = value ? new Date(value + 'T00:00:00') : null;
@@ -322,31 +334,34 @@ function MiniCalendar({ value, onChange }: { value: string; onChange: (v: string
   while (cells.length % 7 !== 0) cells.push(null);
 
   return (
-    <div className="rounded-2xl border border-[#e8e6e0] overflow-hidden">
+    <div className="rounded-2xl border border-[#e8e6e0] overflow-hidden" style={compact ? { maxWidth: 300 } : undefined}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3" style={{ backgroundColor: '#f9f8f6' }}>
+      <div className={`flex items-center justify-between ${compact ? 'px-3 py-1.5' : 'px-4 py-3'}`} style={{ backgroundColor: '#f9f8f6' }}>
         <button type="button" onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-          <ChevronLeft size={16} style={{ color: '#6b6860' }} />
+          <ChevronLeft size={compact ? 14 : 16} style={{ color: '#6b6860' }} />
         </button>
-        <span className="text-sm font-semibold" style={{ color: '#1a1916' }}>
+        <span className={`${compact ? 'text-[13px]' : 'text-sm'} font-semibold`} style={{ color: '#1a1916' }}>
           {MONTHS[cursor.month]} {cursor.year}
         </span>
         <button type="button" onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-          <ChevronRight size={16} style={{ color: '#6b6860' }} />
+          <ChevronRight size={compact ? 14 : 16} style={{ color: '#6b6860' }} />
         </button>
       </div>
       {/* Day labels */}
       <div className="grid grid-cols-7 border-b border-[#e8e6e0]">
         {DAYS.map(d => (
-          <div key={d} className="text-center text-xs font-medium py-2" style={{ color: '#9b9890' }}>{d}</div>
+          <div key={d} className={`text-center font-medium ${compact ? 'text-[10px] py-1' : 'text-xs py-2'}`} style={{ color: '#9b9890' }}>{d}</div>
         ))}
       </div>
       {/* Cells */}
-      <div className="grid grid-cols-7 p-2 gap-y-1">
+      <div className={`grid grid-cols-7 ${compact ? 'p-1.5 gap-y-0.5' : 'p-2 gap-y-1'}`}>
         {cells.map((day, i) => {
           if (!day) return <div key={i} />;
           const cellDate = new Date(cursor.year, cursor.month, day);
           const isPast = cellDate < todayDate;
+          // When the RP restricts contract-start days, disable any other day-of-month.
+          const dayBlocked = Array.isArray(allowedDays) && allowedDays.length > 0 && !allowedDays.includes(day);
+          const isDisabled = isPast || dayBlocked;
           const iso = `${cursor.year}-${pad(cursor.month + 1)}-${pad(day)}`;
           const isSelected = selected
             ? selected.getFullYear() === cursor.year && selected.getMonth() === cursor.month && selected.getDate() === day
@@ -356,14 +371,14 @@ function MiniCalendar({ value, onChange }: { value: string; onChange: (v: string
             <button
               key={i}
               type="button"
-              disabled={isPast}
-              onClick={() => onChange(iso)}
-              className="text-xs rounded-lg py-1.5 w-full text-center transition-all cursor-pointer"
+              disabled={isDisabled}
+              onClick={() => !isDisabled && onChange(iso)}
+              className={`rounded-lg w-full text-center transition-all cursor-pointer ${compact ? 'text-[11px] py-1' : 'text-xs py-1.5'}`}
               style={{
-                backgroundColor: isSelected ? '#2e9f82' : isToday && !isSelected ? '#edf7f3' : 'transparent',
-                color: isSelected ? '#fff' : isPast ? '#c8c6c0' : '#1a1916',
-                fontWeight: isSelected || isToday ? 600 : 400,
-                cursor: isPast ? 'not-allowed' : 'pointer',
+                backgroundColor: isSelected ? '#2e9f82' : isToday && !isSelected && !isDisabled ? '#edf7f3' : 'transparent',
+                color: isSelected ? '#fff' : isDisabled ? '#c8c6c0' : '#1a1916',
+                fontWeight: isSelected ? 600 : isToday && !isDisabled ? 600 : 400,
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
               }}
             >
               {day}
@@ -387,12 +402,11 @@ function fmtSlot(t: string) {
 /* ── Book Viewing Modal ─────────────────────────────────────────────────── */
 const BOOKING_INTENT_KEY = 'upnow_booking_intent';
 
-function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: PublicProperty; onClose: () => void }) {
-  const router = useRouter();
+function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit: PublicUnit; property: PublicProperty; preferredStartDays?: number[]; onClose: () => void }) {
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [notes, setNotes] = useState('');
-  const [moveInDate, setMoveInDate] = useState('');
+  const [moveInDate, setMoveInDate] = useState(() => nextAllowedDate(preferredStartDays));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null); // confirmed scheduledAt ISO string
@@ -438,7 +452,12 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
       const body = await res.json().catch(() => ({}));
       const leadId: number | undefined = body?.lead?.id;
       if (leadId) {
-        router.push(`/dashboard/customer/spaces?space=v-${leadId}`);
+        // Full-page navigation (not router.push): the session cookie was just
+        // set by the auth step, and a client-side nav can replay a Router-Cache
+        // entry that the middleware produced BEFORE the cookie existed (→ /login).
+        // A hard navigation sends the cookie through middleware on a fresh
+        // request and re-initialises AuthContext cleanly.
+        window.location.assign(`/dashboard/customer/spaces/v2/v-${leadId}`);
         return true;
       }
       // Fallback: no lead id in response — show inline success screen
@@ -486,7 +505,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
   // Step 1 — unified: try login first, auto-register if no account found
   async function handleAuthIdentify() {
     const raw = authEmail.trim();
-    if (!raw) { setAuthError('Enter your email or phone number.'); return; }
+    if (!raw) { setAuthError('Enter your phone number.'); return; }
     setAuthError(null);
     setAuthSubmitting(true);
     try {
@@ -624,7 +643,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
       <ModalShell onClose={onClose}>
         <h3 className="font-bold text-xl text-[#1a1916] mb-1">Continue to UpNow</h3>
         <p className="text-sm text-[#9b9890] mb-5">
-          Enter your email or phone number. We&apos;ll send a one-time code to sign you in — or create your account instantly if you&apos;re new.
+          Enter your phone number. We&apos;ll send a one-time code to sign you in — or create your account instantly if you&apos;re new.
         </p>
 
         {authError && (
@@ -633,18 +652,18 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
 
         <div className="mb-4">
           <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">
-            Email or phone number
+            Phone number
           </label>
           <input
-            type="text"
-            inputMode="email"
+            type="tel"
+            inputMode="tel"
             value={authEmail}
             onChange={(e) => setAuthEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAuthIdentify()}
-            placeholder="you@example.com or +971 50 123 4567"
-            autoComplete="username"
+            placeholder="+971 50 123 4567"
+            autoComplete="tel"
             autoFocus
-            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3.5 py-3 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20 focus:border-[#1a1916]"
+            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3.5 py-3 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30 focus:border-[#2e9f82]"
           />
         </div>
 
@@ -652,7 +671,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
           disabled={authSubmitting || !authEmail.trim()}
           onClick={handleAuthIdentify}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
-          style={{ backgroundColor: '#1a1916' }}
+          style={{ backgroundColor: '#2e9f82' }}
         >
           {authSubmitting ? 'Sending code…' : 'Continue →'}
         </button>
@@ -709,9 +728,9 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
                 if (e.key === 'Enter' && otpCode.length === 6) handleAuthVerifyOtp();
               }}
               onPaste={handleOtpPaste}
-              className="w-11 h-12 text-center text-xl font-semibold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20"
+              className="w-11 h-12 text-center text-xl font-semibold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
               style={{
-                borderColor: d ? '#1a1916' : '#e8e6e0',
+                borderColor: d ? '#2e9f82' : '#e8e6e0',
                 background: '#fafaf8',
                 color: '#1a1916',
               }}
@@ -723,7 +742,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
           disabled={authSubmitting || otpCode.length !== 6}
           onClick={handleAuthVerifyOtp}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90 mb-3"
-          style={{ backgroundColor: '#1a1916' }}
+          style={{ backgroundColor: '#2e9f82' }}
         >
           {authSubmitting ? 'Verifying…' : 'Verify & confirm booking'}
         </button>
@@ -733,7 +752,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
           <button
             type="button"
             className="font-semibold hover:underline"
-            style={{ color: '#1a1916' }}
+            style={{ color: '#2e9f82' }}
             onClick={async () => {
               try {
                 await fetch('/api/auth/email/resend-otp', {
@@ -769,9 +788,9 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
         </div>
         <button
           disabled={authSubmitting}
-          onClick={() => router.push('/dashboard/customer/spaces')}
+          onClick={() => window.location.assign('/dashboard/customer/spaces')}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90 mb-3"
-          style={{ backgroundColor: '#1a1916' }}
+          style={{ backgroundColor: '#2e9f82' }}
         >
           Track my booking
         </button>
@@ -819,7 +838,7 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
           </div>
 
           <button
-            onClick={() => router.push('/dashboard/customer/spaces')}
+            onClick={() => window.location.assign('/dashboard/customer/spaces')}
             className="mt-4 w-full py-3 rounded-xl text-sm font-semibold text-white"
             style={{ backgroundColor: '#2e9f82' }}
           >
@@ -893,17 +912,18 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
         </div>
       </div>
 
-      {/* Preferred move-in date — optional */}
+      {/* Preferred move-in date — optional; restricted to the RP's contract-start days */}
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
         Preferred move-in date <span className="text-[#9b9890] font-normal">(optional)</span>
       </label>
-      <input
-        type="date"
-        value={moveInDate}
-        min={new Date().toISOString().split('T')[0]}
-        onChange={(e) => setMoveInDate(e.target.value)}
-        className="w-full text-sm mb-4 border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
-      />
+      {preferredStartDays.length > 0 && (
+        <p className="text-xs text-[#9b9890] mb-1.5">
+          This landlord starts contracts on the {preferredStartDays.map(d => `${d}${['st','nd','rd'][((d % 10) - 1)] || 'th'}`).join(', ')} of the month.
+        </p>
+      )}
+      <div className="mb-4">
+        <MiniCalendar value={moveInDate} onChange={setMoveInDate} allowedDays={preferredStartDays} compact />
+      </div>
 
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
         Notes <span className="text-[#9b9890] font-normal">(optional)</span>
@@ -928,12 +948,11 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
 }
 
 /* ── Book Now Modal ─────────────────────────────────────────────────────── */
-function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property: PublicProperty; onClose: () => void }) {
-  const router = useRouter();
+function InquireModal({ unit, property, preferredStartDays = [], onClose }: { unit: PublicUnit; property: PublicProperty; preferredStartDays?: number[]; onClose: () => void }) {
   const { refresh: refreshAuth } = useAuth();
 
   // Form state
-  const [moveIn,       setMoveIn]       = useState('');
+  const [moveIn,       setMoveIn]       = useState(() => nextAllowedDate(preferredStartDays));
   const [adults,       setAdults]       = useState('1');
   const [children,     setChildren]     = useState('0');
   const [pets,         setPets]         = useState('0');
@@ -944,6 +963,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   const [submitting, setSubmitting]   = useState(false);
   const [error,      setError]        = useState<string | null>(null);
   const [booked,     setBooked]       = useState(false);
+  const [bookedLeadId, setBookedLeadId] = useState<number | null>(null);
 
   // Inline auth state — unified email-or-phone single-field flow
   type AuthStep = null | 'identify' | 'verify-otp';
@@ -986,6 +1006,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
         const m = Array.isArray(data.message) ? data.message.join(', ') : data.message ?? `Error ${res.status}`;
         throw new Error(m);
       }
+      setBookedLeadId(typeof data.leadId === 'number' ? data.leadId : null);
       setBooked(true);
       return true;
     } catch (err) {
@@ -1015,7 +1036,7 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
   // ── Step 1: unified email-or-phone identify ───────────────────────────
   async function handleIdentify() {
     const raw = authIdentifier.trim();
-    if (!raw) { setAuthError('Enter your email or phone number.'); return; }
+    if (!raw) { setAuthError('Enter your phone number.'); return; }
 
     const isPhone = !raw.includes('@');
     const identifier = isPhone
@@ -1163,7 +1184,11 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
             <p className="text-xs text-[#6b6860]">We&apos;ve prepared a payment plan from your preferences. Complete your documents in My Spaces to move toward your contract.</p>
           </div>
           <button
-            onClick={() => router.push('/dashboard/customer/spaces')}
+            onClick={() => window.location.assign(
+              bookedLeadId
+                ? `/dashboard/customer/spaces/v2/v-${bookedLeadId}`
+                : '/dashboard/customer/spaces',
+            )}
             className="w-full py-3 rounded-xl text-sm font-semibold text-white"
             style={{ backgroundColor: '#2e9f82' }}
           >
@@ -1182,21 +1207,21 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
     return (
       <ModalShell onClose={onClose}>
         <h3 className="font-bold text-xl text-[#1a1916] mb-1">Continue to UpNow</h3>
-        <p className="text-sm text-[#9b9890] mb-5">Enter your email or phone — we&apos;ll send a verification code.</p>
+        <p className="text-sm text-[#9b9890] mb-5">Enter your phone number — we&apos;ll send a verification code.</p>
         {authError && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{authError}</div>}
         <div className="mb-4">
-          <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">Email or phone</label>
+          <label className="block text-xs font-semibold text-[#3d3b35] uppercase tracking-wide mb-1.5">Phone number</label>
           <input
-            type="text" value={authIdentifier} onChange={e => setAuthIdentifier(e.target.value)}
+            type="tel" inputMode="tel" value={authIdentifier} onChange={e => setAuthIdentifier(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleIdentify()}
-            placeholder="you@example.com or +971 50 123 4567"
-            autoComplete="email" autoFocus
+            placeholder="+971 50 123 4567"
+            autoComplete="tel" autoFocus
             className={inputCls}
           />
         </div>
         <button disabled={authSubmitting || !authIdentifier.trim()} onClick={handleIdentify}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
-          style={{ backgroundColor: '#1a1916' }}>
+          style={{ backgroundColor: '#2e9f82' }}>
           {authSubmitting ? 'Sending code…' : 'Send verification code →'}
         </button>
       </ModalShell>
@@ -1233,19 +1258,19 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
               onChange={e => handleOtpDigit(i, e.target.value)}
               onKeyDown={e => { handleOtpKey(i, e); if (e.key === 'Enter' && otpCode.length === 6) handleVerifyOtp(); }}
               onPaste={handleOtpPaste}
-              className="w-11 h-12 text-center text-lg font-bold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1a1916]/20"
-              style={{ borderColor: v ? '#1a1916' : '#e8e6e0', background: '#fafaf8', color: '#1a1916' }}
+              className="w-11 h-12 text-center text-lg font-bold border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
+              style={{ borderColor: v ? '#2e9f82' : '#e8e6e0', background: '#fafaf8', color: '#1a1916' }}
             />
           ))}
         </div>
         <button disabled={authSubmitting || otpCode.length !== 6} onClick={handleVerifyOtp}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity hover:opacity-90"
-          style={{ backgroundColor: '#1a1916' }}>
+          style={{ backgroundColor: '#2e9f82' }}>
           {authSubmitting ? 'Verifying…' : 'Verify & reserve'}
         </button>
         <p className="text-xs text-center text-[#9b9890] mt-3">
           Didn&apos;t receive the code?{' '}
-          <button type="button" className="font-semibold hover:underline" style={{ color: '#1a1916' }}
+          <button type="button" className="font-semibold hover:underline" style={{ color: '#2e9f82' }}
             onClick={async () => {
               try {
                 if (!isPhoneVerify) {
@@ -1282,8 +1307,14 @@ function InquireModal({ unit, property, onClose }: { unit: PublicUnit; property:
       {error && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{error}</div>}
 
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Move-in date <span className="text-red-500">*</span></label>
-      <input type="date" value={moveIn} min={new Date().toISOString().split('T')[0]} required
-        onChange={e => setMoveIn(e.target.value)} className={`${inputCls} mb-4`} />
+      {preferredStartDays.length > 0 && (
+        <p className="text-xs text-[#9b9890] mb-1.5">
+          Contracts start on the {preferredStartDays.map(d => `${d}${['st','nd','rd'][((d % 10) - 1)] || 'th'}`).join(', ')} of the month.
+        </p>
+      )}
+      <div className="mb-4">
+        <MiniCalendar value={moveIn} onChange={setMoveIn} allowedDays={preferredStartDays} compact />
+      </div>
 
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Occupants <span className="text-red-500">*</span></label>
       <div className="grid grid-cols-3 gap-2 mb-4">
@@ -1383,7 +1414,7 @@ function HeaderAuthSection() {
 }
 
 /* ── Main page component ─────────────────────────────────────────────────── */
-export default function ListingPageClient({ unit, property, media = [] }: { unit: PublicUnit; property: PublicProperty; media?: UnitMediaItem[] }) {
+export default function ListingPageClient({ unit, property, media = [], preferredStartDays = [] }: { unit: PublicUnit; property: PublicProperty; media?: UnitMediaItem[]; preferredStartDays?: number[] }) {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIdx, setGalleryIdx] = useState(0);
   const [modal, setModal] = useState<'book' | 'inquire' | null>(null);
@@ -1694,8 +1725,8 @@ export default function ListingPageClient({ unit, property, media = [] }: { unit
       )}
 
       {/* Modals */}
-      {modal === 'book' && <BookModal unit={unit} property={property} onClose={() => setModal(null)} />}
-      {modal === 'inquire' && <InquireModal unit={unit} property={property} onClose={() => setModal(null)} />}
+      {modal === 'book' && <BookModal unit={unit} property={property} preferredStartDays={preferredStartDays} onClose={() => setModal(null)} />}
+      {modal === 'inquire' && <InquireModal unit={unit} property={property} preferredStartDays={preferredStartDays} onClose={() => setModal(null)} />}
     </div>
   );
 }

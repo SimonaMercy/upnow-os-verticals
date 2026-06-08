@@ -8,6 +8,7 @@ interface ListingPayload {
   unit: PublicUnit;
   property: PublicProperty;
   media: UnitMediaItem[];
+  preferredStartDays?: number[];
 }
 
 export async function generateMetadata({
@@ -46,5 +47,5 @@ export default async function PublicUnitListingPage({
     return notFound();
   }
 
-  return <ListingPageClient unit={payload.unit} property={payload.property} media={payload.media ?? []} />;
+  return <ListingPageClient unit={payload.unit} property={payload.property} media={payload.media ?? []} preferredStartDays={payload.preferredStartDays ?? []} />;
 }

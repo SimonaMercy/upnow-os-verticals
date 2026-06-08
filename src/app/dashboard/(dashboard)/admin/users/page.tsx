@@ -1,13 +1,26 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, ChevronDown } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
 
-const ROLES = ['', 'customer', 'rental_provider', 'service_provider', 'technician', 'manager', 'admin', 'super_admin'];
 const STATUSES = ['', 'active', 'pending_verification', 'suspended', 'banned'];
+
+// Role tabs — split the user list by role (the user-facing term for
+// `rental_provider` is "Landlords").
+const ROLE_TABS: { key: string; label: string }[] = [
+  { key: '', label: 'All' },
+  { key: 'rental_provider', label: 'Rental Providers' },
+  { key: 'manager', label: 'Managers' },
+  { key: 'service_provider', label: 'Service Providers' },
+  { key: 'technician', label: 'Technicians' },
+  { key: 'admin', label: 'Admins' },
+  { key: 'super_admin', label: 'Super Admins' },
+  { key: 'customer', label: 'Customers' },
+];
 
 interface AdminUser {
   id: number;
@@ -44,6 +57,7 @@ const roleLabel: Record<string, string> = {
 
 export default function AdminUsersPage() {
   useAuth();
+  const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -96,6 +110,27 @@ export default function AdminUsersPage() {
       title="User Management"
       subtitle={`${total} users on the platform`}
     >
+      {/* Role tabs */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {ROLE_TABS.map((t) => {
+          const active = roleFilter === t.key;
+          return (
+            <button
+              key={t.key || 'all'}
+              onClick={() => { setRoleFilter(t.key); setOffset(0); }}
+              className="px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors"
+              style={
+                active
+                  ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                  : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }
+              }
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
         <div
@@ -111,21 +146,6 @@ export default function AdminUsersPage() {
             className="flex-1 outline-none bg-transparent text-sm"
             style={{ color: 'var(--color-neutral-900)' }}
           />
-        </div>
-
-        <div className="relative">
-          <select
-            value={roleFilter}
-            onChange={(e) => { setRoleFilter(e.target.value); setOffset(0); }}
-            className="appearance-none pl-3.5 pr-8 py-2.5 rounded-xl bg-white text-sm outline-none"
-            style={{ boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-base-200)', color: 'var(--color-neutral-700)' }}
-          >
-            <option value="">All roles</option>
-            {ROLES.filter(Boolean).map((r) => (
-              <option key={r} value={r}>{roleLabel[r] ?? r}</option>
-            ))}
-          </select>
-          <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-neutral-400)' }} />
         </div>
 
         <div className="relative">
@@ -180,7 +200,8 @@ export default function AdminUsersPage() {
               return (
                 <div
                   key={u.id}
-                  className="bg-white rounded-2xl p-4 flex flex-wrap items-center gap-4"
+                  onClick={() => router.push(`/dashboard/admin/users/${u.id}`)}
+                  className="bg-white rounded-2xl p-4 flex flex-wrap items-center gap-4 cursor-pointer transition-shadow hover:shadow-md"
                   style={{ boxShadow: 'var(--shadow-sm)' }}
                 >
                   {/* Icon */}
@@ -232,7 +253,7 @@ export default function AdminUsersPage() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {u.status !== 'suspended' && u.role !== 'super_admin' && (
                       <button
-                        onClick={() => void updateStatus(u.id, 'suspended')}
+                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'suspended'); }}
                         disabled={actionLoading === u.id}
                         className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
                         style={{
@@ -247,7 +268,7 @@ export default function AdminUsersPage() {
                     )}
                     {u.status === 'suspended' && (
                       <button
-                        onClick={() => void updateStatus(u.id, 'active')}
+                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'active'); }}
                         disabled={actionLoading === u.id}
                         className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
                         style={{
@@ -266,6 +287,7 @@ export default function AdminUsersPage() {
                   <span className="text-xs ml-auto flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>
                     {new Date(u.createdAt).toLocaleDateString('en-AE')}
                   </span>
+                  <ChevronRight size={16} className="flex-shrink-0" style={{ color: 'var(--color-neutral-300)' }} />
                 </div>
               );
             })}

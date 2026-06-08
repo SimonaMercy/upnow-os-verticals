@@ -142,7 +142,7 @@ export default function ContractsListPage() {
                     return (
                       <tr key={c.id} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] transition-colors">
                         <td className="px-4 py-3">
-                          <Link href={`/rental-provider/dashboard/contracts/${c.id}`} className="font-semibold text-[#1a1916] hover:text-[#2e9f82]">
+                          <Link href={`/rental-provider/dashboard/contracts/${c.id}/v2`} className="font-semibold text-[#1a1916] hover:text-[#2e9f82]">
                             {c.ref}
                           </Link>
                           {c.contractType === 'renewal' && (

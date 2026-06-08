@@ -21,11 +21,21 @@ Font.register({
     { src: '/fonts/Amiri-Bold.ttf', fontWeight: 700 },
   ],
 });
+// Noto Naskh Arabic — clean modern Naskh, the closest freely-licensed (OFL)
+// match to the official DLD form. Static Regular/Bold were instanced from
+// Google Fonts' variable NotoNaskhArabic for reliable @react-pdf rendering.
+Font.register({
+  family: 'NotoAr',
+  fonts: [
+    { src: '/fonts/NotoNaskhArabic-Regular.ttf' },
+    { src: '/fonts/NotoNaskhArabic-Bold.ttf', fontWeight: 700 },
+  ],
+});
 // Avoid hyphenation breaking words mid-line
 Font.registerHyphenationCallback((w) => [w]);
 
 const NAVY = '#1a3c6e';
-const AR = 'Amiri';
+const AR = 'NotoAr';
 
 // Detects Arabic/RTL text — Helvetica has no Arabic glyphs, must use Amiri.
 // Covers Arabic (0600-06FF), Supplement (0750-077F), Extended-A (08A0-08FF),
@@ -122,12 +132,12 @@ function buildTermsAr(j: TenancyJurisdiction): string[] {
 }
 
 const S = {
-  page: { paddingTop: 22, paddingBottom: 20, paddingHorizontal: 24, fontSize: 8, fontFamily: 'Helvetica', color: '#111' },
-  bar: { backgroundColor: NAVY, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3, paddingHorizontal: 6 },
+  page: { paddingTop: 20, paddingBottom: 16, paddingHorizontal: 24, fontSize: 8, fontFamily: 'Helvetica', color: '#111' },
+  bar: { backgroundColor: NAVY, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 6 },
   barEn: { color: '#fff', fontSize: 8.5, fontFamily: 'Helvetica-Bold' },
-  barAr: { color: '#fff', fontSize: 8.5, fontFamily: AR },
-  box: { borderWidth: 1, borderColor: '#bbb', marginBottom: 5 },
-  pad: { paddingHorizontal: 6, paddingTop: 4, paddingBottom: 2 },
+  barAr: { color: '#fff', fontSize: 9, fontFamily: AR },
+  box: { borderWidth: 1, borderColor: '#bbb', marginBottom: 6 },
+  pad: { paddingHorizontal: 6, paddingTop: 5, paddingBottom: 4 },
   enLbl: { fontSize: 7.5, color: '#222' },
   arLbl: { fontSize: 7.5, color: '#444', fontFamily: AR },
   line: { flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3, paddingBottom: 1, color: '#000' },
@@ -143,7 +153,7 @@ const Field = ({ label, ar, value, half }: { label: string; ar: string; value?: 
     ? { ...S.line, fontFamily: AR, textAlign: 'right' }
     : S.line;
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4, width: half ? '50%' : '100%', paddingRight: half ? 6 : 0 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 7, width: half ? '50%' : '100%', paddingRight: half ? 6 : 0 }}>
       <Text style={S.enLbl}>{label}</Text>
       <Text style={lineStyle}>{value || ' '}</Text>
       <Text style={S.arLbl}>{ar}</Text>
@@ -170,18 +180,18 @@ const TermsBlock = ({ termsEn, termsAr, start, end, header }: { termsEn: string[
     {header && <Bar en="Terms and Conditions" ar="الأحكام و الشروط" />}
     <View style={{ flexDirection: 'row' }}>
       <View style={{ width: '50%', padding: 6, borderRightWidth: 1, borderRightColor: '#ddd' }}>
-        {termsEn.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, textAlign: 'justify' }}>{start + i + 1}. {t}</Text>))}
+        {termsEn.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, lineHeight: 1.4, textAlign: 'justify' }}>{start + i + 1}. {t}</Text>))}
       </View>
       <View style={{ width: '50%', padding: 6 }}>
-        {termsAr.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, fontFamily: AR, textAlign: 'right' }}>{t} .{start + i + 1}</Text>))}
+        {termsAr.slice(start, end).map((t, i) => (<Text key={i} style={{ fontSize: 7.5, marginBottom: 4, lineHeight: 1.5, fontFamily: AR, textAlign: 'right' }}>{t} .{start + i + 1}</Text>))}
       </View>
     </View>
   </View>
 );
 const SigBox = ({ label, ar, img, date }: { label: string; ar: string; img?: string | null; date?: string }) => (
   <View style={{ width: '50%', padding: 6 }}>
-    <View style={{ height: 46, alignItems: 'center', justifyContent: 'center' }}>
-      {img ? <Image src={img} style={{ maxHeight: 42, objectFit: 'contain' }} /> : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
+    <View style={{ height: 48, alignItems: 'center', justifyContent: 'center' }}>
+      {img ? <Image src={img} style={{ maxHeight: 44, objectFit: 'contain' }} /> : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#bbb', paddingTop: 3 }}>
       <Text style={{ fontSize: 7.5 }}>{label} <Text style={{ fontFamily: AR }}>{ar}</Text></Text>
@@ -202,9 +212,10 @@ const Signatures = ({ tenant, landlord }: { tenant?: { img?: string | null; date
 );
 const Header = ({ date, j }: { date: string; j: TenancyJurisdiction }) => (
   <View style={{ marginBottom: 8 }}>
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    {/* Row 1 — logos only, at the edges (matches the official DLD form). */}
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8 }}>
       {j.useDldLogos ? (
-        <Image src="/dld/government-of-dubai.png" style={{ height: 46, objectFit: 'contain' }} />
+        <Image src="/dld/government-of-dubai.png" style={{ height: 38, objectFit: 'contain' }} />
       ) : (
         // No official artwork for other emirates — render the government/authority as text.
         <View style={{ width: 150 }}>
@@ -213,22 +224,27 @@ const Header = ({ date, j }: { date: string; j: TenancyJurisdiction }) => (
           <Text style={{ fontSize: 8, fontFamily: AR, color: '#555' }}>{j.authorityAr}</Text>
         </View>
       )}
-      <View style={{ alignItems: 'center' }}>
-        <Text style={{ fontSize: 17, fontFamily: AR, color: NAVY }}>عقد إيجار</Text>
-        <Text style={{ fontSize: 11, fontFamily: 'Times-Bold', color: NAVY, letterSpacing: 3, marginTop: 1 }}>TENANCY CONTRACT</Text>
-      </View>
       {j.useDldLogos ? (
-        <Image src="/dld/land-department.png" style={{ height: 46, objectFit: 'contain' }} />
+        <Image src="/dld/land-department.png" style={{ height: 38, objectFit: 'contain' }} />
       ) : (
         <View style={{ width: 150, alignItems: 'flex-end' }}>
           <Text style={{ fontSize: 8, color: '#555' }}>Registration: {j.registrationEn}</Text>
         </View>
       )}
     </View>
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 6 }}>
-      <Text style={{ fontSize: 9 }}>Date</Text>
-      <Text style={{ width: 140, fontSize: 9, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 4, paddingBottom: 1 }}>{date}</Text>
-      <Text style={{ fontSize: 9, fontFamily: AR }}>التاريخ</Text>
+    {/* Row 2 — grey band: Date on the left, title centered (3-column so the
+        title is truly centred regardless of the Date width). */}
+    <View style={{ backgroundColor: '#eef0f3', flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12 }}>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'flex-end' }}>
+        <Text style={{ fontSize: 9 }}>Date</Text>
+        <Text style={{ width: 95, fontSize: 9, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 4, paddingBottom: 1 }}>{date}</Text>
+        <Text style={{ fontSize: 9, fontFamily: AR }}>التاريخ</Text>
+      </View>
+      <View style={{ flex: 1, alignItems: 'center' }}>
+        <Text style={{ fontSize: 16, fontFamily: AR, color: NAVY }}>عقد إيجار</Text>
+        <Text style={{ fontSize: 10, fontFamily: 'Times-Bold', color: NAVY, letterSpacing: 3, marginTop: 1 }}>TENANCY CONTRACT</Text>
+      </View>
+      <View style={{ flex: 1 }} />
     </View>
   </View>
 );
@@ -270,6 +286,14 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   const lSig = (data.signatures || []).find((s) => s.role === 'landlord');
   const clauses = [...(data.customClauses || []), ...(data.notes ? [data.notes] : [])];
   while (clauses.length < 3) clauses.push('');
+
+  // Official Ejari shows a Signatures bar at the bottom of every page.
+  const sigs = (
+    <Signatures
+      tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt) } : undefined}
+      landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt) } : undefined}
+    />
+  );
 
   return (
     <Document>
@@ -334,22 +358,31 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           </View>
           <Field label="Mode of Payment" ar="طريقة الدفع" value={data.modeOfPayment || ''} />
         </Section>
-        <TermsBlock termsEn={tEn} termsAr={tAr} start={0} end={3} header />
-        <Signatures tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt) } : undefined} landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt) } : undefined} />
+        <View style={{ flexGrow: 1 }} />
+        {sigs}
       </Page>
 
+      {/* Page 2 — Terms & Conditions (all 14, like the official form) */}
       <Page size="A4" style={S.page}>
-        <TermsBlock termsEn={tEn} termsAr={tAr} start={3} end={14} />
+        <Header date={date} j={j} />
+        <TermsBlock termsEn={tEn} termsAr={tAr} start={0} end={14} header />
+        <View style={{ flexGrow: 1 }} />
+        {sigs}
+      </Page>
+
+      {/* Page 3 — Rights, attachments, additional terms */}
+      <Page size="A4" style={S.page}>
+        <Header date={date} j={j} />
         <Section en="Know your Rights" ar="لمعرفة حقوق الأطراف">
           <View style={{ flexDirection: 'row' }}>
             <View style={{ width: '50%', paddingRight: 6, borderRightWidth: 1, borderRightColor: '#ddd' }}>
               {j.rightsEn.map((r, i) => (
-                <Text key={i} style={{ fontSize: 7.5, marginBottom: i < j.rightsEn.length - 1 ? 3 : 0 }}>• {r}</Text>
+                <Text key={i} style={{ fontSize: 7.5, lineHeight: 1.4, marginBottom: i < j.rightsEn.length - 1 ? 4 : 0 }}>• {r}</Text>
               ))}
             </View>
             <View style={{ width: '50%', paddingLeft: 6 }}>
               {j.rightsAr.map((r, i) => (
-                <Text key={i} style={{ fontSize: 7.5, marginBottom: i < j.rightsAr.length - 1 ? 3 : 0, fontFamily: AR, textAlign: 'right' }}>• {r}</Text>
+                <Text key={i} style={{ fontSize: 7.5, lineHeight: 1.5, marginBottom: i < j.rightsAr.length - 1 ? 4 : 0, fontFamily: AR, textAlign: 'right' }}>• {r}</Text>
               ))}
             </View>
           </View>
@@ -379,7 +412,8 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
             <Text style={{ fontSize: 7, color: '#555', width: '48%', fontFamily: AR, textAlign: 'right' }}>ملاحظة: يمكن إضافة ملحق إلى هذا العقد في حال وجود شروط إضافية، على أن يوقع من أطراف التعاقد.</Text>
           </View>
         </Section>
-        <Signatures tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt) } : undefined} landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt) } : undefined} />
+        <View style={{ flexGrow: 1 }} />
+        {sigs}
         <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#bbb', paddingTop: 4, alignItems: 'center' }}>
           {j.footer && <Text style={{ fontSize: 7, color: '#555' }}>{j.footer}</Text>}
           <Text style={{ fontSize: 6.5, color: '#888', marginTop: 1 }}>Ref: {data.ref} · Generated: {fmtDate(new Date().toISOString())}</Text>

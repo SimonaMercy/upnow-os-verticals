@@ -22,6 +22,7 @@ interface ProviderUser {
   email: string;
   phone?: string;
   kycStatus?: string;
+  status?: string;
   createdAt?: string;
 }
 
@@ -91,7 +92,23 @@ interface UploadedDoc {
   notes: string | null;
   issueDate: string | null;
   expiryDate: string | null;
+  documentNumber?: string | null;
   createdAt: string;
+}
+
+interface TenantDetail {
+  profile: {
+    id: number;
+    entityType?: string | null;
+    tradeLicenseNumber?: string | null;
+    tradeLicenseAuthority?: string | null;
+    activeStatus?: string | null;
+    documentStatus?: string | null;
+    createdAt: string;
+    updatedAt?: string | null;
+    user?: { firstName?: string | null; lastName?: string | null; name?: string | null; email?: string | null; phone?: string | null; kycStatus?: string | null; createdAt?: string | null };
+  };
+  uploadedDocs: UploadedDoc[];
 }
 
 interface RpDetail {
@@ -127,6 +144,45 @@ function ComplianceBadge({ s }: { s: ComplianceStatus }) {
       style={{ backgroundColor: cfg.bg, color: cfg.color }}>
       <Icon size={10} />{cfg.label}
     </span>
+  );
+}
+
+// Admin control: flip a user's account active ↔ inactive (suspended).
+function UserStatusToggle({ userId, status, onChange }: { userId?: number; status?: string; onChange?: (s: string) => void }) {
+  const [val, setVal]   = useState(status ?? "active");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setVal(status ?? "active"); }, [status]);
+  if (!userId) return null;
+  const isActive = val === "active";
+  async function toggle() {
+    const next = isActive ? "suspended" : "active";
+    setBusy(true);
+    try {
+      await apiPatch(`/admin/users/${userId}/status`, { status: next });
+      setVal(next);
+      onChange?.(next);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button
+      onClick={toggle}
+      disabled={busy}
+      title={isActive ? "Click to deactivate this account" : "Click to activate this account"}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-opacity disabled:opacity-50"
+      style={{
+        backgroundColor: isActive ? "#dcfce7" : "#f3f4f6",
+        color: isActive ? "#15803d" : "#6b7280",
+        border: `1px solid ${isActive ? "#bbf7d0" : "#e5e7eb"}`,
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: 99, display: "inline-block",
+        backgroundColor: isActive ? "#16a34a" : "#9ca3af" }} />
+      {busy ? "Saving…" : isActive ? "Active" : "Inactive"}
+    </button>
   );
 }
 
@@ -371,11 +427,14 @@ function RpContentPanel({
                 {providerName(profile, `RP #${rpId}`)}
               </h2>
               <ComplianceBadge s={profile.complianceStatus} />
-              <Link href={`/dashboard/admin/kyc/rental-provider/${rpId}`}
-                className="ml-auto flex items-center gap-1 text-xs"
-                style={{ color: "var(--color-primary)" }}>
-                <ExternalLink size={11} /> Full page
-              </Link>
+              <div className="ml-auto flex items-center gap-2">
+                <UserStatusToggle userId={profile.user?.id} status={profile.user?.status} />
+                <Link href={`/dashboard/admin/kyc/rental-provider/${rpId}`}
+                  className="flex items-center gap-1 text-xs"
+                  style={{ color: "var(--color-primary)" }}>
+                  <ExternalLink size={11} /> Full page
+                </Link>
+              </div>
             </div>
             <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>
               {profile.user?.email}{profile.user?.phone ? ` · ${profile.user.phone}` : ""}
@@ -562,6 +621,9 @@ function SpContentPanel({ sp }: { sp: ServiceProvider }) {
               {sp.businessName ?? sp.ownerName ?? providerName(sp, `SP #${sp.id}`)}
             </h2>
             <ComplianceBadge s={sp.complianceStatus} />
+            <div className="ml-auto">
+              <UserStatusToggle userId={sp.user?.id} status={sp.user?.status} />
+            </div>
           </div>
           <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{sp.user?.email}</p>
         </div>
@@ -602,48 +664,102 @@ function SpContentPanel({ sp }: { sp: ServiceProvider }) {
 
 // ─── RIGHT panel: Tenant content ─────────────────────────────────────────────
 
-function TenantContentPanel({ tenant }: { tenant: Tenant }) {
+function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detail: TenantDetail | null; loading: boolean }) {
   const name = providerName(tenant, `Customer #${tenant.id}`);
+  const p = detail?.profile;
+  const u = p?.user;
+  const docs = detail?.uploadedDocs ?? null;
+  const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-AE") : "—");
+
+  const profileRows = [
+    { label: "Email",            value: u?.email ?? tenant.user?.email },
+    { label: "Phone",            value: u?.phone },
+    { label: "Entity type",      value: (p?.entityType ?? tenant.entityType)?.replace(/_/g, " ") },
+    { label: "KYC status",       value: u?.kycStatus?.replace(/_/g, " ") },
+    { label: "Document status",  value: p?.documentStatus ?? tenant.documentStatus },
+    { label: "Active status",    value: p?.activeStatus ?? tenant.activeStatus },
+    { label: "Trade licence no", value: p?.tradeLicenseNumber },
+    { label: "Licence authority",value: p?.tradeLicenseAuthority },
+    { label: "Registered",       value: fmtDate(p?.createdAt ?? tenant.createdAt) },
+    { label: "Last updated",     value: p?.updatedAt ? fmtDate(p.updatedAt) : undefined },
+  ].filter(r => r.value);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
-          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+          <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{name}</h2>
-            <Link href={`/dashboard/admin/kyc/tenant/${tenant.id}`}
-              className="ml-auto flex items-center gap-1 text-xs" style={{ color: "var(--color-primary)" }}>
-              <ExternalLink size={11} /> Full page
-            </Link>
+            <div className="ml-auto">
+              <UserStatusToggle userId={tenant.user?.id} status={tenant.user?.status} />
+            </div>
           </div>
-          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{tenant.user?.email}</p>
+          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{u?.email ?? tenant.user?.email}</p>
         </div>
 
-        <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
-          {[
-            { label: "Entity type",   value: tenant.entityType?.replace(/_/g, " ") },
-            { label: "Doc status",    value: tenant.documentStatus },
-            { label: "Active status", value: tenant.activeStatus },
-            { label: "Registered",    value: new Date(tenant.createdAt).toLocaleDateString("en-AE") },
-          ].map(({ label, value }) => (
-            <div key={label} className="flex items-center justify-between py-1.5 border-b"
+        {/* Profile — full detail */}
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>Profile</p>
+        <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {profileRows.map(({ label, value }) => (
+            <div key={label} className="flex items-center justify-between gap-3 py-1.5 border-b"
               style={{ borderColor: "var(--color-base-100)" }}>
-              <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-              <span className="text-xs font-semibold"
-                style={{ color: value ? "var(--color-neutral-800)" : "var(--color-neutral-300)" }}>
-                {value ?? "—"}
-              </span>
+              <span className="text-xs shrink-0" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
+              <span className="text-xs font-semibold text-right capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
             </div>
           ))}
         </div>
-      </div>
 
-      <div className="shrink-0 border-t px-4 py-3"
-        style={{ borderColor: "var(--color-base-200)", backgroundColor: "#fff" }}>
-        <Link href={`/dashboard/admin/kyc/tenant/${tenant.id}`}
-          className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-semibold"
-          style={{ backgroundColor: "var(--color-primary)", color: "#fff" }}>
-          <ShieldCheck size={13} /> Open Full KYC Review
-        </Link>
+        {/* Documents — full detail inline (number / issue / expiry / notes) */}
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>
+          Documents{docs ? ` (${docs.length})` : ""}
+        </p>
+        <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {loading ? (
+            <p className="text-xs py-3 text-center" style={{ color: "var(--color-neutral-400)" }}>Loading documents…</p>
+          ) : !docs || docs.length === 0 ? (
+            <p className="text-xs py-3 text-center" style={{ color: "var(--color-neutral-400)" }}>No documents uploaded yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {docs.map((doc) => {
+                const ok = ["PROCESSED", "COMPLETE", "processed", "complete", "approved"].includes(doc.status);
+                const exp = doc.expiryDate ? new Date(doc.expiryDate) : null;
+                const expired = exp ? exp < new Date() : false;
+                const soon = exp && !expired ? (exp.getTime() - Date.now()) < 30 * 864e5 : false;
+                const expColor = expired ? "#dc2626" : soon ? "#b45309" : "var(--color-neutral-500)";
+                return (
+                  <div key={doc.id} className="rounded-lg p-2.5" style={{ backgroundColor: "var(--color-base-50, #fafafa)", border: "1px solid var(--color-base-100)" }}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <FileText size={12} style={{ color: "var(--color-primary)" }} />
+                        <span className="text-xs font-semibold truncate capitalize" style={{ color: "var(--color-neutral-800)" }}>
+                          {doc.documentKey.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium capitalize"
+                          style={{ backgroundColor: ok ? "#dcfce7" : "#fef3c7", color: ok ? "#15803d" : "#b45309" }}>
+                          {String(doc.status).toLowerCase()}
+                        </span>
+                        {doc.fileUrl && (
+                          <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-[11px]" style={{ color: "var(--color-primary)" }}>
+                            <ExternalLink size={11} /> View
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-[18px]">
+                      {doc.documentNumber && <span className="text-[11px]" style={{ color: "var(--color-neutral-500)" }}>No: <b style={{ color: "var(--color-neutral-700)" }}>{doc.documentNumber}</b></span>}
+                      {doc.issueDate && <span className="text-[11px]" style={{ color: "var(--color-neutral-500)" }}>Issued: {new Date(doc.issueDate).toLocaleDateString("en-AE")}</span>}
+                      {doc.expiryDate && <span className="text-[11px] font-medium" style={{ color: expColor }}>Expires: {new Date(doc.expiryDate).toLocaleDateString("en-AE")}{expired ? " (expired)" : soon ? " (soon)" : ""}</span>}
+                      <span className="text-[11px]" style={{ color: "var(--color-neutral-400)" }}>Uploaded: {new Date(doc.createdAt).toLocaleDateString("en-AE")}</span>
+                      {doc.notes && <span className="text-[11px] w-full" style={{ color: "var(--color-neutral-500)" }}>Note: {doc.notes}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -919,6 +1035,8 @@ export default function AdminKycPage() {
   const [rpDetail, setRpDetail]               = useState<RpDetail | null>(null);
   const [rpDetailLoading, setRpDetailLoading] = useState(false);
   const [rpDetailError, setRpDetailError]     = useState<string | null>(null);
+  const [tenantDetail, setTenantDetail]       = useState<TenantDetail | null>(null);
+  const [tenantDocsLoading, setTenantDocsLoading] = useState(false);
 
   // Infinite-scroll plumbing for the queue column
   const PAGE_SIZE = 10;
@@ -979,6 +1097,14 @@ export default function AdminKycPage() {
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Restore the last-selected tab from the URL (?tab=…) so a refresh keeps you
+  // on the same tab (e.g. Customers stays Customers).
+  useEffect(() => {
+    const VALID: Tab[] = ["rental", "service", "tenants", "managers", "technicians"];
+    const t = new URLSearchParams(window.location.search).get("tab") as Tab | null;
+    if (t && VALID.includes(t)) setTab(t);
+  }, []);
+
   // Infinite scroll — load the next page of the ACTIVE tab when the sentinel
   // scrolls into view, until all records for that tab are loaded.
   useEffect(() => {
@@ -1018,6 +1144,20 @@ export default function AdminKycPage() {
     return () => controller.abort();
   }, [selectedId, tab]);
 
+  // Load the selected customer's uploaded documents inline (same data the
+  // standalone Full KYC page uses) so everything lives inside the tab.
+  useEffect(() => {
+    if (tab !== "tenants" || selectedId === null) { setTenantDetail(null); return; }
+    const controller = new AbortController();
+    setTenantDetail(null);
+    setTenantDocsLoading(true);
+    apiGet<TenantDetail>(`/admin/kyc/tenants/${selectedId}`, { signal: controller.signal })
+      .then((d) => { if (!controller.signal.aborted) setTenantDetail(d); })
+      .catch(() => { if (!controller.signal.aborted) setTenantDetail(null); })
+      .finally(() => { if (!controller.signal.aborted) setTenantDocsLoading(false); });
+    return () => controller.abort();
+  }, [selectedId, tab]);
+
   function kycScore(rp: RentalProvider) {
     const fields = [rp.entityType, rp.contactAddress, rp.tradeLicenseNumber, rp.emiratesIdNumber, rp.bankIban, rp.companyName];
     return Math.round((fields.filter(Boolean).length / fields.length) * 100);
@@ -1027,7 +1167,15 @@ export default function AdminKycPage() {
     return Math.round((fields.filter(Boolean).length / fields.length) * 100);
   }
 
-  function handleTabChange(t: Tab) { setTab(t); setSelectedId(null); setStatusFilter("all"); }
+  function handleTabChange(t: Tab) {
+    setTab(t); setSelectedId(null); setStatusFilter("all");
+    // Persist to the URL so a refresh keeps this tab selected.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", t);
+      window.history.replaceState({}, "", url);
+    } catch { /* no-op */ }
+  }
   function handleStatusFilter(s: StatusFilter) { setStatusFilter(s); setSelectedId(null); }
   function handleRpStatusChange(id: number, status: ComplianceStatus) {
     setRps((prev) => prev.map((r) => r.id === id ? { ...r, complianceStatus: status } : r));
@@ -1269,7 +1417,7 @@ export default function AdminKycPage() {
               ) : selectedSp ? (
                 <SpContentPanel sp={selectedSp} />
               ) : selectedTenant ? (
-                <TenantContentPanel tenant={selectedTenant} />
+                <TenantContentPanel tenant={selectedTenant} detail={tenantDetail} loading={tenantDocsLoading} />
               ) : selectedManager ? (
                 <ManagerContentPanel m={selectedManager} />
               ) : selectedTechnician ? (

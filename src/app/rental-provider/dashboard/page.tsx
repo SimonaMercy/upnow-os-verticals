@@ -621,7 +621,7 @@ export default function RentalProviderDashboard() {
                 return (
                   <Link
                     key={r.contractId}
-                    href={`/rental-provider/dashboard/contracts/${r.contractId}`}
+                    href={`/rental-provider/dashboard/contracts/${r.contractId}/v2`}
                     className="flex items-center justify-between gap-3 py-3 border-b border-[var(--base-200)] last:border-0 hover:bg-[var(--base-100)]/40 -mx-2 px-2 rounded-md transition-colors"
                   >
                     <div className="min-w-0 flex-1">

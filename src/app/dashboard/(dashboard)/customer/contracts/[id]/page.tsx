@@ -590,6 +590,7 @@ export default function TenantContractDetailPage() {
                     { key: 'property',  icon: Building2,     label: 'Property'  },
                     { key: 'period',    icon: Calendar,      label: 'Period'    },
                     { key: 'payments',  icon: CreditCard,    label: 'Payments'  },
+                    { key: 'documents', icon: FileText,      label: 'Documents' },
                     { key: 'clauses',   icon: ClipboardList, label: 'Clauses'   },
                   ] as const).map(({ key, icon: Icon, label }) => (
                     <button key={key} onClick={() => setActiveDrawer(key)}
@@ -778,6 +779,48 @@ export default function TenantContractDetailPage() {
                     </SectionCard>
                   </div>
 
+                  {/* Documents */}
+                  <div className={activeDrawer !== 'documents' ? 'hidden' : 'p-5 space-y-4'}>
+                    <SectionCard title="Contract Documents" icon={FileText}>
+                      {docs.length === 0 ? (
+                        <p className="text-xs text-[#9b9890]">No documents available for this contract yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {docs.map(d => {
+                            const label = d.displayName
+                              ?? d.documentKey.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
+                            const isImg = /\.(png|jpe?g|webp|gif)$/i.test(d.fileUrl) || (d.fileUrl || '').includes('image');
+                            return (
+                              <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] bg-white">
+                                <div className="w-9 h-9 rounded-lg bg-[#f0faf6] flex items-center justify-center shrink-0">
+                                  <FileText size={16} className="text-[#2e9f82]" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-medium text-[#1a1916] truncate">{label}</p>
+                                  <p className="text-[11px] text-[#9b9890]">
+                                    {d.expiryDate ? `Expires ${new Date(d.expiryDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}` : (d.category ?? '').replace(/_/g, ' ')}
+                                  </p>
+                                </div>
+                                {d.fileUrl && (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <a href={d.fileUrl} target="_blank" rel="noopener noreferrer"
+                                      className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] px-2.5 py-1.5 rounded-lg hover:bg-[#f0faf6]">
+                                      <Eye size={13} /> {isImg ? 'View' : 'Open'}
+                                    </a>
+                                    <a href={d.fileUrl} download
+                                      className="flex items-center gap-1 text-xs font-medium text-[#6b6860] px-2.5 py-1.5 rounded-lg hover:bg-[#f4f3ef]">
+                                      <Download size={13} /> Download
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </SectionCard>
+                  </div>
+
                   {/* Clauses */}
                   <div className={activeDrawer !== 'clauses' ? 'hidden' : 'p-5 space-y-4'}>
                     <SectionCard title="Contract Clauses" icon={ClipboardList}>
@@ -825,6 +868,7 @@ export default function TenantContractDetailPage() {
                     label: 'Payments',
                     desc: isPending ? 'Set your preferences' : `${contract.numberOfInstallments ?? '?'} cheques`,
                   },
+                  { key: 'documents', icon: FileText,      label: 'Documents', desc: `${docs.length} file${docs.length === 1 ? '' : 's'}` },
                   { key: 'clauses',   icon: ClipboardList, label: 'Clauses',   desc: `${contract.customClauses?.length ?? 0} clauses` },
                 ] as const).map(({ key, icon: Icon, label, desc }) => (
                   <button key={key} onClick={() => setActiveDrawer(key)}

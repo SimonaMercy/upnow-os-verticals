@@ -227,7 +227,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
           )}
           {deal.contractId && (
             <a
-              href={`/rental-provider/dashboard/contracts/${deal.contractId}`}
+              href={`/rental-provider/dashboard/contracts/${deal.contractId}/v2`}
               className="flex-1 text-center text-xs font-medium text-[#1a1916] border border-[#1a1916] rounded-lg py-2 hover:bg-[#f4f3ef] flex items-center justify-center gap-1"
             >
               Open contract <ExternalLink size={11} />

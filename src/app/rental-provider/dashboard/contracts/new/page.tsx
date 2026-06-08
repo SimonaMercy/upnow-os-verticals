@@ -398,7 +398,7 @@ export default function NewContractPage() {
       const created = await res.json() as { id: number };
 
       setSuccess(true);
-      setTimeout(() => router.push(`/rental-provider/dashboard/contracts/${created.id}`), 1500);
+      setTimeout(() => router.push(`/rental-provider/dashboard/contracts/${created.id}/v2`), 1500);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

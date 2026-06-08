@@ -19,6 +19,8 @@ import 'yet-another-react-lightbox/plugins/thumbnails.css';
 import { toast } from 'sonner';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
+import { getRequiredDocs } from '@/lib/docRequirements';
+import { openDocsTogether } from '@/lib/openDocsTogether';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -97,20 +99,21 @@ const STAGE_PILL: Record<LeadStage, string> = {
   converted:            'bg-[#e0f2fe] text-[#0369a1]',
 };
 
+// Filter tabs mirror the live pipeline only. Legacy/never-reached stages
+// (new, contacted, approved, offer_made, applied) are intentionally omitted —
+// their labels/colors are still defined above so any stray record renders a
+// badge and remains visible under "All".
 const TABS: { key: 'all' | LeadStage; label: string }[] = [
   { key: 'all',                  label: 'All' },
-  { key: 'new',                  label: 'New' },
-  { key: 'contacted',            label: 'Contacted' },
   { key: 'viewing_scheduled',    label: 'Viewing' },
+  { key: 'interested',           label: 'Interested' },
   { key: 'documents_collection', label: 'Docs' },
   { key: 'payment_plan_shared',  label: 'Plan Shared' },
-  { key: 'interested',           label: 'Interested' },
   { key: 'cheques_submitted',    label: 'Cheques Ready' },
   { key: 'cheques_collected',    label: 'Collected' },
   { key: 'contract_issued',      label: 'Contract' },
-  { key: 'approved',             label: 'Approved' },
-  { key: 'rejected',             label: 'Rejected' },
   { key: 'converted',            label: 'Converted' },
+  { key: 'rejected',             label: 'Rejected' },
 ];
 
 interface ApiViewing {
@@ -132,6 +135,10 @@ interface PaymentPlanItem {
   dueDate: string;
   description?: string;
   type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+  /** RP-assigned payment method for this installment (default cheque). */
+  paymentMethod?: PaymentMethodKind | null;
+  /** RP-entered reference for this installment (cheque #, transfer ID, auth code). */
+  reference?: string | null;
 }
 
 type PaymentMethodKind = 'cheque' | 'bank_transfer' | 'card' | 'cash';
@@ -258,28 +265,11 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
   const viewing = getPendingViewing(lead);
 
   switch (lead.stage) {
-    case 'new':
-      return { kind: 'stage', label: 'Mark Contacted', target: 'contacted',
-        cls: 'bg-[#eef2ff] text-[#4338ca] hover:bg-[#e0e7ff]' };
-    case 'contacted':
-      return { kind: 'stage', label: 'Viewing Booked', target: 'viewing_scheduled',
-        cls: 'bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a]' };
     case 'viewing_scheduled':
       return viewing
         ? { kind: 'mark_visited', label: 'Mark Visited', cls: 'bg-[#d8f2e8] text-[#1a7a5a] hover:bg-[#bbf0d8]' }
         : null;
-    // Legacy stages
-    case 'applied':
-      return { kind: 'stage', label: 'Send Offer', target: 'offer_made',
-        cls: 'bg-[#fce7f3] text-[#9d174d] hover:bg-[#fbcfe8]' };
-    case 'offer_made':
-      return { kind: 'stage', label: 'Approve', target: 'approved',
-        cls: 'bg-[#d1fae5] text-[#065f46] hover:bg-[#a7f3d0]' };
-    case 'approved':
-      return lead.unit?.id && lead.convertedTenant?.id
-        ? { kind: 'convert', label: 'Convert', cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' }
-        : null;
-    // New pipeline stages — `interested` and `documents_collection` both
+    // Live pipeline stages — `interested` and `documents_collection` both
     // sit at "customer has uploaded their docs and is waiting for RP to
     // confirm". The payment plan was already auto-generated when the
     // customer expressed interest, so RP just needs a one-click "looks
@@ -288,7 +278,7 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
     // customer side (cheque upload / ready-to-collect).
     case 'documents_collection':
     case 'interested':
-      return { kind: 'approve_docs', label: 'Approve Documents',
+      return { kind: 'approve_docs', label: 'Review Documents',
         cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' };
     case 'payment_plan_shared':
       return null; // waiting for customer to upload cheques
@@ -304,7 +294,7 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
         ? { kind: 'convert', label: 'Convert', cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' }
         : null;
     case 'rejected':
-      return { kind: 'stage', label: 'Reopen', target: 'new',
+      return { kind: 'stage', label: 'Reopen', target: 'viewing_scheduled',
         cls: 'bg-[#f4f3f0] text-[#3d3b35] hover:bg-[#e8e6e0]' };
     default:
       return null;
@@ -328,6 +318,15 @@ function nextSerial(base: string, offset = 1): string {
   const [, prefix, digits] = match;
   const next = (parseInt(digits, 10) + offset).toString().padStart(digits.length, '0');
   return prefix + next;
+}
+
+/** Rewrites an RP lead URL to the manager-scoped equivalent when acting as a
+ *  manager (swaps /api/leads → /api/manager/leads + appends ?rp=). In RP mode
+ *  (manager undefined) the URL is returned unchanged. */
+function leadUrl(path: string, manager?: { rp: number } | null): string {
+  if (!manager) return path;
+  const swapped = path.replace('/api/leads', '/api/manager/leads');
+  return swapped + (swapped.includes('?') ? '&' : '?') + `rp=${manager.rp}`;
 }
 
 function ChequeRow({
@@ -407,7 +406,7 @@ function ChequeRow({
 
 /* ─── Lead Row ────────────────────────────────────────────────────────────── */
 function LeadRow({
-  lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays,
+  lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays, manager,
 }: {
   lead: ApiLead;
   onMoveStage: (id: number, s: LeadStage) => void;
@@ -416,6 +415,7 @@ function LeadRow({
   setLeads: React.Dispatch<React.SetStateAction<ApiLead[]>>;
   feeRules: FeeRulesMap | null;
   preferredStartDays: number[];
+  manager?: { rp: number };
 }) {
   const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
   const [visitRemarks, setVisitRemarks] = useState('');
@@ -493,6 +493,9 @@ function LeadRow({
   const [cheques, setCheques] = useState<LeadChequeRecord[]>([]);
   const [chequesLoaded, setChequesLoaded] = useState(false);
   const [chequesLoading, setChequesLoading] = useState(false);
+  // Per-plan-item payment method + reference overrides (optimistic; PATCHed to the lead's plan).
+  const [itemMethods, setItemMethods] = useState<Record<number, PaymentMethodKind>>({});
+  const [itemRefs, setItemRefs] = useState<Record<number, string>>({});
   // Auto-fill suggestions: index-in-sortedItems → suggested serial (propagated when user types in any row)
   const [chequeSuggestions, setChequeSuggestions] = useState<Record<number, string>>({});
   const [chequeError, setChequeError]   = useState<string | null>(null);
@@ -692,7 +695,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (chequesLoaded) return;
     setChequesLoading(true);
     try {
-      const res = await fetch(`/api/leads/${lead.id}/cheques`, { credentials: 'include' });
+      const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques`, manager), { credentials: 'include' });
       if (res.ok) setCheques(await res.json());
     } finally { setChequesLoading(false); setChequesLoaded(true); }
   }
@@ -719,7 +722,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
     setPlanSaving(true); setPlanError(null);
     try {
-      const res = await fetch(`/api/leads/${lead.id}/issue-payment-plan`, {
+      const res = await fetch(leadUrl(`/api/leads/${lead.id}/issue-payment-plan`, manager), {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -752,7 +755,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
   }
 
   async function handleDeleteCheque(chequeId: number) {
-    const res = await fetch(`/api/leads/${lead.id}/cheques/${chequeId}`, {
+    const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques/${chequeId}`, manager), {
       method: 'DELETE', credentials: 'include',
     });
     if (res.ok) setCheques(prev => prev.filter(c => c.id !== chequeId));
@@ -761,7 +764,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
   async function handleApproveDocs() {
     setApprovingDocs(true); setApproveDocsError(null);
     try {
-      const res = await fetch(`/api/leads/${lead.id}/approve-documents`, {
+      const res = await fetch(leadUrl(`/api/leads/${lead.id}/approve-documents`, manager), {
         method: 'PATCH', credentials: 'include',
       });
       const body = await res.json().catch(() => ({}));
@@ -775,7 +778,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
   async function handleConfirmCollected() {
     setConfirmingCollection(true); setChequeError(null);
     try {
-      const res = await fetch(`/api/leads/${lead.id}/confirm-cheques-collected`, {
+      const res = await fetch(leadUrl(`/api/leads/${lead.id}/confirm-cheques-collected`, manager), {
         method: 'PATCH', credentials: 'include',
       });
       const body = await res.json().catch(() => ({}));
@@ -833,7 +836,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     setDocsNoteError(null);
     setDocsNoteSaved(false);
     try {
-      const res = await fetch(`/api/leads/${lead.id}/additional-docs-note`, {
+      const res = await fetch(leadUrl(`/api/leads/${lead.id}/additional-docs-note`, manager), {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: docsNoteItems }),
@@ -888,7 +891,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (!viewing) return;
     setMarkingVisit(true); setVisitError(null);
     try {
-      const res = await fetch(`/api/leads/viewings/${viewing.id}/status`, {
+      const res = await fetch(leadUrl(`/api/leads/viewings/${viewing.id}/status`, manager), {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'completed', outcome: visitRemarks.trim() || undefined }),
@@ -912,7 +915,9 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (primary.kind === 'stage') { onMoveStage(lead.id, primary.target); return; }
     if (primary.kind === 'convert') { onConvert(lead); return; }
     if (primary.kind === 'mark_visited') { openPanel('visited'); return; }
-    if (primary.kind === 'approve_docs') { handleApproveDocs(); return; }
+    // Show the customer's documents first; the actual approve happens from the
+    // "Approve Documents" button inside the docs panel (no more blind one-click).
+    if (primary.kind === 'approve_docs') { openPanel('docs'); return; }
     if (primary.kind === 'record_cheques') { openPanel('cheques'); return; }
     if (primary.kind === 'confirm_collected') { handleConfirmCollected(); return; }
   }
@@ -963,6 +968,14 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 ${STAGE_PILL[lead.stage]}`}>
                 {STAGE_LABELS[lead.stage]}
               </span>
+              {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
+                <p
+                  className="text-[10px] text-[#b91c1c] truncate mt-1"
+                  title={anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+                >
+                  {anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+                </p>
+              )}
             </div>
 
             {/* Date */}
@@ -1226,6 +1239,56 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </button>
             </div>
           </div>
+          {/* What was requested from the customer — full checklist (required + supporting), mirrors the customer's view */}
+          {!docsLoading && (() => {
+            const all = getRequiredDocs(lead.unit?.unitType);
+            if (all.length === 0) return null;
+            const okKeys = new Set(
+              (tenantDocs ?? [])
+                .filter(d => !['missing', 'rejected'].includes(d.status))
+                .map(d => d.documentKey),
+            );
+            const req = all.filter(d => d.required);
+            const opt = all.filter(d => !d.required);
+            const received = req.filter(d => okKeys.has(d.key)).length;
+            const chipCls = (ok: boolean, optional: boolean) =>
+              ok
+                ? 'bg-[#dcfce7] text-[#15803d]'
+                : optional
+                  ? 'bg-[#f4f3ef] text-[#6b6860]'
+                  : 'bg-[#fef3c7] text-[#92400e]';
+            const Chip = (d: { key: string; label: string }, optional: boolean) => {
+              const ok = okKeys.has(d.key);
+              return (
+                <span
+                  key={d.key}
+                  className={`inline-flex items-center gap-1 text-[10px] font-medium rounded-full px-2 py-0.5 ${chipCls(ok, optional)}`}
+                >
+                  {ok ? <Check size={9} /> : <Clock size={9} />}{d.label}
+                </span>
+              );
+            };
+            return (
+              <div className="mb-3 rounded-lg border border-[#e8e6e0] bg-white px-3 py-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[#6b6860] mb-1.5">
+                  Requested Documents · {received}/{req.length} required received
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {req.map(d => Chip(d, false))}
+                </div>
+                {opt.length > 0 && (
+                  <>
+                    <p className="text-[9px] font-semibold uppercase tracking-wide text-[#9b9890] mt-2 mb-1">
+                      Supporting (optional)
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {opt.map(d => Chip(d, true))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           {docActionError && <p className="text-[10px] text-[#b91c1c] mb-2">{docActionError}</p>}
           {docsLoading ? (
             <p className="flex items-center gap-2 text-xs text-[#9b9890]">
@@ -1412,6 +1475,25 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               {docsNoteSaved && <span className="text-[10px] text-[#16a34a] font-medium">Saved ✓</span>}
             </div>
           </div>
+
+          {/* Approve all & advance — only after the RP has reviewed the docs above */}
+          {(lead.stage === 'interested' || lead.stage === 'documents_collection') && (
+            <div className="mt-4 pt-4 border-t border-[#e8e6e0]">
+              {approveDocsError && <p className="text-[10px] text-[#b91c1c] mb-2">{approveDocsError}</p>}
+              <button
+                onClick={handleApproveDocs}
+                disabled={approvingDocs}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2.5 rounded-lg text-white disabled:opacity-50 cursor-pointer"
+                style={{ backgroundColor: '#2e9f82' }}
+              >
+                {approvingDocs ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                {approvingDocs ? 'Approving…' : 'Approve Documents & Share Plan'}
+              </button>
+              <p className="text-[10px] text-[#9b9890] text-center mt-1.5">
+                Confirms the documents above and unlocks the customer&apos;s payment step.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1470,8 +1552,21 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </div>
             )}
 
-            {/* Tenant notes from booking (viewing level) */}
-            {anyViewing.notes && (
+            {/* Customer declined the viewing — surface the reason prominently */}
+            {anyViewing.status === 'cancelled' && anyViewing.outcome === 'not_interested' && (
+              <div className="flex items-start gap-2">
+                <X size={12} className="text-[#b91c1c] shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] text-[#b91c1c] uppercase font-semibold tracking-wide mb-0.5">Declined by Customer</p>
+                  <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">
+                    {anyViewing.notes?.trim() ? anyViewing.notes : 'No reason provided.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Tenant notes from booking (viewing level) — suppressed when notes hold the decline reason */}
+            {anyViewing.notes && !(anyViewing.status === 'cancelled' && anyViewing.outcome === 'not_interested') && (
               <div className="flex items-start gap-2">
                 <MessageSquare size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
                 <div>
@@ -1481,8 +1576,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </div>
             )}
 
-            {/* RP visit outcome/remarks */}
-            {anyViewing.outcome && (
+            {/* RP visit outcome/remarks — free text from a completed visit; skip the internal not_interested code */}
+            {anyViewing.outcome && anyViewing.outcome !== 'not_interested' && (
               <div className="flex items-start gap-2">
                 <CheckCircle2 size={12} className="text-[#2e9f82] shrink-0 mt-0.5" />
                 <div>
@@ -2058,6 +2153,76 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               )}
             </div>
 
+            {/* Payment method per payment — all planned payments, RP sets each method (default Cheque),
+                independent of how many references the customer uploaded. */}
+            {plan && sortedItems.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide">Payment method (all payments)</p>
+                {sortedItems.map((item, i) => {
+                  const method = itemMethods[item.index] ?? item.paymentMethod ?? 'cheque';
+                  return (
+                    <div key={`m-${item.index}`} className="flex items-center gap-2 flex-wrap bg-white border border-[#fde68a] rounded-lg px-2.5 py-1.5">
+                      <span className="text-[11px] text-[#1a1916] flex-1 min-w-[150px]">
+                        <span className="text-[#0369a1] font-semibold">#{i + 1}</span> {item.description ?? `Payment ${i + 1}`}
+                        <span className="font-bold text-[#1a1916]"> · AED {(item.amountFils / 100).toLocaleString('en-AE')}</span>
+                        {item.dueDate && <span className="text-[#9b9890]"> · {item.dueDate}</span>}
+                      </span>
+                      <select
+                        value={method}
+                        onChange={async (e) => {
+                          const m = e.target.value as PaymentMethodKind;
+                          setChequeError(null);
+                          setItemMethods(prev => ({ ...prev, [item.index]: m }));
+                          const res = await fetch(leadUrl(`/api/leads/${lead.id}/plan-item-method`, manager), {
+                            method: 'PATCH', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ itemIndex: item.index, paymentMethod: m }),
+                          });
+                          if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed to set method'); }
+                        }}
+                        className="text-[10px] px-2 py-1 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] cursor-pointer focus:outline-none focus:border-[#2e9f82]"
+                      >
+                        {(['cheque','bank_transfer','card','cash'] as PaymentMethodKind[]).map(m => (
+                          <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        value={itemRefs[item.index] ?? item.reference ?? ''}
+                        onChange={(e) => setItemRefs(prev => ({ ...prev, [item.index]: e.target.value }))}
+                        placeholder="Reference (cheque #, transfer ID…)"
+                        onBlur={async (e) => {
+                          const val = e.currentTarget.value.trim();
+                          setChequeError(null);
+                          const patchRef = async (idx: number, reference: string) => {
+                            const res = await fetch(leadUrl(`/api/leads/${lead.id}/plan-item-method`, manager), {
+                              method: 'PATCH', credentials: 'include',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ itemIndex: idx, reference }),
+                            });
+                            if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed to set reference'); }
+                          };
+                          await patchRef(item.index, val);
+                          // Auto-generate the series for subsequent EMPTY rows (CHQ-1 → CHQ-2, CHQ-3…).
+                          if (val) {
+                            for (let j = i + 1; j < sortedItems.length; j++) {
+                              const t = sortedItems[j];
+                              const existing = (itemRefs[t.index] ?? t.reference ?? '').trim();
+                              if (existing) continue;
+                              const serial = nextSerial(val, j - i);
+                              setItemRefs(prev => ({ ...prev, [t.index]: serial }));
+                              await patchRef(t.index, serial);
+                            }
+                          }
+                        }}
+                        className="text-[10px] px-2 py-1 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] w-[170px]"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {chequesLoading && (
               <p className="flex items-center gap-2 text-xs text-[#9b9890]">
                 <Loader2 size={12} className="animate-spin" /> Loading…
@@ -2100,7 +2265,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       onRecord={async (serial) => {
                         if (!serial.trim()) { setChequeError('Cheque number is required'); return; }
                         setChequeError(null);
-                        const res = await fetch(`/api/leads/${lead.id}/cheques`, {
+                        const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques`, manager), {
                           method: 'POST', credentials: 'include',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
@@ -2118,12 +2283,12 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       }}
                       onDelete={async () => {
                         if (!recorded) return;
-                        const res = await fetch(`/api/leads/${lead.id}/cheques/${recorded.id}`, { method: 'DELETE', credentials: 'include' });
+                        const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques/${recorded.id}`, manager), { method: 'DELETE', credentials: 'include' });
                         if (res.ok) setCheques(prev => prev.filter(c => c.id !== recorded.id));
                       }}
                       onStatusChange={async (status) => {
                         if (!recorded) return;
-                        const res = await fetch(`/api/leads/${lead.id}/cheques/${recorded.id}/status`, {
+                        const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques/${recorded.id}/status`, manager), {
                           method: 'PATCH', credentials: 'include',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ status }),
@@ -2175,10 +2340,21 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 for the customer-upload path. */}
             {lead.stage === 'cheques_submitted' && hasCustomerUploads && (
               <div className={`pt-3 space-y-2 ${plan ? 'border-t border-[#fde68a]' : ''}`}>
-                <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
-                  Payment references uploaded by customer
-                  <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{customerUploads.length}</span>
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
+                    Payment references uploaded by customer
+                    <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{customerUploads.length}</span>
+                  </p>
+                  {customerUploads.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => openDocsTogether(customerUploads.map(c => ({ fileUrl: c.imageUrl, displayName: c.notes ?? 'Cheque' })))}
+                      className="text-[10px] font-semibold text-[#0369a1] hover:underline cursor-pointer flex items-center gap-1 shrink-0"
+                    >
+                      <ExternalLink size={11} /> View all
+                    </button>
+                  )}
+                </div>
                 {customerUploads.map((c, i) => {
                   const previewLabel = c.notes || `Payment ${i + 1}`;
                   const openPreview = () => c.imageUrl && setChequePreview({ url: c.imageUrl, label: previewLabel });
@@ -2193,7 +2369,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                           className="relative w-14 h-14 rounded-lg border border-[#fde68a] overflow-hidden bg-[#fef9c3] flex items-center justify-center hover:opacity-80 disabled:cursor-default transition-opacity cursor-pointer flex-shrink-0"
                           aria-label={`Preview ${previewLabel}`}
                         >
-                          {c.imageUrl
+                          {c.imageUrl && !c.imageUrl.toLowerCase().split('?')[0].endsWith('.pdf')
                             // eslint-disable-next-line @next/next/no-img-element
                             ? <img src={c.imageUrl} alt={previewLabel} className="w-full h-full object-cover" />
                             : <FileText size={16} className="text-[#9b9890]" />
@@ -2217,94 +2393,6 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                           </button>
                         )}
                       </div>
-
-                      {/* Form rows: aligned label column + control column */}
-                      <div className="px-3 py-2.5 space-y-2">
-                        {plan && sortedItems.length > 0 && (
-                          <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
-                            <label htmlFor={`map-${c.id}`} className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Map to</label>
-                            <select
-                              id={`map-${c.id}`}
-                              value={c.planItemIndex ?? ''}
-                              onChange={async (e) => {
-                                const raw = e.target.value;
-                                const next = raw === '' ? null : Number(raw);
-                                setChequeError(null);
-                                const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
-                                  method: 'PATCH', credentials: 'include',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ planItemIndex: next }),
-                                });
-                                if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
-                                setCheques(prev => prev.map(x => x.id === c.id ? { ...x, planItemIndex: next } : x));
-                              }}
-                              className="w-full text-[11px] px-2 py-1.5 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] cursor-pointer focus:outline-none focus:border-[#2e9f82]"
-                            >
-                              <option value="">— Select payment —</option>
-                              {sortedItems.map((it) => (
-                                <option key={it.index} value={it.index}>
-                                  #{it.index} {it.description ?? `Payment ${it.index}`} · AED {(it.amountFils / 100).toLocaleString('en-AE')}{it.dueDate ? ` · ${it.dueDate}` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
-                          <label htmlFor={`ref-${c.id}`} className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Reference</label>
-                          <input
-                            id={`ref-${c.id}`}
-                            type="text"
-                            defaultValue={c.chequeSerial ?? ''}
-                            placeholder="Cheque #, transfer ID, auth code…"
-                            onBlur={async (e) => {
-                              const next = e.currentTarget.value;
-                              if ((c.chequeSerial ?? '') === next) return;
-                              setChequeError(null);
-                              const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
-                                method: 'PATCH', credentials: 'include',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ chequeSerial: next }),
-                              });
-                              if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
-                              setCheques(prev => prev.map(x => x.id === c.id ? { ...x, chequeSerial: next.trim() || null } : x));
-                            }}
-                            className="w-full text-[11px] px-2 py-1.5 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82]"
-                          />
-                        </div>
-
-                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: '90px 1fr' }}>
-                          <span className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Method</span>
-                          <div className="flex gap-1 flex-wrap">
-                            {(['cheque','bank_transfer','card','cash'] as PaymentMethodKind[]).map(m => {
-                              const active = c.paymentMethod === m;
-                              return (
-                                <button
-                                  key={m}
-                                  type="button"
-                                  onClick={async () => {
-                                    setChequeError(null);
-                                    const res = await fetch(`/api/leads/${lead.id}/cheques/${c.id}/status`, {
-                                      method: 'PATCH', credentials: 'include',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ paymentMethod: m }),
-                                    });
-                                    if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed'); return; }
-                                    setCheques(prev => prev.map(x => x.id === c.id ? { ...x, paymentMethod: m } : x));
-                                  }}
-                                  className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors cursor-pointer ${
-                                    active
-                                      ? 'bg-[#2e9f82] text-white border-[#1f6655]'
-                                      : 'bg-white text-[#6b6860] border-[#ede9e3] hover:bg-[#f4f3f0]'
-                                  }`}
-                                >
-                                  {PAYMENT_METHOD_LABEL[m]}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
                     </div>
                   );
                 })}
@@ -2323,7 +2411,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                   onClick={async () => {
                     setConfirmingCollection(true); setChequeError(null);
                     try {
-                      const res = await fetch(`/api/leads/${lead.id}/approve-cheques`, { method: 'PATCH', credentials: 'include' });
+                      const res = await fetch(leadUrl(`/api/leads/${lead.id}/approve-cheques`, manager), { method: 'PATCH', credentials: 'include' });
                       const body = await res.json().catch(() => ({}));
                       if (!res.ok) { setChequeError(body.message ?? 'Failed'); return; }
                       setPanel('none');
@@ -2336,14 +2424,18 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                   Payment Review & Approve
                 </button>
               )}
-              <button
-                disabled={confirmingCollection || cheques.length === 0}
-                onClick={handleConfirmCollected}
-                className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
-              >
-                {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
-                Confirm All Collected
-              </button>
+              {/* Only the customer-upload path uses "Payment Review & Approve" above;
+                  the RP-recorded path uses this one. Never show both at once. */}
+              {lead.stage !== 'cheques_submitted' && (
+                <button
+                  disabled={confirmingCollection || cheques.length === 0}
+                  onClick={handleConfirmCollected}
+                  className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
+                  Confirm All Collected
+                </button>
+              )}
               <button onClick={() => setPanel('none')} className="text-xs px-4 py-2 rounded-lg bg-white border border-[#fde68a] text-[#854d0e] hover:bg-[#fef9c3] transition-colors cursor-pointer">
                 Close
               </button>
@@ -2652,7 +2744,12 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 }
 
 /* ─── Page ────────────────────────────────────────────────────────────────── */
-export default function LeadsPage() {
+/**
+ * Leads pipeline workspace. Used by the RP portal (default export below) and the
+ * Manager portal (rendered with `manager={{ rp }}`), which swaps every action to
+ * the landlord-scoped /api/manager/leads/* endpoints via leadUrl().
+ */
+export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   const router = useRouter();
   const [leads, setLeads]           = useState<ApiLead[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -2667,7 +2764,7 @@ export default function LeadsPage() {
   const fetchLeads = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch('/api/leads', { credentials: 'include' });
+      const res = await fetch(leadUrl('/api/leads', manager), { credentials: 'include' });
       if (!res.ok) throw new Error(`Failed to load leads (${res.status})`);
       const data = await res.json();
       setLeads(Array.isArray(data) ? data : []);
@@ -2716,7 +2813,7 @@ export default function LeadsPage() {
   async function moveStage(leadId: number, stage: LeadStage) {
     setMovingLead(leadId);
     try {
-      await fetch(`/api/leads/${leadId}/stage`, {
+      await fetch(leadUrl(`/api/leads/${leadId}/stage`, manager), {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage }),
@@ -2735,7 +2832,9 @@ export default function LeadsPage() {
     const startParam  = startDate ? `&startDate=${startDate}` : '';
     const chequeParam = lead.paymentPlan?.chequeCount ? `&chequeCount=${lead.paymentPlan.chequeCount}` : '';
     router.push(
-      `/rental-provider/dashboard/contracts/new?unitId=${lead.unit?.id}&tenantId=${lead.convertedTenant?.id}&leadId=${lead.id}&tenantName=${name}${startParam}${chequeParam}`,
+      manager
+        ? `/dashboard/manager/contracts?rp=${manager.rp}`
+        : `/rental-provider/dashboard/contracts/new?unitId=${lead.unit?.id}&tenantId=${lead.convertedTenant?.id}&leadId=${lead.id}&tenantName=${name}${startParam}${chequeParam}`,
     );
   }
 
@@ -2913,6 +3012,7 @@ export default function LeadsPage() {
                 setLeads={setLeads}
                 feeRules={feeRules}
                 preferredStartDays={preferredStartDays}
+                manager={manager}
               />
             </div>
           ))}
@@ -2922,4 +3022,9 @@ export default function LeadsPage() {
       )}
     </div>
   );
+}
+
+// RP portal route — the workspace with the default (RP-scoped) API.
+export default function LeadsPage() {
+  return <LeadsWorkspace />;
 }

@@ -4,37 +4,20 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Search, X, Users } from 'lucide-react';
 
-type ContractStatus = 'active' | 'terminated' | 'none';
-
-type Tenant = {
+type Customer = {
   id: number;
-  contractId: number | null;
   name: string;
   email: string;
-  unit: string;
-  asset: string;
-  contractStatus: ContractStatus;
-  rentPerYear: number;
-  renewalDays: number | null;
-  endDate: string | null;
-};
-
-const CONTRACT_LABELS: Record<ContractStatus, string> = {
-  active: 'Active',
-  terminated: 'Terminated',
-  none: 'No Contract',
-};
-
-const CONTRACT_STYLE: Record<ContractStatus, string> = {
-  active: 'bg-[#d8f2e8] text-[#1a7a5a]',
-  terminated: 'bg-[#fee2e2] text-[#b91c1c]',
-  none: 'bg-[#f4f3ef] text-[#6b6860]',
+  phone: string | null;
+  nationality: string | null;
+  leaseCount: number;
+  activeLeaseCount: number;
+  totalActiveRent: number;
+  latestActiveEnd: string | null;
 };
 
 function calcRenewalDays(endDate: string | null): number | null {
   if (!endDate) return null;
-  // Compare calendar day to calendar day (UTC) so the count isn't skewed by the
-  // current time-of-day vs the date's UTC-midnight.
   const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`).getTime();
   const now = new Date();
   const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -42,70 +25,77 @@ function calcRenewalDays(endDate: string | null): number | null {
 }
 
 export default function TenantsPage() {
-  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterContract, setFilterContract] = useState('all');
+  const [filterActive, setFilterActive] = useState('all'); // all | active | inactive
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
       .then(r => r.json())
       .then(data => {
         if (!Array.isArray(data)) return;
-        // Deduplicate by tenant id, keeping the most recent active contract
-        const map = new Map<number, Tenant>();
+        // Collect raw leases per customer, then resolve the CURRENT lease per unit.
+        // Imported renewals are all flagged contractActive=true, so the live lease for
+        // a unit is the one with the latest start date; older same-unit leases are history.
+        type Raw = { unitId: number | null; startDate: string | null; endDate: string | null; annualRent: number; status: string | null };
+        const byTenant = new Map<number, { c: Customer; leases: Raw[] }>();
         for (const c of data) {
           const tid = c.tenant?.id;
           if (!tid || !c.tenant?.name) continue;
-          const contractStatus: ContractStatus =
-            c.contractActive ? 'active' : c.status === 'terminated' ? 'terminated' : 'none';
-          const existing = map.get(tid);
-          // Prefer active contracts; among equals keep the more recent one,
-          // comparing like-for-like end dates (the later-ending contract is the
-          // current/renewed one). Previously compared the new contract's START
-          // against the existing END, which kept the stale row for back-to-back
-          // leases.
-          if (!existing || (contractStatus === 'active' && existing.contractStatus !== 'active') ||
-              (contractStatus === existing.contractStatus && new Date(c.endDate ?? 0) > new Date(existing.endDate ?? 0))) {
-            map.set(tid, {
-              id: tid,
-              contractId: c.id ?? null,
-              name: c.tenant.name,
-              email: c.tenant.email ?? '',
-              unit: c.unit?.number ? `Unit ${c.unit.number}` : (c.unit?.name ?? '—'),
-              asset: c.property?.buildingName ?? '—',
-              contractStatus,
-              rentPerYear: c.annualRent ?? 0,
-              endDate: c.endDate ?? null,
-              renewalDays: calcRenewalDays(c.endDate),
-            });
-          }
+          const e = byTenant.get(tid) ?? {
+            c: { id: tid, name: c.tenant.name, email: c.tenant.email ?? '', phone: c.tenant.phone ?? null, nationality: c.tenant.nationality ?? null, leaseCount: 0, activeLeaseCount: 0, totalActiveRent: 0, latestActiveEnd: null } as Customer,
+            leases: [] as Raw[],
+          };
+          e.leases.push({ unitId: c.unit?.id ?? null, startDate: c.startDate ?? null, endDate: c.endDate ?? null, annualRent: c.annualRent ?? 0, status: c.status ?? null });
+          byTenant.set(tid, e);
         }
-        setTenants(Array.from(map.values()));
+        const TERMINAL = new Set(['terminated', 'cancelled']);
+        const customers = Array.from(byTenant.values()).map(({ c, leases }) => {
+          const currentByUnit = new Map<number, Raw>();
+          const noUnit: Raw[] = [];
+          for (const l of leases) {
+            if (l.unitId == null) { noUnit.push(l); continue; }
+            const cur = currentByUnit.get(l.unitId);
+            if (!cur || String(l.startDate ?? '') > String(cur.startDate ?? '')) currentByUnit.set(l.unitId, l);
+          }
+          const current = [...currentByUnit.values(), ...noUnit].filter(l => !TERMINAL.has((l.status ?? '').toLowerCase()));
+          c.leaseCount = leases.length;
+          c.activeLeaseCount = current.length;
+          c.totalActiveRent = current.reduce((s, l) => s + (l.annualRent ?? 0), 0);
+          c.latestActiveEnd = current.reduce<string | null>((m, l) => (l.endDate && (!m || new Date(l.endDate) > new Date(m)) ? l.endDate : m), null);
+          return c;
+        });
+        setCustomers(customers.sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = tenants.filter(t => {
-    if (filterContract !== 'all' && t.contractStatus !== filterContract) return false;
+  const filtered = customers.filter(t => {
+    if (filterActive === 'active' && t.activeLeaseCount === 0) return false;
+    if (filterActive === 'inactive' && t.activeLeaseCount > 0) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!t.name.toLowerCase().includes(q) && !t.email.toLowerCase().includes(q) && !t.unit.toLowerCase().includes(q)) return false;
+      if (!t.name.toLowerCase().includes(q) && !t.email.toLowerCase().includes(q) && !(t.phone ?? '').toLowerCase().includes(q)) return false;
     }
     return true;
   });
 
-  const hasFilters = filterContract !== 'all' || search !== '';
-  const clearFilters = () => { setFilterContract('all'); setSearch(''); };
+  const hasFilters = filterActive !== 'all' || search !== '';
+  const clearFilters = () => { setFilterActive('all'); setSearch(''); };
 
-  const totalRent = tenants.reduce((s, t) => s + (t.contractStatus === 'active' ? t.rentPerYear : 0), 0);
-  const renewalSoon = tenants.filter(t => t.renewalDays !== null && t.renewalDays >= 0 && t.renewalDays <= 90).length;
+  const activeLeases = customers.reduce((s, t) => s + t.activeLeaseCount, 0);
+  const totalRent = customers.reduce((s, t) => s + t.totalActiveRent, 0);
+  const renewalSoon = customers.filter(t => {
+    const d = calcRenewalDays(t.latestActiveEnd);
+    return d !== null && d >= 0 && d <= 90;
+  }).length;
 
   const SUMMARY = [
-    { label: 'Total Customers',     value: loading ? '…' : String(tenants.length) },
-    { label: 'Active Contracts',     value: loading ? '…' : String(tenants.filter(t => t.contractStatus === 'active').length) },
-    { label: 'Total Active Rent',    value: loading ? '…' : `AED ${totalRent.toLocaleString('en-AE')}` },
+    { label: 'Total Customers',    value: loading ? '…' : String(customers.length) },
+    { label: 'Active Leases',      value: loading ? '…' : String(activeLeases) },
+    { label: 'Total Active Rent',  value: loading ? '…' : `AED ${totalRent.toLocaleString('en-AE')}` },
     { label: 'Renewals Within 90d', value: loading ? '…' : String(renewalSoon) },
   ];
 
@@ -135,17 +125,16 @@ export default function TenantsPage() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
           <input
             type="text"
-            placeholder="Search by name, email or unit…"
+            placeholder="Search by name, email or phone…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
           />
         </div>
-        <select value={filterContract} onChange={e => setFilterContract(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
-          <option value="all">All Contracts</option>
-          <option value="active">Active</option>
-          <option value="terminated">Terminated</option>
-          <option value="none">No Contract</option>
+        <select value={filterActive} onChange={e => setFilterActive(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
+          <option value="all">All Customers</option>
+          <option value="active">With active lease</option>
+          <option value="inactive">Without active lease</option>
         </select>
         {hasFilters && (
           <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
@@ -162,20 +151,20 @@ export default function TenantsPage() {
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-sm text-[#9b9890]">Loading customers…</div>
-        ) : tenants.length === 0 ? (
+        ) : customers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
               <Users size={24} className="text-[#2e9f82]" />
             </div>
             <p className="text-sm text-[#6b6860] mb-1">No customers yet</p>
-            <p className="text-xs text-[#9b9890]">Customers will appear here once you have active rental agreements</p>
+            <p className="text-xs text-[#9b9890]">Customers will appear here once you have rental agreements</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left min-w-[800px]">
               <thead>
                 <tr className="bg-[#f4f3ef]">
-                  {['Name', 'Unit', 'Property', 'Contract', 'Annual Rent', 'Renewal In', 'Actions'].map(h => (
+                  {['Name', 'Email', 'Phone', 'Nationality', 'Leases', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
@@ -183,36 +172,24 @@ export default function TenantsPage() {
               <tbody>
                 {filtered.map(t => (
                   <tr key={t.id} className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916]">
+                    <td className="px-4 py-3.5 font-medium">{t.name}</td>
+                    <td className="px-4 py-3.5 text-[#6b6860]">{t.email || '—'}</td>
+                    <td className="px-4 py-3.5 text-[#6b6860]">{t.phone || '—'}</td>
+                    <td className="px-4 py-3.5 text-[#6b6860]">{t.nationality || '—'}</td>
                     <td className="px-4 py-3.5">
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-[#9b9890]">{t.email}</div>
-                    </td>
-                    <td className="px-4 py-3.5">{t.unit}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{t.asset}</td>
-                    <td className="px-4 py-3.5">
-                      <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${CONTRACT_STYLE[t.contractStatus]}`}>
-                        {CONTRACT_LABELS[t.contractStatus]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 font-medium">
-                      {t.contractStatus === 'active' ? `AED ${t.rentPerYear.toLocaleString('en-AE')}` : '—'}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      {t.renewalDays !== null ? (
-                        <span className={`text-xs font-medium ${t.renewalDays <= 30 ? 'text-red-600' : t.renewalDays <= 90 ? 'text-amber-600' : 'text-[#6b6860]'}`}>
-                          {t.renewalDays > 0 ? `${t.renewalDays}d` : 'Expired'}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      {t.contractId ? (
-                        <Link href={`/rental-provider/dashboard/contracts/${t.contractId}`} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
-                      ) : (
-                        <span className="text-sm text-[#9b9890]">—</span>
+                      <span className="font-medium">{t.leaseCount}</span>
+                      {t.activeLeaseCount > 0 && (
+                        <span className="text-xs text-[#1a7a5a] ml-1.5">· {t.activeLeaseCount} active</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <Link href={`/rental-provider/dashboard/tenants/${t.id}`} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
                     </td>
                   </tr>
                 ))}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[#9b9890]">No customers match your filters.</td></tr>
+                )}
               </tbody>
             </table>
           </div>

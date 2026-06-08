@@ -59,7 +59,8 @@ interface TenantContract {
   annualRent: number;
   tenantSignedAt: string | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
-  unit: { id: number | null };
+  unit: { id: number | null; number?: string | null; name?: string | null; unitType?: string | null; bedrooms?: number | null } | null;
+  property?: { id: number | null; buildingName?: string | null; fullAddress?: string | null } | null;
 }
 
 interface ViewingGroup {
@@ -70,8 +71,9 @@ interface ViewingGroup {
 }
 
 type SpaceRow =
-  | { kind: 'viewing'; key: string; group: ViewingGroup; contract?: TenantContract }
-  | { kind: 'direct';  key: string; lead: DirectLead;    contract?: TenantContract };
+  | { kind: 'viewing';  key: string; group: ViewingGroup; contract?: TenantContract }
+  | { kind: 'direct';   key: string; lead: DirectLead;    contract?: TenantContract }
+  | { kind: 'contract'; key: string; contract: TenantContract };
 
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
 
@@ -108,15 +110,19 @@ function fmtShort(iso: string) {
 
 function rowStatusConfig(row: SpaceRow): { label: string; bg: string; text: string; isAction: boolean } {
   const c = row.contract;
-  const stage = row.kind === 'viewing' ? row.group.leadStage : row.lead.stage;
-  const vstatus = row.kind === 'viewing' ? row.group.primary.status : undefined;
 
   if (c) {
     if (c.status === 'active') return { label: 'Active Tenancy', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false };
     if (c.status === 'issued' && !c.tenantSignedAt) return { label: 'Sign Contract', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
     if (c.status === 'issued' && c.tenantSignedAt)  return { label: 'Awaiting Ejari', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
+    if (c.status === 'expired')    return { label: 'Lease Ended', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
+    if (c.status === 'terminated') return { label: 'Terminated',  bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
     return { label: 'Contract Pending', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
   }
+
+  // Non-contract rows are always viewing/direct here.
+  const stage = row.kind === 'viewing' ? row.group.leadStage : row.kind === 'direct' ? row.lead.stage : 'new';
+  const vstatus = row.kind === 'viewing' ? row.group.primary.status : undefined;
 
   const stageMap: Record<string, { label: string; bg: string; text: string; isAction: boolean }> = {
     documents_collection: { label: 'Documents in Review',     bg: 'bg-[#f0f9ff]', text: 'text-[#0369a1]', isAction: false },
@@ -211,7 +217,28 @@ export default function MySpacesPage() {
   );
   const activeDirectLeads  = directLeads.filter(l => l.stage !== 'rejected');
   const inactiveDirectLeads = directLeads.filter(l => l.stage === 'rejected');
-  const isEmpty = !loading && viewings.length === 0 && directLeads.length === 0;
+  const isEmpty = !loading && viewings.length === 0 && directLeads.length === 0 && contracts.length === 0;
+
+  // Units already represented by a viewing group or direct lead — so contract
+  // rows below don't double-list the same unit.
+  const representedUnitIds = new Set<number>([
+    ...activeGroups.map(g => g.unit?.id).filter((x): x is number => x != null),
+    ...activeDirectLeads.map(l => l.unit?.id).filter((x): x is number => x != null),
+  ]);
+  // Contracts whose unit has NO viewing/lead row — surface them directly so a
+  // customer always sees their leases (including contracts created outside the
+  // viewing/lead pipeline, e.g. imported data). One row per unit, primary pick.
+  const TERMINAL_CONTRACT = new Set(['expired', 'terminated', 'cancelled', 'rejected', 'superseded']);
+  const contractOnly = Array.from(
+    new Set(contracts.map(c => c.unit?.id).filter((x): x is number => x != null)),
+  )
+    .filter(uid => !representedUnitIds.has(uid))
+    .map(uid => pickPrimaryContract(contracts, uid))
+    .filter((c): c is TenantContract => !!c);
+  const activeContractRows: SpaceRow[] = contractOnly
+    .filter(c => !TERMINAL_CONTRACT.has(c.status))
+    .map(c => ({ kind: 'contract' as const, key: `c-${c.id}`, contract: c }));
+  const pastContractRows = contractOnly.filter(c => TERMINAL_CONTRACT.has(c.status));
 
   const activeRows: SpaceRow[] = [
     ...activeGroups.map(g => ({
@@ -226,6 +253,7 @@ export default function MySpacesPage() {
       lead: l,
       contract: pickPrimaryContract(contracts, l.unit?.id),
     })),
+    ...activeContractRows,
   ];
 
   const activeCount    = activeRows.filter(r => r.contract?.status === 'active').length;
@@ -294,7 +322,28 @@ export default function MySpacesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
           {activeRows.map((row, idx) => {
             const sc = rowStatusConfig(row);
-            const unit = row.kind === 'viewing' ? row.group.unit : row.lead.unit;
+            // For contract-only rows, map the contract's unit/property payload
+            // into the SpaceUnit shape the card expects.
+            const unit: SpaceUnit | null = row.kind === 'viewing'
+              ? row.group.unit
+              : row.kind === 'direct'
+                ? row.lead.unit
+                : row.contract.unit
+                  ? {
+                      id: row.contract.unit.id ?? 0,
+                      unitNumber: row.contract.unit.number ?? '',
+                      unitName: row.contract.unit.name ?? null,
+                      unitType: row.contract.unit.unitType ?? null,
+                      bedrooms: row.contract.unit.bedrooms ?? null,
+                      property: row.contract.property
+                        ? {
+                            id: row.contract.property.id ?? 0,
+                            buildingName: row.contract.property.buildingName ?? '',
+                            fullAddress: row.contract.property.fullAddress ?? null,
+                          }
+                        : undefined,
+                    }
+                  : null;
             const c = row.contract;
             const isActive = c?.status === 'active';
             const community = unit?.property?.community?.name ?? null;
@@ -307,7 +356,9 @@ export default function MySpacesPage() {
               ? { label: 'Period', value: `${fmtShort(c.startDate)} -> ${fmtShort(c.endDate)}` }
               : row.kind === 'viewing'
                 ? { label: 'Viewing', value: fmtShort(row.group.primary.scheduledAt) }
-                : { label: 'Applied', value: fmtShort(row.lead.createdAt) };
+                : row.kind === 'direct'
+                  ? { label: 'Applied', value: fmtShort(row.lead.createdAt) }
+                  : { label: 'Contract', value: `CID-${row.contract.id}` };
             const buildingName = unit?.property?.buildingName ?? '';
             const unitLabel = unit?.unitName ?? (unit ? `Unit ${unit.unitNumber}` : 'Property');
             const photo = DUMMY_PHOTOS[idx % DUMMY_PHOTOS.length];
@@ -415,10 +466,19 @@ export default function MySpacesPage() {
       )}
 
       {/* Past / inactive */}
-      {!loading && (inactiveGroups.length > 0 || inactiveDirectLeads.length > 0) && (
+      {!loading && (inactiveGroups.length > 0 || inactiveDirectLeads.length > 0 || pastContractRows.length > 0) && (
         <section>
           <h2 className="text-sm font-semibold text-[#3d3b35] uppercase tracking-wide mb-3">Past</h2>
           <div className="space-y-3">
+            {pastContractRows.map(c => (
+              <InactiveCard
+                key={`pc-${c.id}`}
+                label={c.unit?.name ?? (c.unit?.number ? `Unit ${c.unit.number}` : 'Property')}
+                subLabel={c.property?.buildingName ?? undefined}
+                dateStr={c.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : ''}
+                reason={c.status === 'terminated' ? 'Lease terminated' : 'Lease ended'}
+              />
+            ))}
             {inactiveGroups.map(g => (
               <InactiveCard
                 key={`iv-${g.leadId}`}

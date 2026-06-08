@@ -1433,14 +1433,14 @@ export default function ContractDetailPage() {
                   when we're viewing a child, so the modal targets the right id. */}
               {contract.successorProposal ? (
                 <Link
-                  href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}`}
+                  href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}/v2`}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
                 >
                   <RotateCcw size={12} /> View new proposal · CID-{contract.successorProposal.id}
                 </Link>
               ) : contract.contractType === 'renewal' && contract.parentContractId ? (
                 <Link
-                  href={`/rental-provider/dashboard/contracts/${contract.parentContractId}`}
+                  href={`/rental-provider/dashboard/contracts/${contract.parentContractId}/v2`}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center justify-center gap-1.5"
                 >
                   <RotateCcw size={12} /> Open original lease to re-propose
@@ -1472,7 +1472,7 @@ export default function ContractDetailPage() {
               </p>
             </div>
             <Link
-              href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}`}
+              href={`/rental-provider/dashboard/contracts/${contract.successorProposal.id}/v2`}
               className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#1f6655] flex items-center gap-1.5 shrink-0"
             >
               Open CID-{contract.successorProposal.id}

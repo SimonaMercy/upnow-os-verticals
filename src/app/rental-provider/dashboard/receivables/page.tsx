@@ -238,7 +238,7 @@ export default function ReceivablesPage() {
                     className="border-b border-[#f0ede8] hover:bg-[#fafaf8] text-sm text-[#1a1916] cursor-pointer transition-colors">
                     <td className="px-4 py-3.5">
                       {r.contractId ? (
-                        <Link href={`/rental-provider/dashboard/contracts/${r.contractId}`}
+                        <Link href={`/rental-provider/dashboard/contracts/${r.contractId}/v2`}
                           onClick={e => e.stopPropagation()}
                           className="text-[#2e9f82] font-medium hover:underline">{r.contractRef}</Link>
                       ) : <span className="text-[#9b9890]">—</span>}
@@ -317,7 +317,7 @@ export default function ReceivablesPage() {
                 </div>
               )}
               {detail.contractId && (
-                <Link href={`/rental-provider/dashboard/contracts/${detail.contractId}`}
+                <Link href={`/rental-provider/dashboard/contracts/${detail.contractId}/v2`}
                   className="flex items-center gap-2 text-sm font-semibold text-[#2e9f82] hover:underline mt-2">
                   <ExternalLink size={14} /> Open Contract
                 </Link>

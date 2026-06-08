@@ -81,6 +81,7 @@ interface UnitRow {
   rentEscalationPct: string;
   description: string;
   stagedPhotos: StagedPhoto[];
+  stagedFloorPlan: File | null;
 }
 
 function emptyRow(expanded = true): UnitRow {
@@ -92,7 +93,7 @@ function emptyRow(expanded = true): UnitRow {
     furnishing: 'Unfurnished', rentalPrice: '',
     securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
     view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
-    rentEscalationPct: '', description: '', stagedPhotos: [],
+    rentEscalationPct: '', description: '', stagedPhotos: [], stagedFloorPlan: null,
   };
 }
 
@@ -455,7 +456,7 @@ export default function AddListingPage() {
   const dupRow = (id: string) => {
     const src = rows.find(r => r.id === id);
     if (!src) return;
-    const dup: UnitRow = { ...src, id: Math.random().toString(36).slice(2), expanded: true, unitNumber: '', stagedPhotos: [] };
+    const dup: UnitRow = { ...src, id: Math.random().toString(36).slice(2), expanded: true, unitNumber: '', stagedPhotos: [], stagedFloorPlan: null };
     setRows(prev => {
       const idx = prev.findIndex(r => r.id === id);
       const next = [...prev.map(r => ({ ...r, expanded: false }))];
@@ -487,6 +488,10 @@ export default function AddListingPage() {
       next.splice(idx, 1);
       return { ...r, stagedPhotos: next };
     }));
+  };
+
+  const setFloorPlan = (rowId: string, file: File | null) => {
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, stagedFloorPlan: file } : r));
   };
 
   /* ── validate ── */
@@ -614,6 +619,28 @@ export default function AddListingPage() {
             photoDone++;
             setSaveProgress({ phase: 'Uploading photos…', done: photoDone, total: totalPhotos });
           }
+        }
+      }
+
+      /* 4. Upload staged floor plans (one per unit) */
+      const planRows = unitIds.filter(({ rowId }) => rows.find(r => r.id === rowId)?.stagedFloorPlan);
+      if (planRows.length > 0) {
+        setSaveProgress({ phase: 'Uploading floor plans…', done: 0, total: planRows.length });
+        let planDone = 0;
+        for (const { rowId, unitId } of planRows) {
+          const row = rows.find(r => r.id === rowId)!;
+          try {
+            const fd = new FormData();
+            fd.append('file', row.stagedFloorPlan!);
+            const res = await fetch(`/api/properties/${propId}/units/${unitId}/floor-plan`, {
+              method: 'POST', body: fd, credentials: 'include',
+            });
+            if (!res.ok) throw new Error();
+          } catch {
+            errs.push(`Floor plan for unit "${row.unitNumber}": upload failed`);
+          }
+          planDone++;
+          setSaveProgress({ phase: 'Uploading floor plans…', done: planDone, total: planRows.length });
         }
       }
 
@@ -1213,6 +1240,7 @@ export default function AddListingPage() {
                   onStagePhotos={(files) => stagePhotos(r.id, files)}
                   onRemovePhoto={(idx) => removeStagedPhoto(r.id, idx)}
                   onReorderPhotos={(photos) => reorderPhotos(r.id, photos)}
+                  onSetFloorPlan={(file) => setFloorPlan(r.id, file)}
                   canDelete={rows.length > 1}
                 />
               ))}
@@ -1349,7 +1377,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 /* ─── UnitCard ────────────────────────────────────────────────────────────── */
 function UnitCard({
-  row, index, unitTypes, propCategory, errors, onUpdate, onDelete, onDuplicate, onToggle, onStagePhotos, onRemovePhoto, onReorderPhotos, canDelete,
+  row, index, unitTypes, propCategory, errors, onUpdate, onDelete, onDuplicate, onToggle, onStagePhotos, onRemovePhoto, onReorderPhotos, onSetFloorPlan, canDelete,
 }: {
   row: UnitRow;
   index: number;
@@ -1363,9 +1391,11 @@ function UnitCard({
   onStagePhotos: (files: File[]) => void;
   onRemovePhoto: (idx: number) => void;
   onReorderPhotos: (newPhotos: StagedPhoto[]) => void;
+  onSetFloorPlan: (file: File | null) => void;
   canDelete: boolean;
 }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const floorPlanInputRef = useRef<HTMLInputElement>(null);
   const dragIdxRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const showBedBath = !row.unitType || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
@@ -1707,6 +1737,39 @@ function UnitCard({
               </div>
             )}
             <p className="text-[10px] text-[#9b9890] mt-1">JPEG, PNG or WebP · up to 20 per unit · drag thumbnails to reorder · first image is the cover.</p>
+          </div>
+
+          {/* Row 10: Floor plan */}
+          <div>
+            <input
+              ref={floorPlanInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              className="sr-only"
+              onChange={e => { const f = e.target.files?.[0] ?? null; if (f) onSetFloorPlan(f); e.target.value = ''; }}
+            />
+            <p className="text-xs font-medium text-[#6b6860] mb-2">
+              Floor plan <span className="text-[#9b9890] font-normal">(optional)</span>
+            </p>
+            {row.stagedFloorPlan ? (
+              <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+                <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                <span className="text-sm text-[#1a1916] truncate flex-1">{row.stagedFloorPlan.name}</span>
+                <button type="button" onClick={() => floorPlanInputRef.current?.click()}
+                  className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
+                <button type="button" onClick={() => onSetFloorPlan(null)}
+                  className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer">
+                  <X size={11} />
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => floorPlanInputRef.current?.click()}
+                className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer">
+                <Upload size={20} className="text-[#c8c6c0] mb-1.5" />
+                <span className="text-xs text-[#9b9890]">Click to attach a floor plan (PDF or image)</span>
+              </button>
+            )}
+            <p className="text-[10px] text-[#9b9890] mt-1">PDF, PNG, JPG or WebP · the layout drawing for this unit.</p>
           </div>
         </div>
       )}
