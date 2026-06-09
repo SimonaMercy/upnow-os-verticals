@@ -19,7 +19,7 @@ import {
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
 } from 'lucide-react';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -40,7 +40,7 @@ interface ReportDef {
   columns: Column[];
   totals: TotalSpec[];
   /** Optional control rendered above the table (e.g. window-days for lease expiry). */
-  controlKey?: 'leaseExpiryWindow' | 'dateRange';
+  controlKey?: 'leaseExpiryWindow' | 'dateRange' | 'year';
   /** When set, table rows expand into a modal listing their child items. */
   drilldown?: DrilldownSpec;
   /**
@@ -48,7 +48,7 @@ interface ReportDef {
    * section (using its summary columns as the header) with its drilldown
    * children listed inline beneath — everything on one page, no modal.
    */
-  layout?: 'table' | 'grouped';
+  layout?: 'table' | 'grouped' | 'matrix';
 }
 
 interface Column {
@@ -204,6 +204,23 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'forfeitedFils', label: 'Forfeited', type: 'aed' },
       { key: 'netHeldFils', label: 'Net liability (held)', type: 'aed' },
       { key: 'totalFils', label: 'Total', type: 'aed' },
+    ],
+  },
+
+  'rent-collection': {
+    title: 'Rent Collection (Rent Roll)',
+    description: 'The collection matrix — every customer down the side, the twelve months of the year across the top. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total per customer and a monthly totals row. Pick the year above.',
+    endpoint: '/api/reports/rent-collection',
+    layout: 'matrix',
+    controlKey: 'year',
+    columns: [],
+    totals: [
+      { key: 'customers', label: 'Customers', type: 'number' },
+      { key: 'scheduledFils', label: 'Total rent', type: 'aed' },
+      { key: 'collectedFils', label: 'Collected', type: 'aed' },
+      { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
+      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
     ],
   },
 
@@ -370,6 +387,19 @@ function fmtNumber(n: number | null | undefined): string {
   if (n === null || n === undefined) return '—';
   return new Intl.NumberFormat('en-AE').format(n);
 }
+// Compact amount for matrix cells — no currency symbol, no decimals.
+function fmtAmt(fils: number | null | undefined): string {
+  const n = Number(fils ?? 0);
+  if (!n) return '·';
+  return new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n / 100);
+}
+// Rent-roll cell colour by cheque status.
+const CELL_STATUS_STYLE: Record<string, string> = {
+  cleared:   'text-[#15803d]',          // collected → green
+  pending:   'text-[#b45309]',          // outstanding → amber
+  bounced:   'text-[#dc2626] font-semibold', // bounced → red
+  cancelled: 'text-[#9b9890] line-through',
+};
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -445,7 +475,7 @@ export default function ReportDetailPage() {
   const slug = params.slug as ReportSlug;
   const def = REPORTS[slug];
 
-  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number } | null>(null);
+  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; year?: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -455,6 +485,8 @@ export default function ReportDetailPage() {
   // Default every date-range report to the current calendar year (URL overrides).
   const [from, setFrom] = useState<string>(sp?.get('from') ?? YEAR_START);
   const [to, setTo]     = useState<string>(sp?.get('to') ?? YEAR_END);
+  // Matrix (rent-roll) year selector — defaults to the current year.
+  const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || CURRENT_YEAR);
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -469,18 +501,25 @@ export default function ReportDetailPage() {
       if (from) qs.set('from', from);
       if (to) qs.set('to', to);
       if ([...qs.keys()].length) url = `${def.endpoint}?${qs.toString()}`;
+    } else if (def.controlKey === 'year') {
+      url = `${def.endpoint}?year=${year}`;
     }
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, leaseWindow, from, to]);
+  }, [def, leaseWindow, from, to, year]);
 
   const filtered = useMemo(() => {
     if (!data?.rows) return [];
     const needle = search.trim().toLowerCase();
     if (!needle) return data.rows;
+    if (def.layout === 'matrix') {
+      return data.rows.filter(row =>
+        ['customer', 'unitLabel', 'buildingName', 'contractRef'].some(
+          k => String(row[k] ?? '').toLowerCase().includes(needle)));
+    }
     return data.rows.filter(row =>
       def.columns.some(c => String(row[c.key] ?? '').toLowerCase().includes(needle)),
     );
@@ -537,6 +576,29 @@ export default function ReportDetailPage() {
       if (type === 'date') return raw ? new Date(String(raw)).toISOString().slice(0, 10) : '';
       return raw ?? '';
     };
+
+    // Matrix layout: customer + unit + property, then a column per month, then total.
+    if (def.layout === 'matrix') {
+      const months = data.months ?? [];
+      const headers = ['Customer', 'Unit', 'Property', ...months, 'Total'];
+      const rows = sorted.map(row => {
+        const cells = (row.cells as { amountFils: number }[]) ?? [];
+        return [
+          String(row.customer ?? ''),
+          String(row.unitLabel ?? ''),
+          String(row.buildingName ?? ''),
+          ...cells.map(c => (Number(c.amountFils) / 100).toFixed(2)),
+          (Number(row.totalFils) / 100).toFixed(2),
+        ];
+      });
+      rows.push([
+        'Total', '', '',
+        ...(data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
+        (Number(data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
+      ]);
+      downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
+      return;
+    }
 
     // Grouped layout: export one row per child lease, prefixed with its group.
     if (def.layout === 'grouped' && def.drilldown) {
@@ -633,6 +695,19 @@ export default function ReportDetailPage() {
           <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
           <span className="text-xs text-[#9b9890]">→</span>
           <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
+        </div>
+      )}
+
+      {/* Year selector (rent-roll matrix) */}
+      {def.controlKey === 'year' && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Year:</span>
+          {Array.from({ length: CURRENT_YEAR - 2021 }, (_, i) => 2023 + i).map(y => (
+            <button key={y} onClick={() => setYear(y)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${year === y ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {y}
+            </button>
+          ))}
         </div>
       )}
 
@@ -749,6 +824,56 @@ export default function ReportDetailPage() {
               </div>
             );
           })}
+        </div>
+      ) : def.layout === 'matrix' ? (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+          <div className="overflow-x-auto">
+            <table className="text-sm border-collapse min-w-full">
+              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <tr>
+                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">Customer</th>
+                  {(data?.months ?? []).map(m => (
+                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap">{m}</th>
+                  ))}
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((row, i) => {
+                  const cells = (row.cells as { amountFils: number; status: string | null }[]) ?? [];
+                  return (
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+                      <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left">
+                        <div className="font-medium text-[#1a1916] leading-tight">{String(row.customer ?? '—')}</div>
+                        <div className="text-[11px] text-[#9b9890] leading-tight">{[row.unitLabel, row.buildingName].filter(Boolean).map(String).join(' · ')}</div>
+                      </td>
+                      {cells.map((c, ci) => (
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
+                          {fmtAmt(c.amountFils)}
+                        </td>
+                      ))}
+                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+                <tr>
+                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
+                  {(data?.columnTotals ?? []).map((t, ti) => (
+                    <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{fmtAmt(t)}</td>
+                  ))}
+                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtAmt(data?.totals?.scheduledFils)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="flex items-center gap-4 px-4 py-2.5 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
+            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#15803d]" /> Collected</span>
+            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#b45309]" /> Pending</span>
+            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#dc2626]" /> Bounced</span>
+            <span className="flex items-center gap-1.5"><span className="text-[#d4d2cc]">·</span> No cheque due</span>
+          </div>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
