@@ -49,6 +49,8 @@ interface ReportDef {
    * children listed inline beneath — everything on one page, no modal.
    */
   layout?: 'table' | 'grouped' | 'matrix';
+  /** Optional caution banner shown above the report (e.g. data-quality notes). */
+  dataNote?: string;
 }
 
 interface Column {
@@ -102,6 +104,10 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
   },
 };
 
+// Shown on reports that depend on cheque collection status, which isn't tracked
+// yet — the figures are the contractual rent schedule, not confirmed receipts.
+const NEEDS_CHEQUE_DATA = 'Collection status isn’t tracked yet — these figures show scheduled rent due, not confirmed collections. Load your cheque register to replace them with real data.';
+
 const REPORTS: Record<ReportSlug, ReportDef> = {
   occupancy: {
     title: 'Occupancy Report',
@@ -131,6 +137,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Receivables Summary',
     description: 'Outstanding rent and admin-fee cheques, aged into buckets so you see what is overdue and by how long.',
     endpoint: '/api/reports/receivables',
+    dataNote: NEEDS_CHEQUE_DATA,
     columns: [
       { key: 'contractRef', label: 'Contract' },
       { key: 'tenantName', label: 'Customer' },
@@ -211,6 +218,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Rent Collection (Rent Roll)',
     description: 'The collection matrix — every customer down the side, the twelve months of the year across the top. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total per customer and a monthly totals row. Pick the year above.',
     endpoint: '/api/reports/rent-collection',
+    dataNote: NEEDS_CHEQUE_DATA,
     layout: 'matrix',
     controlKey: 'year',
     columns: [],
@@ -228,6 +236,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'PDC / Cheque Register',
     description: 'Every cheque on file with its lifecycle — pending, cleared, bounced or cancelled. Post-dated cheques are simply those with a future cheque date. The date range filters by cheque date.',
     endpoint: '/api/reports/cheque-register',
+    dataNote: NEEDS_CHEQUE_DATA,
     controlKey: 'dateRange',
     columns: [
       { key: 'chequeDate', label: 'Cheque date', type: 'date' },
@@ -253,6 +262,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Collection Rate Report',
     description: 'Monthly rent collection performance — cheques due each month, how much cleared (collected), what is still pending, what bounced, and the collection rate. Anchored on the cheque date; use the date range to scope the period.',
     endpoint: '/api/reports/collection-rate',
+    dataNote: NEEDS_CHEQUE_DATA,
     controlKey: 'dateRange',
     columns: [
       { key: 'label', label: 'Month' },
@@ -277,6 +287,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Customer Ledger',
     description: 'Per-customer rent cashflow — what was scheduled, collected, is still outstanding and bounced, with each customer\'s collection rate and last payment. Sorted by who owes the most. Use the date range to scope the period.',
     endpoint: '/api/reports/tenant-ledger',
+    dataNote: NEEDS_CHEQUE_DATA,
     controlKey: 'dateRange',
     columns: [
       { key: 'tenantName', label: 'Customer' },
@@ -661,6 +672,14 @@ export default function ReportDetailPage() {
         <p className="text-sm text-gray-600">{def.description}</p>
         {data && <p className="text-xs text-gray-500 mt-1">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>}
       </div>
+
+      {/* Data-quality caution banner */}
+      {def.dataNote && (
+        <div className="flex items-start gap-2 mb-4 px-3.5 py-2.5 rounded-xl bg-[#fef3c7] border border-[#fcd34d] text-[#854d0e] text-xs print:bg-white">
+          <AlertCircle size={14} className="shrink-0 mt-0.5" />
+          <span>{def.dataNote}</span>
+        </div>
+      )}
 
       {/* Lease-expiry window control */}
       {def.controlKey === 'leaseExpiryWindow' && (
