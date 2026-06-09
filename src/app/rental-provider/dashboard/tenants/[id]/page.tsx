@@ -6,7 +6,7 @@
  * customer holds with the RP + their KYC documents.
  */
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, User, FileText, CreditCard, ExternalLink, Mail, Phone, IdCard,
@@ -70,6 +70,17 @@ const docTone = (s: string | null) =>
 export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // This page is re-exported for the manager portal. A manager has no RP profile,
+  // so they scope via /manager + a ?rp=<landlord> query (the contracts endpoint
+  // is RP-only; the manager endpoint resolves the landlord behind the scenes).
+  const isManager = (pathname ?? '').startsWith('/dashboard/manager');
+  const rpParam = searchParams.get('rp');
+  const listHref = isManager ? '/dashboard/manager/tenants' : '/rental-provider/dashboard/tenants';
+  const detailUrl = isManager
+    ? `/api/manager/tenants/${params?.id}?rp=${rpParam ?? ''}`
+    : `/api/contracts/tenants/${params?.id}`;
   const [data, setData] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,18 +88,18 @@ export default function CustomerDetailPage() {
   useEffect(() => {
     if (!params?.id) return;
     setLoading(true);
-    fetch(`/api/contracts/tenants/${params.id}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error(r.status === 403 ? 'This customer has no contracts with you.' : `Error ${r.status}`); return r.json() as Promise<CustomerDetail>; })
+    fetch(detailUrl, { credentials: 'include' })
+      .then(r => { if (!r.ok) throw new Error(r.status === 403 ? 'This customer has no contracts with this landlord.' : `Error ${r.status}`); return r.json() as Promise<CustomerDetail>; })
       .then(setData)
       .catch(e => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
-  }, [params?.id]);
+  }, [detailUrl, params?.id]);
 
   if (loading) return <div className="p-6 text-sm text-[#9b9890]">Loading customer…</div>;
   if (error || !data) {
     return (
       <div className="p-6">
-        <button onClick={() => router.push('/rental-provider/dashboard/tenants')} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-4"><ArrowLeft size={14} /> Back to Customers</button>
+        <button onClick={() => router.push(listHref)} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-4"><ArrowLeft size={14} /> Back to Customers</button>
         <p className="text-sm text-[#b91c1c]">{error ?? 'Customer not found'}</p>
       </div>
     );
@@ -150,7 +161,7 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="p-6">
-      <button onClick={() => router.push('/rental-provider/dashboard/tenants')} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-4 cursor-pointer hover:underline"><ArrowLeft size={14} /> Back to Customers</button>
+      <button onClick={() => router.push(listHref)} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-4 cursor-pointer hover:underline"><ArrowLeft size={14} /> Back to Customers</button>
 
       {/* Header */}
       <div className="flex items-start gap-4 mb-6">

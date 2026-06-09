@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { Search, X, Users, Lock } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
@@ -228,8 +229,8 @@ export default function ManagerTenantsPage() {
             <table className="w-full text-left min-w-[800px]">
               <thead>
                 <tr className="bg-[#f4f3ef]">
-                  {['Name', 'Unit', 'Property', 'Contract', 'Annual Rent', 'Renewal In'].map(h => (
-                    <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
+                  {['Name', 'Unit', 'Property', 'Contract', 'Annual Rent', 'Renewal In', ''].map((h, i) => (
+                    <th key={h || `c${i}`} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -256,6 +257,9 @@ export default function ManagerTenantsPage() {
                           {t.renewalDays > 0 ? `${t.renewalDays}d` : 'Expired'}
                         </span>
                       ) : '—'}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <Link href={`/dashboard/manager/tenants/${t.id}?rp=${effectiveRp}`} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
                     </td>
                   </tr>
                 ))}
