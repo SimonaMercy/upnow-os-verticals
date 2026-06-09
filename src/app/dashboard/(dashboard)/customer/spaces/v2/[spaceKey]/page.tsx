@@ -157,6 +157,18 @@ interface ApiTermination {
   effectiveDate: string | null;
   response: 'pending' | 'accepted' | 'rejected' | null;
 }
+
+interface ApiSettlementLine { id: number; label: string; amount: number; type: 'deduction' | 'due' }
+interface ApiSettlement {
+  status: 'sent' | 'agreed' | 'paid';
+  depositHeld: number;
+  notes: string | null;
+  refundAmount: number | null;
+  lines: ApiSettlementLine[];
+  sentAt: string | null;
+  agreedAt: string | null;
+  paidAt: string | null;
+}
 interface ApiContractPayment {
   id: number;
   paymentType: string | null;
@@ -193,6 +205,7 @@ interface ApiContract {
   property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null } | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   moveInInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
+  moveOutInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
   termination?: ApiTermination | null;
   /** Per-installment schedule. Populated for any contract that has Payment
    *  rows; for proposed renewals this drives the inline schedule preview on
@@ -3163,6 +3176,24 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
 
   if (!c) return null;
 
+  // Wind-down: termination accepted but lease still ACTIVE until the effective
+  // date (docs/CONTRACT_LIFECYCLE.md §4.3). In this state the "Request
+  // Termination" CTA no longer applies — show move-out info instead.
+  const term = c.termination;
+  const winding = term?.response === 'accepted' && c.status === 'active';
+
+  // Deposit settlement (shown once the RP shares it during wind-down).
+  const [settlement, setSettlement] = useState<ApiSettlement | null>(null);
+  const cId = c.id;
+  const loadSettlement = useCallback(async () => {
+    if (!winding || !cId) { setSettlement(null); return; }
+    try {
+      const r = await fetch(`/api/contracts/tenant/${cId}/settlement`, { credentials: 'include' });
+      setSettlement(r.ok ? ((await r.json()) as ApiSettlement | null) : null);
+    } catch { setSettlement(null); }
+  }, [winding, cId]);
+  useEffect(() => { void loadSettlement(); }, [loadSettlement]);
+
   const u = resolved.unit;
   const pp = resolved.paymentPlan;
   const fmtD = (d: string | null | undefined) =>
@@ -3180,6 +3211,8 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const tenantName   = ''; // not on Resolved; omit rather than guess
 
   const today = new Date();
+  const effDate = term?.effectiveDate ? new Date(term.effectiveDate + 'T00:00:00') : null;
+  const daysLeft = effDate ? Math.ceil((effDate.getTime() - today.getTime()) / 86400000) : null;
   const chequeItems = (pp?.items ?? []).filter(it => it.type !== 'security_deposit');
   const nextCheque = chequeItems.find(it => it.dueDate && new Date(it.dueDate + 'T00:00:00') >= today);
 
@@ -3221,10 +3254,10 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
               padding: '4px 10px', borderRadius: 999,
-              background: 'var(--jade-deep)', color: 'var(--paper)',
+              background: winding ? 'var(--brick)' : 'var(--jade-deep)', color: 'var(--paper)',
               fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em',
             }}>
-              <Sparkles size={10} /> Active tenancy
+              {winding ? <><X size={10} /> Move-out scheduled</> : <><Sparkles size={10} /> Active tenancy</>}
             </span>
           </div>
 
@@ -3288,6 +3321,50 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           )}
         </div>
       </div>
+
+      {/* ── Wind-down panel (termination accepted, lease ending) ── */}
+      {winding && (
+        <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 14, padding: '18px 20px', display: 'grid', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <X size={16} color="var(--brick)" />
+            <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--brick)', margin: 0 }}>Move-out scheduled</p>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.55 }}>
+            {term?.requestedByRole === 'tenant'
+              ? 'Your termination request was accepted.'
+              : 'Your rental provider scheduled an early end to this tenancy.'}{' '}
+            Your lease stays active until <strong>{fmtD(term?.effectiveDate)}</strong>
+            {daysLeft != null && daysLeft >= 0 ? ` — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : ''}.
+          </p>
+          {term?.reason && (
+            <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>Reason: {term.reason}</p>
+          )}
+          <div style={{ borderTop: '1px dashed var(--brick)', paddingTop: 12, display: 'grid', gap: 10 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--brick)', margin: 0 }}>What happens next</p>
+            <WindDownStep
+              n={1}
+              label="Move-out inspection"
+              sub="Your rental provider will schedule a final inspection of the unit before the effective date."
+              done={!!c.moveOutInspection?.signedByTenant}
+            />
+            <WindDownStep
+              n={2}
+              label="Final settlement"
+              sub={
+                settlement?.status === 'paid' ? 'Your deposit refund has been processed.'
+                : settlement?.status === 'agreed' ? 'You agreed — your refund is being processed.'
+                : settlement?.status === 'sent' ? 'Ready to review — check the breakdown below and confirm.'
+                : 'Your security deposit is refunded, less any outstanding dues or agreed deductions.'
+              }
+              done={settlement?.status === 'paid'}
+            />
+          </div>
+
+          {settlement && (
+            <SettlementCard contractId={c.id} settlement={settlement} onAgreed={loadSettlement} />
+          )}
+        </div>
+      )}
 
       {/* ── Section selector slabs ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -3462,17 +3539,37 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           }}>
             <FileText size={12} /> Preview Tenancy Contract
           </Link>
-          <button onClick={() => setShowTerm(true)} style={{
-            padding: '7px 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-            background: 'var(--brick-soft)', color: 'var(--brick)', border: '1px solid var(--brick)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
-          }}>
-            <X size={12} /> Request Termination
-          </button>
+          {!winding && (
+            <button onClick={() => setShowTerm(true)} style={{
+              padding: '7px 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+              background: 'var(--brick-soft)', color: 'var(--brick)', border: '1px solid var(--brick)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+            }}>
+              <X size={12} /> Request Termination
+            </button>
+          )}
         </div>
       </div>
 
       {showTerm && <TerminationRequestModal contract={c} onClose={() => setShowTerm(false)} onSuccess={() => { setShowTerm(false); onRefresh(); }} />}
+    </div>
+  );
+}
+
+function WindDownStep({ n, label, sub, done }: { n: number; label: string; sub: string; done: boolean }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <span style={{
+        flexShrink: 0, width: 22, height: 22, borderRadius: '50%',
+        display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
+        background: done ? 'var(--jade-deep)' : 'var(--paper)',
+        color: done ? 'var(--paper)' : 'var(--brick)',
+        border: `1.5px solid ${done ? 'var(--jade-deep)' : 'var(--brick)'}`,
+      }}>{done ? <Check size={12} /> : n}</span>
+      <div>
+        <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{label}{done ? ' · done' : ''}</p>
+        <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0', lineHeight: 1.45 }}>{sub}</p>
+      </div>
     </div>
   );
 }
@@ -3482,6 +3579,81 @@ function PassField({ label, value, mono }: { label: string; value: string; mono?
     <div>
       <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0, fontWeight: 600 }}>{label}</p>
       <p style={{ fontFamily: mono ? 'monospace' : 'inherit', fontSize: 13, color: 'var(--ink)', margin: '4px 0 0', fontWeight: 600 }}>{value}</p>
+    </div>
+  );
+}
+
+function SettlementCard({ contractId, settlement, onAgreed }: { contractId: number; settlement: ApiSettlement; onAgreed: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const aedF = (n: number) => 'AED ' + new Intl.NumberFormat('en-AE', { maximumFractionDigits: 2 }).format(n);
+  const fmtDT = (d: string | null) => d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const sumLines = (settlement.lines ?? []).reduce((a, l) => a + Number(l.amount || 0), 0);
+  const refund = settlement.refundAmount != null ? settlement.refundAmount : settlement.depositHeld - sumLines;
+
+  async function agree() {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/tenant/${contractId}/settlement/agree`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
+      await onAgreed();
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Deposit settlement</p>
+        <span style={{
+          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+          padding: '3px 8px', borderRadius: 999,
+          background: settlement.status === 'paid' ? 'var(--jade-deep)' : settlement.status === 'agreed' ? '#eef7f3' : 'var(--saffron-soft)',
+          color: settlement.status === 'paid' ? 'var(--paper)' : settlement.status === 'agreed' ? 'var(--jade-deep)' : '#9a3412',
+        }}>
+          {settlement.status === 'paid' ? 'Refund paid' : settlement.status === 'agreed' ? 'You agreed' : 'Review required'}
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gap: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+          <span style={{ color: 'var(--ink-2)' }}>Deposit held</span>
+          <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{aedF(settlement.depositHeld)}</span>
+        </div>
+        {(settlement.lines ?? []).map(l => (
+          <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+            <span style={{ color: 'var(--mute)' }}>− {l.label}<span style={{ fontSize: 10, marginLeft: 6, textTransform: 'uppercase', color: 'var(--mute)' }}>{l.type}</span></span>
+            <span style={{ fontWeight: 600, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>− {aedF(Number(l.amount))}</span>
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--mist-strong)', paddingTop: 8, marginTop: 2 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>Net refund to you</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: refund < 0 ? '#b91c1c' : 'var(--jade-deep)', fontVariantNumeric: 'tabular-nums' }}>{aedF(refund)}</span>
+        </div>
+      </div>
+
+      {settlement.notes && <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0, lineHeight: 1.45 }}>{settlement.notes}</p>}
+
+      {settlement.status === 'sent' && (
+        <>
+          {err && <p style={{ fontSize: 12, color: '#b91c1c', margin: 0 }}>{err}</p>}
+          <button onClick={agree} disabled={busy} style={{
+            padding: '9px 14px', borderRadius: 10, fontSize: 13, fontWeight: 700, border: 'none',
+            background: 'var(--jade-deep)', color: 'var(--paper)', cursor: busy ? 'default' : 'pointer',
+            opacity: busy ? 0.6 : 1, fontFamily: 'inherit',
+          }}>
+            {busy ? 'Submitting…' : 'Agree to settlement'}
+          </button>
+          <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0 }}>By agreeing you accept the deductions above. Your refund will be processed afterwards.</p>
+        </>
+      )}
+      {settlement.status === 'agreed' && (
+        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>You agreed{settlement.agreedAt ? ` on ${fmtDT(settlement.agreedAt)}` : ''} — your refund is being processed.</p>
+      )}
+      {settlement.status === 'paid' && (
+        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>Refund processed{settlement.paidAt ? ` on ${fmtDT(settlement.paidAt)}` : ''}.</p>
+      )}
     </div>
   );
 }

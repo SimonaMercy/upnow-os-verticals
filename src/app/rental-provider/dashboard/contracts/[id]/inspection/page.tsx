@@ -25,6 +25,9 @@ interface InspectionItem {
   inCondition: Condition;
   outCondition: Condition;
   itemAttachments?: ItemAttachment[];
+  /** Read-only move-in photos for this item, carried over so the move-out
+   *  inspection shows the "before" evidence next to the move-out column. */
+  moveInAttachments?: ItemAttachment[];
 }
 
 interface InspectionArea {
@@ -49,6 +52,8 @@ interface InspectionData {
   areas: InspectionArea[];
   generalNotes: string;
   photos: InspectionPhoto[];
+  /** Read-only move-in general photos, shown as reference during move-out. */
+  moveInPhotos?: InspectionPhoto[];
   tenantSig: string | null;
   landlordSig: string | null;
   rpSubmittedAt?: string | null;
@@ -310,16 +315,9 @@ function AreaBlock({
 
       {/* Items table */}
       <div className="px-5 pt-3 pb-2">
-        <div className={`grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] ${isMoveOut ? 'grid-cols-[1fr_auto_auto_auto_auto]' : 'grid-cols-[1fr_auto_auto_auto]'}`}>
+        <div className="grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] grid-cols-[1fr_auto_auto_auto]">
           <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Item</span>
-          {isMoveOut ? (
-            <>
-              <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide w-24 text-center">Move-In</span>
-              <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide w-24 text-center">Move-Out</span>
-            </>
-          ) : (
-            <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide w-24 text-center">Condition</span>
-          )}
+          <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide w-24 text-center">{isMoveOut ? 'Move-Out' : 'Condition'}</span>
           <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Attach</span>
           <span className="w-6" />
         </div>
@@ -327,7 +325,7 @@ function AreaBlock({
         {area.items.map(item => (
           <div
             key={item.id}
-            className={`grid gap-2 items-center py-1.5 border-b border-[#f9f8f6] last:border-0 ${isMoveOut ? 'grid-cols-[1fr_auto_auto_auto_auto]' : 'grid-cols-[1fr_auto_auto_auto]'}`}
+            className="grid gap-2 items-center py-1.5 border-b border-[#f9f8f6] last:border-0 grid-cols-[1fr_auto_auto_auto]"
           >
             {item.isCustom && !isLocked ? (
               <input
@@ -341,26 +339,14 @@ function AreaBlock({
               <span className="text-sm text-[#1a1916]">{item.name}</span>
             )}
 
-            {isMoveOut ? (
-              <>
-                <div className="flex justify-center w-24">
-                  <ConditionPicker value={item.inCondition} onChange={() => {}} />
-                </div>
-                <div className="flex justify-center w-24">
-                  <ConditionPicker
-                    value={item.outCondition}
-                    onChange={v => !isLocked && updateItem(item.id, { outCondition: v })}
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="flex justify-center w-24">
-                <ConditionPicker
-                  value={item.inCondition}
-                  onChange={v => !isLocked && updateItem(item.id, { inCondition: v })}
-                />
-              </div>
-            )}
+            {/* Single condition column — move-out edits `outCondition` (pre-filled from
+                the move-in baseline on load); move-in edits `inCondition`. */}
+            <div className="flex justify-center w-24">
+              <ConditionPicker
+                value={isMoveOut ? item.outCondition : item.inCondition}
+                onChange={v => !isLocked && updateItem(item.id, isMoveOut ? { outCondition: v } : { inCondition: v })}
+              />
+            </div>
 
             {/* Per-item attachment — RP only, not shown to tenant */}
             <div className="flex items-center">
@@ -710,25 +696,44 @@ export default function InspectionPage() {
         fetch(`/api/contracts/${contractId}`, { credentials: 'include' }),
         fetch(`/api/contracts/${contractId}/inspection?type=${inspType}`, { credentials: 'include' }),
       ]);
+      // The date field shows the move-in date for a move-in inspection and the
+      // contract's move-out (end) date for a move-out inspection.
+      let defaultDate = '';
       if (contractRes.ok) {
         const c = await contractRes.json();
         const startDate = c.startDate ?? c.contractStartDate ?? null;
+        const endDate   = c.endDate ?? c.contractEndDate ?? null;
+        defaultDate = (inspType === 'move_out' ? endDate : startDate) ?? '';
         setMeta({
           property:    c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit:        c.unit?.number ?? c.unit?.unitNumber ?? '',
           tenantName:  c.tenant?.name ?? '',
           tenantId:    c.tenant?.id ?? null,
           moveInDate:  startDate,
-          moveOutDate: c.endDate ?? c.contractEndDate ?? null,
+          moveOutDate: endDate,
         });
-        setData(d => d.moveInDate ? d : { ...d, moveInDate: startDate ?? '' });
+        setData(d => d.moveInDate ? d : { ...d, moveInDate: defaultDate });
       }
       if (inspRes.ok) {
         const savedInsp = await inspRes.json();
         if (savedInsp && typeof savedInsp === 'object' && (savedInsp as InspectionData).areas) {
           const loaded = savedInsp as InspectionData;
+          // A move-out that hasn't been submitted yet starts pre-filled: each item's
+          // move-out condition defaults to the recorded move-in condition (the
+          // "before" baseline; Good when there was no move-in record), and the date
+          // field defaults to the contract's move-out date rather than the seeded
+          // move-in date. Once submitted, the saved record is shown as-is.
+          const seedMoveOut = inspType === 'move_out' && !loaded.rpSubmittedAt;
+          const areas = seedMoveOut
+            ? loaded.areas.map(a => ({
+                ...a,
+                items: a.items.map(it => ({ ...it, outCondition: it.outCondition || it.inCondition || 'G' })),
+              }))
+            : loaded.areas;
           setData({
             ...loaded,
+            areas,
+            moveInDate: seedMoveOut ? defaultDate : (loaded.moveInDate || defaultDate),
             photos: Array.isArray(loaded.photos) ? loaded.photos : [],
             reportGeneratedDate: loaded.reportGeneratedDate ?? new Date().toISOString().split('T')[0],
           });
@@ -905,7 +910,7 @@ export default function InspectionPage() {
               <input type="text" value={meta?.tenantName ?? ''} disabled className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 bg-[#f9f8f6] text-[#6b6860]" />
             </div>
             <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Move-In Date</label>
+              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">{isMoveIn ? 'Move-In Date' : 'Move-Out Date'}</label>
               <input type="date" value={data.moveInDate}
                 onChange={e => setData(d => ({ ...d, moveInDate: e.target.value }))}
                 className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
@@ -1064,6 +1069,26 @@ export default function InspectionPage() {
         </div>
 
       </div>
+
+      {/* ── Move-in photos (reference) — move-out only, read-only ────────── */}
+      {!isMoveIn && (data.moveInPhotos?.length ?? 0) > 0 && (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4 print:hidden">
+          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
+            <Images size={14} className="text-[#9b9890]" /> Move-In Photos
+            <span className="ml-1.5 text-[#9b9890] text-xs font-normal">reference · read-only</span>
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {data.moveInPhotos!.map(p => (
+              <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer"
+                className="block rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.url} alt={p.caption || 'Move-in photo'} className="w-full h-32 object-cover" />
+                {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Move-In Photos — screen only, hidden in print ────────────────── */}
       <div className="print:hidden">

@@ -28,7 +28,7 @@
  */
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { openDocsTogether } from '@/lib/openDocsTogether';
@@ -37,7 +37,7 @@ import {
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
   User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check,
-  UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send,
+  UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 
@@ -136,9 +136,9 @@ interface ContractDetail {
 // Step model
 // ────────────────────────────────────────────────────────────────────────────
 
-type StepKey = 'issue' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms';
+type StepKey = 'issue' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'settlement';
 type Tone = 'action' | 'waiting' | 'celebrate' | 'declined';
-type IconKey = 'document' | 'pen' | 'stamp' | 'bolt' | 'key' | 'active' | 'envelope' | 'alert' | 'clock';
+type IconKey = 'document' | 'pen' | 'stamp' | 'bolt' | 'key' | 'active' | 'envelope' | 'alert' | 'clock' | 'wallet';
 
 interface Step { key: StepKey; short: string; label: string; icon: IconKey }
 
@@ -156,6 +156,10 @@ const STEPS_RENEWAL: Step[] = [
   { key: 'ejari',  short: 'Ejari',   label: 'Ejari renewal',    icon: 'stamp'    },
   { key: 'active', short: 'Active',  label: 'Renewal active',   icon: 'active'   },
 ];
+// Appended after "Active" once a termination is accepted and the lease is
+// winding down (Phase 6c) — the actionable move-out inspection + settlement steps.
+const MOVE_OUT_STEP: Step = { key: 'moveout', short: 'Move-out', label: 'Move-out inspection', icon: 'key' };
+const SETTLEMENT_STEP: Step = { key: 'settlement', short: 'Settlement', label: 'Deposit settlement', icon: 'wallet' };
 
 interface DerivedState {
   status: ContractDetail['status'];
@@ -164,6 +168,8 @@ interface DerivedState {
   landlordSigned: boolean;
   utilityDoc: boolean;
   moveIn: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
+  moveOut: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
+  settlementStatus: 'draft' | 'sent' | 'agreed' | 'paid' | null;
 }
 
 function isDone(key: StepKey, st: DerivedState): boolean {
@@ -173,6 +179,8 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     case 'ejari':   return st.ejariStatus === 'registered';
     case 'utility': return st.utilityDoc;
     case 'movein':  return st.moveIn.rpCounterSig;
+    case 'moveout': return st.moveOut.rpCounterSig;
+    case 'settlement': return st.settlementStatus === 'paid';
     case 'active':  return st.status === 'active';
     case 'terms':   return true; // renewal flow only shows terms once accepted by customer
     default:        return false;
@@ -203,7 +211,7 @@ function spaceCategoryFromUnitType(unitType: string | null): string {
   return 'residential';
 }
 
-function deriveState(contract: ContractDetail, signatures: { role: string }[], insp: MoveInInsp | null): DerivedState {
+function deriveState(contract: ContractDetail, signatures: { role: string }[], insp: MoveInInsp | null, moveOutInsp: MoveInInsp | null, settlementStatus: DerivedState['settlementStatus']): DerivedState {
   return {
     status: contract.status,
     ejariStatus: contract.ejariStatus,
@@ -215,6 +223,12 @@ function deriveState(contract: ContractDetail, signatures: { role: string }[], i
       tenantSig: !!insp?.tenantSig,
       rpCounterSig: !!insp?.rpCounterSig,
     },
+    moveOut: {
+      rpSubmitted: !!moveOutInsp?.rpSubmittedAt,
+      tenantSig: !!moveOutInsp?.tenantSig,
+      rpCounterSig: !!moveOutInsp?.rpCounterSig,
+    },
+    settlementStatus,
   };
 }
 
@@ -232,6 +246,7 @@ const STEP_ICON_PATHS: Record<IconKey, string> = {
   envelope: 'M3 5h18v14H3z M3 7l9 7 9-7',
   alert:    'M12 2L1 21h22z M12 9v5 M12 17h.01',
   clock:    'M12 3 a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
+  wallet:   'M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1z M3 7l0-1a2 2 0 0 1 2-2h11 M16 13h.01',
 };
 
 function Waypoint({
@@ -347,6 +362,7 @@ function HeroIcon({ tone, icon }: { tone: Tone; icon: IconKey }) {
     envelope: FileText,
     alert:    AlertCircle,
     clock:    Clock,
+    wallet:   Wallet,
   };
   const Ic = map[icon];
   return <div className={'heroicon ' + tone}><Ic size={26} /></div>;
@@ -471,6 +487,8 @@ interface StepHandlers {
   onRevertToDraft: () => Promise<void>;
   signActionUrl: string;
   inspectionUrl: string;
+  moveOutInspectionUrl: string;
+  settlementUrl: string;
   printUrl: string;
   /** When true, all workflow rollback / re-do affordances are hidden:
    *  the "Update" / "Re-upload" / "Revert to draft" buttons on completed
@@ -640,6 +658,72 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
         };
   }
 
+  if (key === 'moveout') {
+    const done = isDone('moveout', st);
+    const eff = h.contract.termination?.effectiveDate;
+    return done
+      ? {
+          tone: 'celebrate', icon: 'key', sub: 'Move-out · complete', label: 'Move-out',
+          headline: 'Move-out inspection complete.',
+          body: 'Both parties signed the move-out condition report. Proceed to the deposit settlement.',
+          timing: null,
+          node: <Completed title="Move-out inspection counter-signed" sub="Ready for final settlement" viewUrl={h.moveOutInspectionUrl} viewLabel="View inspection" />,
+        }
+      : {
+          tone: 'action', icon: 'key', sub: 'Wind-down', label: 'Move-out',
+          headline: 'Complete the move-out inspection.',
+          body: `Walk the unit against the move-in report${eff ? ` before ${fmtDate(eff)}` : ''}, record the move-out condition, collect the customer signature and counter-sign.`,
+          timing: 'Takes ~3 min',
+          node: (
+            <>
+              <div className="chklist">
+                <ChkRow on={st.moveOut.rpSubmitted} label="Move-out inspection submitted" onToggle={() => {}} />
+                <ChkRow on={st.moveOut.tenantSig} label={`${TEN} signed`} onToggle={() => {}} />
+                <ChkRow on={st.moveOut.rpCounterSig} label="You counter-signed" onToggle={() => {}} />
+              </div>
+              <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
+                <ClipboardCheck size={14} /> Open move-out inspection
+              </Link>
+            </>
+          ),
+        };
+  }
+
+  if (key === 'settlement') {
+    const ss = st.settlementStatus;
+    if (ss === 'paid') {
+      return {
+        tone: 'celebrate', icon: 'wallet', sub: 'Settlement · complete', label: 'Settlement',
+        headline: 'Deposit settled.',
+        body: 'The deposit refund has been reconciled and marked paid. This tenancy is fully closed out.',
+        timing: null,
+        node: <Completed title="Deposit refund paid" sub="Settlement closed" viewUrl={h.settlementUrl} viewLabel="View settlement" />,
+      };
+    }
+    const statusLine =
+      ss === 'agreed' ? `${TEN} agreed — pay the refund and mark it paid.`
+      : ss === 'sent' ? `Sent to ${TEN} — awaiting their agreement.`
+      : 'Reconcile the deposit: deductions, dues, and the net refund.';
+    return {
+      tone: 'action', icon: 'wallet', sub: 'Wind-down', label: 'Settlement',
+      headline: 'Settle the security deposit.',
+      body: statusLine,
+      timing: null,
+      node: (
+        <>
+          <div className="chklist">
+            <ChkRow on={ss === 'sent' || ss === 'agreed'} label="Settlement sent to customer" onToggle={() => {}} />
+            <ChkRow on={ss === 'agreed'} label={`${TEN} agreed`} onToggle={() => {}} />
+            <ChkRow on={false} label="Refund marked paid" onToggle={() => {}} />
+          </div>
+          <Link href={h.settlementUrl} className="btn btn-jade btn-block">
+            <Wallet size={14} /> Open settlement workspace
+          </Link>
+        </>
+      ),
+    };
+  }
+
   if (key === 'terms') {
     return {
       tone: 'celebrate', icon: 'envelope', sub: 'Renewal · step 1', label: 'Terms agreed',
@@ -699,13 +783,18 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       body: `The tenancy stays active until ${fmtDate(h.contract.termination.effectiveDate)}, then auto-terminates.`,
       timing: 'Until effective date',
       node: (
-        <div className="qbanner waiting">
-          <span className="bic"><Clock size={18} /></span>
-          <div style={{ flex: 1 }}>
-            <p className="bt">Effective {fmtDate(h.contract.termination.effectiveDate)}</p>
-            <p className="bp">Both parties have agreed. Prepare the final inspection and security-deposit settlement.</p>
+        <>
+          <div className="qbanner waiting">
+            <span className="bic"><Clock size={18} /></span>
+            <div style={{ flex: 1 }}>
+              <p className="bt">Effective {fmtDate(h.contract.termination.effectiveDate)}</p>
+              <p className="bp">Both parties have agreed. Complete the move-out inspection, then settle the security deposit.</p>
+            </div>
           </div>
-        </div>
+          <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
+            <ClipboardCheck size={14} /> {st.moveOut.rpCounterSig ? 'View move-out inspection' : 'Open move-out inspection'}
+          </Link>
+        </>
       ),
     };
   }
@@ -944,7 +1033,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 
 function DetailsDrawer({
   open, tab, setTab, onClose, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
-  onRecordPayment, onUpdatePaymentStatus, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
+  onRecordPayment, onUpdatePayment, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
@@ -954,8 +1043,11 @@ function DetailsDrawer({
     description?: string; amount: number; paymentType?: string; paymentMethod?: string;
     chequeNumber?: string; transactionDate?: string;
   }) => Promise<void>;
-  /** PATCH /api/contracts/:id/payments/:paymentId — change cheque status. */
-  onUpdatePaymentStatus: (paymentId: number, chequeStatus: string) => Promise<void>;
+  /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / reference / description. */
+  onUpdatePayment: (paymentId: number, patch: {
+    chequeStatus?: string; amount?: number; chequeNumber?: string | null;
+    description?: string | null; transactionDate?: string | null;
+  }) => Promise<void>;
   /** PATCH /api/contracts/:id/clauses — save edited custom clauses + notes. */
   onSaveClauses: (customClauses: string[], notes: string | null) => Promise<void>;
   /** PATCH /api/contracts/:id/confirm-pdc — confirm post-dated cheques received. */
@@ -975,6 +1067,36 @@ function DetailsDrawer({
     paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
   });
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
+  // ── Inline cheque editor — correct amount / reference / description on existing rows ──
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ amount: '', chequeNumber: '', description: '' });
+  const [editBusy, setEditBusy] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+  const startEdit = (p: ContractPayment) => {
+    setEditingId(p.id); setEditErr(null);
+    setEditForm({
+      amount: p.amount != null ? String(p.amount) : '',
+      chequeNumber: p.chequeNumber ?? '',
+      description: p.description ?? '',
+    });
+  };
+  const saveEdit = async (paymentId: number) => {
+    const amt = Number(editForm.amount);
+    if (editForm.amount.trim() === '' || !Number.isFinite(amt) || amt < 0) { setEditErr('Enter a valid amount'); return; }
+    setEditBusy(true); setEditErr(null);
+    try {
+      await onUpdatePayment(paymentId, {
+        amount: amt,
+        chequeNumber: editForm.chequeNumber.trim() || null,
+        description: editForm.description.trim() || null,
+      });
+      setEditingId(null);
+    } catch (e) {
+      setEditErr(e instanceof Error ? e.message : 'Failed to save changes');
+    } finally {
+      setEditBusy(false);
+    }
+  };
   const submitRec = async () => {
     const amt = Number(rec.amount);
     if (!amt || amt <= 0) { setRecErr('Enter a valid amount'); return; }
@@ -998,7 +1120,7 @@ function DetailsDrawer({
   };
   const changeStatus = async (paymentId: number, status: string) => {
     setStatusBusy(paymentId);
-    try { await onUpdatePaymentStatus(paymentId, status); }
+    try { await onUpdatePayment(paymentId, { chequeStatus: status }); }
     finally { setStatusBusy(null); }
   };
   // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
@@ -1199,7 +1321,8 @@ function DetailsDrawer({
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
                       {rentRows.map((p, i) => (
-                        <tr key={p.id}>
+                        <Fragment key={p.id}>
+                        <tr>
                           <td>{i + 1}</td>
                           <td>{p.description ?? '—'}</td>
                           <td className="amt">
@@ -1211,20 +1334,64 @@ function DetailsDrawer({
                           <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}</td>
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
-                            <select
-                              className={'cstat ' + (p.chequeStatus ?? 'pending')}
-                              style={{ cursor: 'pointer' }}
-                              value={p.chequeStatus ?? 'pending'}
-                              disabled={statusBusy === p.id}
-                              onChange={e => void changeStatus(p.id, e.target.value)}
-                            >
-                              <option value="pending">Pending</option>
-                              <option value="cleared">Cleared</option>
-                              <option value="bounced">Bounced</option>
-                              <option value="cancelled">Cancelled</option>
-                            </select>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <select
+                                className={'cstat ' + (p.chequeStatus ?? 'pending')}
+                                style={{ cursor: 'pointer' }}
+                                value={p.chequeStatus ?? 'pending'}
+                                disabled={statusBusy === p.id}
+                                onChange={e => void changeStatus(p.id, e.target.value)}
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="cleared">Cleared</option>
+                                <option value="bounced">Bounced</option>
+                                <option value="cancelled">Cancelled</option>
+                              </select>
+                              <button
+                                type="button"
+                                className="mini-btn view"
+                                title="Edit amount / reference / description"
+                                onClick={() => editingId === p.id ? setEditingId(null) : startEdit(p)}
+                              >
+                                <Pencil size={12} /> Edit
+                              </button>
+                            </div>
                           </td>
                         </tr>
+                        {editingId === p.id && (
+                          <tr>
+                            <td colSpan={6} style={{ background: 'var(--jade-tint)' }}>
+                              <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                <p className="subhead">Correct cheque details</p>
+                                <div className="field"><label>Description</label>
+                                  <input className="input" value={editForm.description} placeholder="e.g. Rental Instalment 1 of 4"
+                                    onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
+                                </div>
+                                <div className="grid2">
+                                  <div className="field"><label>Amount (AED)</label>
+                                    <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
+                                      onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                  </div>
+                                  <div className="field"><label>Cheque / reference no.</label>
+                                    <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
+                                      onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                  </div>
+                                </div>
+                                {showVat && (
+                                  <p className="note" style={{ marginTop: 2 }}>VAT ({contract.rentVatRate ?? 0}%) is recalculated from the corrected amount automatically.</p>
+                                )}
+                                {editErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{editErr}</p>}
+                                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                  <button className="btn btn-jade btn-sm" disabled={editBusy} onClick={() => void saveEdit(p.id)}>
+                                    <Check size={14} /> {editBusy ? 'Saving…' : 'Save changes'}
+                                  </button>
+                                  <button className="btn btn-ghost btn-sm" disabled={editBusy} onClick={() => { setEditingId(null); setEditErr(null); }}>Cancel</button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                       {rentRows.length === 0 && (
                         <tr><td colSpan={6}><span className="note">No payments recorded yet.</span></td></tr>
@@ -1854,6 +2021,8 @@ export default function ContractV2Page() {
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string }[]>([]);
   const [moveInInsp, setMoveInInsp] = useState<MoveInInsp | null>(null);
+  const [moveOutInsp, setMoveOutInsp] = useState<MoveInInsp | null>(null);
+  const [settlementStatus, setSettlementStatus] = useState<DerivedState['settlementStatus']>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
@@ -1885,6 +2054,23 @@ export default function ContractV2Page() {
           .then(r => (r.ok ? r.json() : null))
           .then((insp: MoveInInsp | null) => setMoveInInsp(insp ?? null))
           .catch(() => null);
+        // Only load the move-out inspection once the lease is winding down
+        // (termination accepted, still active) — otherwise it's not yet relevant.
+        const winding = data.termination?.response === 'accepted' && data.status === 'active';
+        if (winding) {
+          fetch(`/api/contracts/${params.id}/inspection?type=move_out`, { credentials: 'include', signal: ctrl.signal })
+            .then(r => (r.ok ? r.json() : null))
+            .then((insp: MoveInInsp | null) => setMoveOutInsp(insp ?? null))
+            .catch(() => null);
+          fetch(`/api/contracts/${params.id}/settlement`, { credentials: 'include', signal: ctrl.signal })
+            .then(r => (r.ok ? r.json() : null))
+            .then((s: { status?: DerivedState['settlementStatus']; exists?: boolean } | null) =>
+              setSettlementStatus(s && s.exists ? (s.status ?? null) : null))
+            .catch(() => null);
+        } else {
+          setMoveOutInsp(null);
+          setSettlementStatus(null);
+        }
       })
       .catch((e: unknown) => {
         if ((e as { name?: string })?.name !== 'AbortError') {
@@ -1898,8 +2084,8 @@ export default function ContractV2Page() {
   useEffect(() => { void reload(); }, [reload]);
 
   const derived = useMemo(
-    () => contract ? deriveState(contract, signatures, moveInInsp) : null,
-    [contract, signatures, moveInInsp],
+    () => contract ? deriveState(contract, signatures, moveInInsp, moveOutInsp, settlementStatus) : null,
+    [contract, signatures, moveInInsp, moveOutInsp, settlementStatus],
   );
 
   // Loading / error
@@ -1921,7 +2107,11 @@ export default function ContractV2Page() {
   }
 
   const mode: 'new' | 'renewal' = contract.contractType === 'renewal' ? 'renewal' : 'new';
-  const steps = mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
+  // Wind-down (Phase 6c): once a termination is accepted while the lease is
+  // still active, surface the actionable move-out inspection step after Active.
+  const isWinding = contract.termination?.response === 'accepted' && contract.status === 'active';
+  const baseSteps = mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
+  const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, SETTLEMENT_STEP] : baseSteps;
   const doneArr = steps.map(s => isDone(s.key, derived));
   const firstTodo = doneArr.findIndex(x => !x);
   const autoIdx = firstTodo >= 0 ? firstTodo : steps.length - 1;
@@ -2086,13 +2276,19 @@ export default function ContractV2Page() {
     }
     void reload();
   };
-  // PATCH /api/contracts/:id/payments/:paymentId  (mirrors old page updatePaymentStatus)
-  const onUpdatePaymentStatus = async (paymentId: number, chequeStatus: string) => {
+  // PATCH /api/contracts/:id/payments/:paymentId — status, or correct amount / reference / description.
+  const onUpdatePayment = async (paymentId: number, patch: {
+    chequeStatus?: string; amount?: number; chequeNumber?: string | null;
+    description?: string | null; transactionDate?: string | null;
+  }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chequeStatus }),
+      body: JSON.stringify(patch),
     });
-    if (!res.ok) throw new Error(`Error ${res.status}`);
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
     void reload();
   };
 
@@ -2218,6 +2414,8 @@ export default function ContractV2Page() {
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
     signActionUrl: `${contractsBase}/${contract.id}`,
     inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
+    moveOutInspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_out`,
+    settlementUrl: `${contractsBase}/${contract.id}/settlement`,
     printUrl: `${contractsBase}/${contract.id}/print`,
     readOnlyWorkflow,
   };
@@ -2379,6 +2577,21 @@ export default function ContractV2Page() {
                 />
               </div>
             )}
+            {/* Move-out signing link — available during wind-down even though the
+                 onboarding workflow is otherwise frozen (status === active). */}
+            {selStep.key === 'moveout' && contract.tenant.id && !derived.moveOut.rpCounterSig && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+                  Customer move-out signing link
+                </div>
+                <SendTenantLinkButton
+                  tenantId={contract.tenant.id}
+                  contractId={contract.id}
+                  section="move_out"
+                  label="Send move-out link"
+                />
+              </div>
+            )}
             {/* Flow 4: Redo Ejari — roll back to issued so a corrected certificate
                  can be uploaded. Shown on the Ejari step once it is registered and
                  the workflow has not yet frozen (active / expired / terminated). */}
@@ -2418,7 +2631,7 @@ export default function ContractV2Page() {
         onApproveDoc={onApproveDoc}
         onRejectDoc={onRejectDoc}
         onRecordPayment={onRecordPayment}
-        onUpdatePaymentStatus={onUpdatePaymentStatus}
+        onUpdatePayment={onUpdatePayment}
         onSaveClauses={onSaveClauses}
         onConfirmPdc={onConfirmPdc}
         onUploadDoc={onUploadDoc}
