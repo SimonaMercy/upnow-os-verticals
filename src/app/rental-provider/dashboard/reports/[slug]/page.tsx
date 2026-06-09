@@ -104,9 +104,9 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
   },
 };
 
-// Shown on reports that depend on cheque collection status, which isn't tracked
-// yet — the figures are the contractual rent schedule, not confirmed receipts.
-const NEEDS_CHEQUE_DATA = 'Collection status isn’t tracked yet — these figures show scheduled rent due, not confirmed collections. Load your cheque register to replace them with real data.';
+// Shown on cheque/collection reports: the cheque figures are real (extracted
+// from the scanned cheque copies), but clearance is inferred from the due date.
+const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scanned cheques. A cheque shows as collected once its due date has passed — flag any bounced cheque, and reconcile against bank statements for exact clearance. A few contracts with incomplete scans still use the rent schedule.';
 
 const REPORTS: Record<ReportSlug, ReportDef> = {
   occupancy: {
