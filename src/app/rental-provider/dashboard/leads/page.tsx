@@ -252,6 +252,73 @@ function getPendingViewing(lead: ApiLead) {
   );
 }
 
+/* ─── Needs-attention triage ──────────────────────────────────────────────── */
+// Derived purely from data already on the lead — no backend involvement.
+// A lead is urgent when its viewing date passed without an outcome being
+// recorded, or its stage has sat without movement past a small SLA.
+type Urgency = { level: 'red' | 'amber'; label: string };
+
+const DAY_MS = 86_400_000;
+
+function getUrgency(lead: ApiLead): Urgency | null {
+  const now = Date.now();
+  const daysSince = (iso?: string | null) =>
+    iso ? Math.floor((now - new Date(iso).getTime()) / DAY_MS) : null;
+
+  if (lead.stage === 'viewing_scheduled') {
+    const v = getPendingViewing(lead);
+    if (v && new Date(v.scheduledAt).getTime() < now) {
+      const d = daysSince(v.scheduledAt) ?? 0;
+      return d < 1
+        ? { level: 'amber', label: 'Viewing passed — record outcome' }
+        : { level: d >= 2 ? 'red' : 'amber', label: `Viewing ${d}d overdue` };
+    }
+    return null;
+  }
+
+  const idle = daysSince(lead.updatedAt);
+  if (idle == null) return null;
+  switch (lead.stage) {
+    case 'payment_plan_shared':
+      return idle >= 3 ? { level: idle >= 7 ? 'red' : 'amber', label: `Plan shared ${idle}d — follow up` } : null;
+    case 'documents_collection':
+      return idle >= 3 ? { level: idle >= 7 ? 'red' : 'amber', label: `Docs pending ${idle}d` } : null;
+    case 'interested':
+      return idle >= 3 ? { level: idle >= 7 ? 'red' : 'amber', label: `No next step ${idle}d` } : null;
+    case 'cheques_submitted':
+      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Cheques ready ${idle}d — collect` } : null;
+    default:
+      return null;
+  }
+}
+
+const URGENCY_PILL: Record<'red' | 'amber', string> = {
+  red:   'bg-[#fee2e2] text-[#b91c1c]',
+  amber: 'bg-[#fef3c7] text-[#92400e]',
+};
+
+// Short phrases for the needs-action banner breakdown, per urgent stage.
+const URGENCY_PHRASE: Partial<Record<LeadStage, [string, string]>> = {
+  viewing_scheduled:    ['overdue viewing', 'overdue viewings'],
+  interested:           ['no next step', 'no next step'],
+  documents_collection: ['docs pending', 'docs pending'],
+  payment_plan_shared:  ['stale plan', 'stale plans'],
+  cheques_submitted:    ['cheques to collect', 'cheques to collect'],
+};
+
+// Pipeline header columns, in funnel order; terminal stages last.
+const FUNNEL_COLS: [LeadStage, string][] = [
+  ['viewing_scheduled',    'Viewing'],
+  ['interested',           'Interested'],
+  ['documents_collection', 'Docs'],
+  ['payment_plan_shared',  'Plan'],
+  ['cheques_submitted',    'Cheques'],
+  ['cheques_collected',    'Collected'],
+  ['contract_issued',      'Contract'],
+  ['converted',            'Converted'],
+  ['rejected',             'Rejected'],
+];
+
 /* ─── Primary action per stage ────────────────────────────────────────────── */
 type PrimaryAction =
   | { kind: 'stage'; label: string; target: LeadStage; cls: string }
@@ -968,6 +1035,18 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 ${STAGE_PILL[lead.stage]}`}>
                 {STAGE_LABELS[lead.stage]}
               </span>
+              {(() => {
+                const u = getUrgency(lead);
+                return u ? (
+                  <p
+                    className={`flex items-center gap-1 rounded-full text-[10px] font-semibold px-1.5 py-0.5 mt-1 max-w-full ${URGENCY_PILL[u.level]}`}
+                    title={u.label}
+                  >
+                    <Clock size={9} className="shrink-0" />
+                    <span className="truncate">{u.label}</span>
+                  </p>
+                ) : null;
+              })()}
               {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
                 <p
                   className="text-[10px] text-[#b91c1c] truncate mt-1"
@@ -2757,6 +2836,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
   const [view, setView]             = useState<'list' | 'calendar'>('list');
+  const [urgentOnly, setUrgentOnly] = useState(false);
   const [movingLead, setMovingLead] = useState<number | null>(null);
   const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
@@ -2810,6 +2890,21 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   }, []);
   useEffect(() => { setSearch(''); }, [activeTab]);
 
+  // Needs-attention triage (derived client-side; see getUrgency)
+  const urgentLeads = leads.filter(l => getUrgency(l) !== null);
+  const urgencySummary = (() => {
+    const byStage = new Map<LeadStage, number>();
+    urgentLeads.forEach(l => byStage.set(l.stage, (byStage.get(l.stage) ?? 0) + 1));
+    return [...byStage.entries()]
+      .map(([s, n]) => { const p = URGENCY_PHRASE[s]; return p ? `${n} ${n === 1 ? p[0] : p[1]}` : null; })
+      .filter(Boolean)
+      .join(' · ');
+  })();
+  // If the last urgent lead is resolved while the urgent-only filter is on,
+  // the banner (and its toggle) disappears — release the filter with it.
+  const urgentCount = urgentLeads.length;
+  useEffect(() => { if (urgentOnly && urgentCount === 0) setUrgentOnly(false); }, [urgentOnly, urgentCount]);
+
   async function moveStage(leadId: number, stage: LeadStage) {
     setMovingLead(leadId);
     try {
@@ -2842,6 +2937,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
     key === 'all' ? leads.length : leads.filter(l => l.stage === key).length;
 
   const filtered = leads.filter(l => {
+    if (urgentOnly && !getUrgency(l)) return false;
     if (activeTab !== 'all' && l.stage !== activeTab) return false;
     if (search) {
       const q    = search.toLowerCase();
@@ -2914,6 +3010,63 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
       {/* List view — stage tabs, search, list */}
       {view === 'list' && (
       <>
+      {/* Pipeline header — hairline-divided columns, label over count; click a
+          column to filter (same effect as the tab), click again to clear. */}
+      {!loading && leads.length > 0 && (
+        <div className="bg-white rounded-xl border border-[#e8e6e0] mb-4 flex items-stretch divide-x divide-[#f0ede8] overflow-x-auto scrollbar-none">
+          {FUNNEL_COLS.map(([s, label]) => {
+            const n = tabCount(s);
+            const isActive = activeTab === s;
+            return (
+              <button
+                key={s}
+                onClick={() => setActiveTab(isActive ? 'all' : s)}
+                className={`relative flex-1 min-w-[92px] shrink-0 flex flex-col gap-1 px-4 py-3 text-left transition-colors cursor-pointer ${
+                  isActive ? 'bg-[#fafaf8]' : 'hover:bg-[#fafaf8]'
+                }`}
+              >
+                <span className={`text-[10px] font-medium uppercase tracking-[0.08em] whitespace-nowrap ${
+                  isActive ? 'text-[#2e9f82]' : 'text-[#9b9890]'
+                }`}>
+                  {label}
+                </span>
+                <span className={`text-xl font-semibold leading-none tabular-nums ${
+                  n > 0 ? 'text-[#1a1916]' : 'text-[#c8c6c0]'
+                }`}>
+                  {n}
+                </span>
+                {isActive && <span className="absolute inset-x-0 bottom-0 h-[2px] bg-[#2e9f82]" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Needs-action banner — leads whose viewing passed without an outcome,
+          or whose stage idled past its follow-up window. [Show] filters to
+          just those; default list order is never changed. */}
+      {!loading && urgentLeads.length > 0 && (
+        <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] px-4 py-3 mb-4 flex items-center gap-3 flex-wrap">
+          <ShieldAlert size={16} className="text-[#d97706] shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[#92400e]">
+              {urgentLeads.length} lead{urgentLeads.length !== 1 ? 's' : ''} need{urgentLeads.length === 1 ? 's' : ''} action
+            </p>
+            {urgencySummary && <p className="text-xs text-[#b45309] truncate">{urgencySummary}</p>}
+          </div>
+          <button
+            onClick={() => { if (!urgentOnly) setActiveTab('all'); setUrgentOnly(o => !o); }}
+            className={`text-xs font-semibold rounded-lg px-3 py-1.5 cursor-pointer transition-colors shrink-0 ${
+              urgentOnly
+                ? 'bg-[#92400e] text-white'
+                : 'bg-white border border-[#fde68a] text-[#92400e] hover:bg-[#fef3c7]'
+            }`}
+          >
+            {urgentOnly ? 'Show all' : 'Show'}
+          </button>
+        </div>
+      )}
+
       {/* Stage tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 mb-5 scrollbar-none">
         {TABS.map(tab => {
