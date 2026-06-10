@@ -40,46 +40,54 @@ import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 // ────────────────────────────────────────────────────────────────────────────
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
-type DisplayStatus = ContractStatus | 'declined' | 'renewal_pending' | 'superseded' | 'terminating';
+type DisplayStatus = ContractStatus | 'declined' | 'needs_activation' | 'starts_later' | 'superseded' | 'terminating';
 type TabKey = DisplayStatus | 'all' | 'upcoming_renewal';
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
-  active:          'Active',
-  expired:         'Expired',
-  terminated:      'Terminated',
-  pending:         'Pending',
-  issued:          'In Progress',
-  declined:        'Declined',
-  renewal_pending: 'Renewal Pending',
-  superseded:      'Superseded',
-  terminating:     'Terminating',
+  active:           'Active',
+  expired:          'Expired',
+  terminated:       'Terminated',
+  pending:          'Draft',
+  issued:           'In Progress',
+  declined:         'Declined',
+  needs_activation: 'Needs Activation',
+  starts_later:     'Starts Later',
+  superseded:       'Superseded',
+  terminating:      'Terminating',
 };
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all',              label: 'All' },
   { key: 'active',           label: 'Active' },
   { key: 'terminating',      label: 'Terminating' },
-  { key: 'pending',          label: 'Pending' },
+  { key: 'needs_activation', label: 'Needs Activation' },
+  { key: 'starts_later',     label: 'Starts Later' },
+  { key: 'upcoming_renewal', label: 'Expiring ≤ 60d' },
   { key: 'issued',           label: 'In Progress' },
-  { key: 'upcoming_renewal', label: 'Upcoming Renewal' },
-  { key: 'renewal_pending',  label: 'Renewal Pending' },
+  { key: 'pending',          label: 'Draft' },
   { key: 'declined',         label: 'Declined' },
   { key: 'superseded',       label: 'Superseded' },
   { key: 'expired',          label: 'Expired' },
   { key: 'terminated',       label: 'Terminated' },
 ];
 
-/** Map the raw DB status to a display status. Four synthetic labels on top
- *  of the DB enum (docs/CONTRACT_LIFECYCLE.md §3 + §4.3):
- *    - `declined`        — renewal child where `contractActive=false`
- *    - `renewal_pending` — renewal child still awaiting customer decision
- *    - `superseded`      — new-lease draft archived because the unit was
- *                          leased to a different customer first
- *    - `terminating`     — ACTIVE contract with accepted termination, still
- *                          winding down to its effective date */
-function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contractActive' | 'termination'>): DisplayStatus {
+/** Local YYYY-MM-DD (no UTC shift) — the page's "today" for term-state checks. */
+const TODAY = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+})();
+
+/** Map the raw DB status to a display status. Synthetic labels on top of the
+ *  DB enum (docs/CONTRACT_LIFECYCLE.md §3 + §4.3) — mirrors the RP orders page:
+ *    - `declined`         — renewal child where `contractActive=false`
+ *    - `superseded`       — new-lease draft archived because the unit was
+ *                           leased to a different customer first
+ *    - `terminating`      — ACTIVE contract with accepted termination
+ *    - `needs_activation` — `pending` contract whose term is ALREADY RUNNING
+ *                           (the live lease in practice, awaiting activation)
+ *    - `starts_later`     — `pending` contract whose term has not begun yet */
+function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contractActive' | 'termination' | 'startDate' | 'endDate'>): DisplayStatus {
   if (c.contractType === 'renewal' && c.contractActive === false) return 'declined';
-  if (c.contractType === 'renewal' && c.status === 'pending') return 'renewal_pending';
   if (
     c.contractType !== 'renewal' &&
     c.contractActive === false &&
@@ -88,6 +96,12 @@ function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contract
     return 'superseded';
   }
   if (c.status === 'active' && c.termination?.response === 'accepted') return 'terminating';
+  if (c.status === 'pending') {
+    const s = (c.startDate ?? '').slice(0, 10);
+    const e = (c.endDate ?? '').slice(0, 10);
+    if (s && s > TODAY) return 'starts_later';
+    if (s && s <= TODAY && e && e >= TODAY) return 'needs_activation';
+  }
   return c.status;
 }
 
@@ -153,7 +167,9 @@ function initials(name: string | null): string {
 }
 
 function isExpiringSoon(c: Contract, now: Date, in60: Date): boolean {
-  if (displayStatusOf(c) !== 'active') return false;
+  // Live tenancy = signed-active OR running-but-not-activated.
+  const ds = displayStatusOf(c);
+  if (ds !== 'active' && ds !== 'needs_activation') return false;
   const e = new Date(c.endDate);
   return e >= now && e <= in60;
 }
@@ -329,8 +345,8 @@ export default function ManagerContractsPage() {
   const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode }[] = [
     { lbl: 'Total',              val: String(contracts.length),       ic: <FileText size={12} /> },
     { lbl: 'Active',             val: String(tabCounts.active ?? 0),   ic: <Shield size={12} /> },
+    { lbl: 'Needs activation',   val: String(tabCounts.needs_activation ?? 0), ic: <RotateCcw size={12} /> },
     { lbl: 'Expiring · 60d',     val: String(tabCounts.upcoming_renewal ?? 0), ic: <Clock size={12} /> },
-    { lbl: 'Declined renewals',  val: String(tabCounts.declined ?? 0), ic: <RotateCcw size={12} /> },
     { lbl: 'Active rent / yr',   val: fmtAedAmt(activeRent), aed: true, accent: true, ic: <Coins size={12} /> },
   ];
 
@@ -377,7 +393,7 @@ export default function ManagerContractsPage() {
         {/* Tabs */}
         <div className="rangetabs">
           <div className="tabs">
-            {TABS.map(t => (
+            {TABS.filter(t => t.key === 'all' || (tabCounts[t.key] ?? 0) > 0).map(t => (
               <button
                 key={t.key}
                 type="button"
@@ -864,7 +880,8 @@ function GlobalStyle() {
       .orders-page .status.pending     { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-edge); }
       .orders-page .status.issued      { background: var(--info-bg); color: var(--info-fg); border-color: #c7d8f5; }
       .orders-page .status.expired     { background: var(--paper-2); color: var(--ink-3); border-color: var(--line); }
-      .orders-page .status.renewal_pending { background: var(--sky-bg); color: var(--sky-fg); border-color: #bae0fa; }
+      .orders-page .status.needs_activation { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-edge); }
+      .orders-page .status.starts_later     { background: var(--sky-bg); color: var(--sky-fg); border-color: #bae0fa; }
       .orders-page .status.declined    { background: var(--danger-bg); color: var(--danger-fg); border-color: #f1c5c2; }
       .orders-page .status.superseded  { background: var(--purple-bg); color: var(--purple-fg); border-color: #d6cef9; }
       .orders-page .status.terminated  { background: #ececec; color: #57534e; border-color: #ddd9d2; }
