@@ -299,11 +299,19 @@ export default function OrdersPage() {
   // in an earlier year but run through the selected year are included — not just
   // the ones that *started* that year.
   const yearScoped = useMemo(() => {
+    if (filterYear === 'all') return contracts;
     const jan1 = `${filterYear}-01-01`;
     const dec31 = `${filterYear}-12-31`;
     return contracts.filter(c => {
       const s = (c.startDate ?? '').slice(0, 10);
       const e = (c.endDate ?? '').slice(0, 10);
+      // A proposed/forward renewal's TERM starts after the current lease ends
+      // (often next year), so a pure term-overlap scope hides it from the year
+      // it was actually raised in. Surface FORWARD-dated contracts (term begins
+      // after this year) that were CREATED this year — i.e. renewals you proposed
+      // now for a future term. (Scoped to forward terms so 2026-imported leases
+      // with past terms don't flood the current-year view.)
+      if (s && s > dec31 && (c.createdAt ?? '').slice(0, 4) === filterYear) return true;
       if (!s || s > dec31) return false;   // term starts after this year
       if (e && e < jan1) return false;     // term ended before this year
       return true;                         // overlaps the year
@@ -417,6 +425,7 @@ export default function OrdersPage() {
             <div className="year-global">
               <Calendar size={14} />
               <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter by year">
+                <option value="all">All years</option>
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
