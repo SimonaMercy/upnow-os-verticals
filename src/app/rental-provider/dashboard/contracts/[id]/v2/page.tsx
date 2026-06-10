@@ -109,6 +109,8 @@ interface ContractDetail {
   renewalAccepted: 'pending' | 'accepted' | 'rejected' | null;
   renewalStatus: string | null;
   renewalRejectionReason?: string | null;
+  /** Customer declined the renewal with intent to leave → move-out wind-down. */
+  vacateAtEnd?: boolean;
   parentContractId?: number | null;
   successorProposal?: {
     id: number;
@@ -200,6 +202,19 @@ function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+function fmtMethod(m: string | null | undefined): string {
+  if (!m) return '—';
+  return m.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+}
+
+const PAYMENT_METHODS: { value: string; label: string }[] = [
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'card', label: 'Card' },
+  { value: 'online', label: 'Online' },
+];
 
 function spaceCategoryFromUnitType(unitType: string | null): string {
   if (!unitType) return 'residential';
@@ -1046,7 +1061,7 @@ function DetailsDrawer({
   /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / reference / description. */
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; chequeNumber?: string | null;
-    description?: string | null; transactionDate?: string | null;
+    description?: string | null; transactionDate?: string | null; paymentMethod?: string;
   }) => Promise<void>;
   /** PATCH /api/contracts/:id/clauses — save edited custom clauses + notes. */
   onSaveClauses: (customClauses: string[], notes: string | null) => Promise<void>;
@@ -1069,7 +1084,7 @@ function DetailsDrawer({
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
   // ── Inline cheque editor — correct amount / reference / description on existing rows ──
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ amount: '', chequeNumber: '', description: '' });
+  const [editForm, setEditForm] = useState({ amount: '', chequeNumber: '', description: '', paymentMethod: 'cheque' });
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
   const startEdit = (p: ContractPayment) => {
@@ -1078,6 +1093,7 @@ function DetailsDrawer({
       amount: p.amount != null ? String(p.amount) : '',
       chequeNumber: p.chequeNumber ?? '',
       description: p.description ?? '',
+      paymentMethod: p.paymentMethod ?? 'cheque',
     });
   };
   const saveEdit = async (paymentId: number) => {
@@ -1089,6 +1105,7 @@ function DetailsDrawer({
         amount: amt,
         chequeNumber: editForm.chequeNumber.trim() || null,
         description: editForm.description.trim() || null,
+        paymentMethod: editForm.paymentMethod,
       });
       setEditingId(null);
     } catch (e) {
@@ -1295,14 +1312,76 @@ function DetailsDrawer({
                   <div className="sech"><span className="si"><DollarSign size={16} /></span><span className="st">Security deposit</span></div>
                   <div className="secb">
                     <table className="ptable">
-                      <thead><tr><th>Amount</th><th>Reference</th><th>Date</th><th>Status</th></tr></thead>
+                      <thead><tr><th>Amount</th><th>Reference</th><th>Method</th><th>Date</th><th>Status</th></tr></thead>
                       <tbody>
-                        <tr>
-                          <td className="amt">{fmtAed(depositRow.amount)}</td>
-                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
-                          <td>{fmtDate(depositRow.transactionDate)}</td>
-                          <td><span className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}>{(depositRow.chequeStatus ?? 'Cleared').replace(/^./, c => c.toUpperCase())}</span></td>
-                        </tr>
+                        <Fragment>
+                          <tr>
+                            <td className="amt">{fmtAed(depositRow.amount)}</td>
+                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
+                            <td>{fmtMethod(depositRow.paymentMethod)}</td>
+                            <td>{fmtDate(depositRow.transactionDate)}</td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <select
+                                  className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}
+                                  style={{ cursor: 'pointer' }}
+                                  value={depositRow.chequeStatus ?? 'cleared'}
+                                  disabled={statusBusy === depositRow.id}
+                                  onChange={e => void changeStatus(depositRow.id, e.target.value)}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="cleared">Cleared</option>
+                                  <option value="bounced">Bounced</option>
+                                  <option value="cancelled">Cancelled</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  className="mini-btn view"
+                                  title="Edit amount / reference / description"
+                                  onClick={() => editingId === depositRow.id ? setEditingId(null) : startEdit(depositRow)}
+                                >
+                                  <Pencil size={12} /> Edit
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {editingId === depositRow.id && (
+                            <tr>
+                              <td colSpan={5} style={{ background: 'var(--jade-tint)' }}>
+                                <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                  <p className="subhead">Correct security-deposit details</p>
+                                  <div className="field"><label>Description</label>
+                                    <input className="input" value={editForm.description} placeholder="e.g. Security deposit"
+                                      onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
+                                  </div>
+                                  <div className="grid2">
+                                    <div className="field"><label>Amount (AED)</label>
+                                      <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
+                                        onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                    </div>
+                                    <div className="field"><label>Payment method</label>
+                                      <select className="input" value={editForm.paymentMethod}
+                                        onChange={e => setEditForm(v => ({ ...v, paymentMethod: e.target.value }))}>
+                                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                      </select>
+                                    </div>
+                                  </div>
+                                  <div className="field"><label>Cheque / reference no.</label>
+                                    <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
+                                      onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                  </div>
+                                  {editErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{editErr}</p>}
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                    <button className="btn btn-jade btn-sm" disabled={editBusy} onClick={() => void saveEdit(depositRow.id)}>
+                                      <Check size={14} /> {editBusy ? 'Saving…' : 'Save changes'}
+                                    </button>
+                                    <button className="btn btn-ghost btn-sm" disabled={editBusy} onClick={() => { setEditingId(null); setEditErr(null); }}>Cancel</button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       </tbody>
                     </table>
                   </div>
@@ -1318,7 +1397,7 @@ function DetailsDrawer({
                 </div>
                 <div className="secb">
                   <table className="ptable">
-                    <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Due date</th><th>Status</th></tr></thead>
+                    <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
                       {rentRows.map((p, i) => (
                         <Fragment key={p.id}>
@@ -1332,6 +1411,7 @@ function DetailsDrawer({
                             )}
                           </td>
                           <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}</td>
+                          <td>{fmtMethod(p.paymentMethod)}</td>
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1360,7 +1440,7 @@ function DetailsDrawer({
                         </tr>
                         {editingId === p.id && (
                           <tr>
-                            <td colSpan={6} style={{ background: 'var(--jade-tint)' }}>
+                            <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
                               <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
                                 <p className="subhead">Correct cheque details</p>
                                 <div className="field"><label>Description</label>
@@ -1372,10 +1452,16 @@ function DetailsDrawer({
                                     <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
                                       onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
                                   </div>
-                                  <div className="field"><label>Cheque / reference no.</label>
-                                    <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
-                                      onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                  <div className="field"><label>Payment method</label>
+                                    <select className="input" value={editForm.paymentMethod}
+                                      onChange={e => setEditForm(v => ({ ...v, paymentMethod: e.target.value }))}>
+                                      {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                    </select>
                                   </div>
+                                </div>
+                                <div className="field"><label>Cheque / reference no.</label>
+                                  <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
+                                    onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
                                 </div>
                                 {showVat && (
                                   <p className="note" style={{ marginTop: 2 }}>VAT ({contract.rentVatRate ?? 0}%) is recalculated from the corrected amount automatically.</p>
@@ -1394,17 +1480,17 @@ function DetailsDrawer({
                         </Fragment>
                       ))}
                       {rentRows.length === 0 && (
-                        <tr><td colSpan={6}><span className="note">No payments recorded yet.</span></td></tr>
+                        <tr><td colSpan={7}><span className="note">No payments recorded yet.</span></td></tr>
                       )}
                     </tbody>
                     <tfoot>
                       {showVat && (
                         <>
-                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td colSpan={3} /></tr>
-                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td colSpan={3} /></tr>
+                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td colSpan={4} /></tr>
+                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td colSpan={4} /></tr>
                         </>
                       )}
-                      <tr><td colSpan={2}>{showVat ? 'Total (incl. VAT)' : 'Total'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={3} /></tr>
+                      <tr><td colSpan={2}>{showVat ? 'Total (incl. VAT)' : 'Total'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={4} /></tr>
                     </tfoot>
                   </table>
 
@@ -1725,6 +1811,84 @@ function SignaturePad({ onChange }: { onChange: (d: string | null) => void }) {
           Clear signature
         </button>
       )}
+    </div>
+  );
+}
+
+/** Inline landlord-signature field shown on the page (no modal) so the landlord
+ *  can countersign directly. Same role/endpoint as SignModal. */
+function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; onSigned: () => void }) {
+  const [sig, setSig] = useState<string | null>(null);
+  const [name, setName] = useState(contract.landlord.companyName || contract.landlord.name || '');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
+
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string } = {
+        role: 'landlord',
+        signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
+        method: 'online',
+      };
+      if (mode === 'canvas') body.signatureImage = sig!;
+      else                   body.typedName     = name.trim();
+      const res = await fetch(`/api/contracts/${contract.id}/sign`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Sign failed: ${res.status}`);
+      setDone(true);          // hold the success state until the parent reload swaps this out
+      onSigned();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Sign failed');
+      setBusy(false);
+    }
+  };
+  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && !busy;
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--jade-edge, #bfe3d6)', borderRadius: 'var(--r-lg)', padding: 16, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <span className="mti" style={{ background: 'var(--jade)' }}><FileSignature size={16} /></span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink, #1a1916)' }}>Sign this contract</div>
+          <div className="note">Add your landlord signature below to countersign — no extra steps.</div>
+        </div>
+      </div>
+      <div className="signas">
+        <span className="sa-ic"><BadgeCheck size={20} /></span>
+        <div>
+          <div className="sa-l">Signing as Landlord</div>
+          <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button type="button" className={'btn btn-sm ' + (mode === 'canvas' ? 'btn-jade' : 'btn-ghost')} onClick={() => setMode('canvas')}>
+          Draw signature
+        </button>
+        <button type="button" className={'btn btn-sm ' + (mode === 'typed' ? 'btn-jade' : 'btn-ghost')} onClick={() => setMode('typed')}>
+          Type name
+        </button>
+      </div>
+      {mode === 'canvas' ? (
+        <SignaturePad onChange={setSig} />
+      ) : (
+        <div className="field">
+          <label>Typed name</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} />
+        </div>
+      )}
+      {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+        <button className="btn btn-jade" disabled={!canSubmit || done} onClick={submit}>
+          <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : 'Sign as Landlord'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2054,9 +2218,11 @@ export default function ContractV2Page() {
           .then(r => (r.ok ? r.json() : null))
           .then((insp: MoveInInsp | null) => setMoveInInsp(insp ?? null))
           .catch(() => null);
-        // Only load the move-out inspection once the lease is winding down
-        // (termination accepted, still active) — otherwise it's not yet relevant.
-        const winding = data.termination?.response === 'accepted' && data.status === 'active';
+        // Load the move-out inspection + settlement once the lease is winding
+        // down — either an accepted early termination, or the customer declined
+        // the renewal to vacate (move-out at the scheduled lease end).
+        const winding = (data.termination?.response === 'accepted' && data.status === 'active')
+          || !!data.vacateAtEnd;
         if (winding) {
           fetch(`/api/contracts/${params.id}/inspection?type=move_out`, { credentials: 'include', signal: ctrl.signal })
             .then(r => (r.ok ? r.json() : null))
@@ -2107,9 +2273,12 @@ export default function ContractV2Page() {
   }
 
   const mode: 'new' | 'renewal' = contract.contractType === 'renewal' ? 'renewal' : 'new';
-  // Wind-down (Phase 6c): once a termination is accepted while the lease is
-  // still active, surface the actionable move-out inspection step after Active.
-  const isWinding = contract.termination?.response === 'accepted' && contract.status === 'active';
+  // Wind-down (Phase 6c): surface the actionable move-out inspection + deposit
+  // settlement steps when the lease is ending — either an accepted early
+  // termination (still active), or the customer declined the renewal to vacate
+  // (move-out at the scheduled lease end). `vacateAtEnd` carries through expiry.
+  const isWinding = (contract.termination?.response === 'accepted' && contract.status === 'active')
+    || !!contract.vacateAtEnd;
   const baseSteps = mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
   const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, SETTLEMENT_STEP] : baseSteps;
   const doneArr = steps.map(s => isDone(s.key, derived));
@@ -2118,8 +2287,12 @@ export default function ContractV2Page() {
   const selIdx = selKey ? Math.max(0, steps.findIndex(s => s.key === selKey)) : autoIdx;
   const selStep = steps[selIdx];
 
-  // Lifecycle dead-ends
-  const isDeclinedRenewal = contract.contractType === 'renewal' && contract.renewalAccepted === 'rejected';
+  // Lifecycle dead-ends — only the ARCHIVED renewal proposal row is a dead-end.
+  // An active lease whose own renewal was declined (incl. decline-to-vacate) is
+  // NOT a dead-end: it keeps running to its end and shows the move-out wind-down.
+  const isDeclinedRenewal = contract.contractType === 'renewal'
+    && contract.renewalAccepted === 'rejected'
+    && contract.contractActive === false;
   const isSuperseded = contract.contractType !== 'renewal' && !contract.contractActive && (contract.status === 'pending' || contract.status === 'issued');
 
   // Actions
@@ -2279,7 +2452,7 @@ export default function ContractV2Page() {
   // PATCH /api/contracts/:id/payments/:paymentId — status, or correct amount / reference / description.
   const onUpdatePayment = async (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; chequeNumber?: string | null;
-    description?: string | null; transactionDate?: string | null;
+    description?: string | null; transactionDate?: string | null; paymentMethod?: string;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -2501,8 +2674,19 @@ export default function ContractV2Page() {
   const missingSteps = steps.filter((s, i) => s.key !== 'active' && !doneArr[i]);
   const allActive = isDone('active', derived);
 
-  // KYC docs = customer-owned documents in contract.documents
-  const kycDocs = (contract.documents ?? []).filter(d => d.ownerType === 'customer' || d.ownerType === 'tenant');
+  // Landlord (you) can sign once the contract is issued and not yet countersigned.
+  // Mirrors the customer page, which exposes a "Sign Contract" button in its top bar
+  // rather than only inside the workflow stepper.
+  const canLandlordSign = contract.status === 'issued' && !derived.landlordSigned && !isSuperseded && !isDeclinedRenewal;
+
+  // KYC docs = customer-owned documents in contract.documents.
+  // On a RENEWAL, valid documents are already on file, so we only surface the
+  // ones that are EXPIRED (they're the only profile docs that need re-collecting).
+  // New contracts show the full set.
+  const allKycDocs = (contract.documents ?? []).filter(d => d.ownerType === 'customer' || d.ownerType === 'tenant');
+  const kycDocs = contract.contractType === 'renewal'
+    ? allKycDocs.filter(d => d.expiryDate && new Date(d.expiryDate) < new Date())
+    : allKycDocs;
 
   return (
     <div className="quest-page">
@@ -2527,8 +2711,35 @@ export default function ContractV2Page() {
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Download size={14} /> PDF
             </Link>
+            {derived.landlordSigned && (
+              <span className="pill celebrate" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <BadgeCheck size={13} /> You signed
+              </span>
+            )}
           </div>
         </div>
+
+        {/* Inline landlord signature field — sign directly here, no modal. */}
+        {canLandlordSign && (
+          <InlineLandlordSign contract={contract} onSigned={() => void reload()} />
+        )}
+
+        {/* Vacate-on-renewal-decline — customer won't renew and is moving out.
+            The move-out inspection + deposit settlement steps are surfaced below. */}
+        {contract.vacateAtEnd && (
+          <div className="qbanner waiting" style={{ marginBottom: 4 }}>
+            <span className="bic"><Key size={18} /></span>
+            <div style={{ flex: 1 }}>
+              <p className="bt">Customer is vacating — renewal declined</p>
+              <p className="bp">
+                {contract.tenant.name ?? 'The customer'} won’t renew and will move out
+                {contract.endDate ? ` on ${fmtDate(contract.endDate)}` : ' at lease end'}. Complete the move-out inspection and deposit settlement.
+              </p>
+              {contract.renewalRejectionReason && <div className="quote">&ldquo;{contract.renewalRejectionReason}&rdquo;</div>}
+            </div>
+            <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'center' }} onClick={() => setSelKey('moveout')}>Go to move-out</button>
+          </div>
+        )}
 
         {/* Missing strip */}
         {!isSuperseded && !isDeclinedRenewal && (

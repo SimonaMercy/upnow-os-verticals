@@ -12,6 +12,7 @@ import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { HowItWorks } from '@/components/upnow/HowItWorks';
 import { TrustSignals } from '@/components/upnow/TrustSignals';
 import { Footer } from '@/components/upnow/Footer';
+import { SignupChoice } from '@/components/upnow/SignupChoice';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -1122,6 +1123,9 @@ export function LandingPageV2() {
         <PathsSection />
 
         <GrowSection />
+
+        {/* Sign-up section — the #signup anchor the "Sign up" links target. */}
+        <SignupChoice />
       </main>
 
       <Footer />

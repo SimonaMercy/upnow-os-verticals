@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { useParams, useSearchParams, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import {
   Plus, Trash2, Save, Printer, ArrowLeft, CheckCircle, Loader2,
   AlertCircle, RotateCcw, UploadCloud, X, Camera, Paperclip, Images,
@@ -66,9 +67,26 @@ interface ContractMeta {
   property: string;
   unit: string;
   tenantName: string;
+  tenantPhone: string;
   tenantId?: number | null;
   moveInDate: string | null;
   moveOutDate: string | null;
+  contractEndDate: string | null;
+}
+
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  const dt = new Date(d.length === 10 ? d + 'T00:00:00' : d);
+  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function InfoCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-0.5">{label}</p>
+      <p className="text-sm font-semibold text-[#1a1916]">{value || '—'}</p>
+    </div>
+  );
 }
 
 /** Generate + copy a purpose-scoped tenant portal link (move-in / move-out
@@ -662,8 +680,11 @@ function LegendChip({ letter, label, color }: { letter: string; label: string; c
 export default function InspectionPage() {
   const params       = useParams<{ id: string }>();
   const searchParams = useSearchParams();
-  const router       = useRouter();
+  const pathname     = usePathname();
   const inspType     = (searchParams.get('type') ?? 'move_in') as InspType;
+  // Back to the contract page — works even when opened directly (router.back()
+  // is a no-op with no history). Keeps the manager vs RP route context.
+  const backHref = (pathname ?? '').replace(/\/inspection\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${params?.id}/v2`;
 
   const [meta, setMeta]   = useState<ContractMeta | null>(null);
   const [data, setData]   = useState<InspectionData>(makeBlankData);
@@ -703,14 +724,20 @@ export default function InspectionPage() {
         const c = await contractRes.json();
         const startDate = c.startDate ?? c.contractStartDate ?? null;
         const endDate   = c.endDate ?? c.contractEndDate ?? null;
-        defaultDate = (inspType === 'move_out' ? endDate : startDate) ?? '';
+        // On an early termination the actual move-out is the termination
+        // effective date (when the tenancy winds down), not the original lease end.
+        const termEffective = c.termination?.effectiveDate ?? null;
+        const moveOutDate = termEffective ?? endDate;
+        defaultDate = (inspType === 'move_out' ? moveOutDate : startDate) ?? '';
         setMeta({
           property:    c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit:        c.unit?.number ?? c.unit?.unitNumber ?? '',
           tenantName:  c.tenant?.name ?? '',
+          tenantPhone: c.tenant?.phone ?? '',
           tenantId:    c.tenant?.id ?? null,
           moveInDate:  startDate,
-          moveOutDate: endDate,
+          moveOutDate: moveOutDate,
+          contractEndDate: moveOutDate,
         });
         setData(d => d.moveInDate ? d : { ...d, moveInDate: defaultDate });
       }
@@ -808,9 +835,9 @@ export default function InspectionPage() {
 
       {/* Topbar */}
       <div className="flex items-center justify-between print:hidden">
-        <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
+        <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
           <ArrowLeft size={15} /> Back to contract
-        </button>
+        </Link>
         <div className="flex items-center gap-2">
           <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
             <Printer size={14} /> Print
@@ -834,6 +861,26 @@ export default function InspectionPage() {
           </p>
         )}
       </div>
+
+      {/* Printable report header — tenant, property + key dates */}
+      {meta && (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
+          <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#f4f3ef]">
+            <h2 className="text-base font-bold text-[#1a1916]">{title} Report</h2>
+            <span className="text-xs text-[#9b9890]">Contract #{contractId}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
+            <InfoCell label="Tenant name" value={meta.tenantName} />
+            <InfoCell label="Tenant mobile" value={meta.tenantPhone} />
+            <InfoCell label={`${title} date`} value={fmtDate(data.inspectionDate ?? data.reportGeneratedDate)} />
+            <InfoCell label="Building" value={meta.property} />
+            <InfoCell label="Unit no." value={meta.unit} />
+            <InfoCell label="Inspector" value={data.inspectorName} />
+            <InfoCell label="Handover date" value={fmtDate(meta.moveInDate)} />
+            <InfoCell label="Contract end date" value={fmtDate(meta.contractEndDate)} />
+          </div>
+        </div>
+      )}
 
       {/* Status banners */}
       {fullySigned && (
@@ -894,21 +941,9 @@ export default function InspectionPage() {
           <LegendChip letter="D" label="Damaged" color="bg-[#ef4444]" />
         </div>
 
-        {/* Header info */}
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
+        {/* Header info — editable inspection fields (tenant/property shown in the report header above) */}
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 print:hidden">
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Property</label>
-              <input type="text" value={meta?.property ?? ''} disabled className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 bg-[#f9f8f6] text-[#6b6860]" />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Unit</label>
-              <input type="text" value={meta?.unit ?? ''} disabled className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 bg-[#f9f8f6] text-[#6b6860]" />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Tenant</label>
-              <input type="text" value={meta?.tenantName ?? ''} disabled className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 bg-[#f9f8f6] text-[#6b6860]" />
-            </div>
             <div>
               <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">{isMoveIn ? 'Move-In Date' : 'Move-Out Date'}</label>
               <input type="date" value={data.moveInDate}
@@ -998,6 +1033,13 @@ export default function InspectionPage() {
 
       {/* ── Photo Gallery (after form) ───────────────────────────────────── */}
       <PhotoGallery areas={data.areas} globalPhotos={data.photos} />
+
+      {/* Acknowledgement — both parties confirm the recorded condition before signing */}
+      <div className="bg-[#fafaf8] border border-[#f0efe9] rounded-2xl p-4 text-xs text-[#4b4b46] leading-relaxed">
+        {isMoveIn
+          ? `The tenant and rental provider confirm that ${meta?.unit ? `Unit ${meta.unit}` : 'the unit'}${meta?.property ? ` at ${meta.property}` : ''} was inspected together and that the condition recorded above accurately reflects its state at handover / move-in.`
+          : `The tenant and rental provider confirm that ${meta?.unit ? `Unit ${meta.unit}` : 'the unit'}${meta?.property ? ` at ${meta.property}` : ''} was inspected together at move-out and that the condition recorded above accurately reflects its state. Any damages or outstanding dues noted may be deducted from the security deposit as part of the final settlement.`}
+      </div>
 
       {/* ── Signature row: Customer Signature | Inspector Signature ─────────
            Customer column: always shown (placeholder until tenant signs).

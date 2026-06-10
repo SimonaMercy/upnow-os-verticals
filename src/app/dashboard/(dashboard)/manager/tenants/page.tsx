@@ -13,10 +13,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Search, X, Users, Lock } from 'lucide-react';
+import { Search, X, Users, Lock, Plus } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 type ContractStatus = 'active' | 'terminated' | 'none';
@@ -78,6 +79,9 @@ export default function ManagerTenantsPage() {
     ? Number(selectedRp)
     : (rps.find(r => r.permissions.canManageAgreements)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
   const allowed = effectiveRp != null && canForRp('canManageAgreements', effectiveRp);
+  const canCreate = effectiveRp != null && canForRp('canCreateContracts', effectiveRp);
+  const router = useRouter();
+  const [showAdd, setShowAdd] = useState(false);
 
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,7 +175,31 @@ export default function ManagerTenantsPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">All current and past customers across the landlord’s units.</p>
         </div>
+        {canCreate && (
+          <button onClick={() => setShowAdd(true)}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65]">
+            <Plus size={15} /> Add Customer
+          </button>
+        )}
       </div>
+
+      {showAdd && effectiveRp != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
+            <CustomerForm
+              mode="create"
+              method="POST"
+              submitUrl={`/api/manager/tenants?rp=${effectiveRp}`}
+              onCancel={() => setShowAdd(false)}
+              onDone={(r) => {
+                setShowAdd(false);
+                if (r.tenantId) router.push(`/dashboard/manager/contracts/new?rp=${effectiveRp}&tenantId=${r.tenantId}${r.name ? `&tenantName=${encodeURIComponent(r.name)}` : ''}`);
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

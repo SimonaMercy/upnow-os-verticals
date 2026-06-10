@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Search, X, Users } from 'lucide-react';
+import { Search, X, Users, Plus } from 'lucide-react';
+import { CustomerForm } from '@/components/upnow/CustomerForm';
 
 type Customer = {
   id: number;
@@ -25,6 +27,8 @@ function calcRenewalDays(endDate: string | null): number | null {
 }
 
 export default function TenantsPage() {
+  const router = useRouter();
+  const [showAdd, setShowAdd] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -107,7 +111,31 @@ export default function TenantsPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">All current and past customers across your units.</p>
         </div>
+        <button onClick={() => setShowAdd(true)}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65]">
+          <Plus size={15} /> Add Customer
+        </button>
       </div>
+
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
+            <CustomerForm
+              mode="create"
+              submitUrl="/api/contracts/tenants"
+              method="POST"
+              onCancel={() => setShowAdd(false)}
+              onDone={(r) => {
+                setShowAdd(false);
+                // New customers have no contract yet (so the contract-scoped list/detail
+                // won't show them); take the RP straight to the contract wizard, prefilled.
+                if (r.tenantId) router.push(`/rental-provider/dashboard/contracts/new?tenantId=${r.tenantId}${r.name ? `&tenantName=${encodeURIComponent(r.name)}` : ''}`);
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

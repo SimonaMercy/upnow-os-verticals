@@ -5,13 +5,14 @@
  * GET /api/contracts/tenants/:id → profile/KYC + financials + every lease the
  * customer holds with the RP + their KYC documents.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, User, FileText, CreditCard, ExternalLink, Mail, Phone, IdCard,
-  Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Files,
+  Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Files, Pencil,
 } from 'lucide-react';
+import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 
 type Lease = {
@@ -81,11 +82,15 @@ export default function CustomerDetailPage() {
   const detailUrl = isManager
     ? `/api/manager/tenants/${params?.id}?rp=${rpParam ?? ''}`
     : `/api/contracts/tenants/${params?.id}`;
+  const editUrl = isManager
+    ? `/api/manager/tenants/${params?.id}?rp=${rpParam ?? ''}`
+    : `/api/contracts/tenants/${params?.id}`;
   const [data, setData] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!params?.id) return;
     setLoading(true);
     fetch(detailUrl, { credentials: 'include' })
@@ -94,6 +99,7 @@ export default function CustomerDetailPage() {
       .catch(e => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
   }, [detailUrl, params?.id]);
+  useEffect(() => { load(); }, [load]);
 
   if (loading) return <div className="p-6 text-sm text-[#9b9890]">Loading customer…</div>;
   if (error || !data) {
@@ -168,11 +174,35 @@ export default function CustomerDetailPage() {
         <div className="w-14 h-14 rounded-2xl bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
           {isCompany ? <Building2 size={26} /> : <User size={26} />}
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold text-[#1a1916]">{c.name ?? '—'}</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">{isCompany ? 'Company' : 'Individual'} · Customer #{c.id}</p>
         </div>
+        {!editing && (
+          <button onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-full border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef]">
+            <Pencil size={14} /> Edit
+          </button>
+        )}
       </div>
+
+      {editing && (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 mb-6">
+          <h2 className="text-base font-bold text-[#1a1916] mb-3">Edit customer</h2>
+          <CustomerForm
+            mode="edit"
+            method="PATCH"
+            submitUrl={editUrl}
+            initial={{
+              firstName: c.firstName, lastName: c.lastName, name: c.name, email: c.email, phone: c.phone,
+              emiratesIdNumber: c.emiratesId, nationality: c.nationality, gender: c.gender,
+              dateOfBirth: c.dateOfBirth, entityType: c.entityType, companyName: c.companyName,
+            }}
+            onCancel={() => setEditing(false)}
+            onDone={() => { setEditing(false); load(); }}
+          />
+        </div>
+      )}
 
       {/* Action items — RED */}
       {actions.length > 0 && (

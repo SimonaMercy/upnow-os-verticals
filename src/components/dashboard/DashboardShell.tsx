@@ -104,7 +104,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { section: 'More' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance' },
-    { label: 'My Documents',     href: '/dashboard/manager/documents',  icon: FileText },
+    { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
   ],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },

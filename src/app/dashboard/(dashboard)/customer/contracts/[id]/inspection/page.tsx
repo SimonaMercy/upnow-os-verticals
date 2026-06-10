@@ -12,17 +12,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature, Printer } from 'lucide-react';
 
 /**
  * Back link that works whether the page was opened in a new tab (no history)
  * or via in-app navigation. Always navigates to the parent contract detail.
  */
 function BackLink({ contractId }: { contractId: string | undefined }) {
-  const href = contractId ? `/dashboard/customer/contracts/${contractId}` : '/dashboard/customer/spaces';
+  const sp = useSearchParams();
+  // Return to the tenant's space. Prefer the exact space they came from (?from),
+  // else the contract's own space (v2 resolves a `c-<id>` key directly). Only
+  // honour same-origin relative paths.
+  const from = sp.get('from');
+  const safeFrom = from && from.startsWith('/') && !from.startsWith('//') ? from : null;
+  const href = safeFrom
+    ?? (contractId ? `/dashboard/customer/spaces/v2/c-${contractId}` : '/dashboard/customer/spaces');
   return (
     <Link href={href} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] w-fit">
-      <ArrowLeft size={15} /> Back to contract
+      <ArrowLeft size={15} /> Back to my space
     </Link>
   );
 }
@@ -50,6 +57,30 @@ interface InspectionData {
   tenantSignedAt?: string | null;
   rpCounterSig?: string | null;
   rpCounterSignedAt?: string | null;
+}
+
+interface InspMeta {
+  tenantName: string;
+  tenantPhone: string;
+  unitNumber: string;
+  buildingName: string;
+  handoverDate: string | null;     // move-in / handover
+  contractEndDate: string | null;  // effective end (termination date if terminating, else lease end)
+}
+
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  const dt = new Date(d.length === 10 ? d + 'T00:00:00' : d);
+  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function InfoCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-0.5">{label}</p>
+      <p className="text-sm font-semibold text-[#1a1916]">{value || '—'}</p>
+    </div>
+  );
 }
 
 function condLabel(c: InspectionItem['inCondition']) {
@@ -133,6 +164,7 @@ export default function TenantInspectionPage() {
   const title = isMoveIn ? 'Move-In Inspection' : 'Move-Out Inspection';
 
   const [data, setData] = useState<InspectionData | null>(null);
+  const [meta, setMeta] = useState<InspMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sigImg, setSigImg] = useState<string | null>(null);
@@ -144,7 +176,13 @@ export default function TenantInspectionPage() {
     if (!contractId) return;
     setLoading(true); setLoadError(null);
     try {
-      const res = await fetch(`/api/contracts/tenant/${contractId}/inspection?type=${inspType}`, { credentials: 'include' });
+      // Inspection (the report) + the contract (unit/building/dates) + own profile
+      // (tenant name/mobile) — the latter two power the printable header.
+      const [res, listRes, meRes] = await Promise.all([
+        fetch(`/api/contracts/tenant/${contractId}/inspection?type=${inspType}`, { credentials: 'include' }),
+        fetch(`/api/contracts/tenant`, { credentials: 'include' }),
+        fetch(`/api/auth/me`, { credentials: 'include' }),
+      ]);
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
         setLoadError((b as { message?: string }).message ?? 'Failed to load inspection');
@@ -154,6 +192,25 @@ export default function TenantInspectionPage() {
       if (!body) { setLoadError('The rental provider has not submitted this inspection yet.'); return; }
       setData(body);
       if (body.tenantSig) setSigned(true);
+
+      try {
+        const list = listRes.ok ? (await listRes.json()) : [];
+        const c = Array.isArray(list) ? list.find((x: { id: number }) => x.id === contractId) : null;
+        const me = meRes.ok ? await meRes.json() : null;
+        // Some accounts have `name` polluted with the phone number (legacy OTP
+        // signup) — prefer firstName + lastName, and ignore a phone-like name.
+        const composedName = [me?.firstName, me?.lastName].filter(Boolean).join(' ').trim();
+        const rawName = (me?.name ?? '').trim();
+        const tenantName = composedName || (/^\+?[\d\s()-]{6,}$/.test(rawName) ? '' : rawName);
+        setMeta({
+          tenantName,
+          tenantPhone: me?.phone ?? '',
+          unitNumber: c?.unit?.unitNumber ?? c?.unit?.number ?? '',
+          buildingName: c?.property?.buildingName ?? '',
+          handoverDate: body.moveInDate || c?.startDate || null,
+          contractEndDate: c?.termination?.effectiveDate ?? c?.endDate ?? null,
+        });
+      } catch { /* header is best-effort; report still renders */ }
     } catch {
       setLoadError('Unexpected error loading inspection');
     } finally { setLoading(false); }
@@ -205,16 +262,36 @@ export default function TenantInspectionPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-      <BackLink contractId={params?.id} />
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6 print:py-0 print:max-w-none" id="inspection-report">
+      <div className="no-print"><BackLink contractId={params?.id} /></div>
 
-      <div>
-        <h1 className="text-xl font-bold text-[#1a1916]">{title}</h1>
-        <p className="text-xs text-[#9b9890] mt-1">
-          Inspector: <strong className="text-[#1a1916]">{data.inspectorName || '—'}</strong>
-          {data.inspectionDate && <> · Inspection date: <strong className="text-[#1a1916]">{new Date(data.inspectionDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong></>}
-          {data.reportGeneratedDate && <> · Report generated: <strong className="text-[#1a1916]">{new Date(data.reportGeneratedDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong></>}
-        </p>
+      <div className="flex items-start justify-between gap-3 no-print">
+        <div>
+          <h1 className="text-xl font-bold text-[#1a1916]">{title}</h1>
+          <p className="text-xs text-[#9b9890] mt-1">Review the recorded condition, then sign to confirm.</p>
+        </div>
+        <button type="button" onClick={() => window.print()}
+          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
+          <Printer size={13} /> Print
+        </button>
+      </div>
+
+      {/* Printable header — tenant, property + key dates */}
+      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
+        <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#f4f3ef]">
+          <h2 className="text-base font-bold text-[#1a1916]">{title} Report</h2>
+          <span className="text-xs text-[#9b9890]">Contract #{contractId}</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
+          <InfoCell label="Tenant name" value={meta?.tenantName ?? ''} />
+          <InfoCell label="Tenant mobile" value={meta?.tenantPhone ?? ''} />
+          <InfoCell label={`${title} date`} value={fmtDate(data.inspectionDate ?? data.reportGeneratedDate)} />
+          <InfoCell label="Building" value={meta?.buildingName ?? ''} />
+          <InfoCell label="Unit no." value={meta?.unitNumber ?? ''} />
+          <InfoCell label="Inspector" value={data.inspectorName ?? ''} />
+          <InfoCell label="Handover date" value={fmtDate(meta?.handoverDate)} />
+          <InfoCell label="Contract end date" value={fmtDate(meta?.contractEndDate)} />
+        </div>
       </div>
 
       {/* Inspection content — read-only summary of the RP's submission */}
@@ -245,36 +322,47 @@ export default function TenantInspectionPage() {
         </div>
       )}
 
-      {/* Tenant signature */}
+      {/* Acknowledgement + signature */}
       <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4">
-        <div>
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
-            <FileSignature size={14} className="text-[#2e9f82]" /> Your Signature
-          </h2>
-          <p className="text-xs text-[#9b9890] mt-0.5">
-            Confirm the condition above by signing below. Once signed, this can&apos;t be changed.
-          </p>
-        </div>
+        <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
+          <FileSignature size={14} className="text-[#2e9f82]" /> Acknowledgement &amp; Signature
+        </h2>
+        <p className="text-xs text-[#4b4b46] leading-relaxed bg-[#fafaf8] border border-[#f0efe9] rounded-xl p-3">
+          {isMoveIn
+            ? `I, ${meta?.tenantName || 'the tenant'}, confirm that I have inspected the above unit and that the recorded condition accurately reflects its state at the time of handover / move-in.`
+            : `I, ${meta?.tenantName || 'the tenant'}, confirm that I have inspected the above unit and that the recorded condition accurately reflects its state at move-out. I understand that any damages or outstanding dues noted above may be deducted from my security deposit as part of the final settlement.`}
+        </p>
+
         {signed ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
-              <CheckCircle2 size={15} className="text-[#2e9f82]" />
-              <p className="text-sm font-medium text-[#1a7a5a]">You have signed this inspection ✓</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-1">Tenant</p>
+                <div className="border border-[#e8e6e0] rounded-lg bg-white h-24 flex items-center justify-center overflow-hidden">
+                  {data.tenantSig
+                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={data.tenantSig} alt="Tenant signature" className="max-h-20 object-contain" />
+                    : <span className="text-xs text-[#16a34a]">Signed ✓</span>}
+                </div>
+                <p className="text-[10px] text-[#6b6860] mt-1">{meta?.tenantName || ''}{data.tenantSignedAt ? ` · ${fmtDate(data.tenantSignedAt)}` : ''}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-1">Rental provider</p>
+                <div className="border border-[#e8e6e0] rounded-lg bg-white h-24 flex items-center justify-center overflow-hidden">
+                  {data.rpCounterSig
+                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={data.rpCounterSig} alt="Rental provider signature" className="max-h-20 object-contain" />
+                    : <span className="text-xs text-[#9b9890]">Awaiting counter-signature</span>}
+                </div>
+                <p className="text-[10px] text-[#6b6860] mt-1">{data.rpCounterSignedAt ? fmtDate(data.rpCounterSignedAt) : ''}</p>
+              </div>
             </div>
-            {data.rpCounterSig ? (
-              <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
-                <CheckCircle2 size={15} className="text-[#2e9f82]" />
-                <p className="text-sm font-medium text-[#1a7a5a]">Rental provider has counter-signed — tenancy is now active ✓</p>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 bg-[#fffbeb] border border-[#fde68a] rounded-xl px-4 py-3">
-                <AlertCircle size={15} className="text-[#92400e] shrink-0" />
-                <p className="text-sm font-medium text-[#78350f]">Awaiting rental provider counter-signature to activate tenancy</p>
-              </div>
-            )}
+            <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-2.5 no-print">
+              <CheckCircle2 size={15} className="text-[#2e9f82]" />
+              <p className="text-sm font-medium text-[#1a7a5a]">{data.rpCounterSig ? 'Both parties have signed.' : 'You have signed — awaiting the rental provider counter-signature.'}</p>
+            </div>
           </div>
         ) : (
-          <>
+          <div className="no-print space-y-3">
+            <p className="text-xs text-[#9b9890]">Tick the unit against the report above, then draw your signature. Once signed, this can&apos;t be changed.</p>
             <SigPad value={sigImg} onChange={setSigImg} />
             {signError && <p className="text-xs text-red-600">{signError}</p>}
             <button
@@ -284,11 +372,19 @@ export default function TenantInspectionPage() {
               className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 cursor-pointer"
               style={{ background: '#2e9f82' }}
             >
-              {signing ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><FileSignature size={14} /> Sign Inspection</>}
+              {signing ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><FileSignature size={14} /> Agree &amp; Sign Inspection</>}
             </button>
-          </>
+          </div>
         )}
       </div>
+
+      <style jsx global>{`
+        @media print {
+          nav, aside, .no-print { display: none !important; }
+          body { background: #fff !important; }
+          #inspection-report { margin: 0 !important; }
+        }
+      `}</style>
     </div>
   );
 }

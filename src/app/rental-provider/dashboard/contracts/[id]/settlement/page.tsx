@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
   Wallet, BadgeCheck, Banknote,
@@ -54,8 +55,11 @@ const STATUS_META: Record<SettlementStatus, { label: string; cls: string }> = {
 
 export default function SettlementPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
+  const pathname = usePathname();
   const contractId = params?.id;
+  // Back goes to the contract page (works even when opened directly — router.back()
+  // is a no-op with no history). Keeps the manager vs RP route context.
+  const backHref = (pathname ?? '').replace(/\/settlement\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${contractId}/v2`;
 
   const [meta, setMeta] = useState<ContractMeta | null>(null);
   const [status, setStatus] = useState<SettlementStatus>('draft');
@@ -70,7 +74,9 @@ export default function SettlementPage() {
   const [savedTick, setSavedTick] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const locked = status === 'agreed' || status === 'paid';
+  // Editable only as a draft. Once it's been sent to the customer the figures are
+  // shared/agreed and must not change — locked through sent → agreed → paid.
+  const locked = status !== 'draft';
 
   const apply = useCallback((s: ApiSettlement) => {
     setStatus(s.status);
@@ -170,9 +176,9 @@ export default function SettlementPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       {/* Topbar */}
       <div className="flex items-center justify-between">
-        <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
+        <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
           <ArrowLeft size={15} /> Back to contract
-        </button>
+        </Link>
         <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sm.cls}`}>{sm.label}</span>
       </div>
 
@@ -201,7 +207,7 @@ export default function SettlementPage() {
         <div className="flex items-start gap-2 text-sm bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-4 py-3">
           <AlertCircle size={15} className="text-[#c2410c] shrink-0 mt-0.5" />
           <div><p className="font-semibold text-[#9a3412]">Awaiting customer agreement</p>
-            <p className="text-xs text-[#c2410c] mt-0.5">Sent {fmtDateTime(stamps.sentAt)}. You can still edit and re-send, or mark the refund paid.</p></div>
+            <p className="text-xs text-[#c2410c] mt-0.5">Sent {fmtDateTime(stamps.sentAt)} — now locked for editing. Mark the refund paid once you’ve settled with the customer.</p></div>
         </div>
       )}
       {error && <div className="flex items-center gap-2 text-sm text-[#dc2626] bg-[#fef2f2] rounded-xl px-4 py-3"><AlertCircle size={15} /> {error}</div>}
@@ -289,7 +295,7 @@ export default function SettlementPage() {
             </button>
             <button onClick={() => void sendToCustomer()} disabled={saving || acting !== null}
               className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
-              {acting === 'send' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {status === 'sent' ? 'Re-send to customer' : 'Send to customer'}
+              {acting === 'send' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send to customer
             </button>
           </>
         )}

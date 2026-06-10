@@ -29,6 +29,21 @@ interface Detail {
   purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
 }
 
+interface InspPhoto { id: string; url: string; caption?: string }
+interface InspItem { name: string; inCondition?: string; outCondition?: string }
+interface InspArea { name: string; items?: InspItem[]; remarks?: string }
+interface Inspection {
+  areas?: InspArea[];
+  generalNotes?: string;
+  photos?: InspPhoto[];
+  moveInPhotos?: InspPhoto[];
+  inspectorName?: string;
+  rpSubmittedAt?: string | null;
+  tenantSig?: string | null;
+  tenantSignedAt?: string | null;
+  rpCounterSig?: string | null;
+}
+
 const API = (token: string, path: string) => `/api/portal/${token}${path}`;
 function instalmentLabel(n: number | null): string {
   const map: Record<number, string> = { 1: '1 - (Single Payment)', 2: '2 - (Two Payments)', 3: '3 - (Three Payments)', 4: '4 - (Four Payments)', 6: '6 - (Six Payments)', 12: '12 - (Twelve Payments)' };
@@ -51,6 +66,8 @@ export default function ContractReviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [insp, setInsp] = useState<Inspection | null>(null);
+
   const load = useCallback(() => {
     setLoading(true);
     fetch(API(token, `/contracts/${id}`), { credentials: 'omit' })
@@ -58,6 +75,19 @@ export default function ContractReviewPage() {
       .then(setD).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [token, id]);
   useEffect(() => { load(); }, [load]);
+
+  // When the link is scoped to an inspection, the tenant should review the
+  // inspection the RP recorded (not the tenancy contract) before signing.
+  const inspType: 'move_in' | 'move_out' | null =
+    d?.purpose === 'move_out' ? 'move_out' : d?.purpose === 'move_in' ? 'move_in' : null;
+  const loadInsp = useCallback(() => {
+    if (!inspType) { setInsp(null); return; }
+    fetch(API(token, `/contracts/${id}/inspection?type=${inspType}`), { credentials: 'omit' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((j: Inspection | null) => setInsp(j ?? null))
+      .catch(() => setInsp(null));
+  }, [inspType, token, id]);
+  useEffect(() => { loadInsp(); }, [loadInsp]);
 
   if (loading) return <Centered><Loader2 className="animate-spin" /> Loading contract…</Centered>;
   if (error || !d) return (
@@ -84,12 +114,28 @@ export default function ContractReviewPage() {
       <div className="max-w-3xl mx-auto px-4 py-8">
         <Link href={`/portal/${token}`} className="text-xs text-[#6b6860] flex items-center gap-1 mb-3"><ArrowLeft size={13} /> Back to documents</Link>
         <div className="flex items-center gap-2 mb-1"><ShieldCheck size={18} className="text-[#2e9f82]" /><span className="font-bold text-[#1a1916]">UpNow</span></div>
-        <h1 className="text-2xl font-bold text-[#1a1916] mt-3">Your tenancy contract — CID-{d.contract.id}</h1>
-        <p className="text-sm text-[#6b6860] mt-1">Please read the full contract below, then sign at the bottom.</p>
+        <h1 className="text-2xl font-bold text-[#1a1916] mt-3">
+          {inspType === 'move_out' ? 'Move-out inspection' : inspType === 'move_in' ? 'Move-in inspection' : 'Your tenancy contract'} — CID-{d.contract.id}
+        </h1>
+        <p className="text-sm text-[#6b6860] mt-1">
+          {inspType
+            ? 'Review the condition your rental provider recorded, then sign at the bottom to confirm.'
+            : 'Please read the full contract below, then sign at the bottom.'}
+        </p>
 
-        {/* The actual contract document */}
+        {/* Inspection links show the inspection the RP recorded; contract links show the contract document. */}
         <div className="mt-5">
-          <EjariInline data={ejari} addendums={addendums} height={680} />
+          {inspType ? (
+            insp && insp.rpSubmittedAt ? (
+              <InspectionPreview insp={insp} type={inspType} />
+            ) : (
+              <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
+                Your rental provider hasn&apos;t completed this inspection yet. Please check back once they share it.
+              </div>
+            )
+          ) : (
+            <EjariInline data={ejari} addendums={addendums} height={680} />
+          )}
         </div>
 
         {/* Any extra signed/official copies attached */}
@@ -116,16 +162,32 @@ export default function ContractReviewPage() {
         )}
 
         {showMoveIn && (
-          <Card title="Move-in inspection" icon={CheckCircle2}>
-            <p className="text-xs text-[#6b6860] mb-2">Confirm and sign your move-in inspection.</p>
-            <SignBox token={token} contractId={id} kind="move_in" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
+          <Card title="Sign the move-in inspection" icon={CheckCircle2}>
+            {!insp || !insp.rpSubmittedAt ? (
+              <p className="text-sm text-[#9b9890]">Not ready to sign yet — your rental provider is still completing the inspection.</p>
+            ) : insp.tenantSig ? (
+              <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this move-in inspection.</p>
+            ) : (
+              <>
+                <p className="text-xs text-[#6b6860] mb-2">Confirm the condition recorded above, then sign.</p>
+                <SignBox token={token} contractId={id} kind="move_in" defaultName={d.contract.tenant?.name ?? ''} onSigned={() => { load(); loadInsp(); }} />
+              </>
+            )}
           </Card>
         )}
 
         {showMoveOut && (
-          <Card title="Move-out inspection" icon={CheckCircle2}>
-            <p className="text-xs text-[#6b6860] mb-2">Confirm and sign your move-out inspection.</p>
-            <SignBox token={token} contractId={id} kind="move_out" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
+          <Card title="Sign the move-out inspection" icon={CheckCircle2}>
+            {!insp || !insp.rpSubmittedAt ? (
+              <p className="text-sm text-[#9b9890]">Not ready to sign yet — your rental provider is still completing the move-out inspection.</p>
+            ) : insp.tenantSig ? (
+              <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this move-out inspection.</p>
+            ) : (
+              <>
+                <p className="text-xs text-[#6b6860] mb-2">Confirm the move-out condition recorded above, then sign.</p>
+                <SignBox token={token} contractId={id} kind="move_out" defaultName={d.contract.tenant?.name ?? ''} onSigned={() => { load(); loadInsp(); }} />
+              </>
+            )}
           </Card>
         )}
 
@@ -202,6 +264,99 @@ function SignBox({ token, contractId, kind, defaultName, onSigned }: {
       <button onClick={submit} disabled={busy} className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60 bg-[#2e9f82] inline-flex items-center gap-1.5">
         {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : kind === 'move_out' ? 'Sign move-out' : 'Sign move-in'}
       </button>
+    </div>
+  );
+}
+
+function condMeta(v?: string): { label: string; cls: string } {
+  if (v === 'G') return { label: 'Good', cls: 'bg-[#2e9f82] text-white' };
+  if (v === 'F') return { label: 'Fair', cls: 'bg-[#f59e0b] text-white' };
+  if (v === 'D') return { label: 'Damaged', cls: 'bg-[#ef4444] text-white' };
+  return { label: '—', cls: 'bg-[#f0efe9] text-[#9b9890]' };
+}
+
+function PhotoGrid({ photos }: { photos: InspPhoto[] }) {
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      {photos.map(p => (
+        <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden border border-[#e8e6e0]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={p.url} alt={p.caption || 'photo'} className="w-full h-20 object-cover" />
+        </a>
+      ))}
+    </div>
+  );
+}
+
+/** Read-only inspection report the tenant reviews before signing on the portal. */
+function InspectionPreview({ insp, type }: { insp: Inspection; type: 'move_in' | 'move_out' }) {
+  const isOut = type === 'move_out';
+  const cols = isOut ? 'grid-cols-[1fr_5rem_5rem]' : 'grid-cols-[1fr_5rem]';
+  const Pill = ({ v }: { v?: string }) => {
+    const m = condMeta(v);
+    return <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded ${m.cls}`}>{m.label}</span>;
+  };
+  return (
+    <div className="space-y-4">
+      {/* Condition legend */}
+      <div className="flex items-center gap-3 bg-[#f9f8f6] rounded-xl px-4 py-2.5 text-xs">
+        <span className="font-semibold text-[#6b6860] uppercase tracking-wide">Condition</span>
+        <span className="inline-flex items-center gap-1.5"><Pill v="G" /></span>
+        <span className="inline-flex items-center gap-1.5"><Pill v="F" /></span>
+        <span className="inline-flex items-center gap-1.5"><Pill v="D" /></span>
+      </div>
+
+      {(insp.areas ?? []).map((area, ai) => (
+        <div key={ai} className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
+          <div className="px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef]">
+            <span className="text-sm font-bold text-[#1a1916]">{area.name || `Area ${ai + 1}`}</span>
+          </div>
+          <div className="px-5 py-3">
+            <div className={`grid ${cols} gap-3 pb-1.5 border-b border-[#f4f3ef] text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]`}>
+              <span>Item</span>
+              {isOut ? <><span className="text-center">Move-in</span><span className="text-center">Move-out</span></> : <span className="text-center">Condition</span>}
+            </div>
+            {(area.items ?? []).map((it, ii) => (
+              <div key={ii} className={`grid ${cols} gap-3 items-center py-1.5 border-b border-[#f9f8f6] last:border-0`}>
+                <span className="text-sm text-[#1a1916]">{it.name}</span>
+                {isOut ? (
+                  <>
+                    <span className="text-center"><Pill v={it.inCondition} /></span>
+                    <span className="text-center"><Pill v={it.outCondition} /></span>
+                  </>
+                ) : (
+                  <span className="text-center"><Pill v={it.inCondition} /></span>
+                )}
+              </div>
+            ))}
+            {area.remarks && <p className="text-xs text-[#6b6860] mt-2"><span className="font-semibold">Remarks:</span> {area.remarks}</p>}
+          </div>
+        </div>
+      ))}
+
+      {insp.generalNotes && (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
+          <p className="text-xs font-semibold text-[#1a1916] mb-1">General notes</p>
+          <p className="text-sm text-[#6b6860] whitespace-pre-wrap">{insp.generalNotes}</p>
+        </div>
+      )}
+
+      {(isOut && (insp.moveInPhotos ?? []).length > 0) || (insp.photos ?? []).length > 0 ? (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4 space-y-3">
+          {isOut && (insp.moveInPhotos ?? []).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-[#9b9890] mb-1.5">Move-in photos (reference)</p>
+              <PhotoGrid photos={insp.moveInPhotos!} />
+            </div>
+          )}
+          {(insp.photos ?? []).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-[#1a1916] mb-1.5">{isOut ? 'Move-out photos' : 'Move-in photos'}</p>
+              <PhotoGrid photos={insp.photos!} />
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

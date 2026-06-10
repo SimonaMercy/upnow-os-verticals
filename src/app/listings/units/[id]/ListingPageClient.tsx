@@ -7,7 +7,7 @@ import {
   MapPin, X, ChevronLeft, ChevronRight, BedDouble, Bath, Maximize2,
   Layers, Wind, CheckCircle2, Check, Shield, Clock,
   Calendar, MessageSquare, ImageIcon,
-  Flame, AppWindow, DoorOpen, Hash, Ruler,
+  Flame, AppWindow, DoorOpen, Ruler,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
@@ -103,10 +103,10 @@ function fmt(n: string | number | null) {
 }
 function fmtAed(n: string | number | null) {
   if (n == null) return null;
-  const fils = Number(n);
-  if (isNaN(fils)) return null;
-  // Prices are stored in fils (100 fils = 1 AED)
-  const aed = fils / 100;
+  // Unit prices (rental_price, market_price, security_deposit, admin_fee,
+  // service_charges) are stored in whole AED — NOT fils. Format as-is.
+  const aed = Number(n);
+  if (isNaN(aed)) return null;
   return `AED ${new Intl.NumberFormat('en-AE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(aed)}`;
 }
 function humanType(s: string) {
@@ -232,39 +232,16 @@ function InquiryPanel({
         </div>
       )}
 
-      {/* Price breakdown */}
-      <div className="bg-[#f4f3ef] rounded-xl p-4 space-y-2.5 text-sm mb-4">
-        {unit.rentalPrice != null && (
+      {/* Public listing shows the asking Annual Rent only — no deposit / fees /
+          internal market value. */}
+      {unit.rentalPrice != null && (
+        <div className="bg-[#f4f3ef] rounded-xl p-4 text-sm mb-4">
           <div className="flex justify-between items-baseline">
             <span className="text-[#6b6860]">Annual Rent</span>
             <span className="font-bold text-[#1a1916]">{fmtAed(unit.rentalPrice)}</span>
           </div>
-        )}
-        {unit.securityDeposit != null && (
-          <div className="flex justify-between items-baseline">
-            <span className="text-[#6b6860]">Security Deposit</span>
-            <span className="font-medium text-[#1a1916]">{fmtAed(unit.securityDeposit)}</span>
-          </div>
-        )}
-        {unit.adminFee != null && (
-          <div className="flex justify-between items-baseline">
-            <span className="text-[#6b6860]">Admin Fee</span>
-            <span className="font-medium text-[#1a1916]">{fmtAed(unit.adminFee)}</span>
-          </div>
-        )}
-        {unit.serviceCharges != null && (
-          <div className="flex justify-between items-baseline">
-            <span className="text-[#6b6860]">Service Charges</span>
-            <span className="font-medium text-[#1a1916]">{fmtAed(unit.serviceCharges)}</span>
-          </div>
-        )}
-        {unit.marketPrice != null && (
-          <div className="flex justify-between items-baseline border-t border-[#e8e6e0] pt-2.5 mt-1">
-            <span className="text-[#6b6860]">Market Value</span>
-            <span className="font-medium text-[#1a1916]">{fmtAed(unit.marketPrice)}</span>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Building highlights */}
       {(property.hasParking || property.hasGym || property.hasPool) && (
@@ -1463,7 +1440,6 @@ export default function ListingPageClient({ unit, property, media = [], preferre
     unit.numDoors > 0 && { icon: <DoorOpen size={18} />, label: 'Doors', value: String(unit.numDoors) },
     unit.kitchenType && { icon: <CheckCircle2 size={18} />, label: 'Kitchen', value: `${humanType(unit.kitchenType)} Kitchen` },
     unit.numBalconies > 0 && { icon: <CheckCircle2 size={18} />, label: 'Balconies', value: String(unit.numBalconies) },
-    unit.premiseNumber && { icon: <Hash size={18} />, label: 'Premise No.', value: unit.premiseNumber },
   ].filter(Boolean) as Array<{ icon: React.ReactNode; label: string; value: string }>;
 
   const facilities: string[] = (() => {

@@ -29,7 +29,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Search, X, FileText, ChevronLeft, ChevronRight,
+  Search, X, FileText, ChevronLeft, ChevronRight, Plus,
   Bell, Download, Clock, RotateCcw, Shield, Coins, Lock,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
@@ -353,6 +353,11 @@ export default function ManagerContractsPage() {
             <p>Every agreement across the landlord’s portfolio and where it sits in its lifecycle — from draft to Ejari, renewal and termination.</p>
           </div>
           <div className="right">
+            {effectiveRp != null && canForRp('canCreateContracts', effectiveRp) && (
+              <Link href={`/dashboard/manager/contracts/new?rp=${effectiveRp}`} className="btn" style={{ background: '#2e9f82', color: '#fff', borderColor: '#2e9f82' }}>
+                <Plus size={14} /> New contract
+              </Link>
+            )}
             <button type="button" className="btn btn-ghost"><Download size={14} /> Export</button>
           </div>
         </div>

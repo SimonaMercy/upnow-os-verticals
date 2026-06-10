@@ -44,8 +44,12 @@ const POS: Record<string, [number, number, number, number]> = {
 // Property-Usage radio circles (pdf-lib coords, all y≈347).
 const USAGE_X: Record<string, number> = { industrial: 152, commercial: 259.5, residential: 372.5 };
 // Signature boxes: [page, tenantCx, lessorCx, sigBaseline, dateBottom]
+// The official DLD form carries a Signatures block on ALL three pages:
+//  • page 1 (info) and page 2 (terms) — block sits at the very bottom (same y)
+//  • page 3 (additional terms) — block sits higher up, above the footer band
 const SIG: [number, number, number, number, number][] = [
   [0, 118, 392, 770, 806.2],
+  [1, 118, 392, 770, 806.2],
   [2, 118, 392, 740, 776],
 ];
 

@@ -26,14 +26,14 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Loader2, AlertCircle, Clock, MapPin, FileText, Pen, Stamp,
   Zap, Key, BadgeCheck, Mail, Phone, Wallet, Binoculars, Calendar, ChevronRight,
-  Info, Check, ChevronDown, ChevronLeft,
+  Info, ChevronDown, ChevronLeft,
   X, CheckCircle2, UploadCloud, ExternalLink, Printer,
-  Sparkles, ArrowRight, Camera, Trash2,
+  Sparkles, ArrowRight, Camera, Trash2, ClipboardCheck,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
@@ -204,6 +204,8 @@ interface ApiContract {
   unit: { id: number | null; number?: string | null; name?: string | null; unitNumber?: string | null; unitName?: string | null; unitType?: string | null; bedrooms?: number | null };
   property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null } | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
+  /** You declined the renewal to vacate → move-out + deposit settlement wind-down. */
+  vacateAtEnd?: boolean;
   moveInInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
   moveOutInspection?: { submitted: boolean; signedByTenant: boolean; signedAt: string | null } | null;
   termination?: ApiTermination | null;
@@ -409,7 +411,14 @@ function deriveStateKey(r: Resolved): StateKey {
 
   // ── 1. Renewal proposal status on the original contract wins over child state.
   if (c?.renewalAccepted === 'pending') return 'renewal_offered';
-  if (c?.renewalAccepted === 'rejected') return 'renewal_rejected';
+  if (c?.renewalAccepted === 'rejected') {
+    // Declined to VACATE → move-out wind-down on the still-active lease (handled
+    // by ActiveAction, which shows the move-out inspection + deposit settlement).
+    // Declined to NEGOTIATE → dead-end until the provider re-proposes.
+    if (c?.vacateAtEnd && c?.status === 'active') return 'active';
+    if (c?.vacateAtEnd && c?.status === 'expired') return 'terminated';
+    return 'renewal_rejected';
+  }
 
   // ── 2. Renewal child in flight — only consulted AFTER customer accepted.
   if (rc) {
@@ -1787,6 +1796,30 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const [docUploading,  setDocUploading]  = useState<string | null>(null);
   const [uploadErr,     setUploadErr]     = useState<string | null>(null);
   const [localPreviews, setLocalPreviews] = useState<Record<string, { url: string; mime: string }>>({});
+  const [eidReading, setEidReading] = useState(false);
+
+  // After an Emirates ID upload the backend runs OCR asynchronously and fills
+  // name / ID / DOB / nationality / gender on the profile. Poll the profile so
+  // those values land and render as auto-filled — with a "reading" state shown
+  // meanwhile so it doesn't feel like nothing happened.
+  const pollEidExtraction = useCallback(async (beforeId: string | null | undefined) => {
+    setEidReading(true);
+    try {
+      for (let i = 0; i < 7; i++) {
+        await new Promise(r => setTimeout(r, 1800));
+        let done = false;
+        try {
+          const me = await apiGet<{ emiratesIdNumber?: string | null }>('/auth/me');
+          if (me?.emiratesIdNumber && me.emiratesIdNumber !== (beforeId ?? null)) done = true;
+        } catch { /* keep polling */ }
+        await refreshUser();
+        if (done) break;
+      }
+    } finally {
+      setEidReading(false);
+      onRefresh();
+    }
+  }, [refreshUser, onRefresh]);
 
   async function uploadDoc(req: DocReq, file: File) {
     if (!tenantProfileId) { setUploadErr('Profile not ready.'); return; }
@@ -1809,6 +1842,9 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
       });
       setLocalPreviews(p => ({ ...p, [req.key]: { url: localUrl, mime: file.type } }));
       onRefresh();
+      if (req.key === 'emirates_id' || req.key === 'emirates_id_front') {
+        void pollEidExtraction(user?.emiratesIdNumber ?? null);
+      }
     } catch (e) {
       URL.revokeObjectURL(localUrl);
       setUploadErr(typeof e === 'string' ? e : e instanceof Error ? e.message : 'Upload failed');
@@ -1858,6 +1894,16 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {uploadErr && <ErrorBox msg={uploadErr} />}
+
+      {eidReading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 12, padding: '12px 14px' }}>
+          <Loader2 size={18} className="animate-spin" style={{ color: '#9a6a00', flexShrink: 0 }} />
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Reading your Emirates ID…</p>
+            <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '2px 0 0', lineHeight: 1.45 }}>We&apos;re extracting your details — your name, ID number, date of birth and nationality will fill in automatically.</p>
+          </div>
+        </div>
+      )}
 
       {/* Personal Details — for the v1 launch we use an admin-review
           model instead of auto-OCR:
@@ -3170,17 +3216,19 @@ const DOC_LABELS: Record<string, string> = {
 
 function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const c = resolved.contract ?? resolved.renewalContract;
+  const pathname = usePathname(); // current space URL — passed as the inspection "back" target
   const [section, setSection] = useState<'payments' | 'documents'>('payments');
   const [showTerm, setShowTerm] = useState(false);
   const tenantDocs = resolved.myDocs;
 
   if (!c) return null;
 
-  // Wind-down: termination accepted but lease still ACTIVE until the effective
-  // date (docs/CONTRACT_LIFECYCLE.md §4.3). In this state the "Request
-  // Termination" CTA no longer applies — show move-out info instead.
+  // Wind-down: the lease is ending — either a termination was accepted (still
+  // ACTIVE until the effective date, docs/CONTRACT_LIFECYCLE.md §4.3) or you
+  // declined the renewal to vacate (move-out at the scheduled lease end). In
+  // either case show move-out info + settlement instead of the renew/terminate CTAs.
   const term = c.termination;
-  const winding = term?.response === 'accepted' && c.status === 'active';
+  const winding = (term?.response === 'accepted' && c.status === 'active') || !!c.vacateAtEnd;
 
   // Deposit settlement (shown once the RP shares it during wind-down).
   const [settlement, setSettlement] = useState<ApiSettlement | null>(null);
@@ -3223,6 +3271,55 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
+
+      {/* ── Action required: review + sign the move-out inspection (top, prominent) ── */}
+      {winding && c.moveOutInspection?.submitted && !c.moveOutInspection?.signedByTenant && (
+        <div style={{
+          background: 'var(--brick-soft)', border: '1.5px solid var(--brick)', borderRadius: 16,
+          padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+          boxShadow: '0 14px 36px -22px rgba(176,58,46,0.5)',
+        }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--brick)', marginBottom: 7 }}>
+              <AlertCircle size={12} /> Action required
+            </span>
+            <p style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.01em' }}>Review &amp; sign your move-out inspection</p>
+            <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '4px 0 0', lineHeight: 1.45 }}>
+              Your rental provider recorded the unit&apos;s move-out condition. Check it against move-in, then sign to confirm.
+            </p>
+          </div>
+          <Link href={`/dashboard/customer/contracts/${c.id}/inspection?type=move_out&from=${encodeURIComponent(pathname)}`} style={{
+            flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 7,
+            padding: '13px 22px', borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+            background: 'var(--brick)', color: 'var(--paper)', textDecoration: 'none',
+          }}>
+            <ClipboardCheck size={17} /> Review &amp; sign
+          </Link>
+        </div>
+      )}
+
+      {/* ── Wind-down panel (termination accepted, lease ending) — sits right under the action button ── */}
+      {winding && (
+        <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 14, padding: '18px 20px', display: 'grid', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <X size={16} color="var(--brick)" />
+            <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--brick)', margin: 0 }}>Move-out scheduled</p>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.55 }}>
+            {term?.requestedByRole === 'tenant'
+              ? 'Your termination request was accepted.'
+              : 'Your rental provider scheduled an early end to this tenancy.'}{' '}
+            Your lease stays active until <strong>{fmtD(term?.effectiveDate)}</strong>
+            {daysLeft != null && daysLeft >= 0 ? ` — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : ''}.
+          </p>
+          {term?.reason && (
+            <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>Reason: {term.reason}</p>
+          )}
+          {settlement && (
+            <SettlementCard contractId={c.id} settlement={settlement} onAgreed={loadSettlement} />
+          )}
+        </div>
+      )}
 
       {/* ── Tenancy Pass (boarding-pass card) ── */}
       <div style={{
@@ -3321,50 +3418,6 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           )}
         </div>
       </div>
-
-      {/* ── Wind-down panel (termination accepted, lease ending) ── */}
-      {winding && (
-        <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 14, padding: '18px 20px', display: 'grid', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <X size={16} color="var(--brick)" />
-            <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--brick)', margin: 0 }}>Move-out scheduled</p>
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.55 }}>
-            {term?.requestedByRole === 'tenant'
-              ? 'Your termination request was accepted.'
-              : 'Your rental provider scheduled an early end to this tenancy.'}{' '}
-            Your lease stays active until <strong>{fmtD(term?.effectiveDate)}</strong>
-            {daysLeft != null && daysLeft >= 0 ? ` — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : ''}.
-          </p>
-          {term?.reason && (
-            <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>Reason: {term.reason}</p>
-          )}
-          <div style={{ borderTop: '1px dashed var(--brick)', paddingTop: 12, display: 'grid', gap: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--brick)', margin: 0 }}>What happens next</p>
-            <WindDownStep
-              n={1}
-              label="Move-out inspection"
-              sub="Your rental provider will schedule a final inspection of the unit before the effective date."
-              done={!!c.moveOutInspection?.signedByTenant}
-            />
-            <WindDownStep
-              n={2}
-              label="Final settlement"
-              sub={
-                settlement?.status === 'paid' ? 'Your deposit refund has been processed.'
-                : settlement?.status === 'agreed' ? 'You agreed — your refund is being processed.'
-                : settlement?.status === 'sent' ? 'Ready to review — check the breakdown below and confirm.'
-                : 'Your security deposit is refunded, less any outstanding dues or agreed deductions.'
-              }
-              done={settlement?.status === 'paid'}
-            />
-          </div>
-
-          {settlement && (
-            <SettlementCard contractId={c.id} settlement={settlement} onAgreed={loadSettlement} />
-          )}
-        </div>
-      )}
 
       {/* ── Section selector slabs ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -3556,24 +3609,6 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   );
 }
 
-function WindDownStep({ n, label, sub, done }: { n: number; label: string; sub: string; done: boolean }) {
-  return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-      <span style={{
-        flexShrink: 0, width: 22, height: 22, borderRadius: '50%',
-        display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
-        background: done ? 'var(--jade-deep)' : 'var(--paper)',
-        color: done ? 'var(--paper)' : 'var(--brick)',
-        border: `1.5px solid ${done ? 'var(--jade-deep)' : 'var(--brick)'}`,
-      }}>{done ? <Check size={12} /> : n}</span>
-      <div>
-        <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{label}{done ? ' · done' : ''}</p>
-        <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0', lineHeight: 1.45 }}>{sub}</p>
-      </div>
-    </div>
-  );
-}
-
 function PassField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
@@ -3621,12 +3656,14 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
           <span style={{ color: 'var(--ink-2)' }}>Deposit held</span>
           <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{aedF(settlement.depositHeld)}</span>
         </div>
-        {(settlement.lines ?? []).map(l => (
-          <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
-            <span style={{ color: 'var(--mute)' }}>− {l.label}<span style={{ fontSize: 10, marginLeft: 6, textTransform: 'uppercase', color: 'var(--mute)' }}>{l.type}</span></span>
-            <span style={{ fontWeight: 600, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>− {aedF(Number(l.amount))}</span>
+        {/* Customer view: deductions are consolidated into a single
+            "Maintenance charges" line (the itemised breakdown stays RP-side). */}
+        {sumLines > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+            <span style={{ color: 'var(--mute)' }}>− Maintenance charges</span>
+            <span style={{ fontWeight: 600, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>− {aedF(sumLines)}</span>
           </div>
-        ))}
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--mist-strong)', paddingTop: 8, marginTop: 2 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>Net refund to you</span>
           <span style={{ fontSize: 16, fontWeight: 700, color: refund < 0 ? '#b91c1c' : 'var(--jade-deep)', fontVariantNumeric: 'tabular-nums' }}>{aedF(refund)}</span>
@@ -3764,6 +3801,9 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   // whether to re-propose with updated terms.
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  // Decline intent: negotiate (open to a new offer, lease keeps running) vs
+  // vacate (leaving at lease end → move-out inspection + deposit settlement).
+  const [rejectIntent, setRejectIntent] = useState<'negotiate' | 'vacate'>('negotiate');
 
   // Phase 6 — same "Attach payment references" experience as the new-lease
   // payment_review step. The customer drops in cheque photos, transfer
@@ -3855,7 +3895,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
       const init: RequestInit = { method: 'PATCH', credentials: 'include' };
       if (verb === 'reject') {
         init.headers = { 'Content-Type': 'application/json' };
-        init.body = JSON.stringify({ reason: rejectReason.trim() || undefined });
+        init.body = JSON.stringify({ reason: rejectReason.trim() || undefined, intent: rejectIntent });
       }
       const res = await fetch(`/api/contracts/${parent!.id}/renewal/${verb}`, init);
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
@@ -3869,6 +3909,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
       if (verb === 'reject') {
         setRejectOpen(false);
         setRejectReason('');
+        setRejectIntent('negotiate');
       }
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(null); }
@@ -4176,7 +4217,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
             }}
           >
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Reject renewal terms?</p>
+              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Not renewing — what next?</p>
               <button
                 type="button"
                 onClick={() => !busy && setRejectOpen(false)}
@@ -4188,11 +4229,32 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
             </div>
             <div style={{ padding: '18px 20px', display: 'grid', gap: 14 }}>
               <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-                Your current lease continues until <strong>{parent.endDate ? fmtDateLong(parent.endDate) : '—'}</strong>. Telling your rental provider why helps them re-propose with terms that work for you.
+                You won’t be renewing on these terms. What would you like to do?
               </p>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {([
+                  { v: 'negotiate' as const, t: 'These terms don’t work for me', s: `You’re open to a new offer — your provider can re-propose. Your lease keeps running until ${parent.endDate ? fmtDateLong(parent.endDate) : 'its end date'}.` },
+                  { v: 'vacate' as const, t: 'I’ll be moving out', s: `End the tenancy at ${parent.endDate ? fmtDateLong(parent.endDate) : 'lease end'}. You’ll get a move-out inspection and your deposit settlement.` },
+                ]).map(o => {
+                  const on = rejectIntent === o.v;
+                  return (
+                    <button key={o.v} type="button" onClick={() => setRejectIntent(o.v)} style={{
+                      textAlign: 'left', padding: '12px 14px', borderRadius: 12, cursor: 'pointer',
+                      border: `1.5px solid ${on ? 'var(--jade-deep)' : 'var(--mist-strong)'}`,
+                      background: on ? '#eef7f3' : 'var(--surface)', fontFamily: 'inherit',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 15, height: 15, borderRadius: 999, border: `4px solid ${on ? 'var(--jade-deep)' : 'var(--mist-strong)'}`, background: 'var(--paper)', flexShrink: 0 }} />
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)' }}>{o.t}</span>
+                      </div>
+                      <p style={{ fontSize: 12, color: 'var(--mute)', margin: '6px 0 0 23px', lineHeight: 1.45 }}>{o.s}</p>
+                    </button>
+                  );
+                })}
+              </div>
               <div>
                 <label htmlFor="renewal-reject-reason" style={{ fontSize: 11, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Reason (optional but recommended)
+                  {rejectIntent === 'vacate' ? 'Note to your provider (optional)' : 'What would make it work? (optional but recommended)'}
                 </label>
                 <textarea
                   id="renewal-reject-reason"
@@ -4220,7 +4282,9 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
                 data-testid="renewal-reject-submit"
               >
                 {busy === 'reject' ? <Loader2 size={16} className="animate-spin" /> : null}
-                {busy === 'reject' ? 'Sending…' : 'Reject renewal'}
+                {busy === 'reject'
+                  ? 'Sending…'
+                  : rejectIntent === 'vacate' ? 'Confirm move-out' : 'Send to provider'}
               </PrimaryBtn>
             </div>
           </div>

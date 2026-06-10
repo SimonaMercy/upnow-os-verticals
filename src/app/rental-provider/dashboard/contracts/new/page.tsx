@@ -15,9 +15,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2 } from 'lucide-react';
+import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2, Send } from 'lucide-react';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -116,6 +116,105 @@ const AVAILABILITY_CONFIG: Record<Unit['availability'], { label: string; dot: st
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+/** Generate + copy a documents-upload portal link for the selected customer.
+ *  A 'documents' link needs only the tenant (no contract yet), so it works
+ *  mid-creation — the RP can send it before the contract is even saved. */
+function SendDocsLinkButton({ tenantId }: { tenantId: number }) {
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [link, setLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  const send = async () => {
+    setState('sending');
+    try {
+      const res = await fetch('/api/portal/generate', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId, purpose: 'documents' }),
+      });
+      if (!res.ok) throw new Error();
+      const d = await res.json();
+      setLink(d.link ?? ''); setState('done');
+      if (d.link) { try { await navigator.clipboard.writeText(d.link); setCopied(true); } catch { /* ignore */ } }
+    } catch { setState('error'); }
+  };
+  if (state === 'done' && link) {
+    return (
+      <div className="mt-2 flex items-center gap-2 max-w-md">
+        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
+          className="flex-1 text-[11px] px-2 py-1.5 rounded-lg border border-[#e8e6e0] bg-[#fafaf8] text-[#1a1916]" />
+        <button type="button"
+          onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } }}
+          className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-[#2e9f82] text-white whitespace-nowrap">{copied ? 'Copied ✓' : 'Copy'}</button>
+      </div>
+    );
+  }
+  return (
+    <button type="button" onClick={send} disabled={state === 'sending'}
+      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#2e9f82] text-[#2e9f82] disabled:opacity-60">
+      <Send size={12} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : 'Send documents upload link'}
+    </button>
+  );
+}
+
+/** Inline "create a new customer" form for the contract wizard. Creates the
+ *  customer (account + tenant profile) and hands the new tenant back so the
+ *  wizard can issue a contract to them. Login is email OTP (no password). */
+function NewCustomerForm({ postUrl, onCreated, onCancel }: {
+  postUrl: string; onCreated: (t: { id: number; name: string }) => void; onCancel: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [entityType, setEntityType] = useState<'individual' | 'company'>('individual');
+  const [companyName, setCompanyName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
+  const submit = async () => {
+    if (!name.trim()) { setErr('Name is required'); return; }
+    if (!email.trim()) { setErr('Email is required'); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(postUrl, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(), email: email.trim(), phone: phone.trim() || undefined,
+          entityType, companyName: entityType === 'company' ? (companyName.trim() || undefined) : undefined,
+        }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? 'Could not create customer'); }
+      const d = await res.json();
+      onCreated({ id: d.tenantId, name: d.name ?? name.trim() });
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to create customer'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#fafaf8] p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-[#1a1916]">New customer</p>
+        <button type="button" onClick={onCancel} className="text-xs text-[#9b9890] hover:text-[#1a1916]">Cancel</button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" className={field} />
+        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" className={field} />
+        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone (optional)" className={field} />
+        <select value={entityType} onChange={e => setEntityType(e.target.value as 'individual' | 'company')} className={field}>
+          <option value="individual">Individual</option>
+          <option value="company">Company</option>
+        </select>
+        {entityType === 'company' && (
+          <input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Company name" className={`${field} col-span-2`} />
+        )}
+      </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <button type="button" onClick={submit} disabled={busy}
+        className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-[#2e9f82] text-white disabled:opacity-60">
+        {busy ? 'Creating…' : 'Create customer'}
+      </button>
+      <p className="text-[11px] text-[#9b9890]">They&apos;ll sign in with this email via a one-time code — no password needed.</p>
+    </div>
+  );
+}
+
 export default function NewContractPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -125,6 +224,22 @@ export default function NewContractPage() {
   const qStartDate  = searchParams.get('startDate')  ?? '';
   const qLeadId     = searchParams.get('leadId')     ?? '';
   const qChequeCount = searchParams.get('chequeCount') ?? '';
+  // Context-aware create-customer endpoint: manager (re-export) posts via the
+  // manager route + ?rp; the RP posts to the contracts endpoint.
+  const pathname = usePathname();
+  const isManager = (pathname ?? '').startsWith('/dashboard/manager');
+  const rpParam = searchParams.get('rp') ?? '';
+  const createTenantUrl = isManager ? `/api/manager/tenants?rp=${rpParam}` : '/api/contracts/tenants';
+  const propertiesUrl  = isManager ? '/api/manager/properties' : '/api/properties';
+  const tenantsListUrl = isManager ? `/api/manager/tenants/list?rp=${rpParam}` : '/api/contracts/tenants/list';
+  const tenantSearchUrl = (q: string) => isManager
+    ? `/api/manager/tenants/search?rp=${rpParam}&q=${encodeURIComponent(q)}`
+    : `/api/contracts/tenants/search?q=${encodeURIComponent(q)}`;
+  const unitsUrl = (pid: string | number) => isManager
+    ? `/api/manager/properties/${pid}/units`
+    : `/api/properties/${pid}/units`;
+  const submitUrl = isManager ? `/api/manager/contracts?rp=${rpParam}` : '/api/contracts';
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
 
   // Live plan brought over from the lead (when available) — drives the prefilled amounts
   // AND the cheque schedule preview, so the contract matches what was issued to the tenant.
@@ -184,8 +299,10 @@ export default function NewContractPage() {
     notes: '',
   });
 
-  // Load preferred start days from RP profile
+  // Load preferred start days from RP profile (RP only — managers have no RP profile;
+  // cheque dates just won't pre-snap to preferred days, which is a non-blocking nicety).
   useEffect(() => {
+    if (isManager) return;
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: { profile?: { preferredStartDays?: number[] | null } } | null) => {
@@ -200,9 +317,13 @@ export default function NewContractPage() {
   // Load properties + tenants on mount; pre-fill if query params present
   useEffect(() => {
     Promise.all([
-      fetch('/api/properties', { credentials: 'include' }).then(r => r.json()),
-      fetch('/api/contracts/tenants/list', { credentials: 'include' }).then(r => r.json()),
-    ]).then(([propData, tenantData]) => {
+      fetch(propertiesUrl, { credentials: 'include' }).then(r => r.json()),
+      fetch(tenantsListUrl, { credentials: 'include' }).then(r => r.json()),
+    ]).then(([propDataRaw, tenantData]) => {
+      // Manager properties span all managed landlords — scope to the selected one.
+      const propData = (isManager && Array.isArray(propDataRaw) && rpParam)
+        ? propDataRaw.filter((p: { rentalProviderId?: number }) => p.rentalProviderId === Number(rpParam))
+        : propDataRaw;
       if (Array.isArray(propData)) setProperties(propData);
       setPropertiesLoaded(true);
       if (Array.isArray(tenantData)) {
@@ -276,7 +397,7 @@ export default function NewContractPage() {
   // Load units when property changes; auto-select unit from query param
   useEffect(() => {
     if (!form.propertyId) { setUnits([]); return; }
-    fetch(`/api/properties/${form.propertyId}/units`, { credentials: 'include' })
+    fetch(unitsUrl(form.propertyId), { credentials: 'include' })
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -308,7 +429,7 @@ export default function NewContractPage() {
   // Tenant search with debounce
   const searchTenants = useCallback((q: string) => {
     if (!q || q.length < 2) { setTenantResults([]); return; }
-    fetch(`/api/contracts/tenants/search?q=${encodeURIComponent(q)}`, { credentials: 'include' })
+    fetch(tenantSearchUrl(q), { credentials: 'include' })
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setTenantResults(data); })
       .catch(() => undefined);
@@ -383,7 +504,7 @@ export default function NewContractPage() {
         ...(qLeadId && planFromLead ? { leadId: Number(qLeadId) } : {}),
       };
 
-      const res = await fetch('/api/contracts', {
+      const res = await fetch(submitUrl, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -398,7 +519,8 @@ export default function NewContractPage() {
       const created = await res.json() as { id: number };
 
       setSuccess(true);
-      setTimeout(() => router.push(`/rental-provider/dashboard/contracts/${created.id}/v2`), 1500);
+      const doneBase = isManager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
+      setTimeout(() => router.push(`${doneBase}/${created.id}/v2`), 1500);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -656,7 +778,32 @@ export default function NewContractPage() {
                     )}
               </div>
               {form.tenantId && (
-                <p className="mt-2 text-xs text-[#2e9f82] font-medium">✓ {form.tenantName}</p>
+                <>
+                  <p className="mt-2 text-xs text-[#2e9f82] font-medium">✓ {form.tenantName}</p>
+                  <SendDocsLinkButton tenantId={Number(form.tenantId)} />
+                </>
+              )}
+
+              {/* Customer not in the system yet — create one inline */}
+              {!form.tenantId && (
+                showNewCustomer ? (
+                  <NewCustomerForm
+                    postUrl={createTenantUrl}
+                    onCancel={() => setShowNewCustomer(false)}
+                    onCreated={(t) => {
+                      setForm(f => ({ ...f, tenantId: String(t.id), tenantName: t.name }));
+                      setTenantSearch(t.name);
+                      setShowNewCustomer(false);
+                      setTenantDropdownOpen(false);
+                      setTenantResults([]);
+                    }}
+                  />
+                ) : (
+                  <button type="button" onClick={() => setShowNewCustomer(true)}
+                    className="mt-2 inline-flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
+                    <PlusCircle size={13} /> Customer not listed? Create a new customer
+                  </button>
+                )
               )}
 
               {/* Active tenants quick list */}

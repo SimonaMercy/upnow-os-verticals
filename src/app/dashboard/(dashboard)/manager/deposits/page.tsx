@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Search, X, Wallet, Loader2, RefreshCw, Lock } from 'lucide-react';
+import { Search, X, Wallet, Loader2, RefreshCw, Lock, ExternalLink, FileText } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
@@ -54,10 +54,26 @@ interface Deposit {
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;
+  proofs?: DepositProof[];
+}
+
+interface DepositProof {
+  documentKey: string;
+  displayName: string | null;
+  mimeType: string | null;
+  fileUrl: string | null;
 }
 
 function fmtAed(v: number) {
   return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(v);
+}
+
+/** Human label for a deposit proof, derived from its document_key. */
+function proofLabel(key: string): string {
+  if (key.startsWith('deposit_cheque')) return 'Cheque';
+  if (key.startsWith('deposit_slip') || key.startsWith('bank')) return 'Bank Transfer';
+  if (key.startsWith('deposit_receipt')) return 'Receipt';
+  return key.replace(/_/g, ' ');
 }
 
 export default function ManagerDepositsPage() {
@@ -231,7 +247,7 @@ export default function ManagerDepositsPage() {
             <table className="w-full text-left min-w-[900px]">
               <thead>
                 <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
-                  {['Deposit Ref', 'Contract', 'Building', 'Unit', 'Customer', 'Amount', 'Recorded', 'Period', 'Status'].map(h => (
+                  {['Deposit Ref', 'Contract', 'Building', 'Unit', 'Customer', 'Amount', 'Status'].map(h => (
                     <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
@@ -250,10 +266,6 @@ export default function ManagerDepositsPage() {
                     <td className="px-4 py-3.5">{d.unit}</td>
                     <td className="px-4 py-3.5">{d.tenant}</td>
                     <td className="px-4 py-3.5 font-semibold">{fmtAed(d.amount)}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{d.recordedDate ?? '—'}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">
-                      {d.fromYear && d.toYear ? `${d.fromYear}–${d.toYear}` : d.fromYear ?? '—'}
-                    </td>
                     <td className="px-4 py-3.5">
                       <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[d.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
                         {STATUS_LABELS[d.status] ?? d.status}
@@ -296,14 +308,45 @@ export default function ManagerDepositsPage() {
                   { label: 'Customer',    value: detail.tenant },
                   { label: 'Cheque Amount', value: fmtAed(detail.amount) },
                   { label: 'Receipt Amount', value: detail.amountReceipt != null ? fmtAed(detail.amountReceipt) : '—' },
-                  { label: 'Recorded',    value: detail.recordedDate ?? '—' },
-                  { label: 'Period',      value: detail.fromYear && detail.toYear ? `${detail.fromYear}–${detail.toYear}` : (detail.fromYear ?? '—').toString() },
                 ].map(item => (
                   <div key={item.label} className="bg-[#f4f3ef] rounded-xl p-3">
                     <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">{item.label}</p>
                     <p className="text-sm font-semibold text-[#1a1916]">{item.value}</p>
                   </div>
                 ))}
+              </div>
+
+              {/* Payment proof — the cheque image or bank-transfer slip/receipt */}
+              <div>
+                <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-2">Payment proof</p>
+                {(detail.proofs?.length ?? 0) === 0 ? (
+                  <div className="bg-[#fffbeb] border border-[#fde68a] rounded-xl p-3">
+                    <p className="text-xs text-[#92400e]">No cheque image or bank-transfer proof uploaded for this deposit.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    {detail.proofs!.map((pf, i) => {
+                      const isImg = (pf.mimeType ?? '').startsWith('image/');
+                      return (
+                        <a key={i} href={pf.fileUrl ?? '#'} target="_blank" rel="noreferrer"
+                          className="block rounded-xl border border-[#e8e6e0] overflow-hidden hover:border-[#2e9f82] transition-colors">
+                          {isImg && pf.fileUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={pf.fileUrl} alt={proofLabel(pf.documentKey)} className="w-full h-28 object-cover bg-[#f4f3ef]" />
+                          ) : (
+                            <div className="w-full h-28 flex items-center justify-center bg-[#f4f3ef] text-[#9b9890]">
+                              <FileText size={28} />
+                            </div>
+                          )}
+                          <div className="px-2.5 py-2">
+                            <p className="text-xs font-semibold text-[#1a1916]">{proofLabel(pf.documentKey)}</p>
+                            <p className="text-[10px] text-[#2e9f82] flex items-center gap-1"><ExternalLink size={10} /> View</p>
+                          </div>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               {detail.notes && (
                 <div className="bg-[#f4f3ef] rounded-xl p-3">

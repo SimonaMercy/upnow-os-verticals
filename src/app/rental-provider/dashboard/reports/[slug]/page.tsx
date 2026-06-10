@@ -19,7 +19,7 @@ import {
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
 } from 'lucide-react';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -40,7 +40,7 @@ interface ReportDef {
   columns: Column[];
   totals: TotalSpec[];
   /** Optional control rendered above the table (e.g. window-days for lease expiry). */
-  controlKey?: 'leaseExpiryWindow' | 'dateRange' | 'year';
+  controlKey?: 'leaseExpiryWindow' | 'dateRange' | 'year' | 'forecastMonths';
   /** When set, table rows expand into a modal listing their child items. */
   drilldown?: DrilldownSpec;
   /**
@@ -72,6 +72,7 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
   description: 'Leases coming up for renewal each month — count, annual rent at stake, and how many are already in progress. Lapsed leases on occupied units show as Overdue.',
   endpoint: '/api/reports/renewal-forecast',
   layout: 'grouped',
+  controlKey: 'forecastMonths',
   columns: [
     { key: 'monthLabel', label: 'Month' },
     { key: 'leases', label: 'Leases up for renewal', align: 'right', type: 'number' },
@@ -374,6 +375,39 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'ejariPending', label: 'Ejari pending', type: 'number' },
     ],
   },
+
+  'fee-taxation': {
+    title: 'Fee & VAT (Taxation)',
+    description: 'One-off fees and rent VAT per year, bucketed by the contract start date — net, VAT and the output VAT to file. Admin & commission are VAT-able (5%); ejari is exempt; rent VAT applies to commercial/industrial leases. Use the date range to scope the period.',
+    endpoint: '/api/reports/fee-taxation',
+    controlKey: 'dateRange',
+    dataNote: 'Commission is estimated from your fee rules (annual rent × commission %), since it is not stored per contract — a manually-overridden commission on an individual deal won\'t be reflected. Admin & ejari are the actual net fees on each contract. VAT uses your configured fee rules. Only issued/active/expired/terminated contracts are counted.',
+    columns: [
+      { key: 'yearLabel', label: 'Year' },
+      { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
+      { key: 'adminNetFils', label: 'Admin (net)', align: 'right', type: 'aed' },
+      { key: 'adminVatFils', label: 'Admin VAT', align: 'right', type: 'aed' },
+      { key: 'ejariNetFils', label: 'Ejari (net)', align: 'right', type: 'aed' },
+      { key: 'ejariVatFils', label: 'Ejari VAT', align: 'right', type: 'aed' },
+      { key: 'commissionNetFils', label: 'Commission (net)', align: 'right', type: 'aed' },
+      { key: 'commissionVatFils', label: 'Commission VAT', align: 'right', type: 'aed' },
+      { key: 'rentNetFils', label: 'Rent (net)', align: 'right', type: 'aed' },
+      { key: 'rentVatFils', label: 'Rent VAT', align: 'right', type: 'aed' },
+      { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'contracts', label: 'Contracts', type: 'number' },
+      { key: 'adminNetFils', label: 'Admin (net)', type: 'aed' },
+      { key: 'adminVatFils', label: 'Admin VAT', type: 'aed' },
+      { key: 'ejariNetFils', label: 'Ejari (net)', type: 'aed' },
+      { key: 'ejariVatFils', label: 'Ejari VAT', type: 'aed' },
+      { key: 'commissionNetFils', label: 'Commission (net)', type: 'aed' },
+      { key: 'commissionVatFils', label: 'Commission VAT', type: 'aed' },
+      { key: 'rentNetFils', label: 'Rent (net)', type: 'aed' },
+      { key: 'rentVatFils', label: 'Rent VAT', type: 'aed' },
+      { key: 'totalVatFils', label: 'Total VAT', type: 'aed' },
+    ],
+  },
 };
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
@@ -493,6 +527,7 @@ export default function ReportDetailPage() {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [leaseWindow, setLeaseWindow] = useState<number>(() => Number(sp?.get('window') ?? 90));
+  const [forecastMonths, setForecastMonths] = useState<number>(() => Number(sp?.get('months') ?? 12));
   // Default every date-range report to the current calendar year (URL overrides).
   const [from, setFrom] = useState<string>(sp?.get('from') ?? YEAR_START);
   const [to, setTo]     = useState<string>(sp?.get('to') ?? YEAR_END);
@@ -507,6 +542,8 @@ export default function ReportDetailPage() {
     let url = def.endpoint;
     if (def.controlKey === 'leaseExpiryWindow') {
       url = `${def.endpoint}?window=${leaseWindow}`;
+    } else if (def.controlKey === 'forecastMonths') {
+      url = `${def.endpoint}?months=${forecastMonths}`;
     } else if (def.controlKey === 'dateRange') {
       const qs = new URLSearchParams();
       if (from) qs.set('from', from);
@@ -520,7 +557,7 @@ export default function ReportDetailPage() {
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, leaseWindow, from, to, year]);
+  }, [def, leaseWindow, forecastMonths, from, to, year]);
 
   const filtered = useMemo(() => {
     if (!data?.rows) return [];
@@ -691,6 +728,21 @@ export default function ReportDetailPage() {
               onClick={() => { setLeaseWindow(w); router.replace(`/rental-provider/dashboard/reports/lease-expiry?window=${w}`); }}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${leaseWindow === w ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
               {w} days
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Renewal-forecast horizon control */}
+      {def.controlKey === 'forecastMonths' && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Horizon:</span>
+          {[3, 6, 12, 24].map(m => (
+            <button
+              key={m}
+              onClick={() => { setForecastMonths(m); router.replace(`/rental-provider/dashboard/reports/${slug}?months=${m}`); }}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${forecastMonths === m ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {m} months
             </button>
           ))}
         </div>

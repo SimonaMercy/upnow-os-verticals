@@ -152,6 +152,7 @@ export interface UnitFormData {
   furnishing: string;
   amenities: string[];
   rentalPrice: string;
+  marketPrice: string;
   securityDeposit: string;
   adminFee: string;
   ejariFeeFils: string;
@@ -235,7 +236,7 @@ function ordinal(n: string): string {
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
   floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', view: '',
-  furnishing: 'Unfurnished', amenities: [], rentalPrice: '',
+  furnishing: 'Unfurnished', amenities: [], rentalPrice: '', marketPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
   serviceCharges: '', minLeaseMonths: '12', noticePeriodDays: '60',
   rentEscalationPct: '', description: '',
@@ -490,6 +491,20 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
                 onChange={e => upd('rentalPrice', e.target.value)}
               />
               {errors.rentalPrice && <p className="text-[10px] text-red-500 mt-0.5">{errors.rentalPrice}</p>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Market Rent (AED)</label>
+              <input
+                type="number" min="0"
+                className={INPUT}
+                placeholder="e.g. 90000"
+                value={form.marketPrice}
+                onChange={e => upd('marketPrice', e.target.value)}
+              />
+              <p className="text-[10px] text-[#9b9890] mt-0.5">Benchmark for pricing comparison — optional.</p>
             </div>
           </div>
 
