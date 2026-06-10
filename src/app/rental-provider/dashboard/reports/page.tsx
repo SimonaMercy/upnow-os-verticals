@@ -12,7 +12,9 @@ import Link from 'next/link';
 import {
   Search, X, FileText, BarChart2, Building2, AlertCircle, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart, ScrollText,
+  Banknote, TrendingUp,
 } from 'lucide-react';
+import ExecutiveOverview from './ExecutiveOverview';
 
 interface ReportTile {
   slug: string;
@@ -25,6 +27,8 @@ interface ReportTile {
 const REPORTS: ReportTile[] = [
   { slug: 'occupancy',          title: 'Occupancy Report',         description: 'Units, occupied counts, and contracted rent per property.',           Icon: Building2,    available: true  },
   { slug: 'receivables',        title: 'Receivables Summary',      description: 'Outstanding cheques aged 0-30 / 31-60 / 61-90 / 90+.',                Icon: Wallet,       available: true  },
+  { slug: 'cashflow-forecast',  title: 'Cash Inflow Forecast',     description: 'Post-dated cheques landing each month, plus the overdue backlog.',    Icon: Banknote,     available: true  },
+  { slug: 'rent-vs-market',     title: 'Rent vs Market',           description: 'Current rent vs market benchmark per unit — uplift recoverable at renewal.', Icon: TrendingUp, available: true },
   { slug: 'lease-expiry',       title: 'Lease Expiry Report',      description: 'Active contracts ending within 30 / 60 / 90 / 180 / 365 days.',       Icon: CalendarClock, available: true },
   { slug: 'renewal-forecast',   title: 'Renewal Forecast',         description: 'Leases coming up for renewal each month, with annual rent at stake.',  Icon: RefreshCw,    available: true  },
   { slug: 'rent-collection',    title: 'Rent Collection (Rent Roll)', description: 'Collection matrix — customers down, months across, totals.',          Icon: BarChart2,    available: true  },
@@ -36,6 +40,7 @@ const REPORTS: ReportTile[] = [
   { slug: 'tenant-ledger',      title: 'Customer Ledger',          description: 'Per-customer rent collected, outstanding, and last payment.',          Icon: FileText,     available: true  },
   { slug: 'fee-taxation',       title: 'Fee & VAT (Taxation)',     description: 'Admin, ejari & commission fees + rent VAT per year — net, VAT and gross.', Icon: ScrollText,  available: true  },
   { slug: 'portfolio-overview', title: 'Portfolio Overview',       description: 'Units by type, occupancy, and annual asking rent.',                    Icon: FileBarChart, available: true  },
+  { slug: 'data-gaps',          title: 'Data Gaps & Exceptions',   description: 'Active leases missing a deposit, KYC gaps, the renewal backlog, and units missing details.', Icon: AlertCircle, available: true  },
   { slug: 'income-statement',   title: 'Income Statement',         description: 'Revenue by stream — rent, admin, ejari, deposits.',                    Icon: BarChart2,    available: false },
   { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false },
   { slug: 'manager-performance', title: 'Manager Performance Report', description: 'Per-asset-manager activity and deal velocity.',                     Icon: Users,        available: false },
@@ -55,10 +60,14 @@ export default function ReportsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Interactive portfolio reports — view inline, download CSV, or print as PDF.</p>
+          <p className="text-sm text-[#6b6860] mt-0.5">Where the portfolio stands right now — then drill into any report below.</p>
         </div>
       </div>
 
+      {/* Executive overview — KPI tiles, exceptions, charts */}
+      <ExecutiveOverview />
+
+      <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">All reports</h2>
       <div className="relative max-w-sm mb-6">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
         <input

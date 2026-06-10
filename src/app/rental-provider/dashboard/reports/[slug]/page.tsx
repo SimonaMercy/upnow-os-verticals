@@ -19,7 +19,7 @@ import {
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
 } from 'lucide-react';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -65,11 +65,13 @@ interface TotalSpec {
   key: string;
   label: string;
   type?: 'aed' | 'number' | 'rate';
+  /** Show this tile even when zero — for totals whose 0 IS the signal (e.g. arrears). */
+  keep?: boolean;
 }
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Forecast',
-  description: 'Leases coming up for renewal each month — count, annual rent at stake, and how many are already in progress. Lapsed leases on occupied units show as Overdue.',
+  description: 'Leases coming up for renewal each month — count, annual rent at stake, and how many are already in progress. Lapsed leases on occupied units show as Overdue. An unsigned draft renewal does not replace the current lease — it marks that lease\'s renewal as in progress (Proposed).',
   endpoint: '/api/reports/renewal-forecast',
   layout: 'grouped',
   controlKey: 'forecastMonths',
@@ -112,7 +114,7 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   occupancy: {
     title: 'Occupancy Report',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and contracted rent.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and the rent roll. "Rent Roll" is the latest lease on every occupied unit (so it reconciles with occupancy, including units on lapsed leases pending renewal); "Active leases" counts only contracts still in active status.',
     endpoint: '/api/reports/occupancy',
     columns: [
       { key: 'buildingName', label: 'Property' },
@@ -123,7 +125,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'vacantUnits', label: 'Vacant', align: 'right', type: 'number' },
       { key: 'maintenanceUnits', label: 'Maintenance', align: 'right', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
-      { key: 'contractedRentFils', label: 'Contracted Rent', align: 'right', type: 'aed' },
+      { key: 'rentRollFils', label: 'Rent Roll', align: 'right', type: 'aed' },
+      { key: 'activeContractedRentFils', label: 'Active leases', align: 'right', type: 'aed' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
@@ -131,7 +134,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupied', label: 'Occupied', type: 'number' },
       { key: 'vacant', label: 'Vacant', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
-      { key: 'contractedRentFils', label: 'Contracted Rent', type: 'aed' },
+      { key: 'rentRollFils', label: 'Rent Roll', type: 'aed' },
+      { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
     ],
   },
   receivables: {
@@ -152,13 +156,14 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
     ],
     totals: [
-      { key: 'upcomingFils', label: 'Upcoming', type: 'aed' },
+      { key: 'overdueFils', label: 'Overdue (arrears)', type: 'aed', keep: true },
+      { key: 'upcomingFils', label: 'Upcoming PDCs', type: 'aed' },
       { key: 'currentFils', label: 'Due today', type: 'aed' },
       { key: 'overdue30Fils', label: 'Overdue 1-30', type: 'aed' },
       { key: 'overdue60Fils', label: 'Overdue 31-60', type: 'aed' },
       { key: 'overdue90Fils', label: 'Overdue 61-90', type: 'aed' },
       { key: 'overdue90PlusFils', label: 'Overdue 90+', type: 'aed' },
-      { key: 'totalOutstandingFils', label: 'Total outstanding', type: 'aed' },
+      { key: 'totalOutstandingFils', label: 'Total (incl. upcoming)', type: 'aed' },
     ],
   },
   'lease-expiry': {
@@ -373,6 +378,70 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'annualRentFils', label: 'Annual rent signed', type: 'aed' },
       { key: 'ejariRegistered', label: 'Ejari registered', type: 'number' },
       { key: 'ejariPending', label: 'Ejari pending', type: 'number' },
+    ],
+  },
+
+  'cashflow-forecast': {
+    title: 'Cash Inflow Forecast',
+    description: 'When cash actually lands — every post-dated cheque bucketed by the month it falls due. Past-due pending cheques show as Overdue (that is arrears, not future cash); cheques beyond the horizon collapse into Later.',
+    endpoint: '/api/reports/cashflow-forecast',
+    dataNote: NEEDS_CHEQUE_DATA,
+    layout: 'grouped',
+    controlKey: 'forecastMonths',
+    columns: [
+      { key: 'monthLabel', label: 'Month' },
+      { key: 'cheques', label: 'Cheques', align: 'right', type: 'number' },
+      { key: 'amountFils', label: 'Inflow', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'overdueFils', label: 'Overdue (arrears)', type: 'aed', keep: true },
+      { key: 'next90Fils', label: 'Next 90 days', type: 'aed' },
+      { key: 'horizonFils', label: 'Within horizon', type: 'aed' },
+      { key: 'laterFils', label: 'Beyond horizon', type: 'aed' },
+      { key: 'totalPendingFils', label: 'Total pending', type: 'aed' },
+      { key: 'cheques', label: 'Cheques', type: 'number' },
+    ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'monthLabel',
+      countLabel: 'cheques',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'dueDate', label: 'Due', type: 'date' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'chequeNumber', label: 'Cheque #' },
+        { key: 'paymentType', label: 'Type', type: 'stage' },
+        { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+      ],
+    },
+  },
+
+  'rent-vs-market': {
+    title: 'Rent vs Market',
+    description: 'Each occupied unit\'s current rent against its market benchmark — the gap is the rent you can recover when the lease renews. Sorted by biggest uplift first. "At market" is within ±5% of the benchmark.',
+    endpoint: '/api/reports/rent-vs-market',
+    dataNote: 'The market benchmark is each unit\'s market price as maintained on the Units page — update it there if a benchmark looks stale. Units without a benchmark are listed but excluded from the uplift total.',
+    columns: [
+      { key: 'buildingName', label: 'Property' },
+      { key: 'unitLabel', label: 'Unit' },
+      { key: 'tenantName', label: 'Customer' },
+      { key: 'unitType', label: 'Type', type: 'stage' },
+      { key: 'currentRentFils', label: 'Current rent', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market', align: 'right', type: 'aed' },
+      { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
+      { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
+      { key: 'position', label: 'Position', type: 'stage' },
+      { key: 'leaseEnd', label: 'Lease ends', type: 'date' },
+    ],
+    totals: [
+      { key: 'units', label: 'Occupied units', type: 'number' },
+      { key: 'belowMarket', label: 'Below market', type: 'number' },
+      { key: 'aboveMarket', label: 'Above market', type: 'number' },
+      { key: 'currentRentFils', label: 'Current rent (all units)', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market (benchmarked units)', type: 'aed' },
+      { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
     ],
   },
 
@@ -616,11 +685,42 @@ export default function ReportDetailPage() {
       .filter(g => g.items.length > 0);
   }, [def, data, search]);
 
+  // Auto-hide all-zero numeric tiles/columns so reports don't surface dead
+  // columns (VAT, admin/ejari fees, bounced, ejari-registered …) full of zeros
+  // in datasets that don't capture that data yet. Text/identity columns always
+  // stay; rate tiles always stay (a real 0% is meaningful). CSV keeps everything.
+  const deadTotalKeys = useMemo(() => {
+    const dead = new Set<string>();
+    if (!data) return dead;
+    for (const t of def.totals) {
+      if (!t.keep && (t.type === 'aed' || t.type === 'number')) {
+        const v = data.totals?.[t.key];
+        if (v == null || Number(v) === 0) dead.add(t.key);
+      }
+    }
+    return dead;
+  }, [data, def]);
+
+  const deadColKeys = useMemo(() => {
+    const dead = new Set<string>();
+    if (!data?.rows?.length || def.layout) return dead; // plain table only
+    for (const c of def.columns) {
+      if (c.type === 'aed' || c.type === 'number') {
+        const allZero = data.rows.every(r => { const v = r[c.key]; return v == null || Number(v) === 0; });
+        if (allZero) dead.add(c.key);
+      }
+    }
+    return dead;
+  }, [data, def]);
+
+  const visibleColumns = useMemo(() => def.columns.filter(c => !deadColKeys.has(c.key)), [def, deadColKeys]);
+  const visibleTotals = useMemo(() => def.totals.filter(t => !deadTotalKeys.has(t.key)), [def, deadTotalKeys]);
+
   function handleCsv() {
     if (!data) return;
     const datestamp = new Date(data.generatedAt).toISOString().slice(0, 10);
     const fmtCell = (raw: unknown, type?: Column['type']) => {
-      if (type === 'aed') return raw == null ? '' : (Number(raw) / 100).toFixed(2);
+      if (type === 'aed' || type === 'delta') return raw == null ? '' : (Number(raw) / 100).toFixed(2);
       if (type === 'date') return raw ? new Date(String(raw)).toISOString().slice(0, 10) : '';
       return raw ?? '';
     };
@@ -783,9 +883,9 @@ export default function ReportDetailPage() {
       )}
 
       {/* Totals */}
-      {data && (
+      {data && visibleTotals.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 mb-6">
-          {def.totals.map(t => {
+          {visibleTotals.map(t => {
             const raw = data.totals[t.key];
             return (
               <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
@@ -952,7 +1052,7 @@ export default function ReportDetailPage() {
             <table className="w-full text-sm">
               <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                 <tr>
-                  {def.columns.map(c => (
+                  {visibleColumns.map(c => (
                     <th
                       key={c.key}
                       onClick={() => toggleSort(c.key)}
@@ -973,7 +1073,7 @@ export default function ReportDetailPage() {
                       key={i}
                       onClick={canDrill ? () => setDrill(row) : undefined}
                       className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
-                      {def.columns.map(c => (
+                      {visibleColumns.map(c => (
                         <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
                           <CellValue value={row[c.key]} type={c.type} />
                         </td>
@@ -995,7 +1095,7 @@ export default function ReportDetailPage() {
       {data && (
         <p className="text-[11px] text-[#9b9890] mt-3 print:mt-4">
           {def.layout === 'grouped'
-            ? `${groups.reduce((n, g) => n + g.items.length, 0)} leases across ${groups.length} month${groups.length === 1 ? '' : 's'}`
+            ? `${groups.reduce((n, g) => n + g.items.length, 0)} ${def.drilldown?.countLabel ?? 'rows'} across ${groups.length} month${groups.length === 1 ? '' : 's'}`
             : `${sorted.length} row${sorted.length === 1 ? '' : 's'}`} · Generated {new Date(data.generatedAt).toLocaleString('en-AE')}
         </p>
       )}

@@ -94,7 +94,7 @@ interface ReportDef {
 const REPORTS: Record<ReportSlug, ReportDef> = {
   occupancy: {
     title: 'Occupancy Report',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and contracted rent.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and the rent roll (latest lease on every occupied unit; "Active leases" counts only contracts still in active status).',
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'community', label: 'Community' },
@@ -104,7 +104,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'vacantUnits', label: 'Vacant', align: 'right', type: 'number' },
       { key: 'maintenanceUnits', label: 'Maintenance', align: 'right', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
-      { key: 'contractedRentFils', label: 'Contracted Rent', align: 'right', type: 'aed' },
+      { key: 'rentRollFils', label: 'Rent Roll', align: 'right', type: 'aed' },
+      { key: 'activeContractedRentFils', label: 'Active leases', align: 'right', type: 'aed' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
@@ -112,7 +113,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupied', label: 'Occupied', type: 'number' },
       { key: 'vacant', label: 'Vacant', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
-      { key: 'contractedRentFils', label: 'Contracted Rent', type: 'aed' },
+      { key: 'rentRollFils', label: 'Rent Roll', type: 'aed' },
+      { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
     ],
   },
   receivables: {
