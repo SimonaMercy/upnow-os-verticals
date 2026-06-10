@@ -577,6 +577,16 @@ function stepsFor(stateKey: StateKey, resolved?: Resolved | null):
 }
 
 /* ─── Helpers ──────────────────────────────────────────────────────── */
+/** Person display name: prefer firstName+lastName; fall back to `name` only
+ *  when it isn't a phone number (phone-only signups store the phone there). */
+function personName(u: { firstName?: string | null; lastName?: string | null; name?: string | null } | null | undefined): string {
+  if (!u) return '';
+  const composed = [u.firstName?.trim(), u.lastName?.trim()].filter(Boolean).join(' ');
+  if (composed) return composed;
+  const name = (u.name ?? '').trim();
+  return /^\+?\d[\d\s\-().]{5,}$/.test(name) ? '' : name;
+}
+
 function fmtAed(n: number | null | undefined) {
   if (n == null) return '—';
   return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(n);
@@ -2599,7 +2609,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payment schedule · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>Issued {fmtDateShort(plan.issuedAt)}</span>
-            <button type="button" onClick={() => printPaymentPlan(resolved, (user?.name ?? '').trim() || '—')}
+            <button type="button" onClick={() => printPaymentPlan(resolved, personName(user) || '—')}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
               <Printer size={12} /> Print / Save PDF
             </button>
@@ -2722,7 +2732,7 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   const { user } = useAuth();
   const c = renewal ? resolved.renewalContract : resolved.contract;
   const [sig, setSig] = useState<string | null>(null);
-  const [name, setName] = useState(user?.name ?? '');
+  const [name, setName] = useState(personName(user));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!c) return <ErrorBox msg="Contract not found." />;
@@ -3261,11 +3271,29 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const today = new Date();
   const effDate = term?.effectiveDate ? new Date(term.effectiveDate + 'T00:00:00') : null;
   const daysLeft = effDate ? Math.ceil((effDate.getTime() - today.getTime()) / 86400000) : null;
-  const chequeItems = (pp?.items ?? []).filter(it => it.type !== 'security_deposit');
+  // Prefer the contract's REAL cheques (the source of truth once the tenancy is
+  // active) and only fall back to the payment-plan preview while the contract has
+  // no payment rows yet. Normalised to {description, amountFils, dueDate, status}
+  // so the renderer below works for either source. (c.payments.amountPaid is whole
+  // AED → ×100 to fils; pp items are already fils.)
+  const realCheques = (c.payments ?? [])
+    .filter(p => p.paymentType !== 'security_deposit')
+    .map(p => ({
+      description: p.description ?? (p.paymentType === 'rental_income' ? 'Rent cheque' : (p.paymentType ?? 'Payment').replace(/_/g, ' ')),
+      amountFils: Math.round((p.amountPaid ?? 0) * 100),
+      dueDate: p.transactionDate ? p.transactionDate.slice(0, 10) : null,
+      status: p.chequeStatus ?? null,
+    }))
+    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
+  const planCheques = (pp?.items ?? [])
+    .filter(it => it.type !== 'security_deposit')
+    .map(it => ({ description: it.description ?? null, amountFils: it.amountFils ?? 0, dueDate: it.dueDate ?? null, status: null as string | null }));
+  const chequeItems = realCheques.length ? realCheques : planCheques;
+  const chequesTotalFils = chequeItems.reduce((s, it) => s + it.amountFils, 0);
   const nextCheque = chequeItems.find(it => it.dueDate && new Date(it.dueDate + 'T00:00:00') >= today);
 
   const sections = [
-    { k: 'payments'  as const, label: 'Payments',  sub: chequeItems.length ? `${chequeItems.length} cheques · ${pp ? aed(pp.rentFils) : '—'}` : 'No schedule yet' },
+    { k: 'payments'  as const, label: 'Payments',  sub: chequeItems.length ? `${chequeItems.length} cheques · ${aed(chequesTotalFils)}` : 'No schedule yet' },
     { k: 'documents' as const, label: 'Documents', sub: tenantDocs ? `${tenantDocs.filter(d => d.documentKey !== 'profile_picture').length} docs on file` : 'KYC + Ejari + utility' },
   ];
 
@@ -3403,7 +3431,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           <div style={{ borderTop: '1px dashed var(--mist-strong)', paddingTop: 12 }}>
             <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0 }}>Annual rent</p>
             <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--jade-deep)', margin: '4px 0 0', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-              {pp ? aed(pp.rentFils) : c.annualRent ? `AED ${(c.annualRent / 100).toLocaleString('en-AE')}` : '—'}
+              {pp ? aed(pp.rentFils) : c.annualRent ? `AED ${c.annualRent.toLocaleString('en-AE')}` : '—'}
             </p>
           </div>
 
@@ -3454,11 +3482,11 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
                 <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0' }}>{chequeItems.length} instalments through the year</p>
               )}
             </div>
-            {pp && (
+            {(pp || chequeItems.length > 0) && (
               <div style={{ textAlign: 'right' }}>
-                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Contract value</p>
+                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>{pp ? 'Contract value' : 'Total cheques'}</p>
                 <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--jade-deep)', margin: '2px 0 0', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                  {aed(pp.totalAmountFils)}
+                  {pp ? aed(pp.totalAmountFils) : aed(chequesTotalFils)}
                 </p>
               </div>
             )}
@@ -3469,6 +3497,9 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             )}
             {chequeItems.map((it, i) => {
               const isPast = it.dueDate ? new Date(it.dueDate + 'T00:00:00') < today : false;
+              const bounced = it.status === 'bounced' || it.status === 'cancelled';
+              const cleared = it.status ? it.status === 'cleared' : isPast;
+              const badgeTxt = it.status ?? (isPast ? 'cleared' : 'upcoming');
               return (
                 <div key={i} style={{
                   display: 'grid', gridTemplateColumns: '36px 1fr auto auto', gap: 12, alignItems: 'center',
@@ -3485,10 +3516,10 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{aed(it.amountFils)}</span>
                   <span style={{
-                    padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 600,
-                    background: isPast ? 'var(--jade-soft)' : 'var(--saffron-soft)',
-                    color: isPast ? 'var(--jade-deep)' : 'var(--saffron-deep)',
-                  }}>{isPast ? 'cleared' : 'upcoming'}</span>
+                    padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 600, textTransform: 'capitalize',
+                    background: bounced ? 'var(--brick-soft)' : cleared ? 'var(--jade-soft)' : 'var(--saffron-soft)',
+                    color: bounced ? 'var(--brick)' : cleared ? 'var(--jade-deep)' : 'var(--saffron-deep)',
+                  }}>{badgeTxt}</span>
                 </div>
               );
             })}
