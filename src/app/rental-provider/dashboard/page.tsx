@@ -16,9 +16,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  Building2, DollarSign, Users, FileText, AlertCircle, Calendar,
-  PlusSquare, ClipboardList, CreditCard, BarChart3, Percent, X,
-  TrendingUp, ArrowUpRight, CheckCircle2, AlertTriangle, Eye, Wallet,
+  Building2, DollarSign, FileText, AlertCircle, Calendar,
+  ClipboardList, Percent, X,
+  TrendingUp, ArrowUpRight, CheckCircle2, AlertTriangle, Eye,
   RefreshCw,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -125,17 +125,6 @@ function presetToDates(preset: RangePreset): { from: string; to: string } {
       return { from: '2020-01-01', to: today };
   }
 }
-
-const QUICK_LINKS = [
-  { label: 'List Property',  desc: 'Add a new asset',         href: '/rental-provider/dashboard/portfolio/add', Icon: PlusSquare },
-  { label: 'New Contract',   desc: 'Start a tenancy',         href: '/rental-provider/dashboard/contracts/new',        Icon: ClipboardList },
-  { label: 'Leads',          desc: 'Review pipeline',         href: '/rental-provider/dashboard/leads',                Icon: Users },
-  { label: 'Receivables',    desc: 'Collect rent',            href: '/rental-provider/dashboard/receivables',          Icon: CreditCard },
-  { label: 'Deposits',       desc: 'Security held',           href: '/rental-provider/dashboard/deposits',             Icon: Wallet },
-  { label: 'Customers',      desc: 'Active customers',        href: '/rental-provider/dashboard/tenants',              Icon: FileText },
-  { label: 'Portfolio',      desc: 'Units & properties',      href: '/rental-provider/dashboard/portfolio',            Icon: Building2 },
-  { label: 'Reports',        desc: 'Financials & exports',    href: '/rental-provider/dashboard/reports',              Icon: BarChart3 },
-];
 
 const ACT_ICON: Record<ActivityItem['kind'], typeof CheckCircle2> = {
   payment:  CheckCircle2,
@@ -527,30 +516,6 @@ export default function RentalProviderDashboard() {
               ))}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div>
-        <div className="flex items-baseline justify-between mb-3">
-          <h3 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">Quick Access</h3>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {QUICK_LINKS.map(({ label, desc, href, Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="group bg-white rounded-[13px] border border-[var(--base-200)] px-4 py-3.5 flex items-center gap-3 shadow-sm hover:-translate-y-0.5 hover:border-[var(--neutral-700)] transition-all"
-            >
-              <div className="w-9 h-9 rounded-lg bg-[var(--base-100)] grid place-items-center group-hover:bg-[var(--primary)] transition-colors flex-shrink-0">
-                <Icon size={16} className="text-[var(--neutral-700)] group-hover:text-white transition-colors" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[13.5px] font-bold text-[var(--neutral-900)] leading-tight truncate">{label}</div>
-                <div className="text-[11.5px] text-[var(--neutral-400)] mt-0.5 truncate">{desc}</div>
-              </div>
-            </Link>
-          ))}
         </div>
       </div>
 

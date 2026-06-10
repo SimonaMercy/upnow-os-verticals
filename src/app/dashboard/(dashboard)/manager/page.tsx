@@ -9,7 +9,7 @@ import {
 import { apiGet } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useManagerPermissions, type RpPermissions } from '@/contexts/ManagerPermissionsContext';
-import { DashboardPage, StatCard, QuickAction, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
+import { DashboardPage, StatCard, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 
 interface OverviewStats {
   properties:      number;
@@ -184,24 +184,6 @@ export default function ManagerOverview() {
         )}
       </div>
 
-      {/* Quick actions — permission-gated */}
-      <SectionHeader title="Quick Actions" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {can('canListProperties') && (
-          <QuickAction label="Properties" href="/dashboard/manager/properties" icon={Building2} description="View all managed listings" />
-        )}
-        {can('canManageAgreements') && (
-          <QuickAction label="Contracts" href="/dashboard/manager/contracts" icon={FileText} description="Active tenancy agreements" />
-        )}
-        {can('canManageViewings') && (
-          <QuickAction label="Viewings" href="/dashboard/manager/viewings" icon={Eye} description="Manage appointments" />
-        )}
-        {!loading && !can('canListProperties') && !can('canManageAgreements') && !can('canManageViewings') && (
-          <div className="sm:col-span-2 lg:col-span-3">
-            <DashboardEmpty message="No actions available. Your landlord hasn't granted any permissions yet." />
-          </div>
-        )}
-      </div>
     </DashboardPage>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { DashboardPage, StatCard, QuickAction, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
+import { DashboardPage, StatCard, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { CalendarCheck, CheckCircle, Clock, Star } from 'lucide-react';
 
 export default function TechnicianOverview() {
@@ -19,23 +19,6 @@ export default function TechnicianOverview() {
         <StatCard label="Completed Today" value="0" icon={CheckCircle}   trend="—" color="gold" />
         <StatCard label="Pending"         value="0" icon={Clock}         trend="No pending" color="neutral" />
         <StatCard label="Rating"          value="—" icon={Star}          trend="No reviews yet" color="neutral" />
-      </div>
-
-      {/* Quick actions */}
-      <SectionHeader title="Quick Actions" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-        <QuickAction
-          label="My Jobs"
-          href="/dashboard/technician/jobs"
-          icon={CalendarCheck}
-          description="View all assigned work orders"
-        />
-        <QuickAction
-          label="Schedule"
-          href="/dashboard/technician/schedule"
-          icon={Clock}
-          description="Your upcoming job calendar"
-        />
       </div>
 
       {/* Recent activity */}

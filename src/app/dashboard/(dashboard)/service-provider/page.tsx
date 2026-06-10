@@ -10,7 +10,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { DashboardPage, StatCard, QuickAction, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
+import { DashboardPage, StatCard, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { ProfileCompletionBanner } from '@/components/dashboard/ProfileCompletionBanner';
 import { Briefcase, CalendarCheck, Star, Wallet, Plus, CheckCircle2, ShieldAlert, Lock } from 'lucide-react';
 
@@ -116,29 +116,6 @@ export default function ServiceProviderOverview() {
         <StatCard label="Pending Jobs"     value="0" icon={CalendarCheck} trend="No incoming jobs" color="gold" />
         <StatCard label="Avg. Rating"      value="—" icon={Star}         trend="No reviews yet" color="neutral" />
         <StatCard label="Earnings (AED)"   value="0" icon={Wallet}       trend="This month" color="neutral" />
-      </div>
-
-      {/* Quick actions */}
-      <SectionHeader title="Quick Actions" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
-        <QuickAction
-          label="Add Service"
-          href="/dashboard/service-provider/services/new"
-          icon={Plus}
-          description="Create a new service listing"
-        />
-        <QuickAction
-          label="View Jobs"
-          href="/dashboard/service-provider/jobs"
-          icon={CalendarCheck}
-          description="See incoming and active bookings"
-        />
-        <QuickAction
-          label="Reviews"
-          href="/dashboard/service-provider/reviews"
-          icon={Star}
-          description="See customer feedback"
-        />
       </div>
 
       {/* Recent activity */}

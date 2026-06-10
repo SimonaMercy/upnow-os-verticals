@@ -484,10 +484,6 @@ function PropertyCard({
                   <ChevronDown size={14} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', color: '#9b9890', pointerEvents: 'none' }} />
                 </div>
               )}
-              <Link href={`/listings/floor-plans?propertyId=${property.id}`} target="_blank"
-                className={cn(s.btn, s.btnSm)} title="See units grouped by floor plan">
-                <LayoutGrid size={13} /> Floor plans
-              </Link>
               {!property.isStandaloneUnit && (
                 <button type="button" className={cn(s.btn, s.btnPrimary, s.btnSm)} onClick={onAddUnit}>
                   <Plus size={13} /> Add unit
