@@ -134,7 +134,9 @@ export default function ContractReviewPage() {
               <InspectionPreview insp={insp} type={inspType} />
             ) : (
               <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
-                Your rental provider hasn&apos;t completed this inspection yet. Please check back once they share it.
+                {isInspector
+                  ? 'No inspection recorded yet — fill the inspection form below to get started.'
+                  : 'Your rental provider hasn’t completed this inspection yet. Please check back once they share it.'}
               </div>
             )
           ) : (
@@ -165,10 +167,30 @@ export default function ContractReviewPage() {
           </Card>
         )}
 
+        {/* Inspector: fill / edit the inspection itself from this link — the
+             on-site inspection manager records the condition, then the customer
+             signs, then the inspector counter-signs below. */}
+        {isInspector && (showMoveIn || showMoveOut) && !insp?.rpCounterSig && (
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-4 px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-[#1a1916]">{insp?.rpSubmittedAt ? 'Inspection recorded' : 'Start with the inspection form'}</p>
+              <p className="text-xs text-[#6b6860] mt-0.5">
+                {insp?.rpSubmittedAt
+                  ? 'The form is submitted. You can still review it before counter-signing.'
+                  : 'Walk the unit and record the condition room by room — photos included.'}
+              </p>
+            </div>
+            <Link href={`/portal/${token}/contract/${id}/inspection?type=${showMoveOut ? 'move_out' : 'move_in'}`}
+              className="text-xs font-semibold px-4 py-2 rounded-xl text-white bg-[#2e9f82] inline-flex items-center gap-1.5 shrink-0">
+              <PenLine size={13} /> {insp?.rpSubmittedAt ? 'Open inspection form' : 'Fill the inspection'}
+            </Link>
+          </div>
+        )}
+
         {showMoveIn && (
           <Card title={isInspector ? 'Counter-sign the move-in inspection' : 'Sign the move-in inspection'} icon={CheckCircle2}>
             {!insp || !insp.rpSubmittedAt ? (
-              <p className="text-sm text-[#9b9890]">Not ready to sign yet — {isInspector ? 'the inspection has not been completed yet.' : 'your rental provider is still completing the inspection.'}</p>
+              <p className="text-sm text-[#9b9890]">{isInspector ? 'Fill and submit the inspection form above first.' : 'Not ready to sign yet — your rental provider is still completing the inspection.'}</p>
             ) : isInspector ? (
               insp.rpCounterSig ? (
                 <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> This inspection has been counter-signed.</p>
@@ -194,7 +216,7 @@ export default function ContractReviewPage() {
         {showMoveOut && (
           <Card title={isInspector ? 'Counter-sign the move-out inspection' : 'Sign the move-out inspection'} icon={CheckCircle2}>
             {!insp || !insp.rpSubmittedAt ? (
-              <p className="text-sm text-[#9b9890]">Not ready to sign yet — {isInspector ? 'the inspection has not been completed yet.' : 'your rental provider is still completing the move-out inspection.'}</p>
+              <p className="text-sm text-[#9b9890]">{isInspector ? 'Fill and submit the inspection form above first.' : 'Not ready to sign yet — your rental provider is still completing the move-out inspection.'}</p>
             ) : isInspector ? (
               insp.rpCounterSig ? (
                 <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> This inspection has been counter-signed.</p>

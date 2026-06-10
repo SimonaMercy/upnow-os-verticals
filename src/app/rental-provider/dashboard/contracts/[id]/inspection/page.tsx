@@ -198,13 +198,14 @@ function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: 
 // ─── Per-item attachment upload ───────────────────────────────────────────────
 
 function ItemAttachmentButton({
-  contractId, itemId, attachments, onChange, disabled,
+  contractId, itemId, attachments, onChange, disabled, portalToken,
 }: {
   contractId: number;
   itemId: string;
   attachments: ItemAttachment[];
   onChange: (updated: ItemAttachment[]) => void;
   disabled?: boolean;
+  portalToken?: string | null;
 }) {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -213,14 +214,18 @@ function ItemAttachmentButton({
   async function upload(file: File) {
     setUploading(true); setErr(null);
     try {
-      const urlRes = await fetch('/api/documents/upload-url', {
+      const docBody = {
+        documentKey: `insp_item_${itemId}_${Date.now()}`,
+        mimeType: file.type, originalName: file.name,
+      };
+      const urlRes = await fetch(portalToken
+        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/upload-url`
+        : '/api/documents/upload-url', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ownerType: 'tenancy_contract', ownerId: contractId,
-          documentKey: `insp_item_${itemId}_${Date.now()}`,
-          mimeType: file.type, originalName: file.name,
-        }),
+        body: JSON.stringify(portalToken
+          ? docBody
+          : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
       });
       if (!urlRes.ok) { setErr('Upload URL failed'); return; }
       const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
@@ -285,7 +290,7 @@ function ItemAttachmentButton({
 // ─── Area block ───────────────────────────────────────────────────────────────
 
 function AreaBlock({
-  area, areaIndex, inspType, contractId, onChange, onRemove, canRemove, isLocked,
+  area, areaIndex, inspType, contractId, onChange, onRemove, canRemove, isLocked, portalToken,
 }: {
   area: InspectionArea;
   areaIndex: number;
@@ -295,6 +300,7 @@ function AreaBlock({
   onRemove: () => void;
   canRemove: boolean;
   isLocked: boolean;
+  portalToken?: string | null;
 }) {
   function updateItem(itemId: string, patch: Partial<InspectionItem>) {
     onChange({ ...area, items: area.items.map(i => i.id === itemId ? { ...i, ...patch } : i) });
@@ -374,6 +380,7 @@ function AreaBlock({
                 attachments={item.itemAttachments ?? []}
                 onChange={updated => updateItem(item.id, { itemAttachments: updated })}
                 disabled={isLocked}
+                portalToken={portalToken}
               />
             </div>
 
@@ -504,13 +511,14 @@ function SignaturePad({
 // ─── Photos section ───────────────────────────────────────────────────────────
 
 function PhotosSection({
-  contractId, inspType, photos, onChange, disabled,
+  contractId, inspType, photos, onChange, disabled, portalToken,
 }: {
   contractId: number;
   inspType: InspType;
   photos: InspectionPhoto[];
   onChange: (photos: InspectionPhoto[]) => void;
   disabled?: boolean;
+  portalToken?: string | null;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -524,14 +532,18 @@ function PhotosSection({
     if (!file.type.startsWith('image/')) { setUploadError('Please upload an image file.'); return; }
     setUploading(true); setUploadError(null);
     try {
-      const urlRes = await fetch('/api/documents/upload-url', {
+      const docBody = {
+        documentKey: `inspection_${inspType}_${Date.now()}`,
+        mimeType: file.type, originalName: file.name,
+      };
+      const urlRes = await fetch(portalToken
+        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/upload-url`
+        : '/api/documents/upload-url', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ownerType: 'tenancy_contract', ownerId: contractId,
-          documentKey: `inspection_${inspType}_${Date.now()}`,
-          mimeType: file.type, originalName: file.name,
-        }),
+        body: JSON.stringify(portalToken
+          ? docBody
+          : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
       });
       if (!urlRes.ok) { setUploadError('Failed to get upload URL'); return; }
       const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
@@ -682,9 +694,16 @@ export default function InspectionPage() {
   const searchParams = useSearchParams();
   const pathname     = usePathname();
   const inspType     = (searchParams.get('type') ?? 'move_in') as InspType;
+  // Inspector magic-link mode — this same workspace is served at
+  // /portal/<token>/contract/<id>/inspection so the on-site inspection manager
+  // can FILL the form without an account. Every API call swaps to the
+  // token-scoped portal endpoints and RP-only chrome (tenant link) hides.
+  const portalToken = pathname?.startsWith('/portal/') ? (pathname.split('/')[2] ?? null) : null;
   // Back to the contract page — works even when opened directly (router.back()
   // is a no-op with no history). Keeps the manager vs RP route context.
-  const backHref = (pathname ?? '').replace(/\/inspection\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${params?.id}/v2`;
+  const backHref = portalToken
+    ? `/portal/${portalToken}/contract/${params?.id}`
+    : ((pathname ?? '').replace(/\/inspection\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${params?.id}/v2`);
 
   const [meta, setMeta]   = useState<ContractMeta | null>(null);
   const [data, setData]   = useState<InspectionData>(makeBlankData);
@@ -714,14 +733,18 @@ export default function InspectionPage() {
     setLoading(true);
     try {
       const [contractRes, inspRes] = await Promise.all([
-        fetch(`/api/contracts/${contractId}`, { credentials: 'include' }),
-        fetch(`/api/contracts/${contractId}/inspection?type=${inspType}`, { credentials: 'include' }),
+        fetch(portalToken ? `/api/portal/${portalToken}/contracts/${contractId}` : `/api/contracts/${contractId}`, { credentials: 'include' }),
+        fetch(portalToken
+          ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/full?type=${inspType}`
+          : `/api/contracts/${contractId}/inspection?type=${inspType}`, { credentials: 'include' }),
       ]);
       // The date field shows the move-in date for a move-in inspection and the
       // contract's move-out (end) date for a move-out inspection.
       let defaultDate = '';
       if (contractRes.ok) {
-        const c = await contractRes.json();
+        const raw = await contractRes.json();
+        // Portal detail nests the contract; RP endpoint returns it flat.
+        const c = portalToken ? (raw.contract ?? raw) : raw;
         const startDate = c.startDate ?? c.contractStartDate ?? null;
         const endDate   = c.endDate ?? c.contractEndDate ?? null;
         // On an early termination the actual move-out is the termination
@@ -778,7 +801,9 @@ export default function InspectionPage() {
     if (!contractId) return;
     setSaving(true); setError(null);
     try {
-      const res = await fetch(`/api/contracts/${contractId}/inspection`, {
+      const res = await fetch(portalToken
+        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection`
+        : `/api/contracts/${contractId}/inspection`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: inspType, data }),
@@ -803,10 +828,15 @@ export default function InspectionPage() {
     if (!contractId) return;
     setCountering(true); setCounterError(null);
     try {
-      const res = await fetch(`/api/contracts/${contractId}/inspection/sign?type=${inspType}`, {
+      const res = await fetch(portalToken
+        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/counter-sign`
+        : `/api/contracts/${contractId}/inspection/sign?type=${inspType}`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatureImage: counterSig }),
+        body: JSON.stringify(portalToken
+          // Inspector links record who physically counter-signed.
+          ? { type: inspType, signatureImage: counterSig, signatoryName: data.inspectorName?.trim() || 'Inspection Manager' }
+          : { signatureImage: counterSig }),
       });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
@@ -992,6 +1022,7 @@ export default function InspectionPage() {
               onRemove={() => setData(d => ({ ...d, areas: d.areas.filter(a => a.id !== area.id) }))}
               canRemove={data.areas.length > 1}
               isLocked={formLocked}
+              portalToken={portalToken}
             />
           ))}
 
@@ -1140,6 +1171,7 @@ export default function InspectionPage() {
           photos={data.photos}
           onChange={photos => setData(d => ({ ...d, photos }))}
           disabled={formLocked}
+          portalToken={portalToken}
         />
       </div>
 
