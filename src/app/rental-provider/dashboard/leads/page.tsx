@@ -21,6 +21,7 @@ import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
 import { getRequiredDocs } from '@/lib/docRequirements';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -43,6 +44,7 @@ const COMMERCIAL_UNIT_TYPES = new Set([
 const INDUSTRIAL_UNIT_TYPES = new Set([
   'warehouse','open_yard','storage_unit','cold_storage','logistics_facility',
 ]);
+
 
 function unitSpaceCategory(unitType?: string | null): 'residential' | 'commercial' | 'industrial' {
   if (!unitType) return 'residential';
@@ -585,7 +587,15 @@ function LeadRow({
     try { const p = JSON.parse(lead.additionalDocsNote ?? ''); return Array.isArray(p) ? p : []; }
     catch { return []; }
   });
-  const [newDocItem, setNewDocItem]       = useState('');
+  const [docSearch, setDocSearch]         = useState('');
+  const [docMenuOpen, setDocMenuOpen]     = useState(false);
+  // Add a document (a standard one, or a typed custom name) to the request list.
+  const addDocByName = (raw: string) => {
+    const name = raw.trim();
+    if (!name || docsNoteItems.includes(name)) return;
+    setDocsNoteItems(prev => [...prev, name]);
+    setDocSearch(''); setDocMenuOpen(false); setDocsNoteSaved(false);
+  };
   const [docsNoteSaving, setDocsNoteSaving] = useState(false);
   const [docsNoteSaved, setDocsNoteSaved]   = useState(false);
   const [docsNoteError, setDocsNoteError]   = useState<string | null>(null);
@@ -1510,34 +1520,57 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </div>
             )}
 
-            {/* Add new item */}
-            <div className="flex gap-2 mb-3">
+            {/* Add new item — searchable: pick a standard document or type a custom one */}
+            <div className="relative mb-3">
               <input
                 type="text"
-                value={newDocItem}
-                onChange={e => setNewDocItem(e.target.value)}
+                value={docSearch}
+                onChange={e => { setDocSearch(e.target.value); setDocMenuOpen(true); }}
+                onFocus={() => setDocMenuOpen(true)}
+                onBlur={() => setTimeout(() => setDocMenuOpen(false), 150)}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && newDocItem.trim()) {
-                    setDocsNoteItems(prev => [...prev, newDocItem.trim()]);
-                    setNewDocItem('');
-                    setDocsNoteSaved(false);
-                  }
+                  if (e.key === 'Enter') {
+                    const q = docSearch.trim();
+                    const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q.toLowerCase()) && !docsNoteItems.includes(d));
+                    if (matches.length === 1) addDocByName(matches[0]);
+                    else if (q) addDocByName(q);
+                  } else if (e.key === 'Escape') setDocMenuOpen(false);
                 }}
-                placeholder="e.g. NOC, Bank Statement, Police Clearance…"
-                className="flex-1 text-xs border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82] text-[#1a1916]"
+                placeholder="Search or type a document name…"
+                className="w-full text-xs border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82] text-[#1a1916]"
               />
-              <button
-                onClick={() => {
-                  if (newDocItem.trim()) {
-                    setDocsNoteItems(prev => [...prev, newDocItem.trim()]);
-                    setNewDocItem('');
-                    setDocsNoteSaved(false);
-                  }
-                }}
-                className="flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-lg border border-[#2e9f82] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors cursor-pointer"
-              >
-                + Add
-              </button>
+              {docMenuOpen && (() => {
+                const q = docSearch.trim().toLowerCase();
+                const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q) && !docsNoteItems.includes(d));
+                const exact = REQUESTABLE_DOCS.some(d => d.toLowerCase() === q);
+                return (
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-[#e8e6e0] rounded-lg shadow-lg max-h-56 overflow-auto">
+                    {matches.map(d => (
+                      <button
+                        key={d} type="button"
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => addDocByName(d)}
+                        className="w-full text-left text-xs px-3 py-2 hover:bg-[#f0faf6] text-[#1a1916] flex items-center gap-2 cursor-pointer"
+                      >
+                        <FileText size={11} className="text-[#9b9890] shrink-0" /> {d}
+                      </button>
+                    ))}
+                    {docSearch.trim() && !exact && (
+                      <button
+                        type="button"
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => addDocByName(docSearch.trim())}
+                        className="w-full text-left text-xs px-3 py-2 hover:bg-[#f0faf6] text-[#2e9f82] font-semibold border-t border-[#f0ede8] cursor-pointer"
+                      >
+                        + Add &ldquo;{docSearch.trim()}&rdquo; (custom)
+                      </button>
+                    )}
+                    {matches.length === 0 && !docSearch.trim() && (
+                      <p className="text-[10px] text-[#9b9890] px-3 py-2">Start typing to search documents…</p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {docsNoteError && <p className="text-[10px] text-[#b91c1c] mb-2">{docsNoteError}</p>}
