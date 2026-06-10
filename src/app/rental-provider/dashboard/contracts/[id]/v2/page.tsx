@@ -2343,12 +2343,19 @@ export default function ContractV2Page() {
         // the renewal to vacate (move-out at the scheduled lease end).
         const winding = (data.termination?.response === 'accepted' && data.status === 'active')
           || !!data.vacateAtEnd;
+        // The wind-down (move-out inspection + deposit settlement) lives on the
+        // ACTIVE lease. When the RP opened the archived renewal proposal whose
+        // parent is vacating, pull the status from the parent so the declined
+        // renewal can show "declined → move-out → settlement" in one place.
+        const isArchivedVacateChild = !!data.vacateAtEnd
+          && data.contractActive === false && !!data.parentContractId;
+        const windDownId = isArchivedVacateChild ? data.parentContractId : params.id;
         if (winding) {
-          fetch(`/api/contracts/${params.id}/inspection?type=move_out`, { credentials: 'include', signal: ctrl.signal })
+          fetch(`/api/contracts/${windDownId}/inspection?type=move_out`, { credentials: 'include', signal: ctrl.signal })
             .then(r => (r.ok ? r.json() : null))
             .then((insp: MoveInInsp | null) => setMoveOutInsp(insp ?? null))
             .catch(() => null);
-          fetch(`/api/contracts/${params.id}/settlement`, { credentials: 'include', signal: ctrl.signal })
+          fetch(`/api/contracts/${windDownId}/settlement`, { credentials: 'include', signal: ctrl.signal })
             .then(r => (r.ok ? r.json() : null))
             .then((s: { status?: DerivedState['settlementStatus']; exists?: boolean } | null) =>
               setSettlementStatus(s && s.exists ? (s.status ?? null) : null))
@@ -2397,8 +2404,12 @@ export default function ContractV2Page() {
   // settlement steps when the lease is ending — either an accepted early
   // termination (still active), or the customer declined the renewal to vacate
   // (move-out at the scheduled lease end). `vacateAtEnd` carries through expiry.
+  // The move-out + settlement STEPS belong to the live lease being wound down.
+  // The archived renewal proposal mirrors `vacateAtEnd` (from its parent) only so
+  // its detail can show the declined-renewal summary — it must NOT render empty
+  // wind-down steps, so gate the steps on the contract still being active.
   const isWinding = (contract.termination?.response === 'accepted' && contract.status === 'active')
-    || !!contract.vacateAtEnd;
+    || (!!contract.vacateAtEnd && contract.contractActive !== false);
   const baseSteps = mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
   const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, SETTLEMENT_STEP] : baseSteps;
   const doneArr = steps.map(s => isDone(s.key, derived));
@@ -2728,10 +2739,28 @@ export default function ContractV2Page() {
       ),
     };
   } else if (isDeclinedRenewal) {
+    // Two flavours of decline:
+    //  • vacate  → the customer is leaving; the active lease winds down to a
+    //              move-out inspection + deposit settlement. Show that here so
+    //              the RP sees "declined → move-out → settlement" in one place,
+    //              with the actions completing on the lease (their data home).
+    //  • negotiate → lease keeps running; offer to re-propose.
+    const vacating = !!contract.vacateAtEnd;
+    const moveOutDone = !!derived?.moveOut?.rpCounterSig;
+    const settlementDone = derived?.settlementStatus === 'paid';
+    const settlementLabel = settlementDone
+      ? 'Settled'
+      : derived?.settlementStatus ? 'In progress' : 'Pending';
     content = {
-      tone: 'declined', icon: 'alert', sub: 'Renewal closed', label: 'Renewal declined',
-      headline: 'The customer declined this renewal.',
-      body: 'The proposal is archived and the original lease keeps running. You can propose fresh terms anytime.',
+      tone: 'declined', icon: 'alert',
+      sub: vacating ? 'Moving out' : 'Renewal closed',
+      label: vacating ? 'Declined — vacating' : 'Renewal declined',
+      headline: vacating
+        ? 'The customer declined and is moving out.'
+        : 'The customer declined this renewal.',
+      body: vacating
+        ? 'They won’t renew and will vacate at lease end. Complete the move-out inspection and deposit settlement on the active lease.'
+        : 'The proposal is archived and the original lease keeps running. You can propose fresh terms anytime.',
       timing: null,
       node: (
         <>
@@ -2744,7 +2773,32 @@ export default function ContractV2Page() {
               </div>
             </div>
           )}
-          {contract.successorProposal ? (
+          {vacating ? (
+            <>
+              {/* Wind-down status — lives on the active lease, surfaced here. */}
+              <div className="qbanner waiting">
+                <span className="bic"><Key size={18} /></span>
+                <div style={{ flex: 1 }}>
+                  <p className="bt">Move-out &amp; deposit settlement</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span>Move-out inspection</span>
+                      <strong>{moveOutDone ? 'Completed' : 'Pending'}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span>Deposit settlement</span>
+                      <strong>{settlementLabel}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {contract.parentContractId && (
+                <Link href={`${contractsBase}/${contract.parentContractId}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
+                  <Key size={15} /> Complete move-out &amp; settlement
+                </Link>
+              )}
+            </>
+          ) : contract.successorProposal ? (
             <Link href={`${contractsBase}/${contract.successorProposal.id}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={15} /> View new proposal · CID-{contract.successorProposal.id}
             </Link>
