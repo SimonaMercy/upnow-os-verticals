@@ -27,6 +27,9 @@ interface Detail {
   tenantSigned: boolean;
   moveInAvailable: boolean;
   purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
+  /** 'inspector' = link issued for the on-site inspection manager, who
+   *  counter-signs the RP side instead of signing as the customer. */
+  signerRole?: 'tenant' | 'inspector';
 }
 
 interface InspPhoto { id: string; url: string; caption?: string }
@@ -105,7 +108,8 @@ export default function ContractReviewPage() {
 
   // Each link is scoped to one action; 'all' = legacy link that shows everything.
   const purpose = d.purpose ?? 'all';
-  const showContract = purpose === 'contract' || purpose === 'all';
+  const isInspector = (d.signerRole ?? 'tenant') === 'inspector';
+  const showContract = (purpose === 'contract' || purpose === 'all') && !isInspector;
   const showMoveIn = (purpose === 'move_in' || purpose === 'all') && d.moveInAvailable;
   const showMoveOut = purpose === 'move_out';
 
@@ -162,9 +166,20 @@ export default function ContractReviewPage() {
         )}
 
         {showMoveIn && (
-          <Card title="Sign the move-in inspection" icon={CheckCircle2}>
+          <Card title={isInspector ? 'Counter-sign the move-in inspection' : 'Sign the move-in inspection'} icon={CheckCircle2}>
             {!insp || !insp.rpSubmittedAt ? (
-              <p className="text-sm text-[#9b9890]">Not ready to sign yet — your rental provider is still completing the inspection.</p>
+              <p className="text-sm text-[#9b9890]">Not ready to sign yet — {isInspector ? 'the inspection has not been completed yet.' : 'your rental provider is still completing the inspection.'}</p>
+            ) : isInspector ? (
+              insp.rpCounterSig ? (
+                <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> This inspection has been counter-signed.</p>
+              ) : !insp.tenantSig ? (
+                <p className="text-sm text-[#9b9890]">Waiting for the customer to sign first — you counter-sign after them.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-[#6b6860] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the condition recorded above, then sign — this completes the move-in.</p>
+                  <SignBox token={token} contractId={id} kind="move_in" asInspector defaultName="" onSigned={() => { load(); loadInsp(); }} />
+                </>
+              )
             ) : insp.tenantSig ? (
               <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this move-in inspection.</p>
             ) : (
@@ -177,9 +192,20 @@ export default function ContractReviewPage() {
         )}
 
         {showMoveOut && (
-          <Card title="Sign the move-out inspection" icon={CheckCircle2}>
+          <Card title={isInspector ? 'Counter-sign the move-out inspection' : 'Sign the move-out inspection'} icon={CheckCircle2}>
             {!insp || !insp.rpSubmittedAt ? (
-              <p className="text-sm text-[#9b9890]">Not ready to sign yet — your rental provider is still completing the move-out inspection.</p>
+              <p className="text-sm text-[#9b9890]">Not ready to sign yet — {isInspector ? 'the inspection has not been completed yet.' : 'your rental provider is still completing the move-out inspection.'}</p>
+            ) : isInspector ? (
+              insp.rpCounterSig ? (
+                <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> This inspection has been counter-signed.</p>
+              ) : !insp.tenantSig ? (
+                <p className="text-sm text-[#9b9890]">Waiting for the customer to sign first — you counter-sign after them.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-[#6b6860] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the move-out condition recorded above, then sign.</p>
+                  <SignBox token={token} contractId={id} kind="move_out" asInspector defaultName="" onSigned={() => { load(); loadInsp(); }} />
+                </>
+              )
             ) : insp.tenantSig ? (
               <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this move-out inspection.</p>
             ) : (
@@ -211,8 +237,8 @@ function Card({ title, icon: Icon, children }: { title: string; icon: React.Comp
   );
 }
 
-function SignBox({ token, contractId, kind, defaultName, onSigned }: {
-  token: string; contractId: number; kind: 'contract' | 'move_in' | 'move_out'; defaultName: string; onSigned: () => void;
+function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector = false }: {
+  token: string; contractId: number; kind: 'contract' | 'move_in' | 'move_out'; defaultName: string; onSigned: () => void; asInspector?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
@@ -235,10 +261,14 @@ function SignBox({ token, contractId, kind, defaultName, onSigned }: {
     setBusy(true); setErr(null);
     try {
       const signatureImage = canvasRef.current!.toDataURL('image/png');
-      const url = kind === 'contract' ? `/contracts/${contractId}/sign` : `/contracts/${contractId}/inspection/sign`;
+      const url = kind === 'contract' ? `/contracts/${contractId}/sign`
+        : asInspector ? `/contracts/${contractId}/inspection/counter-sign`
+        : `/contracts/${contractId}/inspection/sign`;
       const body = kind === 'contract'
         ? { signatureImage, signatoryName: name.trim() }
-        : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage };
+        : asInspector
+          ? { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage, signatoryName: name.trim() }
+          : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage };
       const res = await fetch(API(token, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
       onSigned();
@@ -253,7 +283,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned }: {
           <span>I have read the contract above and agree to its terms.</span>
         </label>
       )}
-      <input className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} />
+      <input className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg" placeholder={asInspector ? 'Your full name (inspection manager)' : 'Full name'} value={name} onChange={e => setName(e.target.value)} />
       <div>
         <p className="text-xs text-[#6b6860] mb-1">Draw your signature</p>
         <canvas ref={canvasRef} width={520} height={150} className="w-full border border-[#d8d6d0] rounded-lg bg-[#fafaf8] touch-none"
@@ -262,7 +292,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned }: {
       </div>
       {err && <p className="text-xs text-[#b91c1c]">{err}</p>}
       <button onClick={submit} disabled={busy} className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60 bg-[#2e9f82] inline-flex items-center gap-1.5">
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : kind === 'move_out' ? 'Sign move-out' : 'Sign move-in'}
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : asInspector ? (kind === 'move_out' ? 'Counter-sign move-out' : 'Counter-sign move-in') : kind === 'move_out' ? 'Sign move-out' : 'Sign move-in'}
       </button>
     </div>
   );

@@ -32,6 +32,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'rea
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
@@ -112,6 +113,9 @@ interface ContractDetail {
   /** Customer declined the renewal with intent to leave → move-out wind-down. */
   vacateAtEnd?: boolean;
   parentContractId?: number | null;
+  /** Live renewal child of THIS contract (when viewing a parent) — the agreed
+   *  or in-flight renewal lives in its own contract row. */
+  renewalChild?: { id: number; status: string; startDate?: string | null; endDate?: string | null; annualRent?: number } | null;
   successorProposal?: {
     id: number;
     status: 'pending' | 'issued' | 'active' | 'expired' | 'terminated';
@@ -505,6 +509,8 @@ interface StepHandlers {
   moveOutInspectionUrl: string;
   settlementUrl: string;
   printUrl: string;
+  /** Role-aware contracts list base (RP vs manager) for child/parent links. */
+  contractsBase: string;
   /** When true, all workflow rollback / re-do affordances are hidden:
    *  the "Update" / "Re-upload" / "Revert to draft" buttons on completed
    *  steps and the ChkRow undo toggles on the Sign step. Set to true
@@ -598,13 +604,16 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
 
   if (key === 'ejari') {
     const done = isDone('ejari', st);
+    // The uploaded certificate — base key first, then any extra slots (ejari_certificate_2…).
+    const ejariDoc = (h.contract.documents ?? []).find(d => d.documentKey === 'ejari_certificate')
+      ?? (h.contract.documents ?? []).find(d => d.documentKey.startsWith('ejari'));
     return done
       ? {
           tone: 'celebrate', icon: 'stamp', sub: 'Stop 3 · complete', label: 'Ejari',
           headline: mode === 'renewal' ? 'Ejari renewed.' : 'Ejari registered.',
           body: 'Certificate is on file with the Dubai Land Department.',
           timing: null,
-          node: <Completed title="Registered with DLD" sub="Ejari-certificate.pdf" />,
+          node: <Completed title="Registered with DLD" sub={ejariDoc?.displayName ?? 'Ejari-certificate.pdf'} viewUrl={ejariDoc?.fileUrl} viewLabel="View Ejari" />,
         }
       : {
           tone: 'action', icon: 'stamp', sub: mode === 'renewal' ? 'Renewal · Ejari' : stopOf(3), label: 'Ejari',
@@ -841,12 +850,34 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           {h.contract.renewalAccepted === 'pending' && (
             <div className="flag waiting" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={13} /> Renewal proposed — awaiting {TEN}
+              {h.contract.renewalChild && (
+                <>
+                  {' · '}
+                  <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
+                    View proposal · CID-{h.contract.renewalChild.id}
+                  </Link>
+                </>
+              )}
+            </div>
+          )}
+          {/* Customer accepted — the renewal now lives in its own contract.
+              Without this block the renewal VANISHED from the parent page the
+              moment it was accepted/issued. */}
+          {h.contract.renewalAccepted === 'accepted' && h.contract.renewalChild && (
+            <div className="flag" style={{ alignSelf: 'flex-start', background: 'var(--jade-soft, #e7f5ef)', borderColor: 'var(--jade, #2e9f82)', color: 'var(--jade-deep, #1a7a5a)' }}>
+              <RotateCcw size={13} /> Renewal agreed — {fmtDate(h.contract.renewalChild.startDate ?? null)} → {fmtDate(h.contract.renewalChild.endDate ?? null)}
+              {h.contract.renewalChild.annualRent ? <> @ {fmtAed(h.contract.renewalChild.annualRent)}</> : null}
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-jade" onClick={() => h.openDrawer('payments')}>
               <CreditCard size={14} /> Record payment
             </button>
+            {h.contract.renewalAccepted === 'accepted' && h.contract.renewalChild && (
+              <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} className="btn btn-jade">
+                <RotateCcw size={14} /> Open renewal contract · CID-{h.contract.renewalChild.id}
+              </Link>
+            )}
             {mode !== 'renewal' && !h.contract.renewalAccepted && (
               <button className="btn btn-ghost" onClick={() => h.openModal('renew')}>
                 <RotateCcw size={14} /> Propose renewal
@@ -925,8 +956,8 @@ type DrawerTab = 'parties' | 'property' | 'period' | 'payments' | 'documents' | 
 /** Generates + emails the tenant a secure magic link, deep-linked to the section
  *  relevant to where it's shown (documents vs the contract review/sign page),
  *  and shows the link so the RP can copy/share it directly (e.g. WhatsApp). */
-function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link' }: {
-  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string;
+function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link', role = 'tenant' }: {
+  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string; role?: 'tenant' | 'inspector';
 }) {
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [link, setLink] = useState('');
@@ -940,7 +971,7 @@ function SendTenantLinkButton({ tenantId, contractId, section = 'documents', lab
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         // Each link is scoped to one purpose — the backend enforces it and
         // returns a ready-to-share URL already deep-linked to the right page.
-        body: JSON.stringify({ tenantId, contractId, purpose: section }),
+        body: JSON.stringify({ tenantId, contractId, purpose: section, signerRole: role }),
       });
       if (!res.ok) throw new Error();
       const d = await res.json();
@@ -961,7 +992,10 @@ function SendTenantLinkButton({ tenantId, contractId, section = 'documents', lab
           <a href={link} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> Open</a>
         </div>
         <span style={{ fontSize: 10.5, color: 'var(--mute, #9b9890)' }}>
-          {email ? `Emailed to ${email} · ` : ''}share this link with the customer to upload & sign (valid 14 days)
+          {email ? `Emailed to ${email} · ` : ''}
+          {role === 'inspector'
+            ? 'share this link with your inspection manager to counter-sign on site (valid 14 days)'
+            : 'share this link with the customer to upload & sign (valid 14 days)'}
         </span>
       </div>
     );
@@ -1227,6 +1261,7 @@ function DetailsDrawer({
   const [reqNotes, setReqNotes] = useState('');
   const [reqBusy, setReqBusy] = useState(false);
   const [reqErr, setReqErr] = useState<string | null>(null);
+  const [reqMenuOpen, setReqMenuOpen] = useState(false);
   const submitRequest = async () => {
     const label = reqLabel.trim();
     if (!label) return;
@@ -1672,8 +1707,37 @@ function DetailsDrawer({
                   {/* Request a document from the tenant (Flow 6) */}
                   <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px dashed var(--mist-strong)' }}>
                     <p className="subhead">Request a document from {contract.tenant.name ?? 'the customer'}</p>
-                    <div className="field">
-                      <input className="input" value={reqLabel} placeholder="e.g. NOC from previous landlord" onChange={e => setReqLabel(e.target.value)} />
+                    <div className="field" style={{ position: 'relative' }}>
+                      <input
+                        className="input"
+                        value={reqLabel}
+                        placeholder="Search or type a document name…"
+                        onChange={e => { setReqLabel(e.target.value); setReqMenuOpen(true); }}
+                        onFocus={() => setReqMenuOpen(true)}
+                        onBlur={() => setTimeout(() => setReqMenuOpen(false), 150)}
+                        onKeyDown={e => { if (e.key === 'Escape') setReqMenuOpen(false); }}
+                      />
+                      {reqMenuOpen && (() => {
+                        const q = reqLabel.trim().toLowerCase();
+                        const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q));
+                        if (matches.length === 0 || (matches.length === 1 && matches[0].toLowerCase() === q)) return null;
+                        return (
+                          <div style={{ position: 'absolute', zIndex: 30, marginTop: 4, width: '100%', maxHeight: 220, overflowY: 'auto', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, boxShadow: '0 8px 22px rgba(0,0,0,0.10)' }}>
+                            {matches.map(d => (
+                              <button
+                                key={d} type="button"
+                                onMouseDown={e => e.preventDefault()}
+                                onClick={() => { setReqLabel(d); setReqMenuOpen(false); }}
+                                onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')}
+                                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: 'transparent', border: 'none' }}
+                              >
+                                <FileText size={12} style={{ color: '#9b9890', flexShrink: 0 }} /> {d}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="field">
                       <input className="input" value={reqNotes} placeholder="Instructions for the customer (optional)" onChange={e => setReqNotes(e.target.value)} />
@@ -1887,6 +1951,62 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
         <button className="btn btn-jade" disabled={!canSubmit || done} onClick={submit}>
           <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : 'Sign as Landlord'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Inline RP counter-signature for the move-in / move-out inspection — shown on
+ *  the step card once the customer has signed, so the landlord doesn't have to
+ *  open the inspection workspace just to countersign. Move-in auto-activates. */
+function InlineInspectionCounterSign({ contractId, type, onSigned }: {
+  contractId: number; type: 'move_in' | 'move_out'; onSigned: () => void;
+}) {
+  const [sig, setSig] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/inspection/sign?type=${type}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signatureImage: sig }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.message ?? `Sign failed: ${res.status}`);
+      }
+      setDone(true);          // hold the success state until the parent reload swaps this out
+      onSigned();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Sign failed');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--jade-edge, #bfe3d6)', borderRadius: 'var(--r-lg)', padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <span className="mti" style={{ background: 'var(--jade)' }}><FileSignature size={16} /></span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink, #1a1916)' }}>Counter-sign the inspection</div>
+          <div className="note">
+            {type === 'move_in'
+              ? 'The customer has signed — add your signature to complete move-in and activate the tenancy.'
+              : 'The customer has signed — add your signature to complete the move-out inspection.'}
+          </div>
+        </div>
+      </div>
+      <SignaturePad onChange={setSig} />
+      {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+        <button className="btn btn-jade" disabled={!sig || busy || done} onClick={submit}>
+          <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : 'Counter-sign inspection'}
         </button>
       </div>
     </div>
@@ -2590,6 +2710,7 @@ export default function ContractV2Page() {
     moveOutInspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_out`,
     settlementUrl: `${contractsBase}/${contract.id}/settlement`,
     printUrl: `${contractsBase}/${contract.id}/print`,
+    contractsBase,
     readOnlyWorkflow,
   };
 
@@ -2688,6 +2809,27 @@ export default function ContractV2Page() {
     ? allKycDocs.filter(d => d.expiryDate && new Date(d.expiryDate) < new Date())
     : allKycDocs;
 
+  // Header pill kept consistent with the contracts LIST's time-aware statuses:
+  // a pending contract whose term is already RUNNING is "Needs activation"
+  // (the live lease awaiting its status flip), a future-start pending term is
+  // "Starts later". Without this the header shows the journey-step label and
+  // contradicts what the list says about the same contract.
+  const todayIso = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const startIso = (contract.startDate ?? '').slice(0, 10);
+  const endIso = (contract.endDate ?? '').slice(0, 10);
+  const isRunningPending = contract.status === 'pending' && !isSuperseded && !isDeclinedRenewal
+    && !!startIso && startIso <= todayIso && !!endIso && endIso >= todayIso;
+  const isFuturePending = contract.status === 'pending' && !isSuperseded && !isDeclinedRenewal
+    && !!startIso && startIso > todayIso;
+  const pill = isRunningPending
+    ? { tone: 'waiting', label: 'Needs activation' }
+    : isFuturePending
+      ? { tone: 'waiting', label: 'Starts later' }
+      : { tone: content.tone, label: content.label };
+
   return (
     <div className="quest-page">
       <div className="wrap">
@@ -2696,7 +2838,7 @@ export default function ContractV2Page() {
             <button className="backbtn" onClick={() => router.back()}><ArrowLeft size={18} /></button>
             <div>
               <h1>
-                CID-{contract.id} <span className={'pill ' + content.tone}>{content.label}</span>
+                CID-{contract.id} <span className={'pill ' + pill.tone}>{pill.label}</span>
               </h1>
               <div className="hsub">
                 <Building2 size={13} /> Unit {contract.unit.number ?? '—'} · {contract.property.buildingName ?? '—'}
@@ -2719,11 +2861,6 @@ export default function ContractV2Page() {
           </div>
         </div>
 
-        {/* Inline landlord signature field — sign directly here, no modal. */}
-        {canLandlordSign && (
-          <InlineLandlordSign contract={contract} onSigned={() => void reload()} />
-        )}
-
         {/* Vacate-on-renewal-decline — customer won't renew and is moving out.
             The move-out inspection + deposit settlement steps are surfaced below. */}
         {contract.vacateAtEnd && (
@@ -2738,6 +2875,26 @@ export default function ContractV2Page() {
               {contract.renewalRejectionReason && <div className="quote">&ldquo;{contract.renewalRejectionReason}&rdquo;</div>}
             </div>
             <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'center' }} onClick={() => setSelKey('moveout')}>Go to move-out</button>
+          </div>
+        )}
+
+        {/* Running-but-never-activated lease (imported/synced records land like
+            this). The list calls it "Needs Activation" — give the RP the fix
+            right here instead of a journey step that contradicts reality. */}
+        {isRunningPending && (
+          <div className="qbanner waiting" style={{ marginBottom: 4 }}>
+            <span className="bic"><RotateCcw size={18} /></span>
+            <div style={{ flex: 1 }}>
+              <p className="bt">This lease is already running — it just needs activation</p>
+              <p className="bp">
+                The term started {fmtDate(contract.startDate)} and the tenant is in place, but the
+                contract was never switched to Active. Activate it so it counts as a live tenancy
+                everywhere; you can backfill documents and cheques afterwards.
+              </p>
+            </div>
+            <button className="btn btn-jade btn-sm" style={{ alignSelf: 'center' }} onClick={() => void onActivate()}>
+              Activate now
+            </button>
           </div>
         )}
 
@@ -2788,6 +2945,38 @@ export default function ContractV2Page() {
                 />
               </div>
             )}
+            {/* Inline landlord signature pad — placed after the customer signing
+                 link so the step reads top-to-bottom: statuses → send link →
+                 countersign here. */}
+            {selStep.key === 'sign' && canLandlordSign && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <InlineLandlordSign contract={contract} onSigned={() => void reload()} />
+              </div>
+            )}
+            {/* Move-in: second link for the on-site inspection manager — they
+                 counter-sign the RP side via the same no-login portal, so no
+                 separate account is needed. */}
+            {selStep.key === 'movein' && contract.tenant.id && !readOnlyWorkflow && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+                  Inspection manager signing link
+                </div>
+                <SendTenantLinkButton
+                  tenantId={contract.tenant.id}
+                  contractId={contract.id}
+                  section="move_in"
+                  role="inspector"
+                  label="Send inspector link"
+                />
+              </div>
+            )}
+            {/* Inline RP counter-signature — appears once the customer has signed
+                 the move-in inspection, so it can be completed right here. */}
+            {selStep.key === 'movein' && derived.moveIn.rpSubmitted && derived.moveIn.tenantSig && !derived.moveIn.rpCounterSig && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <InlineInspectionCounterSign contractId={contract.id} type="move_in" onSigned={() => void reload()} />
+              </div>
+            )}
             {/* Move-out signing link — available during wind-down even though the
                  onboarding workflow is otherwise frozen (status === active). */}
             {selStep.key === 'moveout' && contract.tenant.id && !derived.moveOut.rpCounterSig && (
@@ -2808,7 +2997,7 @@ export default function ContractV2Page() {
                  the workflow has not yet frozen (active / expired / terminated). */}
             {selStep.key === 'ejari' && derived.ejariStatus === 'registered' && !readOnlyWorkflow && (
               <button className="ca" style={{ justifySelf: 'start', marginTop: -4, padding: 0, color: 'var(--brick)' }} onClick={() => void onRedoEjari()}>
-                <RotateCcw size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} /> Redo Ejari (reset &amp; re-upload)
+                <RotateCcw size={12} /> Redo Ejari (reset &amp; re-upload)
               </button>
             )}
             {content.timing && (
@@ -2995,7 +3184,7 @@ function GlobalStyle() {
       .quest-page .chkrow.on .cb { background: var(--jade); border-color: var(--jade); color: #fff; }
       .quest-page .chkrow .ct { flex: 1; min-width: 0; }
       .quest-page .chkrow.on .ct { font-weight: 600; }
-      .quest-page .chkrow .ca { font-size: 12px; font-weight: 700; color: var(--jade-deep); background: none; border: 0; cursor: pointer; text-decoration: underline; white-space: nowrap; }
+      .quest-page .ca { display: inline-flex; align-items: center; gap: 4px; width: fit-content; font-size: 12px; font-weight: 700; color: var(--jade-deep); background: none; border: 0; cursor: pointer; text-decoration: underline; white-space: nowrap; }
 
       .quest-page .upbox { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--surface); border: 1.5px dashed var(--mist-strong); border-radius: 12px; padding: 14px 16px; }
       .quest-page .upbox .uf { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
