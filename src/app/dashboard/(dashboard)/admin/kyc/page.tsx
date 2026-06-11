@@ -390,10 +390,12 @@ function RpContentPanel({
 }) {
   const [acting, setActing] = useState(false);
   const [notes, setNotes] = useState("");
+  const [showAllDocs, setShowAllDocs] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setNotes("");
+    setShowAllDocs(false);
     scrollRef.current?.scrollTo({ top: 0 });
   }, [rpId]);
 
@@ -539,7 +541,7 @@ function RpContentPanel({
                   </span>
                 </div>
                 <div className="space-y-1.5">
-                  {docs.map((doc) => (
+                  {(showAllDocs ? docs : docs.slice(0, 4)).map((doc) => (
                     <div key={doc.id} className="flex items-center justify-between gap-2 py-1.5 border-b"
                       style={{ borderColor: "var(--color-base-100)" }}>
                       <div className="min-w-0">
@@ -569,6 +571,13 @@ function RpContentPanel({
                     </div>
                   ))}
                 </div>
+                {docs.length > 4 && (
+                  <button onClick={() => setShowAllDocs((v) => !v)}
+                    className="w-full mt-2 py-1.5 rounded-lg text-xs font-semibold"
+                    style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-primary)" }}>
+                    {showAllDocs ? "Show fewer documents" : `Show all documents (${docs.length})`}
+                  </button>
+                )}
               </div>
             )}
           </div>
