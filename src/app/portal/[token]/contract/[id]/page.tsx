@@ -19,7 +19,7 @@ const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
 });
 
 interface Doc { documentKey: string; displayName: string | null; fileUrl: string }
-interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string }
+interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
 interface Detail {
   contract: EjariContractData & { id: number; status: string | null };
   documents: Doc[];
@@ -57,7 +57,7 @@ function toEjari(c: Detail['contract'], signatures: Sig[]): EjariContractData {
   return {
     ...c,
     modeOfPayment: c.modeOfPayment || instalmentLabel((c as { numberOfInstallments?: number | null }).numberOfInstallments ?? null),
-    signatures: (signatures ?? []).map(s => ({ role: s.role as 'landlord' | 'tenant', signatureImage: s.signatureImage ?? null, signedAt: s.signedAt })),
+    signatures: (signatures ?? []).map(s => ({ role: s.role as 'landlord' | 'tenant', signatureImage: s.signatureImage ?? null, signedAt: s.signedAt, method: s.method })),
   };
 }
 

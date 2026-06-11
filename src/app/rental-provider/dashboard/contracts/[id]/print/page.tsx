@@ -86,6 +86,7 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
       role: s.role,
       signatureImage: s.signatureImage ?? null,
       signedAt: s.signedAt,
+      method: s.method,
     })),
   };
 }

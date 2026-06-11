@@ -172,6 +172,9 @@ interface DerivedState {
   ejariStatus: ContractDetail['ejariStatus'];
   tenantSigned: boolean;
   landlordSigned: boolean;
+  /** All signatures are method 'on_file' — imported lease signed on paper,
+   *  so digital signature fields are not applicable. */
+  sigsOnFile: boolean;
   utilityDoc: boolean;
   moveIn: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
   moveOut: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
@@ -230,12 +233,13 @@ function spaceCategoryFromUnitType(unitType: string | null): string {
   return 'residential';
 }
 
-function deriveState(contract: ContractDetail, signatures: { role: string }[], insp: MoveInInsp | null, moveOutInsp: MoveInInsp | null, settlementStatus: DerivedState['settlementStatus']): DerivedState {
+function deriveState(contract: ContractDetail, signatures: { role: string; method?: string }[], insp: MoveInInsp | null, moveOutInsp: MoveInInsp | null, settlementStatus: DerivedState['settlementStatus']): DerivedState {
   return {
     status: contract.status,
     ejariStatus: contract.ejariStatus,
     tenantSigned: signatures.some(s => s.role === 'tenant'),
     landlordSigned: signatures.some(s => s.role === 'landlord'),
+    sigsOnFile: signatures.length > 0 && signatures.every(s => s.method === 'on_file'),
     utilityDoc: contract.utilityStatus === 'submitted' || contract.utilityStatus === 'verified',
     moveIn: {
       rpSubmitted: !!insp?.rpSubmittedAt,
@@ -565,7 +569,20 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
   if (key === 'sign') {
     const done = isDone('sign', st);
     return done
-      ? {
+      ? st.sigsOnFile
+        ? {
+            tone: 'celebrate', icon: 'pen', sub: 'Stop 2 · complete', label: 'Signed — on file',
+            headline: 'Signed on paper — on file.',
+            body: 'This lease was signed physically before it was imported. Digital signature fields are not applicable.',
+            timing: null,
+            node: (
+              <div className="chklist">
+                <ChkRow on locked label={`${TEN} signed (on file)`} onToggle={() => {}} />
+                <ChkRow on locked label="Landlord signed (on file)" onToggle={() => {}} />
+              </div>
+            ),
+          }
+        : {
           tone: 'celebrate', icon: 'pen', sub: 'Stop 2 · complete', label: 'Signed',
           headline: 'Both parties have signed.',
           body: 'Customer and landlord signatures are on file.',
@@ -2303,7 +2320,7 @@ export default function ContractV2Page() {
     ? '/dashboard/manager/contracts'
     : '/rental-provider/dashboard/contracts';
   const [contract, setContract] = useState<ContractDetail | null>(null);
-  const [signatures, setSignatures] = useState<{ role: string; signedAt?: string }[]>([]);
+  const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
   const [moveInInsp, setMoveInInsp] = useState<MoveInInsp | null>(null);
   const [moveOutInsp, setMoveOutInsp] = useState<MoveInInsp | null>(null);
   const [settlementStatus, setSettlementStatus] = useState<DerivedState['settlementStatus']>(null);

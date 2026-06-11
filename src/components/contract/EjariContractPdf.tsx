@@ -55,7 +55,7 @@ export interface EjariContractData {
   tenant: EjariParty;
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
   unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null };
-  signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[];
+  signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string; method?: string }[];
 }
 export interface EjariAddendum { id: number; name: string; fileUrl: string; mimeType: string; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null; /** Extracted text lines (DOCX), rendered inline across pages. */ lines?: string[] }
 
@@ -190,10 +190,14 @@ const TermsBlock = ({ termsEn, termsAr, start, end, header }: { termsEn: string[
     </View>
   </View>
 );
-const SigBox = ({ label, ar, img, date }: { label: string; ar: string; img?: string | null; date?: string }) => (
+const SigBox = ({ label, ar, img, date, onFile }: { label: string; ar: string; img?: string | null; date?: string; onFile?: boolean }) => (
   <View style={{ width: '50%', padding: 6 }}>
     <View style={{ height: 48, alignItems: 'center', justifyContent: 'center' }}>
-      {img ? <Image src={img} style={{ maxHeight: 44, objectFit: 'contain' }} /> : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
+      {img
+        ? <Image src={img} style={{ maxHeight: 44, objectFit: 'contain' }} />
+        : onFile
+          ? <Text style={{ fontSize: 7.5, color: '#555' }}>Signed on file — N/A</Text>
+          : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#bbb', paddingTop: 3 }}>
       <Text style={{ fontSize: 7.5 }}>{label} <Text style={{ fontFamily: AR }}>{ar}</Text></Text>
@@ -201,14 +205,14 @@ const SigBox = ({ label, ar, img, date }: { label: string; ar: string; img?: str
     </View>
   </View>
 );
-const Signatures = ({ tenant, landlord }: { tenant?: { img?: string | null; date?: string }; landlord?: { img?: string | null; date?: string } }) => (
+const Signatures = ({ tenant, landlord }: { tenant?: { img?: string | null; date?: string; onFile?: boolean }; landlord?: { img?: string | null; date?: string; onFile?: boolean } }) => (
   <View wrap={false} style={{ marginTop: 8 }}>
     <Bar en="Signatures" ar="التوقيعات" />
     <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, flexDirection: 'row' }}>
       <View style={{ width: '50%', borderRightWidth: 1, borderRightColor: '#bbb' }}>
-        <SigBox label="Tenant Signature" ar="توقيع المستأجر" img={tenant?.img} date={tenant?.date} />
+        <SigBox label="Tenant Signature" ar="توقيع المستأجر" img={tenant?.img} date={tenant?.date} onFile={tenant?.onFile} />
       </View>
-      <SigBox label="Lessor's Signature" ar="توقيع المؤجر" img={landlord?.img} date={landlord?.date} />
+      <SigBox label="Lessor's Signature" ar="توقيع المؤجر" img={landlord?.img} date={landlord?.date} onFile={landlord?.onFile} />
     </View>
   </View>
 );
@@ -292,8 +296,8 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   // Official Ejari shows a Signatures bar at the bottom of every page.
   const sigs = (
     <Signatures
-      tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt) } : undefined}
-      landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt) } : undefined}
+      tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt), onFile: tSig.method === 'on_file' } : undefined}
+      landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt), onFile: lSig.method === 'on_file' } : undefined}
     />
   );
 

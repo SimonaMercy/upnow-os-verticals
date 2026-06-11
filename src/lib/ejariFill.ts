@@ -153,6 +153,13 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
       const s = Math.min(maxH / img.height, maxW / img.width, 1);
       const w = img.width * s, h = img.height * s;
       pages[pi].drawImage(img, { x: cx - w / 2, y: H - baseline - h + 14, width: w, height: h });
+    } else if (sig?.method === 'on_file') {
+      // Imported lease signed on paper — mark the field instead of faking a
+      // handwriting signature for a signature that was never given digitally.
+      const txt = 'Signed on file — N/A';
+      const size = 8;
+      const w = roboto.widthOfTextAtSize(txt, size);
+      pages[pi].drawText(txt, { x: cx - w / 2, y: H - baseline + 4, size, font: roboto, color: rgb(0.35, 0.35, 0.35) });
     } else if (sig && name) {
       let size = 20;
       const w0 = vibes.widthOfTextAtSize(name, size);
