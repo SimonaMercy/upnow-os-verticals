@@ -13,7 +13,7 @@ import {
   Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Files, Pencil,
 } from 'lucide-react';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
-import { openDocsTogether } from '@/lib/openDocsTogether';
+import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 
 type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
@@ -28,6 +28,7 @@ type Doc = {
   id: number; documentKey: string; displayName: string | null; category: string | null;
   status: string | null; fileUrl: string | null; issueDate: string | null;
   expiryDate: string | null; createdAt: string | null;
+  ownerType?: string | null; ownerId?: number | null; leaseId?: number | null;
 };
 type Financials = {
   totalActiveRent: number; securityDepositHeld: number;
@@ -58,8 +59,13 @@ function renewalDays(endDate: string | null): number | null {
   const now = new Date();
   return Math.round((end - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000);
 }
-function leaseBadge(l: Lease): { label: string; cls: string } {
-  if (!l.isCurrent) return { label: 'Renewed', cls: 'bg-[#f4f3ef] text-[#6b6860]' };
+function leaseBadge(l: Lease, currentOfUnit?: Lease): { label: string; cls: string } {
+  if (!l.isCurrent) {
+    // Superseding renewal exists but isn't signed yet → this is still the live lease.
+    if (l.contractActive && currentOfUnit && (currentOfUnit.status ?? '').toLowerCase() === 'pending')
+      return { label: 'Active · renewal pending', cls: 'bg-[#d8f2e8] text-[#1a7a5a]' };
+    return { label: 'Renewed', cls: 'bg-[#f4f3ef] text-[#6b6860]' };
+  }
   if ((l.status ?? '').toLowerCase() === 'terminated') return { label: 'Terminated', cls: 'bg-[#fee2e2] text-[#b91c1c]' };
   if (l.contractActive) return { label: 'Active', cls: 'bg-[#d8f2e8] text-[#1a7a5a]' };
   return { label: (l.status ?? 'Inactive').replace(/^./, c => c.toUpperCase()), cls: 'bg-[#f4f3ef] text-[#6b6860]' };
@@ -67,6 +73,13 @@ function leaseBadge(l: Lease): { label: string; cls: string } {
 const prettyKey = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 const docTone = (s: string | null) =>
   s === 'processed' ? 'bg-[#d8f2e8] text-[#1a7a5a]' : s === 'pending' ? 'bg-[#fee2e2] text-[#b91c1c]' : 'bg-[#eef2ff] text-[#3730a3]';
+// KYC = the customer's own identity / licensing rows. Everything else (payment
+// proofs, deposit receipts, lease paperwork) lives in the all-documents popup
+// (shared CustomerDocsModal module).
+const KYC_KEY_RE = /emirates|passport|visa|trade_license|moa|poa|labour|establishment/;
+const isKycDoc = (d: Doc) =>
+  (d.ownerType ?? 'customer') === 'customer' &&
+  (d.category === 'identity' || d.category === 'license' || KYC_KEY_RE.test(d.documentKey));
 
 export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -89,6 +102,7 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [showAllDocs, setShowAllDocs] = useState(false);
 
   const load = useCallback(() => {
     if (!params?.id) return;
@@ -114,7 +128,24 @@ export default function CustomerDetailPage() {
   const c = data.customer;
   const fin = data.financials;
   const isCompany = c.entityType === 'company';
-
+  const kycDocs = data.documents.filter(isKycDoc);
+  // Per unit, the lease whose deposit the RP actually holds (mirrors the
+  // backend securityDepositHeld rule): prefer in-force leases, latest start
+  // among equals — a pending renewal child must not hide the parent's deposit.
+  const depositHolders = (() => {
+    const byUnit = new Map<number, Lease>();
+    for (const l of data.leases) {
+      if (['terminated', 'cancelled'].includes((l.status ?? '').toLowerCase())) continue;
+      const uid = l.unit.id ?? -l.id;
+      const cur = byUnit.get(uid);
+      if (!cur) { byUnit.set(uid, l); continue; }
+      const better = l.contractActive === cur.contractActive
+        ? String(l.startDate ?? '') > String(cur.startDate ?? '')
+        : l.contractActive;
+      if (better) byUnit.set(uid, l);
+    }
+    return [...byUnit.values()].filter(l => l.securityDeposit > 0);
+  })();
   // ── Action items (things needing the RP's attention) — rendered in RED ──
   const actions: string[] = [];
   const missing: string[] = [];
@@ -124,7 +155,7 @@ export default function CustomerDetailPage() {
   if (!c.gender) missing.push('gender');
   if (!c.dateOfBirth) missing.push('date of birth');
   if (missing.length) actions.push(`Missing customer details: ${missing.join(', ')}`);
-  if (data.documents.length === 0) actions.push('No KYC documents on file');
+  if (kycDocs.length === 0) actions.push('No KYC documents on file');
   const pendingDocs = data.documents.filter(d => d.status === 'pending').length;
   if (pendingDocs) actions.push(`${pendingDocs} document${pendingDocs > 1 ? 's' : ''} pending review`);
   for (const l of data.leases) {
@@ -283,13 +314,52 @@ export default function CustomerDetailPage() {
         </div>
       )}
 
+      {/* Security deposits — the RP's liability to this customer, so it gets
+          its own card instead of hiding as a lease-table column. */}
+      {depositHolders.length > 0 && (
+        <div className="bg-white rounded-2xl p-5 shadow-sm mb-6">
+          <h2 className="text-sm font-semibold text-[#1a1916] mb-1 flex items-center gap-2">
+            <ShieldCheck size={16} className="text-[#2e9f82]" /> Security deposits held ({fmtAed(fin.securityDepositHeld)})
+          </h2>
+          <p className="text-xs text-[#9b9890] mb-3">You hold this on the customer&apos;s behalf — refundable at move-out after the settlement.</p>
+          <div className="space-y-2">
+            {depositHolders.map(l => {
+              // Proof of the deposit money: the deposit row's own receipt/slip
+              // docs, plus lease docs that are clearly a deposit cheque/transfer.
+              const proofs = data.documents.filter(d => d.leaseId === l.id && d.fileUrl &&
+                (d.ownerType === 'security_deposit' || /deposit|cheque/i.test(`${d.documentKey} ${d.displayName ?? ''}`)));
+              return (
+                <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-[#e8e6e0] rounded-xl px-4 py-2.5">
+                  <span className="text-sm font-semibold text-[#1a1916]">{fmtAed(l.securityDeposit)}</span>
+                  <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#fff7e0] text-[#9a6b00]">Owed back to customer</span>
+                  <span className="text-xs text-[#6b6860]">
+                    {l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}{l.property.buildingName ? ` · ${l.property.buildingName}` : ''} · {l.ref} · {fmtDate(l.startDate)} → {fmtDate(l.endDate)}
+                  </span>
+                  {proofs.length > 0 ? proofs.map(d => (
+                    <a key={d.id} href={d.fileUrl!} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] bg-[#eef9f4] border border-[#cfe9df] rounded-full px-2 py-0.5 hover:underline">
+                      <FileText size={11} /> {d.displayName || prettyKey(d.documentKey)}
+                    </a>
+                  )) : (
+                    <span className="text-[11px] font-medium text-[#9a6b00]">No cheque / transfer receipt on file</span>
+                  )}
+                  <Link href={`/rental-provider/dashboard/contracts/${l.id}/v2`} className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
+                    View lease <ExternalLink size={11} />
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Leases */}
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-6">
-        <h2 className="text-sm font-semibold text-[#1a1916] px-5 pt-5 pb-3 flex items-center gap-2"><FileText size={16} className="text-[#2e9f82]" /> Leases ({data.leases.length})</h2>
+        <h2 className="text-sm font-semibold text-[#1a1916] px-5 pt-5 pb-3 flex items-center gap-2"><FileText size={16} className="text-[#2e9f82]" /> Lease history ({data.leases.length})</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-left min-w-[920px] text-sm">
             <thead><tr className="bg-[#f4f3ef]">
-              {['Ref', 'Unit', 'Property', 'Period', 'Annual Rent', 'Deposit', 'Outstanding', 'Renewal', 'Status', ''].map(h => (
+              {['Ref', 'Unit', 'Property', 'Period', 'Annual Rent', 'Outstanding', 'Renewal', 'Status', ''].map(h => (
                 <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
               ))}
             </tr></thead>
@@ -297,7 +367,7 @@ export default function CustomerDetailPage() {
               {data.leases.map(l => {
                 const d = l.isCurrent ? renewalDays(l.endDate) : null;
                 const renewalRed = d !== null && d <= 30;
-                const badge = leaseBadge(l);
+                const badge = leaseBadge(l, data.leases.find(o => o.isCurrent && (o.unit.id ?? -o.id) === (l.unit.id ?? -l.id)));
                 return (
                   <tr key={l.id} className={`border-b border-[#e8e6e0] hover:bg-[#f4f3ef] ${l.isCurrent ? 'text-[#1a1916]' : 'text-[#9b9890]'}`}>
                     <td className="px-4 py-3.5 font-medium">{l.ref}</td>
@@ -305,7 +375,6 @@ export default function CustomerDetailPage() {
                     <td className="px-4 py-3.5 text-[#6b6860]">{l.property.buildingName ?? '—'}</td>
                     <td className="px-4 py-3.5 text-[#6b6860]">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
                     <td className="px-4 py-3.5 font-medium">{fmtAed(l.annualRent)}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{l.securityDeposit ? fmtAed(l.securityDeposit) : '—'}</td>
                     <td className={`px-4 py-3.5 font-medium ${l.outstanding > 0 && l.isCurrent ? 'text-[#b91c1c]' : 'text-[#6b6860]'}`}>{l.outstanding > 0 ? fmtAed(l.outstanding) : '—'}</td>
                     <td className="px-4 py-3.5">
                       {!l.isCurrent ? <span className="text-[#9b9890]">—</span>
@@ -320,32 +389,33 @@ export default function CustomerDetailPage() {
                 );
               })}
               {data.leases.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-[#9b9890]">No leases.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-[#9b9890]">No leases.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Documents */}
+      {/* KYC documents — identity / licensing only. Everything else (deposit
+          receipts, payment proofs, lease paperwork) lives in the popup. */}
       <div className="bg-white rounded-2xl p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2"><FileText size={16} className="text-[#2e9f82]" /> Documents ({data.documents.length})</h2>
-          {data.documents.some(d => d.fileUrl) && (
+          <h2 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2"><FileText size={16} className="text-[#2e9f82]" /> KYC documents ({kycDocs.length})</h2>
+          {data.documents.length > 0 && (
             <button
               type="button"
-              onClick={() => openDocsTogether(data.documents)}
+              onClick={() => setShowAllDocs(true)}
               className="text-sm text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <Files size={14} /> View all
+              <Files size={14} /> All documents ({data.documents.length})
             </button>
           )}
         </div>
-        {data.documents.length === 0 ? (
-          <p className="text-sm text-[#b91c1c] font-medium flex items-center gap-2"><AlertTriangle size={14} /> No documents on file for this customer.</p>
+        {kycDocs.length === 0 ? (
+          <p className="text-sm text-[#b91c1c] font-medium flex items-center gap-2"><AlertTriangle size={14} /> No KYC documents on file for this customer.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {data.documents.map(d => (
+            {kycDocs.map(d => (
               <div key={d.id} className="border border-[#e8e6e0] rounded-xl p-3.5 flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-[#f4f3ef] flex items-center justify-center text-[#6b6860] shrink-0"><FileText size={16} /></div>
                 <div className="min-w-0 flex-1">
@@ -363,6 +433,11 @@ export default function CustomerDetailPage() {
           </div>
         )}
       </div>
+
+      {/* All-documents popup — shared module (also used on the contract page) */}
+      {showAllDocs && (
+        <CustomerDocsModal documents={data.documents} tenantName={c.name} onClose={() => setShowAllDocs(false)} />
+      )}
     </div>
   );
 }

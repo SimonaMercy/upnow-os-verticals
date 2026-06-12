@@ -12,11 +12,13 @@ import {
   ShieldCheck, AlertTriangle,
 } from 'lucide-react';
 
-interface DocItem { key: string; displayName: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null }
+interface DocItem { key: string; displayName: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null; category?: string | null; hint?: string | null }
 interface Portal {
   tenant: { name: string; email: string | null; entityType: string };
   kycDocuments: DocItem[];
   otherDocuments: DocItem[];
+  /** Docs the landlord explicitly requested (RP request flow) — shown first. */
+  requestedDocuments?: DocItem[];
   purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
   contractId?: number | null;
   expiresAt: string;
@@ -63,7 +65,7 @@ export default function TenantPortalPage() {
       await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
       await fetch(API(token, '/documents'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentKey: doc.key, category: 'identity', displayName: doc.displayName, fileUrl, mimeType: file.type, s3Key: fileKey }),
+        body: JSON.stringify({ documentKey: doc.key, category: doc.category ?? 'identity', displayName: doc.displayName, fileUrl, mimeType: file.type, s3Key: fileKey }),
       });
       load();
     } catch { setError('Upload failed — please try again.'); }
@@ -88,6 +90,9 @@ export default function TenantPortalPage() {
         <h1 className="text-2xl font-bold text-[#1a1916] mt-3">Hi {greetName(data.tenant.name)},</h1>
         <p className="text-sm text-[#6b6860] mt-1">Please upload the documents requested below.</p>
 
+        {(data.requestedDocuments?.length ?? 0) > 0 && (
+          <DocSection title="Requested by your rental provider" subtitle="Specific documents your landlord asked you to provide" docs={data.requestedDocuments!} uploading={uploading} onUpload={upload} />
+        )}
         <DocSection title="Identity documents (KYC)" subtitle="Your Emirates ID, passport and visa" docs={data.kycDocuments} uploading={uploading} onUpload={upload} />
         {data.otherDocuments.length > 0 && (
           <DocSection title="Rental documents" subtitle="Supporting documents for your tenancy" docs={data.otherDocuments} uploading={uploading} onUpload={upload} />
@@ -128,7 +133,7 @@ function DocSection({ title, subtitle, docs, uploading, onUpload }: {
               <div className="shrink-0">{ok ? <CheckCircle2 size={18} className="text-[#16a34a]" /> : <UploadCloud size={18} className="text-[#d97706]" />}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-[#1a1916]">{doc.displayName}</p>
-                <p className="text-xs text-[#9b9890]">{ok ? 'Uploaded' : doc.required ? 'Required' : 'Optional'}</p>
+                <p className="text-xs text-[#9b9890]">{ok ? 'Uploaded' : doc.required ? 'Required' : 'Optional'}{doc.hint ? ` — ${doc.hint}` : ''}</p>
               </div>
               {ok && doc.fileUrl && <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="text-xs text-[#2e9f82] flex items-center gap-1"><ExternalLink size={12} /> View</a>}
               <label className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white ${busy ? 'opacity-50 pointer-events-none' : ''} ${ok ? 'bg-[#9b9890]' : 'bg-[#2e9f82]'}`}>

@@ -51,9 +51,9 @@ export const RESIDENTIAL_RENTAL_DOCS: DocReq[] = [
   { key: 'employment_letter',    label: 'Employment / Salary Certificate', category: 'banking', required: false, hint: 'Letter from your current employer on company letterhead' },
   { key: 'bank_statement',       label: 'Bank Statement / Pay Slip',       category: 'banking', required: false, hint: 'Last 3 months bank statement or most recent pay slip' },
   { key: 'marriage_certificate', label: 'Marriage Certificate',            category: 'legal',   required: false, hint: 'Required if renting as a family' },
-  { key: 'rental_history',       label: 'Rental History',                  category: 'legal',   required: false, hint: 'Previous landlord clearance / rent clearance paper' },
-  { key: 'credit_report',        label: 'Credit Report',                   category: 'banking', required: false, hint: 'AECB credit report (if applicable)' },
-  { key: 'utility_clearance',    label: 'Previous Utility Closing',        category: 'legal',   required: false, hint: 'Utility clearance from previous premises' },
+  // Rental History / Credit Report / Previous Utility Closing were dropped
+  // (Jun 2026) — not worth the checklist noise; admin can still request them
+  // ad hoc via the request flow (they remain in REQUESTABLE_DOCS).
 ];
 
 /**

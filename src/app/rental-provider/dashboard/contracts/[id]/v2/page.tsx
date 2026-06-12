@@ -33,6 +33,8 @@ import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
+import { KYC_DOCS, KYC_DOC_KEYS, getRentalSectionDocs, getRenewalRequiredDocs } from '@/lib/docRequirements';
+import type { DocReq } from '@/lib/docRequirements';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
@@ -41,6 +43,7 @@ import {
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
+import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -130,10 +133,10 @@ interface ContractDetail {
     response: 'pending' | 'accepted' | 'rejected' | null;
     respondedAt: string | null;
   } | null;
-  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null };
+  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
-  property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
-  unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
+  property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
+  unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
   documents: ContractDoc[];
   payments: ContractPayment[];
 }
@@ -222,6 +225,30 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'card', label: 'Card' },
   { value: 'online', label: 'Online' },
 ];
+
+/** Generic upload types kept from the legacy page — the contract-specific
+ *  checklist types (docRequirements mapping) are merged in front of these. */
+const BASE_DOC_TYPES = [
+  { value: 'trade_license',          label: 'Trade License',          category: 'license',    needsExpiry: true  },
+  { value: 'initial_approval',       label: 'Initial Approval',       category: 'compliance', needsExpiry: false },
+  { value: 'trade_name_reservation', label: 'Trade Name Reservation', category: 'compliance', needsExpiry: false },
+  { value: 'passport',               label: 'Passport',               category: 'identity',   needsExpiry: true  },
+  { value: 'visa',                   label: 'Visa',                   category: 'identity',   needsExpiry: true  },
+  { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
+  { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: true  },
+  { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
+  { value: 'ejari',                  label: 'Ejari',                  category: 'property',   needsExpiry: true  },
+  { value: 'poa',                    label: 'POA',                    category: 'legal',      needsExpiry: false },
+  { value: 'pdc',                    label: 'PDC',                    category: 'payment',    needsExpiry: false },
+  { value: 'agreement',              label: 'Agreement',              category: 'contract',   needsExpiry: false },
+  { value: 'other',                  label: 'Others',                 category: 'other',      needsExpiry: false },
+];
+
+/** Checklist doc keys whose uploads need an expiry date (IDs + licenses). */
+const EXPIRY_DOC_KEYS = new Set([
+  'emirates_id', 'emirates_id_front', 'emirates_id_back', 'passport', 'uae_visa',
+  'trade_license', 'business_license', 'tax_registration',
+]);
 
 function spaceCategoryFromUnitType(unitType: string | null): string {
   if (!unitType) return 'residential';
@@ -968,13 +995,13 @@ function MissingStrip({
 // Detail cards row
 // ────────────────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'parties' | 'property' | 'period' | 'payments' | 'documents' | 'clauses';
+type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses';
 
 /** Generates + emails the tenant a secure magic link, deep-linked to the section
  *  relevant to where it's shown (documents vs the contract review/sign page),
  *  and shows the link so the RP can copy/share it directly (e.g. WhatsApp). */
-function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link', role = 'tenant' }: {
-  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string; role?: 'tenant' | 'inspector';
+function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link', role = 'tenant', disabled = false }: {
+  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string; role?: 'tenant' | 'inspector'; disabled?: boolean;
 }) {
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [link, setLink] = useState('');
@@ -1018,60 +1045,11 @@ function SendTenantLinkButton({ tenantId, contractId, section = 'documents', lab
     );
   }
   return (
-    <button type="button" className="mini-btn view" onClick={send} disabled={state === 'sending'} title="Generate a secure link for the tenant">
+    <button type="button" className="mini-btn view" onClick={send} disabled={disabled || state === 'sending'}
+      style={disabled ? { opacity: .5, cursor: 'not-allowed' } : undefined}
+      title={disabled ? 'Choose the documents to request first' : 'Generate a secure link for the tenant'}>
       <Send size={12} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : label}
     </button>
-  );
-}
-
-function DetailCards({
-  contract, payments, kycDocs, onOpen,
-}: { contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[]; onOpen: (t: DrawerTab) => void }) {
-  const pendingKyc = kycDocs.filter(d => d.status === 'pending').length;
-  const landlordShort = (contract.landlord.companyName ?? contract.landlord.name ?? '—').split(' ')[0];
-  return (
-    <div className="details-wrap">
-      <div className="section-eyebrow">
-        <span className="se-t">Contract details</span>
-        <span className="se-line" />
-        <button className="se-link" onClick={() => onOpen('parties')}>
-          Open full details <ChevronRight size={13} />
-        </button>
-      </div>
-      <div className="detail-cards">
-        <button type="button" className="dcard" onClick={() => onOpen('parties')}>
-          <div className="dch"><span className="dci"><User size={16} /></span><span className="dct">Parties</span><span className="dca"><ChevronRight size={14} /></span></div>
-          <div className="drow"><span className="k">Customer</span><span className="v">{contract.tenant.name ?? '—'}</span></div>
-          <div className="drow"><span className="k">Landlord</span><span className="v">{landlordShort}</span></div>
-        </button>
-        <button type="button" className="dcard" onClick={() => onOpen('payments')}>
-          <div className="dch"><span className="dci"><CreditCard size={16} /></span><span className="dct">Payments</span><span className="dca"><ChevronRight size={14} /></span></div>
-          <div className="drow"><span className="k">Annual rent{(contract.rentVatRate ?? 0) > 0 ? ' (net)' : ''}</span><span className="v">{fmtAed(contract.annualRent)}</span></div>
-          {(contract.rentVatRate ?? 0) > 0 && (
-            <div className="drow"><span className="k">+ VAT ({contract.rentVatRate}%)</span><span className="v">{fmtAed(Math.round(contract.annualRent * (contract.rentVatRate ?? 0)) / 100)}</span></div>
-          )}
-          <div className="drow"><span className="k">Instalments</span><span className="v">{contract.numberOfInstallments ?? '—'}</span></div>
-        </button>
-        <button type="button" className="dcard" onClick={() => onOpen('documents')}>
-          <div className="dch">
-            <span className="dci"><Paperclip size={16} /></span>
-            <span className="dct">Documents</span>
-            {pendingKyc > 0
-              ? <span className="dbadge">{pendingKyc} to review</span>
-              : <span className="dca"><ChevronRight size={14} /></span>}
-          </div>
-          <div className="drow"><span className="k">All documents</span><span className="v">{(contract.documents ?? []).length} files</span></div>
-          <div className="drow"><span className="k">Customer KYC</span><span className="v">{kycDocs.length} files</span></div>
-        </button>
-        <button type="button" className="dcard" onClick={() => onOpen('period')}>
-          <div className="dch"><span className="dci"><Calendar size={16} /></span><span className="dct">Period</span><span className="dca"><ChevronRight size={14} /></span></div>
-          <div className="drow"><span className="k">Start</span><span className="v">{fmtDate(contract.startDate)}</span></div>
-          <div className="drow"><span className="k">End</span><span className="v">{fmtDate(contract.endDate)}</span></div>
-        </button>
-      </div>
-      {/* unused vars to keep typecheck happy when payments comes empty */}
-      <span className="sr-only" hidden>{payments.length}</span>
-    </div>
   );
 }
 
@@ -1089,19 +1067,23 @@ function DRow({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
-  { key: 'parties',   label: 'Parties',   icon: User },
   { key: 'property',  label: 'Property',  icon: Building2 },
-  { key: 'period',    label: 'Period',    icon: Calendar },
   { key: 'payments',  label: 'Payments',  icon: CreditCard },
   { key: 'documents', label: 'Documents', icon: Paperclip },
   { key: 'clauses',   label: 'Clauses',   icon: ClipboardList },
 ];
 
 function DetailsDrawer({
-  open, tab, setTab, onClose, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
+  open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
+  /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
+   *  no slide-in drawer, no tabs, nothing hidden behind a click. The property
+   *  section is skipped (the header chain links to property/unit details
+   *  instead of duplicating them) and clauses stay hidden (addendums are the
+   *  mechanism). */
+  inline?: boolean;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
   onApproveDoc: (id: number) => void; onRejectDoc: (id: number) => void;
   /** POST /api/contracts/:id/payments — record a new instalment / payment. */
@@ -1242,21 +1224,41 @@ function DetailsDrawer({
   const [upExpiry, setUpExpiry] = useState('');
   const [upBusy, setUpBusy] = useState(false);
   const [upErr, setUpErr] = useState<string | null>(null);
-  const DOC_TYPES = [
-    { value: 'trade_license',          label: 'Trade License',          category: 'license',    needsExpiry: true  },
-    { value: 'initial_approval',       label: 'Initial Approval',       category: 'compliance', needsExpiry: false },
-    { value: 'trade_name_reservation', label: 'Trade Name Reservation', category: 'compliance', needsExpiry: false },
-    { value: 'passport',               label: 'Passport',               category: 'identity',   needsExpiry: true  },
-    { value: 'visa',                   label: 'Visa',                   category: 'identity',   needsExpiry: true  },
-    { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
-    { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: true  },
-    { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
-    { value: 'ejari',                  label: 'Ejari',                  category: 'property',   needsExpiry: true  },
-    { value: 'poa',                    label: 'POA',                    category: 'legal',      needsExpiry: false },
-    { value: 'pdc',                    label: 'PDC',                    category: 'payment',    needsExpiry: false },
-    { value: 'agreement',              label: 'Agreement',              category: 'contract',   needsExpiry: false },
-    { value: 'other',                  label: 'Others',                 category: 'other',      needsExpiry: false },
-  ] as const;
+  // Full mapped pack for the unit's category — KYC + commercial / industrial /
+  // residential section (company promotions applied). Shown on new contracts,
+  // and on renewals as the standing customer file under the renewal slots.
+  const fullPackDocs = useMemo<DocReq[]>(
+    () => [...KYC_DOCS, ...getRentalSectionDocs(contract.unit.type, contract.tenant.entityType)],
+    [contract.unit.type, contract.tenant.entityType]);
+  // Renewal-specific re-verification slots (empty for new contracts).
+  const renewalDocs = useMemo<DocReq[]>(
+    () => contract.contractType === 'renewal' ? getRenewalRequiredDocs(contract.unit.type) : [],
+    [contract.contractType, contract.unit.type]);
+  // Upload type picker = checklist types first (most relevant), then the
+  // legacy generic types — so an upload lands on the exact checklist key.
+  const DOC_TYPES = useMemo(() => {
+    const fromChecklist: { value: string; label: string; category: string; needsExpiry: boolean }[] = [];
+    const seen = new Set<string>();
+    for (const d of [...renewalDocs, ...fullPackDocs]) {
+      if (seen.has(d.key)) continue;
+      seen.add(d.key);
+      fromChecklist.push({ value: d.key, label: d.label, category: d.category, needsExpiry: EXPIRY_DOC_KEYS.has(d.key) });
+    }
+    return [...fromChecklist, ...BASE_DOC_TYPES.filter(t => !seen.has(t.value))];
+  }, [renewalDocs, fullPackDocs]);
+  const uploadBoxRef = useRef<HTMLDivElement>(null);
+  /** Checklist "Upload" / "Replace" → open the upload form with the slot's
+   *  type preselected and pop the file picker. */
+  const prefillUpload = (d: DocReq) => {
+    setShowUpload(true);
+    setUpType(d.key);
+    setUpExpiry('');
+    setUpErr(null);
+    requestAnimationFrame(() => {
+      uploadBoxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      docFileRef.current?.click();
+    });
+  };
   const upSelected = DOC_TYPES.find(t => t.value === upType);
   const upShowExpiry = upSelected?.needsExpiry ?? false;
   const submitUpload = async () => {
@@ -1279,13 +1281,49 @@ function DetailsDrawer({
   const [reqBusy, setReqBusy] = useState(false);
   const [reqErr, setReqErr] = useState<string | null>(null);
   const [reqMenuOpen, setReqMenuOpen] = useState(false);
+  const [showReqModal, setShowReqModal] = useState(false);
+  /** Documents picked in the request popup (multi-select). */
+  const [reqSelected, setReqSelected] = useState<string[]>([]);
+  /** How many requests the last send recorded (drives the success note). */
+  const [reqSent, setReqSent] = useState(0);
+  const reqInputRef = useRef<HTMLInputElement>(null);
+  /** Cross-lease document history popup (shared CustomerDocsModal). */
+  const [showDocsHistory, setShowDocsHistory] = useState(false);
+  const addReqDoc = (name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    setReqSelected(prev => prev.some(x => x.toLowerCase() === n.toLowerCase()) ? prev : [...prev, n]);
+    setReqLabel('');
+    setReqMenuOpen(false);
+  };
+  const removeReqDoc = (name: string) =>
+    setReqSelected(prev => prev.filter(x => x !== name));
+  /** Checklist "Request" → open the request popup with that doc selected. */
+  const prefillRequest = (d: DocReq) => {
+    setReqSelected([d.label]);
+    setReqLabel('');
+    setReqNotes(d.hint ?? '');
+    setReqMenuOpen(false);
+    setReqErr(null);
+    setReqSent(0);
+    setShowReqModal(true);
+  };
+  const openBlankRequest = () => {
+    setReqSelected([]); setReqLabel(''); setReqNotes(''); setReqErr(null); setReqMenuOpen(false); setReqSent(0);
+    setShowReqModal(true);
+  };
   const submitRequest = async () => {
-    const label = reqLabel.trim();
-    if (!label) return;
+    // Anything still typed in the search box counts as a selection too.
+    const typed = reqLabel.trim();
+    const labels = [...reqSelected];
+    if (typed && !labels.some(l => l.toLowerCase() === typed.toLowerCase())) labels.push(typed);
+    if (!labels.length) return;
     setReqBusy(true); setReqErr(null);
     try {
-      await onRequestDoc(label, reqNotes.trim());
-      setReqLabel(''); setReqNotes('');
+      for (const label of labels) await onRequestDoc(label, reqNotes.trim());
+      setReqSelected(labels);
+      setReqLabel('');
+      setReqSent(labels.length);
     } catch (e) {
       setReqErr(e instanceof Error ? e.message : 'Failed to send request');
     } finally {
@@ -1294,43 +1332,29 @@ function DetailsDrawer({
   };
   return (
     <>
-      <div className={'scrim ' + (open ? 'open' : '')} onClick={onClose} />
-      <div className={'drawer ' + (open ? 'open' : '')}>
-        <div className="dh">
-          <span className="t">Contract details</span>
-          <button className="x" onClick={onClose}><X size={18} /></button>
-        </div>
-        <div className="dtabs">
-          {DRAWER_TABS.map(({ key, label, icon: Ic }) => (
-            <button key={key} className={'dtab ' + (tab === key ? 'on' : '')} onClick={() => setTab(key)}>
-              <Ic size={13} /> {label}
-            </button>
-          ))}
-        </div>
-        <div className="dbody">
-          {tab === 'parties' && (
-            <div className="sec">
-              <div className="sech"><span className="si"><User size={16} /></span><span className="st">Parties</span></div>
-              <div className="secb">
-                <div className="grid2" style={{ gap: 24 }}>
-                  <div>
-                    <p className="subhead">Landlord</p>
-                    <DRow k="Company" v={contract.landlord.companyName} />
-                    <DRow k="Contact" v={contract.landlord.name} />
-                    <DRow k="Email"   v={contract.landlord.email} />
-                    <DRow k="Phone"   v={contract.landlord.phone} />
-                  </div>
-                  <div>
-                    <p className="subhead mut">Customer</p>
-                    <DRow k="Name"  v={contract.tenant.name} />
-                    <DRow k="Email" v={contract.tenant.email} />
-                    <DRow k="Phone" v={contract.tenant.phone} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {tab === 'property' && (
+      {/* Backdrop only exists in drawer mode — in inline mode it would cover
+          the whole page and swallow every click. */}
+      {!inline && <div className={'scrim ' + (open ? 'open' : '')} onClick={onClose} />}
+      <div className={inline ? 'sections-inline' : 'drawer ' + (open ? 'open' : '')}>
+        {!inline && (
+          <div className="dh">
+            <span className="t">Contract details</span>
+            <button className="x" onClick={onClose}><X size={18} /></button>
+          </div>
+        )}
+        {!inline && (
+          <div className="dtabs">
+            {DRAWER_TABS.map(({ key, label, icon: Ic }) => (
+              <button key={key} className={'dtab ' + (tab === key ? 'on' : '')} onClick={() => setTab(key)}>
+                <Ic size={13} /> {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className={inline ? 'dbody-inline' : 'dbody'}>
+          {/* Parties section removed (CEO: customer name + phone live in the
+              page header; landlord details live on the settings page). */}
+          {!inline && tab === 'property' && (
             <div className="sec">
               <div className="sech"><span className="si"><Building2 size={16} /></span><span className="st">Property &amp; unit</span></div>
               <div className="secb">
@@ -1345,29 +1369,30 @@ function DetailsDrawer({
               </div>
             </div>
           )}
-          {tab === 'period' && (
-            <div className="sec">
-              <div className="sech"><span className="si"><Calendar size={16} /></span><span className="st">Rental period</span></div>
-              <div className="secb">
-                <DRow k="Start"        v={fmtDate(contract.startDate)} />
-                <DRow k="End"          v={fmtDate(contract.endDate)} />
-                <DRow k="Duration"     v={contract.durationYears ? `${contract.durationYears} year${contract.durationYears !== 1 ? 's' : ''}` : '12 months'} />
-                <DRow k="Instalments"  v={contract.numberOfInstallments ? `${contract.numberOfInstallments} payments` : '—'} />
-                <DRow k="Mode"         v={contract.modeOfPayment ? contract.modeOfPayment.charAt(0).toUpperCase() + contract.modeOfPayment.slice(1) : '—'} />
-              </div>
-            </div>
-          )}
-          {tab === 'payments' && (
+          {/* Rental period moved to the page-top info bar (next to the customer). */}
+          {(inline || tab === 'payments') && (
             <>
-              {depositRow && (
-                <div className="sec">
-                  <div className="sech"><span className="si"><DollarSign size={16} /></span><span className="st">Security deposit</span></div>
-                  <div className="secb">
-                    <table className="ptable">
-                      <thead><tr><th>Amount</th><th>Reference</th><th>Method</th><th>Date</th><th>Status</th></tr></thead>
-                      <tbody>
+              <span id="sec-payments" />
+              <div className="sec">
+                <div className="sech">
+                  <span className="si"><CreditCard size={16} /></span>
+                  <span className="st">Payments</span>
+                  <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
+                    {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
+                  </button>
+                </div>
+                <div className="secb">
+                  <table className="ptable">
+                    <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {/* Security deposit folds in as the first payment row. A
+                          renewal doesn't re-collect the deposit — the original
+                          lease holds it — so the row is hidden there. */}
+                      {depositRow && contract.contractType !== 'renewal' && (
                         <Fragment>
                           <tr>
+                            <td><DollarSign size={13} /></td>
+                            <td>{depositRow.description?.trim() || 'Security deposit'}</td>
                             <td className="amt">{fmtAed(depositRow.amount)}</td>
                             <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
                             <td>{fmtMethod(depositRow.paymentMethod)}</td>
@@ -1399,7 +1424,7 @@ function DetailsDrawer({
                           </tr>
                           {editingId === depositRow.id && (
                             <tr>
-                              <td colSpan={5} style={{ background: 'var(--jade-tint)' }}>
+                              <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
                                 <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
                                   <p className="subhead">Correct security-deposit details</p>
                                   <div className="field"><label>Description</label>
@@ -1434,23 +1459,7 @@ function DetailsDrawer({
                             </tr>
                           )}
                         </Fragment>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-              <div className="sec">
-                <div className="sech">
-                  <span className="si"><CreditCard size={16} /></span>
-                  <span className="st">Rental instalments</span>
-                  <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
-                    {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
-                  </button>
-                </div>
-                <div className="secb">
-                  <table className="ptable">
-                    <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
-                    <tbody>
+                      )}
                       {rentRows.map((p, i) => (
                         <Fragment key={p.id}>
                         <tr>
@@ -1612,22 +1621,170 @@ function DetailsDrawer({
                   </div>
                 </div>
               </div>
+              {/* Payment documents (receipts / advices / invoices) live in the
+                  Documents card below, under its Financial tab. */}
             </>
           )}
-          {tab === 'documents' && (() => {
-            const all = contract.documents ?? [];
+          {(inline || tab === 'documents') && (() => {
+            // Requested-but-not-uploaded placeholders (empty fileUrl) are open
+            // asks, not files — keep them out of the lists; checklist slots
+            // show "Requested — awaiting upload" for them instead.
+            const pendingAsks = (contract.documents ?? []).filter(d => !d.fileUrl);
+            const all = (contract.documents ?? []).filter(d => !!d.fileUrl);
+            // Business segregation (CEO doctrine): KYC / Contract / Financial /
+            // Property — by document PURPOSE, not just by owner row.
+            const groupOf = (d: ContractDoc): string => {
+              // Payment proofs are FINANCIAL even when customer-owned; bank
+              // statements (banking) stay with the customer's KYC.
+              if (d.category === 'payment' || d.ownerType === 'security_deposit') return 'financial';
+              if (d.ownerType === 'customer' || d.ownerType === 'tenant') return 'kyc';
+              if (d.category === 'property' || d.category === 'report') return 'property';
+              if (d.ownerType === 'tenancy_contract' || d.category === 'contract' || d.category === 'legal' || d.category === 'inspection') return 'contract';
+              return 'other';
+            };
+
+            // ── Expected-documents checklist (same mapping the customer journey
+            // uses — src/lib/docRequirements). New lease → KYC + the unit
+            // category's pack (commercial / industrial / residential). Renewal →
+            // only the re-verification docs; the full pack lives on the original
+            // lease. Slots match uploads so the gaps are what need requesting.
+            const isRenewal = contract.contractType === 'renewal';
+            // Primary checklist: renewal → re-verification slots; new → full pack.
+            const expected: DocReq[] = isRenewal ? renewalDocs : fullPackDocs;
+            // On renewals the rest of the category pack still shows (standing
+            // customer file) so real gaps — a missing MOA or TRN — stay visible
+            // even though they aren't re-verified here. Identity/KYC docs are
+            // deliberately excluded: they were collected with the original
+            // lease and would only add noise on a renewal screen.
+            const renewalKeys = new Set(expected.map(d => d.key));
+            const standing: DocReq[] = isRenewal
+              ? fullPackDocs.filter(d => !KYC_DOC_KEYS.has(d.key) && !renewalKeys.has(d.key))
+              : [];
+            const norm = (s: string | null | undefined) =>
+              (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            // Upload keys / display names that satisfy a slot without matching its
+            // key verbatim (legacy combined EID, common label variants).
+            const KEY_ALIASES: Record<string, string[]> = {
+              emirates_id_front: ['emirates_id'],
+              emirates_id_back: ['emirates_id'],
+              emirates_id: ['emirates_id_front', 'emirates_id_back'],
+              uae_visa: ['uae_visa_residency', 'uae_visa_residence_visa', 'residence_visa', 'visa'],
+              bank_statement: ['financial_statements', 'bank_statement_pay_slip', 'pay_slip'],
+              employment_letter: ['employment_salary_certificate', 'salary_certificate', 'employment_offer_letter'],
+              utility_clearance: ['previous_utility_closing', 'utility_move_out_clearance'],
+              tax_registration: ['tax_registration_certificate', 'vat_tax_registration_trn', 'vat_certificate'],
+              moa: ['moa_mom', 'memorandum_of_association', 'memorandum_of_association_moa'],
+              business_license: ['business_activity_license'],
+            };
+            const matchDoc = (key: string): ContractDoc | undefined => {
+              const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
+              // RP uploads carry a `_<timestamp>` suffix on the key — strip it.
+              // Newest match wins, so a Replace upload takes over the slot.
+              const baseKey = (d: ContractDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
+              return all
+                .filter(d => accepted.includes(baseKey(d)) || accepted.includes(norm(d.displayName)))
+                .sort((a, b) => b.id - a.id)[0];
+            };
+            const askedNames = new Set(pendingAsks.map(d => norm(d.displayName ?? d.documentKey).replace(/_\d{10,}$/, '')));
+            const askedFor = (req: DocReq) => askedNames.has(norm(req.label)) || askedNames.has(req.key);
+            const checklist = expected.map(req => ({ req, doc: matchDoc(req.key) }));
+            const standingList = standing.map(req => ({ req, doc: matchDoc(req.key) }));
+            const onFile = checklist.filter(c => c.doc).length;
+            const standingOnFile = standingList.filter(c => c.doc).length;
+            const matchedIds = new Set([...checklist, ...standingList].map(c => c.doc?.id).filter((x): x is number => x != null));
+            // One file can satisfy two slots (legacy combined EID covers Front +
+            // Back; renewal + standing share files) — render it once so React
+            // keys stay unique.
+            const seenIds = new Set<number>();
+            const dedupeRows = (rows: { req: DocReq; doc: ContractDoc | undefined }[]) =>
+              rows.filter(({ doc }) => {
+                if (!doc) return true;
+                if (seenIds.has(doc.id)) return false;
+                seenIds.add(doc.id);
+                return true;
+              });
+            const checklistRows = dedupeRows(checklist);
+            const standingRows = dedupeRows(standingList);
+            const category = spaceCategoryFromUnitType(contract.unit.type);
+            const checklistTitle = isRenewal
+              ? 'Renewal documents'
+              : `Customer documents — ${category} set`;
+
             const groups = [
-              { key: 'customer', label: 'Customer documents', items: all.filter(d => d.ownerType === 'customer' || d.ownerType === 'tenant') },
-              { key: 'contract', label: 'Contract documents', items: all.filter(d => d.ownerType === 'tenancy_contract') },
-              { key: 'deposit',  label: 'Deposit documents',  items: all.filter(d => d.ownerType === 'security_deposit') },
-              { key: 'other',    label: 'Other documents',    items: all.filter(d => !['customer', 'tenant', 'tenancy_contract', 'security_deposit'].includes(d.ownerType)) },
-            ].filter(g => g.items.length);
+              { key: 'kyc',       label: 'Additional customer' },
+              { key: 'contract',  label: 'Contract' },
+              { key: 'financial', label: 'Financial' },
+              { key: 'property',  label: 'Property' },
+              { key: 'other',     label: 'Other' },
+            ].map(g => ({ ...g, items: all.filter(d => groupOf(d) === g.key && !matchedIds.has(d.id)) }))
+              .filter(g => g.items.length);
             const openAll = () => openDocsTogether(all);
+
+            const renderDoc = (d: ContractDoc, replaceReq?: DocReq) => {
+              const isKyc = d.ownerType === 'customer' || d.ownerType === 'tenant';
+              const ok  = ['approved', 'processed', 'complete'].includes(d.status);
+              const stt = ok ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
+              const lbl = ok ? (d.status === 'approved' ? 'Approved' : 'On file')
+                : d.status === 'rejected' ? 'Rejected' : 'Pending review';
+              const exp = d.expiryDate ? ' · exp ' + new Date(d.expiryDate).toLocaleDateString('en-AE') : '';
+              return (
+                <div key={d.id} className={'docitem ' + stt}>
+                  <FileText size={14} />
+                  <div>
+                    <div className="dn">{d.displayName ?? d.documentKey.replace(/_/g, ' ')}</div>
+                    <div className="ds">{lbl}{exp}</div>
+                  </div>
+                  <div className="dacts">
+                    <a href={d.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> View</a>
+                    {replaceReq && (
+                      <button type="button" className="mini-btn view" title={`Upload a newer ${replaceReq.label}`} onClick={() => prefillUpload(replaceReq)}>
+                        <UploadCloud size={12} /> Replace
+                      </button>
+                    )}
+                    {/* Review actions only while there's something to review —
+                        verified docs don't carry dummy tick/cross buttons. */}
+                    {isKyc && (stt === 'pending' || stt === 'rejected') && (
+                      <button className="mini-btn ok" title="Approve" onClick={() => onApproveDoc(d.id)}><Check size={12} /></button>
+                    )}
+                    {isKyc && stt === 'pending' && (
+                      <button className="mini-btn no" title="Reject" onClick={() => onRejectDoc(d.id)}><X size={12} /></button>
+                    )}
+                  </div>
+                </div>
+              );
+            };
+            // Missing slots use the SAME row pattern as on-file documents —
+            // icon, name, status, actions right — dashed border marks the gap.
+            const renderMissing = (req: DocReq) => {
+              const asked = askedFor(req);
+              return (
+                <div key={'missing-' + req.key} className={'docitem docmiss' + (req.required && !asked ? ' req' : '')} title={req.hint}>
+                  <FileText size={14} />
+                  <div>
+                    <div className="dn">{req.label}</div>
+                    <div className="ds">{asked ? 'Requested — awaiting upload' : req.required ? 'Missing — required' : 'Not on file — optional'}</div>
+                  </div>
+                  <div className="dacts">
+                    <button type="button" className="mini-btn ok" onClick={() => prefillUpload(req)}>
+                      <UploadCloud size={12} /> Upload
+                    </button>
+                    {!asked && (
+                      <button type="button" className="mini-btn view" onClick={() => prefillRequest(req)}>
+                        <Send size={12} /> Request
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            };
+            const tabGroups = groups.filter(g => g.key !== 'kyc');
+            const kycGroup = groups.find(g => g.key === 'kyc');
             return (
+              <>
               <div className="sec">
                 <div className="sech">
                   <span className="si"><Paperclip size={16} /></span>
-                  <span className="st">All documents ({all.length})</span>
+                  <span className="st">Documents ({all.length})</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                     {all.length > 0 && (
                       <button type="button" className="mini-btn view" onClick={openAll}>
@@ -1637,46 +1794,74 @@ function DetailsDrawer({
                     <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); }}>
                       <UploadCloud size={12} /> Upload
                     </button>
-                    {contract.tenant.id && <SendTenantLinkButton tenantId={contract.tenant.id} contractId={contract.id} section="documents" label="Send docs link" />}
+                    <button type="button" className="mini-btn view" onClick={openBlankRequest}>
+                      <Send size={12} /> Request
+                    </button>
                   </div>
                 </div>
                 <div className="secb">
-                  {all.length === 0 && <p className="note">No documents yet.</p>}
-                  {groups.map(g => (
-                    <div key={g.key} style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '4px 0 8px' }}>
-                        {g.label} ({g.items.length})
+                  {/* Customer file: expected-documents checklist — uploaded
+                      slots show the real file, missing slots carry one-click
+                      Upload / Request — plus extra customer uploads. */}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                      {checklistTitle} · {onFile} of {checklist.length} on file
+                    </div>
+                    {isRenewal && (
+                      <p className="note" style={{ margin: '0 0 8px' }}>
+                        Only {category === 'residential' ? 'identity' : 'licensing'} is re-verified at renewal — the standing customer file is below.
+                      </p>
+                    )}
+                    {/* One list, one pattern — on-file and missing rows share
+                        the same row anatomy and 5px rhythm. */}
+                    <div className="doclist">
+                      {checklistRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
+                    </div>
+                    {isRenewal && standingRows.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
+                          Customer file — {category} set · {standingOnFile} of {standingList.length} on file
+                        </div>
+                        <div className="doclist">
+                          {standingRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
+                        </div>
+                      </>
+                    )}
+                    {kycGroup && (
+                      <>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
+                          Additional customer documents ({kycGroup.items.length})
+                        </div>
+                        <div className="doclist">
+                          {kycGroup.items.map(d => renderDoc(d))}
+                        </div>
+                      </>
+                    )}
+                    {contract.tenant.id != null && (
+                      <p className="note" style={{ marginTop: 8 }}>
+                        Need older or cross-lease files?{' '}
+                        <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowDocsHistory(true)}>
+                          Full document history
+                        </button>
+                      </p>
+                    )}
+                  </div>
+                  {/* Remaining groups — all together, stacked under the
+                      customer file (Contract / Financial / Property / Other) */}
+                  {tabGroups.map(g => (
+                    <div key={g.key}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
+                        {g.label} documents ({g.items.length})
                       </div>
                       <div className="doclist">
-                        {g.items.map(d => {
-                          const isKyc = d.ownerType === 'customer' || d.ownerType === 'tenant';
-                          const ok  = ['approved', 'processed', 'complete'].includes(d.status);
-                          const stt = ok ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
-                          const lbl = ok ? (d.status === 'approved' ? 'Approved' : 'On file')
-                            : d.status === 'rejected' ? 'Rejected' : 'Pending review';
-                          const exp = d.expiryDate ? ' · exp ' + new Date(d.expiryDate).toLocaleDateString('en-AE') : '';
-                          return (
-                            <div key={d.id} className={'docitem ' + stt}>
-                              <FileText size={16} />
-                              <div>
-                                <div className="dn">{d.displayName ?? d.documentKey.replace(/_/g, ' ')}</div>
-                                <div className="ds">{lbl}{exp}</div>
-                              </div>
-                              <div className="dacts">
-                                <a href={d.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> View</a>
-                                {isKyc && d.status !== 'approved' && <button className="mini-btn ok" onClick={() => onApproveDoc(d.id)}><Check size={12} /></button>}
-                                {isKyc && d.status !== 'rejected' && <button className="mini-btn no" onClick={() => onRejectDoc(d.id)}><X size={12} /></button>}
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {g.items.map(d => renderDoc(d))}
                       </div>
                     </div>
                   ))}
 
                   {/* Upload document (Flow 5) */}
                   {showUpload && (
-                    <div style={{ margin: '6px 0 14px', padding: 14, border: '1px solid var(--mist-strong)', borderRadius: 12, background: 'var(--surface)' }}>
+                    <div ref={uploadBoxRef} style={{ margin: '6px 0 14px', padding: 14, border: '1px solid var(--mist-strong)', borderRadius: 12, background: 'var(--surface)' }}>
                       <p className="subhead">Upload a document</p>
                       <input ref={docFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: 'none' }}
                         onChange={e => setUpFile(e.target.files?.[0] ?? null)} />
@@ -1721,30 +1906,65 @@ function DetailsDrawer({
                     </div>
                   )}
 
-                  {/* Request a document from the tenant (Flow 6) */}
-                  <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px dashed var(--mist-strong)' }}>
-                    <p className="subhead">Request a document from {contract.tenant.name ?? 'the customer'}</p>
+                </div>
+              </div>
+              {/* Cross-lease document history — same popup module as the
+                  customer page, no navigation away from the contract. */}
+              {showDocsHistory && contract.tenant.id != null && (
+                <CustomerDocsModal
+                  tenantId={contract.tenant.id}
+                  tenantName={contract.tenant.name}
+                  onClose={() => setShowDocsHistory(false)}
+                />
+              )}
+              {/* Request-a-document popup (Flow 6) */}
+              {showReqModal && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={() => setShowReqModal(false)} />
+                  <div style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 460, padding: 18 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+                      <p className="subhead" style={{ margin: 0 }}>Request documents from {contract.tenant.name ?? 'the customer'}</p>
+                      <button type="button" className="mini-btn view" onClick={() => setShowReqModal(false)}><X size={12} /></button>
+                    </div>
+                    {/* Selected documents — pick several, then send one request + one link */}
+                    {reqSelected.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {reqSelected.map(name => (
+                          <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: 'var(--jade-deep)', background: 'var(--jade-tint, #eef9f4)', border: '1px solid #cfe9df', borderRadius: 999, padding: '3px 6px 3px 10px' }}>
+                            {name}
+                            <button type="button" onClick={() => removeReqDoc(name)} style={{ display: 'grid', placeItems: 'center', border: 0, background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 2 }} title="Remove">
+                              <X size={11} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="field" style={{ position: 'relative' }}>
                       <input
+                        ref={reqInputRef}
+                        autoFocus
                         className="input"
                         value={reqLabel}
-                        placeholder="Search or type a document name…"
+                        placeholder="Search or type a document name, Enter to add…"
                         onChange={e => { setReqLabel(e.target.value); setReqMenuOpen(true); }}
                         onFocus={() => setReqMenuOpen(true)}
                         onBlur={() => setTimeout(() => setReqMenuOpen(false), 150)}
-                        onKeyDown={e => { if (e.key === 'Escape') setReqMenuOpen(false); }}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setReqMenuOpen(false);
+                          if (e.key === 'Enter') { e.preventDefault(); addReqDoc(reqLabel); }
+                        }}
                       />
                       {reqMenuOpen && (() => {
                         const q = reqLabel.trim().toLowerCase();
-                        const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q));
-                        if (matches.length === 0 || (matches.length === 1 && matches[0].toLowerCase() === q)) return null;
+                        const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q) && !reqSelected.some(s => s.toLowerCase() === d.toLowerCase()));
+                        if (matches.length === 0) return null;
                         return (
                           <div style={{ position: 'absolute', zIndex: 30, marginTop: 4, width: '100%', maxHeight: 220, overflowY: 'auto', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, boxShadow: '0 8px 22px rgba(0,0,0,0.10)' }}>
                             {matches.map(d => (
                               <button
                                 key={d} type="button"
                                 onMouseDown={e => e.preventDefault()}
-                                onClick={() => { setReqLabel(d); setReqMenuOpen(false); }}
+                                onClick={() => addReqDoc(d)}
                                 onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                                 style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: 'transparent', border: 'none' }}
@@ -1760,15 +1980,34 @@ function DetailsDrawer({
                       <input className="input" value={reqNotes} placeholder="Instructions for the customer (optional)" onChange={e => setReqNotes(e.target.value)} />
                     </div>
                     {reqErr && <p className="note" style={{ color: 'var(--brick)' }}>{reqErr}</p>}
-                    <button className="btn btn-jade btn-sm" disabled={!reqLabel.trim() || reqBusy} onClick={() => void submitRequest()}>
-                      <Paperclip size={14} /> {reqBusy ? 'Sending…' : 'Send request'}
-                    </button>
+                    {reqSent > 0 && (
+                      <p className="note" style={{ color: 'var(--jade-deep)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Check size={13} /> Requested {reqSent} document{reqSent === 1 ? '' : 's'} — now send the upload link.
+                      </p>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                      <button className="btn btn-jade btn-sm" disabled={reqBusy || (reqSelected.length === 0 && !reqLabel.trim())} onClick={() => void submitRequest()}>
+                        <Paperclip size={14} /> {reqBusy ? 'Sending…' : `Send request${(reqSelected.length + (reqLabel.trim() ? 1 : 0)) > 1 ? 's' : ''}`}
+                      </button>
+                      {/* Upload link unlocks once documents are chosen */}
+                      {contract.tenant.id && (
+                        <SendTenantLinkButton
+                          tenantId={contract.tenant.id}
+                          contractId={contract.id}
+                          section="documents"
+                          label="Send docs link"
+                          disabled={reqSelected.length === 0}
+                        />
+                      )}
+                      <button className="btn btn-ghost btn-sm" disabled={reqBusy} onClick={() => setShowReqModal(false)}>Close</button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+              </>
             );
           })()}
-          {tab === 'clauses' && (
+          {!inline && tab === 'clauses' && (
             <div className="sec">
               <div className="sech"><span className="si"><ClipboardList size={16} /></span><span className="st">Clauses &amp; notes</span></div>
               <div className="secb">
@@ -2316,6 +2555,7 @@ export default function ContractV2Page() {
   // internal contract links must stay within the manager area instead of the
   // landlord (rental-provider) area. Backend endpoints are already role-aware.
   const pathname = usePathname();
+  const isManagerView = pathname.startsWith('/dashboard/manager');
   const contractsBase = pathname.startsWith('/dashboard/manager')
     ? '/dashboard/manager/contracts'
     : '/rental-provider/dashboard/contracts';
@@ -2327,7 +2567,6 @@ export default function ContractV2Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
-  const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
   const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | null>(null);
   // Ejari / DEWA-utility upload (ported from the old page so v2 is self-contained).
   const ejariInputRef = useRef<HTMLInputElement>(null);
@@ -2509,13 +2748,15 @@ export default function ContractV2Page() {
       body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
     });
     if (!urlRes.ok) throw new Error('Failed to get upload URL');
-    const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+    // fileKey MUST be persisted as s3Key — the bucket is private and the
+    // backend can only re-sign View URLs for rows that carry their key.
+    const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey?: string };
     const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
     const putRes = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
     if (!putRes.ok) throw new Error('File upload failed');
     const docRes = await fetch('/api/documents', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, category: 'property', documentKey: docKey, displayName, fileUrl, mimeType: file.type || 'application/octet-stream', isVisibleToTenant: true }),
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, category: 'property', documentKey: docKey, displayName, fileUrl, mimeType: file.type || 'application/octet-stream', s3Key: fileKey, isVisibleToTenant: true }),
     });
     if (!docRes.ok) throw new Error('Failed to record document');
   }
@@ -2660,13 +2901,15 @@ export default function ContractV2Page() {
       const b = await urlRes.json().catch(() => ({})) as { message?: string | string[] };
       throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Error ${urlRes.status}`));
     }
-    const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+    const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey?: string };
     const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
     const putRes = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
     if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
     const docBody: Record<string, unknown> = {
       ownerType: 'tenancy_contract', ownerId: contract.id, category: meta.category,
       documentKey: docKey, displayName: meta.label, fileUrl,
+      // s3Key lets the backend re-sign View URLs (private bucket)
+      s3Key: fileKey,
       mimeType: file.type || 'application/octet-stream', isVisibleToTenant: visibleToTenant,
     };
     if (expiryDate) docBody.expiryDate = expiryDate;
@@ -2730,7 +2973,7 @@ export default function ContractV2Page() {
     contract, state: derived,
     setState: setLocalState,
     openModal: setModal,
-    openDrawer: setDrawerTab,
+    openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
     signActionUrl: `${contractsBase}/${contract.id}`,
@@ -2911,8 +3154,28 @@ export default function ContractV2Page() {
               <h1>
                 CID-{contract.id} <span className={'pill ' + pill.tone}>{pill.label}</span>
               </h1>
+              {/* Chain: Property → Unit → Contract — property and unit are
+                  clickable (their details live on their own pages; nothing is
+                  duplicated here). */}
               <div className="hsub">
-                <Building2 size={13} /> Unit {contract.unit.number ?? '—'} · {contract.property.buildingName ?? '—'}
+                <Building2 size={13} />
+                {contract.property.id && !isManagerView ? (
+                  <Link href={`/rental-provider/dashboard/portfolio/${contract.property.id}`} className="chain-link" title="Open property details">
+                    {contract.property.buildingName ?? 'Property'}
+                  </Link>
+                ) : (
+                  <span>{contract.property.buildingName ?? '—'}</span>
+                )}
+                <ChevronRight size={12} style={{ opacity: .5 }} />
+                {contract.property.id && contract.unit.id && !isManagerView ? (
+                  <Link href={`/rental-provider/dashboard/portfolio/${contract.property.id}/units/${contract.unit.id}`} className="chain-link" title="Open unit details">
+                    Unit {contract.unit.number ?? '—'}
+                  </Link>
+                ) : (
+                  <span>Unit {contract.unit.number ?? '—'}</span>
+                )}
+                <ChevronRight size={12} style={{ opacity: .5 }} />
+                <span>CID-{contract.id}</span>
                 {contract.property.community && <> · {contract.property.community}</>}
               </div>
             </div>
@@ -2930,6 +3193,35 @@ export default function ContractV2Page() {
               </span>
             )}
           </div>
+        </div>
+
+        {/* Customer + rental period — ONE info row under the header (replaces
+            the old Parties and Rental period sections). */}
+        <div className="infobar">
+          <span className="pitem">
+            <span className="pk">Customer</span>
+            <span className="pv">
+              {contract.tenant.id && !isManagerView ? (
+                <Link href={`/rental-provider/dashboard/tenants/${contract.tenant.id}`} className="chain-link" title="Open customer details">
+                  {contract.tenant.name ?? 'Customer'}
+                </Link>
+              ) : (
+                contract.tenant.name ?? '—'
+              )}
+            </span>
+          </span>
+          {contract.tenant.phone && (
+            <span className="pitem">
+              <span className="pk">Phone</span>
+              <span className="pv"><a href={`tel:${contract.tenant.phone}`} className="chain-link">{contract.tenant.phone}</a></span>
+            </span>
+          )}
+          <span className="isep" />
+          <span className="pitem"><span className="pk">Start</span><span className="pv">{fmtDate(contract.startDate)}</span></span>
+          <span className="pitem"><span className="pk">End</span><span className="pv">{fmtDate(contract.endDate)}</span></span>
+          <span className="pitem"><span className="pk">Duration</span><span className="pv">{contract.durationYears ? `${contract.durationYears * 12} months` : '12 months'}</span></span>
+          <span className="pitem"><span className="pk">Instalments</span><span className="pv">{contract.numberOfInstallments ? `${contract.numberOfInstallments} payments` : '—'}</span></span>
+          <span className="pitem"><span className="pk">Mode</span><span className="pv">{contract.modeOfPayment ? contract.modeOfPayment.charAt(0).toUpperCase() + contract.modeOfPayment.slice(1) : '—'}</span></span>
         </div>
 
         {/* Vacate-on-renewal-decline — customer won't renew and is moving out.
@@ -3077,37 +3369,41 @@ export default function ContractV2Page() {
           </div>
         </div>
 
-        {/* Detail cards */}
-        <DetailCards
-          contract={contract}
-          payments={contract.payments ?? []}
-          kycDocs={kycDocs}
-          onOpen={(t) => setDrawerTab(t)}
-        />
+        {/* Contract details — ALL sections visible on the page (CEO doctrine:
+            no small tabs / slide-in drawer hiding information). Parties,
+            Period, Payments (incl. payment documents) and Documents render
+            stacked; property info is NOT duplicated here — the header chain
+            links to the property / unit detail pages instead. */}
+        <div className="details-wrap">
+          <div className="section-eyebrow">
+            <span className="se-t">Contract details</span>
+            <span className="se-line" />
+          </div>
+          <DetailsDrawer
+            inline
+            open
+            tab="payments"
+            setTab={() => undefined}
+            onClose={() => undefined}
+            contract={contract}
+            payments={contract.payments ?? []}
+            kycDocs={kycDocs}
+            onApproveDoc={onApproveDoc}
+            onRejectDoc={onRejectDoc}
+            onRecordPayment={onRecordPayment}
+            onUpdatePayment={onUpdatePayment}
+            onSaveClauses={onSaveClauses}
+            onConfirmPdc={onConfirmPdc}
+            onUploadDoc={onUploadDoc}
+            onRequestDoc={onRequestDoc}
+          />
+        </div>
 
-        {/* Addendums (kept below detail cards per product decision) */}
+        {/* Addendums (clauses are hidden by design — addendums are the mechanism) */}
         <div style={{ marginTop: 24 }}>
           <AddendumsPanel contractId={contract.id} role="landlord" contractStatus={contract.status} />
         </div>
       </div>
-
-      <DetailsDrawer
-        open={!!drawerTab}
-        tab={drawerTab ?? 'parties'}
-        setTab={setDrawerTab}
-        onClose={() => setDrawerTab(null)}
-        contract={contract}
-        payments={contract.payments ?? []}
-        kycDocs={kycDocs}
-        onApproveDoc={onApproveDoc}
-        onRejectDoc={onRejectDoc}
-        onRecordPayment={onRecordPayment}
-        onUpdatePayment={onUpdatePayment}
-        onSaveClauses={onSaveClauses}
-        onConfirmPdc={onConfirmPdc}
-        onUploadDoc={onUploadDoc}
-        onRequestDoc={onRequestDoc}
-      />
 
       {modal === 'sign' && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
@@ -3291,6 +3587,22 @@ function GlobalStyle() {
       .quest-page .dtab:hover { color: var(--ink-2); }
       .quest-page .dtab.on { color: var(--jade-deep); border-bottom-color: var(--jade); }
       .quest-page .dbody { flex: 1; overflow-y: auto; padding: 18px 22px; }
+      .quest-page .chain-link { color: var(--jade-deep); font-weight: 600; text-decoration: none; }
+      .quest-page .chain-link:hover { text-decoration: underline; }
+      /* Inline contract sections — full-width stacked cards. Anchors
+         (span[id]) span the grid with zero height so they don't create
+         empty cells. */
+      .quest-page .dbody-inline { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+      .quest-page .dbody-inline > .sec { margin-bottom: 0; grid-column: 1 / -1; }
+      .quest-page .dbody-inline > span[id] { grid-column: 1 / -1; height: 0; margin: 0; padding: 0; }
+      @media (max-width: 980px) { .quest-page .dbody-inline { grid-template-columns: 1fr; } }
+      /* Info bar — customer + rental period in one row under the header */
+      .quest-page .infobar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 26px; background: #fff; border: 1px solid var(--mist-strong); border-radius: var(--r-md); padding: 10px 18px; margin-bottom: 16px; }
+      .quest-page .infobar .pitem { display: flex; flex-direction: column; gap: 1px; }
+      .quest-page .infobar .pk { font-size: 9.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--mute); }
+      .quest-page .infobar .pv { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+      /* divider pushes the rental fields to the right edge of the bar */
+      .quest-page .infobar .isep { width: 1px; align-self: stretch; background: var(--mist-strong); margin-left: auto; }
       .quest-page .sec { background: #fff; border: 1px solid var(--mist-strong); border-radius: var(--r-md); overflow: hidden; margin-bottom: 14px; }
       .quest-page .sec .sech { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--mist); }
       .quest-page .sec .sech .si { color: var(--jade-deep); }
@@ -3312,17 +3624,29 @@ function GlobalStyle() {
       .quest-page .cstat.pending { background: var(--saffron-soft); color: var(--saffron-deep); }
       .quest-page .cstat.bounced { background: var(--brick-soft); color: var(--brick); }
       .quest-page .cstat.cancelled { background: var(--mist); color: var(--ink-3); }
-      .quest-page .doclist { display: flex; flex-direction: column; gap: 9px; }
-      .quest-page .docitem { display: flex; align-items: center; gap: 12px; border: 1px solid; border-radius: 12px; padding: 11px 14px; }
-      .quest-page .docitem .dn { font-size: 13px; font-weight: 600; }
-      .quest-page .docitem .ds { font-size: 11px; font-weight: 700; margin-top: 1px; }
+      .quest-page .doclist { display: flex; flex-direction: column; gap: 5px; }
+      .quest-page .docitem { display: flex; align-items: center; gap: 9px; border: 1px solid; border-radius: 9px; padding: 5px 10px; min-height: 32px; }
+      .quest-page .docitem > svg { flex-shrink: 0; }
+      /* name + status share one line — keeps long checklists short */
+      .quest-page .docitem > div:not(.dacts) { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+      .quest-page .docitem .dn { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .quest-page .docitem .ds { font-size: 10.5px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
       .quest-page .docitem.approved { background: var(--jade-tint); border-color: #cfe9df; }
       .quest-page .docitem.approved svg, .quest-page .docitem.approved .ds { color: var(--jade-deep); }
       .quest-page .docitem.pending { background: var(--saffron-soft); border-color: var(--saffron-edge); }
       .quest-page .docitem.pending svg, .quest-page .docitem.pending .ds { color: var(--saffron-deep); }
       .quest-page .docitem.rejected { background: var(--brick-soft); border-color: var(--brick-edge); }
       .quest-page .docitem.rejected svg, .quest-page .docitem.rejected .ds { color: var(--brick); }
-      .quest-page .docitem .dacts { margin-left: auto; display: flex; gap: 6px; }
+      /* Missing slots — identical anatomy to on-file rows, dashed border.
+         Class is "docmiss" (NOT "missing") to avoid inheriting the journey
+         MissingStrip's padding/margin rules. */
+      .quest-page .docitem.docmiss { background: #fff; border-style: dashed; border-color: var(--saffron-edge); }
+      .quest-page .docitem.docmiss svg, .quest-page .docitem.docmiss .ds { color: var(--saffron-deep); }
+      .quest-page .docitem.docmiss .dn { color: var(--mute); }
+      .quest-page .docitem.docmiss.req { border-color: var(--brick-edge); }
+      .quest-page .docitem.docmiss.req svg, .quest-page .docitem.docmiss.req .ds { color: var(--brick); }
+      .quest-page .docitem .dacts { margin-left: auto; display: flex; gap: 5px; flex-shrink: 0; }
+      .quest-page .docitem .mini-btn { padding: 3px 8px; }
       .quest-page .mini-btn { font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 8px; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
       .quest-page .mini-btn.ok { background: var(--jade-soft); color: var(--jade-deep); }
       .quest-page .mini-btn.no { background: var(--brick-soft); color: var(--brick); }
