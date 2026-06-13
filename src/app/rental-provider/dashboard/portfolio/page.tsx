@@ -37,6 +37,7 @@ import {
 import s from './portfolio.module.css';
 import { PropertyDetailsModal } from './PropertyDetailsModal';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { UnitPreviewModal } from './UnitPreviewModal';
 import { PortfolioMapModal } from './PortfolioMapModal';
 
@@ -59,6 +60,7 @@ interface Property {
   plotNumber: string | null;
   latitude: number | null;
   longitude: number | null;
+  sharedAmenities: string[] | null;
   hasGym: boolean;
   hasPool: boolean;
   hasParking: boolean;
@@ -243,6 +245,7 @@ function formToCreateDto(data: PropertyFormData) {
     plotNumber: data.plotNumber || undefined,
     latitude: data.latitude ?? undefined,
     longitude: data.longitude ?? undefined,
+    sharedAmenities: data.sharedAmenities,
     hasGym: data.hasGym,
     hasPool: data.hasPool,
     hasParking: data.hasParking,
@@ -676,7 +679,7 @@ export default function PortfolioPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to withdraw listing'),
   });
 
-  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null, drawings?: File[]) => {
+  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) => {
     const dto = formToCreateDto(data);
     let propertyId: number;
     if (propertyModal.editing) {
@@ -713,6 +716,11 @@ export default function PortfolioPage() {
           alert(`The property was saved, but a building drawing upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
         }
       }
+    }
+    // Other named document slots (affection plan, completion cert, etc.).
+    if (propertyId) {
+      const errs = await uploadExtraPropertyDocs(propertyId, extraDocs);
+      if (errs.length) alert(`The property was saved, but some documents failed to upload:\n${errs.join('\n')}`);
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
 
@@ -984,6 +992,7 @@ export default function PortfolioPage() {
             propertyDescription: propertyModal.editing.propertyDescription ?? '',
             latitude:            propertyModal.editing.latitude,
             longitude:           propertyModal.editing.longitude,
+            sharedAmenities:     propertyModal.editing.sharedAmenities ?? [],
             hasGym:              propertyModal.editing.hasGym,
             hasPool:             propertyModal.editing.hasPool,
             hasParking:          propertyModal.editing.hasParking,
@@ -991,6 +1000,7 @@ export default function PortfolioPage() {
             numberOfFloors:      propertyModal.editing.numberOfFloors ?? '',
           } : undefined}
           propertyId={propertyModal.editing?.id}
+          unitCount={propertyModal.editing?.unitCount}
           onClose={() => setPropertyModal({ open: false })}
           onSave={handleSaveProperty}
         />

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import {
   PropertyFields, type PropertyFormData,
 } from '@/components/upnow/PropertyFormModal';
@@ -102,6 +103,7 @@ const EMPTY_PROP: PropertyFormData = {
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
+  sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
   googlePlaceId: null,
 };
@@ -214,6 +216,7 @@ export default function AddListingPage() {
   // is created (mirrors the Edit modal via the shared PropertyFields component).
   const [titleDeed, setTitleDeed] = useState<File | null>(null);
   const [drawings, setDrawings]   = useState<File[]>([]);
+  const [extraDocs, setExtraDocs] = useState<Record<string, File[]>>({});
   // countries + emirates also feed the CSV bulk-importer's name→id resolution,
   // so they live here even though PropertyFields runs its own location cascade.
   const [countries, setCountries] = useState<Country[]>([]);
@@ -413,6 +416,7 @@ export default function AddListingPage() {
           numberOfFloors: pf.numberOfFloors || undefined,
           makaniNumber: pf.makaniNumber || undefined,
           plotNumber: pf.plotNumber || undefined,
+          sharedAmenities: pf.sharedAmenities,
           hasGym: pf.hasGym, hasPool: pf.hasPool, hasParking: pf.hasParking,
           isStandaloneUnit: pf.isStandaloneUnit,
           propertyDescription: pf.propertyDescription || undefined,
@@ -433,6 +437,7 @@ export default function AddListingPage() {
             await uploadOwnedDocument({ ownerType: 'property', ownerId: propId, documentKey: `building_drawing_${Date.now()}_${i}`, category: 'property', displayName: drawings[i].name || `Property drawing ${i + 1}`, file: drawings[i] });
           } catch (e) { docErrs.push(`${drawings[i].name || `Drawing ${i + 1}`}: ${e instanceof Error ? e.message : 'upload failed'}`); }
         }
+        docErrs.push(...await uploadExtraPropertyDocs(propId, extraDocs));
         if (docErrs.length) {
           alert(`The property was created, but ${docErrs.length} document(s) failed to upload:\n\n${docErrs.join('\n')}`);
         }
@@ -744,6 +749,7 @@ export default function AddListingPage() {
                 onClick={() => {
                   setDone(false); setRows([emptyRow(true)]); setMode('new');
                   setSelectedPropId(null); setPf({ ...EMPTY_PROP }); setCsvRows([]); setDoneErrs([]);
+                  setTitleDeed(null); setDrawings([]); setExtraDocs({});
                 }}
                 className="px-5 py-2.5 rounded-lg border border-[#2e9f82] text-[#2e9f82] text-sm font-medium hover:bg-[#f0fdf8] cursor-pointer"
               >
@@ -811,6 +817,7 @@ export default function AddListingPage() {
                   isEdit={false}
                   titleDeed={titleDeed} setTitleDeed={setTitleDeed}
                   drawings={drawings} setDrawings={setDrawings}
+                  extraDocs={extraDocs} setExtraDocs={setExtraDocs}
                 />
               )}
             </div>

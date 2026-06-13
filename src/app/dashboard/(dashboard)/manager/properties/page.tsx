@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
 import { UnitPreviewModal } from '@/app/rental-provider/dashboard/portfolio/UnitPreviewModal';
 import { PortfolioMapModal } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
@@ -48,6 +49,7 @@ interface ManagedProperty {
   propertyDescription?: string | null;
   latitude?:       number | null;
   longitude?:      number | null;
+  sharedAmenities?: string[] | null;
   hasGym?:         boolean;
   hasPool?:        boolean;
   hasParking?:     boolean;
@@ -73,6 +75,7 @@ function formToCreateDto(data: PropertyFormData) {
     plotNumber: data.plotNumber || undefined,
     latitude: data.latitude ?? undefined,
     longitude: data.longitude ?? undefined,
+    sharedAmenities: data.sharedAmenities,
     hasGym: data.hasGym,
     hasPool: data.hasPool,
     hasParking: data.hasParking,
@@ -124,7 +127,7 @@ export default function ManagerPropertiesPage() {
   // The modal is used only for EDITING property details (Add uses the full
   // wizard at /dashboard/manager/properties/add). Unit add/edit lives in the
   // wizard + accordion, same as the landlord portal.
-  async function handleSaveProperty(form: PropertyFormData, titleDeed?: File | null, drawings?: File[]) {
+  async function handleSaveProperty(form: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) {
     if (!propertyModal.editing) return;
     const propertyId = propertyModal.editing.id;
     await apiPatch(`/properties/${propertyId}`, formToCreateDto(form));
@@ -141,6 +144,8 @@ export default function ManagerPropertiesPage() {
         } catch (e) { alert(`Saved, but a building drawing upload failed: ${e instanceof Error ? e.message : 'unknown error'}`); }
       }
     }
+    const docErrs = await uploadExtraPropertyDocs(propertyId, extraDocs);
+    if (docErrs.length) alert(`Saved, but some documents failed to upload:\n${docErrs.join('\n')}`);
     await queryClient.invalidateQueries({ queryKey: ['manager-properties'] });
     setPropertyModal({ open: false });
   }
@@ -335,6 +340,7 @@ export default function ManagerPropertiesPage() {
           propertyDescription: propertyModal.editing.propertyDescription ?? '',
           latitude:            propertyModal.editing.latitude,
           longitude:           propertyModal.editing.longitude,
+          sharedAmenities:     propertyModal.editing.sharedAmenities ?? [],
           hasGym:              propertyModal.editing.hasGym,
           hasPool:             propertyModal.editing.hasPool,
           hasParking:          propertyModal.editing.hasParking,
@@ -342,6 +348,7 @@ export default function ManagerPropertiesPage() {
           numberOfFloors:      propertyModal.editing.numberOfFloors ?? '',
         } : undefined}
         propertyId={propertyModal.editing?.id}
+        unitCount={propertyModal.editing?.unitCount}
         onClose={() => setPropertyModal({ open: false })}
         onSave={handleSaveProperty}
       />

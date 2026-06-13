@@ -67,6 +67,7 @@ const EMPTY_PROP: PropertyFormData = {
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '', latitude: null, longitude: null,
   googlePlaceId: null,
+  sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
 };
 

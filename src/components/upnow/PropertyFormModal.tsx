@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Pencil, Check } from 'lucide-react';
+import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Check } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
-import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
+import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { PROPERTY_DOC_SLOTS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
+import { DocPreviewModal } from './DocPreviewModal';
 
 // ─── Types from backend location endpoints ────────────────
 interface Country      { id: number; nameEn: string; code: string; }
@@ -599,6 +601,9 @@ export interface PropertyFormData {
   propertyDescription: string;
   latitude: number | null;
   longitude: number | null;
+  // Property Features — single multi-select list (source of truth). The legacy
+  // has_gym/has_pool/has_parking booleans are derived from this on the backend.
+  sharedAmenities: string[];
   hasGym: boolean;
   hasPool: boolean;
   hasParking: boolean;
@@ -614,6 +619,7 @@ const EMPTY: PropertyFormData = {
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
   propertyDescription: '',
   latitude: null, longitude: null,
+  sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
   googlePlaceId: null,
 };
@@ -624,17 +630,25 @@ interface Props {
   onClose: () => void;
   /** titleDeed only travels for STANDALONE properties (one deed for the whole
    *  property); multi-unit buildings attach deeds per unit instead. */
-  onSave: (data: PropertyFormData, titleDeed?: File | null, drawings?: File[]) => Promise<void>;
+  onSave: (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) => Promise<void>;
   title?: string;
   /** Edit only — the property whose existing documents (title deed + building
    *  drawings) we load so the form can show and remove them. */
   propertyId?: number;
+  /** Edit only — live unit count, shown read-only as "Number of units". */
+  unitCount?: number;
 }
 
 /** A property's already-uploaded document (title deed / building drawing). */
 export interface PropertyDoc { id: number; documentKey: string; displayName: string | null; fileUrl: string }
 /** Uploads accept PDFs + common image types only. */
 export const PROPERTY_DOC_ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
+
+/** Preset shared-amenity options for the Property Features multi-select.
+ *  "Other Shared Amenities" is handled by the free-text add below. */
+export const PROPERTY_FEATURES = [
+  'Parking Availability', 'Gym', 'Pool', 'Security', 'Concierge',
+];
 
 function FieldLabel({ label, required }: { label: string; required?: boolean }) {
   return (
@@ -648,6 +662,82 @@ const INPUT   = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-
 const SELECT  = cn(INPUT, 'appearance-none');
 const DISABLED_CLS = 'opacity-50 cursor-not-allowed';
 
+/**
+ * A single property-document slot — same look & interaction as the KYC / contract
+ * document slots: green card when a file is present, label + Optional badge,
+ * View (in-app preview), and Upload / Replace / Add. Existing (already-uploaded)
+ * docs and locally-queued files (create flow) render as rows beneath.
+ */
+function DocSlotCard({
+  label, multiple, existing, queued, onAdd, onRemoveQueued, onRemoveExisting, onView,
+}: {
+  label: string;
+  multiple: boolean;
+  existing: PropertyDoc[];
+  queued: File[];
+  onAdd: (files: FileList | null) => void;
+  onRemoveQueued: (idx: number) => void;
+  onRemoveExisting?: (id: number) => void;
+  onView: (doc: { url: string; mime?: string | null; name: string }) => void;
+}) {
+  const count = existing.length + queued.length;
+  const hasAny = count > 0;
+  // Only ever "Upload" / "Replace" / "View" — Replace swaps a single file;
+  // multi-file slots keep "Upload" to attach another.
+  const btnLabel = hasAny && !multiple ? 'Replace' : 'Upload';
+  return (
+    <div
+      className="rounded-lg border px-3 py-2.5"
+      style={{ borderColor: hasAny ? '#22c55e' : '#e8e6e0', background: hasAny ? 'color-mix(in srgb, #22c55e 5%, white)' : 'white' }}
+    >
+      <div className="flex items-center gap-2.5">
+        {hasAny
+          ? <Check size={16} className="shrink-0" style={{ color: '#16a34a' }} />
+          : <FileText size={16} className="shrink-0 text-[#c8c6c0]" />}
+        <span className="text-sm font-medium text-[#1a1916]">{label}</span>
+        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">Optional</span>
+        {hasAny && <span className="text-[11px] text-[#16a34a] font-medium">{count} file{count === 1 ? '' : 's'}</span>}
+        <label className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
+          style={{ background: hasAny && !multiple ? '#f4f3ef' : '#2e9f82', color: hasAny && !multiple ? '#6b6860' : '#fff' }}>
+          <input type="file" accept={PROPERTY_DOC_ACCEPT} multiple={multiple} className="sr-only"
+            onChange={e => { onAdd(e.target.files); e.target.value = ''; }} />
+          <Upload size={13} /> {btnLabel}
+        </label>
+      </div>
+      {hasAny && (
+        <div className="mt-2 space-y-1.5">
+          {existing.map(d => (
+            <div key={`e${d.id}`} className="flex items-center gap-2 text-xs">
+              <FileText size={13} className="text-[#2e9f82] shrink-0" />
+              <span className="truncate flex-1 text-[#44423c]">{d.displayName || 'Document'}</span>
+              <span className="text-[10px] text-[#9b9890] shrink-0">on file</span>
+              {d.fileUrl && (
+                <button type="button" onClick={() => onView({ url: d.fileUrl!, name: d.displayName || label })}
+                  className="text-[#2e9f82] font-medium hover:underline shrink-0">View</button>
+              )}
+              {onRemoveExisting && (
+                <button type="button" onClick={() => onRemoveExisting(d.id)} title="Remove"
+                  className="w-5 h-5 rounded-full bg-[#f4f3ef] grid place-items-center text-[#9b9890] hover:text-[#b91c1c] shrink-0"><Trash2 size={11} /></button>
+              )}
+            </div>
+          ))}
+          {queued.map((f, i) => (
+            <div key={`q${i}`} className="flex items-center gap-2 text-xs">
+              <Upload size={13} className="text-[#2e9f82] shrink-0" />
+              <span className="truncate flex-1 text-[#44423c]">{f.name}</span>
+              <span className="text-[10px] text-[#9b9890] shrink-0">ready to upload</span>
+              <button type="button" onClick={() => onView({ url: URL.createObjectURL(f), mime: f.type, name: f.name })}
+                className="text-[#2e9f82] font-medium hover:underline shrink-0">View</button>
+              <button type="button" onClick={() => onRemoveQueued(i)} title="Remove"
+                className="w-5 h-5 rounded-full bg-[#f4f3ef] grid place-items-center text-[#9b9890] hover:text-[#b91c1c] shrink-0"><X size={11} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Shared, controlled property form body ──────────────────────────────────
 // Single source of truth for BOTH the Edit modal and the Add wizard (RP +
 // manager), so the two can never drift. Owns the location cascade + building
@@ -657,7 +747,9 @@ export function PropertyFields({
   value, setValue, errors, setErrors, isEdit = false,
   titleDeed, setTitleDeed,
   drawings, setDrawings,
-  existingDocs = [], onRemoveExisting, onRenameExisting,
+  existingDocs = [], onRemoveExisting,
+  unitCount,
+  extraDocs = {}, setExtraDocs,
 }: {
   value: PropertyFormData;
   setValue: Dispatch<SetStateAction<PropertyFormData>>;
@@ -670,20 +762,16 @@ export function PropertyFields({
   setDrawings: Dispatch<SetStateAction<File[]>>;
   existingDocs?: PropertyDoc[];
   onRemoveExisting?: (id: number) => void;
-  onRenameExisting?: (id: number, name: string) => void | Promise<void>;
+  /** Edit only — live count of units on this property (read-only display). */
+  unitCount?: number;
+  /** Queued files for the extra document slots (affection plan, NOC, …). */
+  extraDocs?: Record<string, File[]>;
+  setExtraDocs?: Dispatch<SetStateAction<Record<string, File[]>>>;
 }) {
   const [autoFilled, setAutoFilled] = useState(false);
   const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
-  const titleDeedInputRef = useRef<HTMLInputElement>(null);
-  const drawingsInputRef = useRef<HTMLInputElement>(null);
-  // Inline rename of an already-uploaded document (title deed / building drawing).
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
-  const commitRename = (id: number) => {
-    const name = renameDraft.trim();
-    if (name && onRenameExisting) void onRenameExisting(id, name);
-    setRenamingId(null);
-  };
+  // In-app document preview (matches the KYC / contract "View" pattern).
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; mime?: string | null; name: string } | null>(null);
 
   // Location data — full chain Country → Emirate → City → Community → Sub-Community
   const [countries,         setCountries]         = useState<Country[]>([]);
@@ -820,6 +908,30 @@ export function PropertyFields({
     setErrors(prev => ({ ...prev, [k]: undefined }));
   };
 
+  // Property Features multi-select helpers
+  const [featureDraft, setFeatureDraft] = useState('');
+  const toggleFeature = (f: string) =>
+    upd('sharedAmenities', value.sharedAmenities.includes(f)
+      ? value.sharedAmenities.filter(a => a !== f)
+      : [...value.sharedAmenities, f]);
+  const addFeature = () => {
+    const f = featureDraft.trim();
+    if (f && !value.sharedAmenities.some(a => a.toLowerCase() === f.toLowerCase())) {
+      upd('sharedAmenities', [...value.sharedAmenities, f]);
+    }
+    setFeatureDraft('');
+  };
+
+  // Extra document slots (affection plan, completion cert, architectural
+  // drawings, site plan, NOC) — queue files; uploaded by the parent on save.
+  const addSlotFiles = (key: string, list: FileList | null, multiple: boolean) => {
+    if (!list?.length || !setExtraDocs) return;
+    const incoming = Array.from(list);
+    setExtraDocs(prev => ({ ...prev, [key]: multiple ? [...(prev[key] ?? []), ...incoming] : [incoming[0]] }));
+  };
+  const removeSlotFile = (key: string, idx: number) =>
+    setExtraDocs?.(prev => ({ ...prev, [key]: (prev[key] ?? []).filter((_, j) => j !== idx) }));
+
   const handleCountryChange = (val: string) => {
     const country = countries.find(c => c.id === Number(val));
     setValue(prev => ({
@@ -940,41 +1052,13 @@ export function PropertyFields({
     setErrors(prev => ({ ...prev, buildingName: undefined, emirateId: undefined }));
   };
 
-  const existingDeed = existingDocs.find(d => d.documentKey === 'title_deed') ?? null;
+  const existingDeed = existingDocs.filter(d => d.documentKey === 'title_deed');
   const existingDrawings = existingDocs.filter(d => d.documentKey.startsWith('building_drawing'));
 
   const addDrawings = (files: FileList | null) => {
     if (!files?.length) return;
     setDrawings(prev => [...prev, ...Array.from(files)]);
   };
-
-  // An already-uploaded property document — view, rename (inline), remove.
-  const renderExistingDoc = (d: PropertyDoc) => renamingId === d.id ? (
-    <div key={d.id} className="flex items-center gap-2 border border-[#cfe9df] bg-[#f0fdf8] rounded-lg px-3 py-2 mb-2">
-      <input
-        className={INPUT}
-        value={renameDraft}
-        autoFocus
-        placeholder="Name this document…"
-        onChange={e => setRenameDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitRename(d.id); } if (e.key === 'Escape') setRenamingId(null); }}
-      />
-      <button type="button" onClick={() => commitRename(d.id)} title="Save name" className="shrink-0 w-7 h-7 rounded-lg bg-[#2e9f82] text-white grid place-items-center cursor-pointer"><Check size={13} /></button>
-      <button type="button" onClick={() => setRenamingId(null)} title="Cancel" className="shrink-0 w-7 h-7 rounded-lg bg-[#f4f3ef] text-[#6b6860] grid place-items-center cursor-pointer"><X size={13} /></button>
-    </div>
-  ) : (
-    <div key={d.id} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-2">
-      <FileText size={14} className="text-[#2e9f82] shrink-0" />
-      <a href={d.fileUrl} target="_blank" rel="noreferrer" className="text-sm text-[#1a1916] truncate flex-1 hover:underline">{d.displayName || 'Document'}</a>
-      <span className="text-[10px] text-[#9b9890] shrink-0">on file</span>
-      {onRenameExisting && (
-        <button type="button" onClick={() => { setRenamingId(d.id); setRenameDraft(d.displayName || ''); }} title="Rename" className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#2e9f82] cursor-pointer"><Pencil size={11} /></button>
-      )}
-      {onRemoveExisting && (
-        <button type="button" onClick={() => onRemoveExisting(d.id)} title="Remove" className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><Trash2 size={11} /></button>
-      )}
-    </div>
-  );
 
   return (
     <>
@@ -1120,102 +1204,132 @@ export function PropertyFields({
         </div>
       </div>
 
-      {/* Title-deed structure — one deed for the whole property (single owner)
-          vs a deed per unit (units owned/titled separately). Drives where the
-          title deed attaches. */}
-      <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc]">
-        <input
-          type="checkbox"
-          checked={value.isStandaloneUnit}
-          onChange={e => upd('isStandaloneUnit', e.target.checked)}
-          className="mt-0.5 accent-[#2e9f82]"
-        />
-        <span>
-          <span className="block text-sm font-medium text-[#1a1916]">One title deed for the whole property (single owner)</span>
-          <span className="block text-[11px] text-[#9b9890] mt-0.5">
-            On — a single owner holds the entire property under one title deed: a villa,
-            a standalone office, or a whole building owned by one party (deed attached below).
-            Off — units are owned separately, each with its own title deed added in the unit form.
-          </span>
-        </span>
-      </label>
-
-      {/* Title deed — standalone properties only; optional. */}
-      {value.isStandaloneUnit && (
+      {/* Number of units — auto-derived (read-only). Units are added/managed in
+          the unit forms; this just reflects the live count. */}
+      {unitCount != null && (
         <div>
-          <input
-            ref={titleDeedInputRef}
-            type="file"
-            accept={PROPERTY_DOC_ACCEPT}
-            className="sr-only"
-            onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setTitleDeed(f); e.target.value = ''; }}
-          />
-          <FieldLabel label="Title deed" />
-          {/* Already on file (edit) — view / rename / remove */}
-          {existingDeed && !titleDeed && renderExistingDoc(existingDeed)}
-          {titleDeed ? (
-            <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
-              <Upload size={14} className="text-[#2e9f82] shrink-0" />
-              <span className="text-sm text-[#1a1916] truncate flex-1">{titleDeed.name}</span>
-              <button type="button" onClick={() => titleDeedInputRef.current?.click()} className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
-              <button type="button" onClick={() => setTitleDeed(null)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => titleDeedInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
-            >
-              <Upload size={15} className="text-[#c8c6c0]" />
-              {existingDeed ? 'Replace the title deed (PDF or image)' : 'Attach the title deed (PDF or image)'}
-            </button>
-          )}
+          <FieldLabel label="Number of units" />
+          <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 bg-[#faf9f6]">
+            <span className="text-sm font-semibold text-[#1a1916]">{unitCount}</span>
+            <span className="text-xs text-[#9b9890]">unit{unitCount === 1 ? '' : 's'} on this property · managed in the unit forms</span>
+          </div>
         </div>
       )}
 
-      {/* Building drawings — property-level, multiple PDFs / images, optional. */}
+      {/* ── Property documents — same slot pattern as KYC / contract docs ── */}
       <div>
-        <input
-          ref={drawingsInputRef}
-          type="file"
-          multiple
-          accept={PROPERTY_DOC_ACCEPT}
-          className="sr-only"
-          onChange={e => { addDrawings(e.target.files); e.target.value = ''; }}
-        />
-        <FieldLabel label="Property drawings" />
-        {(existingDrawings.length > 0 || drawings.length > 0) && (
-          <div className="space-y-1.5 mb-2">
-            {existingDrawings.map(renderExistingDoc)}
-            {drawings.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
-                <Upload size={14} className="text-[#2e9f82] shrink-0" />
-                <span className="text-sm text-[#1a1916] truncate flex-1">{f.name}</span>
-                <button type="button" onClick={() => setDrawings(prev => prev.filter((_, j) => j !== i))} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
-              </div>
-            ))}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => drawingsInputRef.current?.click()}
-          className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
-        >
-          <Upload size={15} className="text-[#c8c6c0]" />
-          Add property drawings (PDF or images — multiple allowed)
-        </button>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[#9b9890] mb-2">Property documents</p>
+
+        {/* Title-deed structure — one deed for the whole property (single owner)
+            vs a deed per unit (units owned/titled separately). */}
+        <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc] mb-2.5">
+          <input
+            type="checkbox"
+            checked={value.isStandaloneUnit}
+            onChange={e => upd('isStandaloneUnit', e.target.checked)}
+            className="mt-0.5 accent-[#2e9f82]"
+          />
+          <span>
+            <span className="block text-sm font-medium text-[#1a1916]">One title deed for the whole property (single owner)</span>
+            <span className="block text-[11px] text-[#9b9890] mt-0.5">
+              On — a single owner holds the entire property under one title deed: a villa,
+              a standalone office, or a whole building owned by one party (deed attached below).
+              Off — units are owned separately, each with its own title deed added in the unit form.
+            </span>
+          </span>
+        </label>
+
+        <div className="space-y-2.5">
+          {value.isStandaloneUnit && (
+            <DocSlotCard
+              label="Title Deed" multiple={false}
+              existing={existingDeed}
+              queued={titleDeed ? [titleDeed] : []}
+              onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
+              onRemoveQueued={() => setTitleDeed(null)}
+              onRemoveExisting={onRemoveExisting}
+              onView={setViewerDoc}
+            />
+          )}
+          <DocSlotCard
+            label="Building Floor Plans" multiple
+            existing={existingDrawings}
+            queued={drawings}
+            onAdd={addDrawings}
+            onRemoveQueued={i => setDrawings(prev => prev.filter((_, j) => j !== i))}
+            onRemoveExisting={onRemoveExisting}
+            onView={setViewerDoc}
+          />
+          {PROPERTY_DOC_SLOTS.map(slot => (
+            <DocSlotCard
+              key={slot.key}
+              label={slot.label} multiple={slot.multiple}
+              existing={existingDocs.filter(d => docBelongsToSlot(d.documentKey, slot))}
+              queued={extraDocs[slot.key] ?? []}
+              onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
+              onRemoveQueued={i => removeSlotFile(slot.key, i)}
+              onRemoveExisting={onRemoveExisting}
+              onView={setViewerDoc}
+            />
+          ))}
+        </div>
       </div>
+
+      {/* Property Features — single multi-select list + free-text custom add. */}
+      <div>
+        <FieldLabel label="Property features" />
+        <div className="flex flex-wrap gap-1.5">
+          {[...PROPERTY_FEATURES, ...value.sharedAmenities.filter(a => !PROPERTY_FEATURES.includes(a))].map(feat => {
+            const on = value.sharedAmenities.includes(feat);
+            return (
+              <button
+                key={feat}
+                type="button"
+                onClick={() => toggleFeature(feat)}
+                className={cn(
+                  'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors cursor-pointer',
+                  on ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]',
+                )}
+              >
+                {feat}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <input
+            value={featureDraft}
+            onChange={e => setFeatureDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFeature(); } }}
+            placeholder="Other shared amenity…"
+            className={cn(INPUT, 'flex-1')}
+          />
+          <button type="button" onClick={addFeature} className="text-xs font-semibold text-[#2e9f82] px-3 py-2 rounded-lg border border-[#e8e6e0] hover:border-[#2e9f82] cursor-pointer">
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* In-app document preview ("View") */}
+      {viewerDoc && (
+        <DocPreviewModal
+          title={viewerDoc.name}
+          docs={[{ id: 1, fileUrl: viewerDoc.url, mimeType: viewerDoc.mime ?? null, caption: viewerDoc.name }]}
+          onClose={() => setViewerDoc(null)}
+        />
+      )}
     </>
   );
 }
 
-export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId }: Props) {
+export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId, unitCount }: Props) {
   const isEdit = !!initial?.spaceCategory;
   const [form, setForm] = useState<PropertyFormData>({ ...EMPTY, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof PropertyFormData, string>>>({});
   const [saving, setSaving] = useState(false);
   const [titleDeed, setTitleDeed] = useState<File | null>(null);
   const [drawings, setDrawings] = useState<File[]>([]);
+  const [extraDocs, setExtraDocs] = useState<Record<string, File[]>>({});
   const [existingDocs, setExistingDocs] = useState<PropertyDoc[]>([]);
   // Bumped each open so PropertyFields remounts and re-derives its cascade.
   const [openSeq, setOpenSeq] = useState(0);
@@ -1223,11 +1337,11 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
   useEffect(() => {
     if (!open) return;
     setForm({ ...EMPTY, ...initial });
-    setErrors({}); setTitleDeed(null); setDrawings([]);
+    setErrors({}); setTitleDeed(null); setDrawings([]); setExtraDocs({});
     setOpenSeq(s => s + 1);
     if (propertyId) {
       apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
-        .then(ds => setExistingDocs(ds.filter(d => d.documentKey === 'title_deed' || d.documentKey.startsWith('building_drawing'))))
+        .then(ds => setExistingDocs(ds.filter(d => d.documentKey === 'title_deed' || d.documentKey.startsWith('building_drawing') || isExtraSlotDoc(d.documentKey))))
         .catch(() => setExistingDocs([]));
     } else {
       setExistingDocs([]);
@@ -1244,16 +1358,6 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     }
   };
 
-  const renameExisting = async (id: number, name: string) => {
-    // Optimistic — update the label immediately, persist via PATCH.
-    setExistingDocs(prev => prev.map(d => d.id === id ? { ...d, displayName: name } : d));
-    try {
-      await apiPatch(`/documents/${id}`, { displayName: name });
-    } catch (e) {
-      alert(`Could not rename the document: ${e instanceof Error ? e.message : 'unknown error'}`);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: Partial<Record<keyof PropertyFormData, string>> = {};
@@ -1263,7 +1367,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     // Title deed is OPTIONAL — even for a standalone property.
     if (Object.keys(errs).length > 0) return;
     setSaving(true);
-    try { await onSave(form, form.isStandaloneUnit ? titleDeed : null, drawings); onClose(); }
+    try { await onSave(form, form.isStandaloneUnit ? titleDeed : null, drawings, extraDocs); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -1292,7 +1396,9 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
             isEdit={isEdit}
             titleDeed={titleDeed} setTitleDeed={setTitleDeed}
             drawings={drawings} setDrawings={setDrawings}
-            existingDocs={existingDocs} onRemoveExisting={removeExisting} onRenameExisting={renameExisting}
+            existingDocs={existingDocs} onRemoveExisting={removeExisting}
+            unitCount={unitCount}
+            extraDocs={extraDocs} setExtraDocs={setExtraDocs}
           />
 
           {/* Actions */}
