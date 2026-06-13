@@ -1421,7 +1421,7 @@ export default function ListingPageClient({ unit, property, media = [], preferre
   // Use real uploaded photos if available; otherwise fall back to Unsplash placeholders
   // Relative URLs (e.g. /uploads/...) are proxied via Next.js rewrites — works on any device
   const images: string[] = media.length > 0
-    ? media.map(m => m.url.startsWith('http') ? m.url : m.url)
+    ? media.map(m => m.url.startsWith('http') || m.url.startsWith('/') ? m.url : `/uploads/${m.url}`)
     : fallbackImages;
   const catBg = CATEGORY_BG[catKey] ?? '#f4f3ef';
   const avail = AVAIL_STYLE[unit.availability] ?? { bg: '#f4f3ef', text: '#6b6860', label: unit.availability };

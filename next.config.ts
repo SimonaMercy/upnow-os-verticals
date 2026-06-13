@@ -4,6 +4,10 @@ const nextConfig: NextConfig = {
   // Allow all LAN origins in dev so other devices on the network can connect
   allowedDevOrigins: ["127.0.0.1", "192.168.2.126"],
 
+  // Allow a second dev server (e.g. e2e test instance) to run from the same
+  // working tree without fighting over the .next build cache
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+
   // Standalone output for Docker / Cloud Run SSR deployments
   output: "standalone",
 

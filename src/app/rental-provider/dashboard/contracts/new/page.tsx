@@ -492,9 +492,17 @@ export default function NewContractPage() {
         contractStartDate: form.contractStartDate,
         contractEndDate: form.contractEndDate,
         annualRent: effectiveRent,
-        securityDepositAmount: planFromLead ? planFromLead.securityDepositFils / 100 : (su?.securityDeposit ?? undefined),
-        adminFee: planFromLead ? planFromLead.adminFeeFils / 100 : (su?.adminFee ?? undefined),
-        ejariFee: planFromLead ? planFromLead.ejariFils / 100 : (su?.ejariFeeFils ?? undefined),
+        // The units API serializes numerics as strings ("5600.00") — coerce,
+        // or the contracts DTO rejects the whole POST with a 400.
+        securityDepositAmount: planFromLead
+          ? planFromLead.securityDepositFils / 100
+          : su?.securityDeposit != null ? Number(su.securityDeposit) : undefined,
+        adminFee: planFromLead
+          ? planFromLead.adminFeeFils / 100
+          : su?.adminFee != null ? Number(su.adminFee) : undefined,
+        ejariFee: planFromLead
+          ? planFromLead.ejariFils / 100
+          : su?.ejariFeeFils != null ? Number(su.ejariFeeFils) : undefined,
         numberOfInstallments: form.numberOfInstallments ? Number(form.numberOfInstallments) : undefined,
         modeOfPayment: form.modeOfPayment,
         notes: form.notes || undefined,

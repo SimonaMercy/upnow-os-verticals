@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Loader2, Search, MapPin, CheckCircle2, Database } from 'lucide-react';
+import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
 import { apiGet, apiPost } from '@/lib/api';
@@ -159,11 +159,15 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<Omit<SearchResu
 
 // ─── Building Search component ────────────────────────────
 export type { SearchResult };
+// Stable default so the re-open effect below doesn't fire on every render
+// (a fresh [] default changes identity each render).
+const NO_LOCAL_SUGGESTIONS: LocalSuggestion[] = [];
+
 export function BuildingSearch({
   onSelect,
   onManualEntry,
   onQueryChange,
-  localSuggestions = [],
+  localSuggestions = NO_LOCAL_SUGGESTIONS,
 }: {
   onSelect: (r: SearchResult) => void;
   onManualEntry?: () => void;
@@ -179,6 +183,9 @@ export function BuildingSearch({
   const [searched,     setSearched]     = useState(false);
   const debounceRef                     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef                      = useRef<HTMLDivElement>(null);
+  // True only while the user is actively typing — a selection turns it off so
+  // parent re-renders (form auto-fill) can't re-open the dropdown after a pick.
+  const typingRef                       = useRef(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -235,15 +242,17 @@ export function BuildingSearch({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
+    typingRef.current = true;
     setQuery(val);
     onQueryChange?.(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => runSearch(val, localSuggestions), 350);
   };
 
-  // Re-open when parent updates localSuggestions (e.g. existingProps loaded async)
+  // Re-open when parent updates localSuggestions (e.g. existingProps loaded
+  // async) — but only mid-typing, never after the user picked a result.
   useEffect(() => {
-    if (query.length >= 2) setOpen(true);
+    if (typingRef.current && query.length >= 2) setOpen(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localSuggestions]);
 
@@ -253,6 +262,7 @@ export function BuildingSearch({
   }, [query]);
 
   const handlePickCache = (hit: BuildingCacheResult) => {
+    typingRef.current = false;
     setOpen(false);
     setQuery(hit.name);
     onQueryChange?.(hit.name);
@@ -273,6 +283,7 @@ export function BuildingSearch({
   };
 
   const handlePickLocal = (s: LocalSuggestion) => {
+    typingRef.current = false;
     setOpen(false);
     setQuery(s.name);
     onQueryChange?.(s.name);
@@ -292,6 +303,7 @@ export function BuildingSearch({
   };
 
   const handlePickGoogle = async (s: GPlacePrediction) => {
+    typingRef.current = false;
     setOpen(false);
     setQuery(s.main);
     setPicking(true);
@@ -309,6 +321,7 @@ export function BuildingSearch({
   };
 
   const handleManual = () => {
+    typingRef.current = false;
     setQuery(''); setOpen(false); setSearched(false); setSuggestions([]); setCacheResults([]);
     onQueryChange?.('');
     onManualEntry?.();
@@ -609,7 +622,9 @@ interface Props {
   open: boolean;
   initial?: Partial<PropertyFormData>;
   onClose: () => void;
-  onSave: (data: PropertyFormData) => Promise<void>;
+  /** titleDeed only travels for STANDALONE properties (one deed for the whole
+   *  property); multi-unit buildings attach deeds per unit instead. */
+  onSave: (data: PropertyFormData, titleDeed?: File | null) => Promise<void>;
   title?: string;
 }
 
@@ -633,6 +648,9 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
   const [autoFilled, setAutoFilled] = useState(false);
   // Only load Google Maps SDK after a search result is selected (or in edit mode with coords)
   const [showMap, setShowMap] = useState(!!(initial?.latitude && initial?.longitude));
+  // Title deed (standalone properties only — buildings attach deeds per unit)
+  const [titleDeed, setTitleDeed] = useState<File | null>(null);
+  const titleDeedInputRef = useRef<HTMLInputElement>(null);
 
   // Location data — full chain Country → Emirate → City → Community → Sub-Community
   const [countries,         setCountries]         = useState<Country[]>([]);
@@ -924,7 +942,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
     e.preventDefault();
     if (!validate()) return;
     setSaving(true);
-    try { await onSave(form); onClose(); }
+    try { await onSave(form, form.isStandaloneUnit ? titleDeed : null); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -1094,6 +1112,58 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
             <input className={INPUT} placeholder="e.g. PLOT-12345" value={form.plotNumber}
               onChange={e => upd('plotNumber', e.target.value)} />
           </div>
+
+          {/* Standalone toggle — drives where the title deed attaches:
+              standalone = ONE deed on the property (below); multi-unit
+              building = a deed per unit, inside each unit's form. */}
+          <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc]">
+            <input
+              type="checkbox"
+              checked={form.isStandaloneUnit}
+              onChange={e => upd('isStandaloneUnit', e.target.checked)}
+              className="mt-0.5 accent-[#2e9f82]"
+            />
+            <span>
+              <span className="block text-sm font-medium text-[#1a1916]">Standalone unit (villa, single office…)</span>
+              <span className="block text-[11px] text-[#9b9890] mt-0.5">
+                The property is one rentable unit with one title deed (attached below).
+                Leave off for multi-unit buildings — each unit then carries its own deed.
+              </span>
+            </span>
+          </label>
+
+          {/* Title deed — standalone properties only (the whole property is one
+              owned unit, so one deed lives here; multi-unit buildings attach a
+              deed per unit instead, inside each unit's form). */}
+          {form.isStandaloneUnit && (
+            <div>
+              <input
+                ref={titleDeedInputRef}
+                type="file"
+                accept="application/pdf,image/png,image/jpeg,image/webp"
+                className="sr-only"
+                onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setTitleDeed(f); e.target.value = ''; }}
+              />
+              <FieldLabel label="Title deed" />
+              {titleDeed ? (
+                <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+                  <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                  <span className="text-sm text-[#1a1916] truncate flex-1">{titleDeed.name}</span>
+                  <button type="button" onClick={() => titleDeedInputRef.current?.click()} className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
+                  <button type="button" onClick={() => setTitleDeed(null)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => titleDeedInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+                >
+                  <Upload size={15} className="text-[#c8c6c0]" />
+                  Attach the title deed (PDF or image)
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

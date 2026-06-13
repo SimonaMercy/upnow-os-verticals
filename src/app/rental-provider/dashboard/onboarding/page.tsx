@@ -295,7 +295,17 @@ export default function RentalProviderOnboardingPage() {
       }
     }
 
-    const reqMissing = docsForKind.filter((d) => d.required && !checklist.find((c) => c.key === d.key && c.uploaded)).length;
+    // A required doc counts as uploaded if EITHER the server checklist says so
+    // OR it was uploaded in this session (shDocs). The server checklist is
+    // derived from the PERSISTED entity type, which stays 'individual' until
+    // the final submit — so company docs (trade license…) only ever exist
+    // locally before submission and the gate could never be satisfied.
+    const reqMissing = docsForKind.filter(
+      (d) =>
+        d.required &&
+        !checklist.find((c) => c.key === d.key && c.uploaded) &&
+        !shDocs[d.key]?.uploaded,
+    ).length;
     m.documents = reqMissing === 0 && docsForKind.length > 0;
     return m;
   }, [fullName, phoneVerified, isCompany, isAgent, kind, nationality, hasPoa, poaPersonName, poaPersonPhone, poaPersonEmail, shDocs, companyName, tradeLicenseNumber, tradeLicenseAuthority, parentBrokerageName, shareholders, totalSharePct, shareholdersConfirmed, checklist, docsForKind]);

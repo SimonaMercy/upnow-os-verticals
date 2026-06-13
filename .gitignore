@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# e2e build output (Tailwind v4 scans non-ignored dirs — keep this ignored)
+.next-e2e/
+playwright-report-fullcycle/

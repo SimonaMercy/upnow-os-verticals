@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
+import { dashboardPath } from '@/contexts/AuthContext';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -106,8 +107,10 @@ export default function AcceptInvitePage() {
         password: values.password,
       });
       setSuccess(true);
-      // Small delay to show success, then redirect to dashboard
-      setTimeout(() => router.push('/dashboard'), 1500);
+      // Small delay to show success, then land on the ROLE's home —
+      // a bare /dashboard has no page (it 404s).
+      const home = invite ? dashboardPath(invite.role) : '/';
+      setTimeout(() => router.push(home), 1500);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to accept invite. Please try again.';
       setError('root', { message });

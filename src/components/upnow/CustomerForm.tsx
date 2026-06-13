@@ -49,6 +49,12 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
     const fullName = `${firstName} ${lastName}`.trim();
     if (!firstName.trim()) { setErr('First name is required'); return; }
     if (mode === 'create' && !email.trim()) { setErr('Email is required'); return; }
+    // Edit mode: a cleared email was silently ignored (the PATCH omitted it and
+    // the old value stayed) — say so instead, since email is the customer's login.
+    if (mode === 'edit' && initial?.email && !email.trim()) {
+      setErr('Email cannot be removed — it is the customer\u2019s login. Enter a new email instead.');
+      return;
+    }
     setBusy(true); setErr(null);
     const body = mode === 'create'
       ? {

@@ -557,8 +557,8 @@ function RpContentPanel({
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs px-2 py-0.5 rounded-full font-medium"
                           style={{
-                            backgroundColor: doc.status === "PROCESSED" || doc.status === "COMPLETE" ? "#dcfce7" : "#fef3c7",
-                            color: doc.status === "PROCESSED" || doc.status === "COMPLETE" ? "#15803d" : "#b45309",
+                            backgroundColor: ["processed", "complete"].includes(String(doc.status).toLowerCase()) ? "#dcfce7" : "#fef3c7",
+                            color: ["processed", "complete"].includes(String(doc.status).toLowerCase()) ? "#15803d" : "#b45309",
                           }}>
                           {doc.status}
                         </span>

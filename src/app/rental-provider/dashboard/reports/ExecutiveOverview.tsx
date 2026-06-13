@@ -122,18 +122,26 @@ const renewalTooltipLabel = (label: unknown, payload: unknown) => {
   return p?.leases != null ? `${String(label)} — ${p.leases} lease${p.leases === 1 ? '' : 's'}` : String(label ?? '');
 };
 
-export default function ExecutiveOverview() {
+export default function ExecutiveOverview({
+  endpoint = '/api/reports/executive-summary',
+  linkFor = (slug: string) => `/rental-provider/dashboard/reports/${slug}`,
+}: {
+  /** Manager portal passes '/api/manager/reports/executive-summary?rp=N'. */
+  endpoint?: string;
+  /** Builds exception-chip hrefs per portal. */
+  linkFor?: (slug: string) => string;
+} = {}) {
   const [data, setData] = useState<ExecutiveSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/reports/executive-summary', { credentials: 'include' })
+    fetch(endpoint, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [endpoint]);
 
   if (loading) {
     return (
@@ -185,22 +193,22 @@ export default function ExecutiveOverview() {
       {/* Exceptions strip */}
       <div className="flex items-center gap-2 flex-wrap mb-5">
         {ex.renewalsOverdue > 0 && (
-          <ExceptionChip href="/rental-provider/dashboard/reports/renewal-forecast" severity="red">
+          <ExceptionChip href={linkFor('renewal-forecast')} severity="red">
             {ex.renewalsOverdue} leases overdue for renewal · {fmtAed(ex.renewalsOverdueRentFils)}
           </ExceptionChip>
         )}
         {ex.missingDeposit > 0 && (
-          <ExceptionChip href="/rental-provider/dashboard/reports/data-gaps" severity="red">
+          <ExceptionChip href={linkFor('data-gaps')} severity="red">
             {ex.missingDeposit} active leases missing a deposit
           </ExceptionChip>
         )}
         {ex.kycIncomplete > 0 && (
-          <ExceptionChip href="/rental-provider/dashboard/reports/data-gaps" severity="amber">
+          <ExceptionChip href={linkFor('data-gaps')} severity="amber">
             {ex.kycIncomplete} customers with KYC gaps
           </ExceptionChip>
         )}
         {ex.vacantUnlisted > 0 && (
-          <ExceptionChip href="/rental-provider/dashboard/reports/vacancy-analysis" severity="amber">
+          <ExceptionChip href={linkFor('vacancy-analysis')} severity="amber">
             {ex.vacantUnlisted} vacant units not listed
           </ExceptionChip>
         )}

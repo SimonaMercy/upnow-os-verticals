@@ -14,6 +14,9 @@ import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
+import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
+import { UnitPreviewModal } from '@/app/rental-provider/dashboard/portfolio/UnitPreviewModal';
+import { PortfolioMapModal } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { PropertyFormModal, type PropertyFormData } from '@/components/upnow/PropertyFormModal';
 import s from '@/app/rental-provider/dashboard/portfolio/portfolio.module.css';
@@ -40,6 +43,7 @@ interface ManagedProperty {
   communityId?:    number | null;
   subCommunityId?: number | null;
   plotNumber?:     string | null;
+  street?:         string | null;
   propertyDescription?: string | null;
   latitude?:       number | null;
   longitude?:      number | null;
@@ -55,7 +59,10 @@ function formToCreateDto(data: PropertyFormData) {
   return {
     buildingName: data.buildingName,
     spaceCategory: data.spaceCategory,
-    fullAddress: parts.join(', ') || undefined,
+    street: data.street || undefined,
+    // Without a street segment, leave full_address untouched (PATCH omits it)
+    // so a legacy row's embedded street isn't recomposed away.
+    fullAddress: data.street ? parts.join(', ') : undefined,
     emirateId: data.emirateId ?? undefined,
     cityId: data.cityId ?? undefined,
     communityId: data.communityId ?? undefined,
@@ -107,6 +114,10 @@ export default function ManagerPropertiesPage() {
   const [search, setSearch]     = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: ManagedProperty }>({ open: false });
+  // Read-only preview popups + map (shared with the landlord portal)
+  const [detailsProperty, setDetailsProperty] = useState<ManagedProperty | null>(null);
+  const [unitPreview, setUnitPreview] = useState<{ property: ManagedProperty; unit: ManagedUnit } | null>(null);
+  const [showMap, setShowMap] = useState(false);
   const queryClient = useQueryClient();
 
   // The modal is used only for EDITING property details (Add uses the full
@@ -184,6 +195,9 @@ export default function ManagerPropertiesPage() {
             </p>
           </div>
           <div className={s.heroRight}>
+            <button type="button" className={s.btn} onClick={() => setShowMap(true)} title="See all managed properties on a map">
+              <MapPin size={14} /> Map
+            </button>
             {can('canEditProperties') && (
               <button
                 type="button"
@@ -282,6 +296,8 @@ export default function ManagerPropertiesPage() {
                 canEdit={can('canEditProperties')}
                 onEdit={() => setPropertyModal({ open: true, editing: p })}
                 multiLandlord={!rpFilter}
+                onShowDetails={() => setDetailsProperty(p)}
+                onPreviewUnit={(u) => setUnitPreview({ property: p, unit: u })}
               />
             ))}
           </div>
@@ -300,6 +316,7 @@ export default function ManagerPropertiesPage() {
           subCommunityId:      propertyModal.editing.subCommunityId ?? null,
           makaniNumber:        propertyModal.editing.makaniNumber ?? '',
           plotNumber:          propertyModal.editing.plotNumber ?? '',
+          street:              propertyModal.editing.street ?? '',
           propertyDescription: propertyModal.editing.propertyDescription ?? '',
           latitude:            propertyModal.editing.latitude,
           longitude:           propertyModal.editing.longitude,
@@ -312,15 +329,93 @@ export default function ManagerPropertiesPage() {
         onClose={() => setPropertyModal({ open: false })}
         onSave={handleSaveProperty}
       />
+      {/* Read-only preview popups + map (shared components, manager-scoped data) */}
+      {detailsProperty && (
+        <PropertyDetailsModal
+          property={{
+            id: detailsProperty.id,
+            buildingName: detailsProperty.buildingName,
+            spaceCategory: detailsProperty.spaceCategory,
+            fullAddress: detailsProperty.fullAddress ?? null,
+            emirateName: detailsProperty.emirate?.nameEn ?? null,
+            communityName: detailsProperty.community?.nameEn ?? null,
+            street: null,
+            makaniNumber: detailsProperty.makaniNumber ?? null,
+            plotNumber: detailsProperty.plotNumber ?? null,
+            latitude: detailsProperty.latitude ?? null,
+            longitude: detailsProperty.longitude ?? null,
+            hasGym: detailsProperty.hasGym ?? false,
+            hasPool: detailsProperty.hasPool ?? false,
+            hasParking: detailsProperty.hasParking ?? false,
+            isStandaloneUnit: detailsProperty.isStandaloneUnit ?? false,
+            propertyDescription: detailsProperty.propertyDescription ?? null,
+            numberOfFloors: detailsProperty.numberOfFloors ?? null,
+            createdAt: '',
+            unitCount: detailsProperty.unitCount,
+          }}
+          stats={detailsProperty.unitCount != null ? { units: detailsProperty.unitCount, occupied: 0, rentTotal: 0 } : null}
+          onClose={() => setDetailsProperty(null)}
+        />
+      )}
+      {unitPreview && (
+        <UnitPreviewModal
+          propertyId={unitPreview.property.id}
+          propertyName={unitPreview.property.buildingName}
+          fetchBase="/manager/properties"
+          fetchQuery={`rp=${unitPreview.property.rentalProviderId}`}
+          unit={{
+            id: unitPreview.unit.id,
+            propertyId: unitPreview.property.id,
+            unitNumber: unitPreview.unit.unitNumber,
+            unitName: null,
+            unitType: unitPreview.unit.unitType,
+            unitTier: '',
+            floor: null,
+            premiseNumber: null,
+            bedrooms: unitPreview.unit.bedrooms,
+            bathrooms: unitPreview.unit.bathrooms,
+            unitSizeSqft: unitPreview.unit.unitSizeSqft != null ? Number(unitPreview.unit.unitSizeSqft) : null,
+            unitSizeSqm: unitPreview.unit.unitSizeSqm != null ? Number(unitPreview.unit.unitSizeSqm) : null,
+            view: unitPreview.unit.view,
+            facilities: null,
+            rentalPrice: unitPreview.unit.rentalPrice != null ? Number(unitPreview.unit.rentalPrice) : null,
+            marketPrice: unitPreview.unit.marketPrice != null ? Number(unitPreview.unit.marketPrice) : null,
+            securityDeposit: null,
+            adminFee: null,
+            ejariFeeFils: null,
+            commission: null,
+            serviceCharges: null,
+            availability: unitPreview.unit.availability,
+            description: null,
+            isListed: unitPreview.unit.listingStatus === 'published',
+            listingStatus: unitPreview.unit.listingStatus,
+          }}
+          onClose={() => setUnitPreview(null)}
+        />
+      )}
+      {showMap && (
+        <PortfolioMapModal
+          properties={filtered.map(p => ({
+            id: p.id,
+            buildingName: p.buildingName,
+            latitude: p.latitude ?? null,
+            longitude: p.longitude ?? null,
+            fullAddress: p.fullAddress ?? null,
+            unitCount: p.unitCount,
+          }))}
+          onClose={() => setShowMap(false)}
+        />
+      )}
     </div>
   );
 }
 
 /* ── Property card — mirrors the RP portfolio accordion (units on expand) ── */
 function PropertyCard({
-  p, expanded, onToggle, canEdit, onEdit, multiLandlord,
+  p, expanded, onToggle, canEdit, onEdit, multiLandlord, onShowDetails, onPreviewUnit,
 }: {
   p: ManagedProperty; expanded: boolean; onToggle: () => void; canEdit: boolean; onEdit: () => void; multiLandlord: boolean;
+  onShowDetails: () => void; onPreviewUnit: (u: ManagedUnit) => void;
 }) {
   const loc = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ') || p.fullAddress || '—';
   const { data: units = [], isLoading: unitsLoading } = useQuery<ManagedUnit[]>({
@@ -372,6 +467,15 @@ function PropertyCard({
               <div className={s.aggL}>Landlord</div>
             </div>
           )}
+          <button
+            type="button"
+            className={s.actsBtn}
+            title="View property details"
+            aria-label="View property details"
+            onClick={(e) => { e.stopPropagation(); onShowDetails(); }}
+          >
+            <Eye size={14} />
+          </button>
           {canEdit && (
             <button
               type="button"
@@ -429,9 +533,9 @@ function PropertyCard({
                       )}
                       <span className={cn(s.pill, info.cls)}><span className={s.pdot} /> {info.label}</span>
                       <div className={s.unitActs}>
-                        <Link href={`/listings/units/${u.id}`} target="_blank" className={s.actsBtn} title="Preview listing">
+                        <button type="button" className={s.actsBtn} title="Preview unit" onClick={() => onPreviewUnit(u)}>
                           <Eye size={14} />
-                        </Link>
+                        </button>
                         {canEdit && (
                           <button type="button" className={s.actsBtn} title="Edit property" onClick={onEdit}>
                             <Pencil size={14} />
@@ -446,6 +550,7 @@ function PropertyCard({
           )}
         </div>
       )}
+
     </div>
   );
 }

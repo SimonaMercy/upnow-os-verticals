@@ -14,10 +14,11 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Building2, MapPin, Plus, Pencil, Trash2, Search,
-  ChevronDown, Loader2, AlertCircle, Camera, X, ImagePlus, Trash, Eye, FileText,
+  ChevronDown, Loader2, AlertCircle, X, Eye,
   LayoutGrid, Map as MapIcon,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import Link from 'next/link';
 import {
@@ -33,6 +34,10 @@ import {
   INDUSTRIAL_UNIT_TYPES,
 } from '@/components/upnow/UnitFormModal';
 import s from './portfolio.module.css';
+import { PropertyDetailsModal } from './PropertyDetailsModal';
+import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { UnitPreviewModal } from './UnitPreviewModal';
+import { PortfolioMapModal } from './PortfolioMapModal';
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
 
@@ -80,6 +85,7 @@ interface Unit {
   unitSizeSqft: number | null;
   unitSizeSqm: number | null;
   view: string | null;
+  furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
   marketPrice: number | null;
@@ -103,13 +109,6 @@ interface ContractSummary {
   endDate: string | null;
   tenant: { id: number | null; name: string | null } | null;
   unit: { id: number | null } | null;
-}
-
-interface UnitMediaItem {
-  id: number;
-  url: string;
-  caption: string | null;
-  sortOrder: number;
 }
 
 // ─── View options ─────────────────────────────────────────
@@ -203,6 +202,23 @@ function amenitiesFromUnit(unit: Unit): string[] {
   } catch { return []; }
 }
 
+function leaseTermsFromUnit(unit: Unit): {
+  minLeaseMonths: string; noticePeriodDays: string; rentEscalationPct: string;
+} {
+  const empty = { minLeaseMonths: '', noticePeriodDays: '', rentEscalationPct: '' };
+  if (!unit.facilities) return empty;
+  try {
+    const parsed = JSON.parse(unit.facilities);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return empty;
+    const lt = (parsed as { leaseTerms?: Record<string, number> }).leaseTerms ?? {};
+    return {
+      minLeaseMonths:    lt.minLeaseMonths    != null ? String(lt.minLeaseMonths)    : '',
+      noticePeriodDays:  lt.noticePeriodDays  != null ? String(lt.noticePeriodDays)  : '',
+      rentEscalationPct: lt.rentEscalationPct != null ? String(lt.rentEscalationPct) : '',
+    };
+  } catch { return empty; }
+}
+
 function categoryLabel(cat: string): string {
   return SPACE_CATEGORIES.find((c) => c.id === cat)?.label ?? cat;
 }
@@ -213,7 +229,10 @@ function formToCreateDto(data: PropertyFormData) {
   return {
     buildingName: data.buildingName,
     spaceCategory: data.spaceCategory,
-    fullAddress: parts.join(', ') || undefined,
+    street: data.street || undefined,
+    // Without a street segment, leave full_address untouched (PATCH omits it)
+    // so a legacy row's embedded street isn't recomposed away.
+    fullAddress: data.street ? parts.join(', ') : undefined,
     emirateId: data.emirateId ?? undefined,
     cityId: data.cityId ?? undefined,
     communityId: data.communityId ?? undefined,
@@ -232,158 +251,52 @@ function formToCreateDto(data: PropertyFormData) {
 }
 
 function unitFormToDto(data: UnitFormData) {
+  // Empty string means "cleared" — PATCH an explicit null so the backend
+  // actually clears the column (undefined would silently keep the old value).
+  const clearable = (v: string) => (v ? v : null);
+  const num = (v: string) => {
+    if (!v) return null;
+    const n = Number(v.replace('+', '')); // '6+' bedrooms / '5+' bathrooms
+    return Number.isNaN(n) ? null : n;
+  };
   return {
     unitNumber: data.unitNumber,
-    unitName: data.unitName || undefined,
+    unitName: clearable(data.unitName),
     unitType: data.unitType,
     unitTier: data.unitTier || 'standard',
-    floor: data.floor || undefined,
-    premiseNumber: data.premiseNumber || undefined,
-    unitSizeSqft: data.unitSizeSqft ? Number(data.unitSizeSqft) : undefined,
-    bedrooms: data.bedrooms && data.bedrooms !== 'Studio' ? Number(data.bedrooms) : undefined,
-    bathrooms: data.bathrooms ? Number(data.bathrooms) : undefined,
-    amenities: data.amenities.length > 0 ? data.amenities : undefined,
-    view: data.view || undefined,
+    floor: clearable(data.floor),
+    premiseNumber: clearable(data.premiseNumber),
+    unitSizeSqft: num(data.unitSizeSqft) ?? undefined,
+    bedrooms: data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
+    bathrooms: num(data.bathrooms) ?? undefined,
+    amenities: data.amenities, // empty array clears amenities (kept lease terms are merged server-side)
+    view: clearable(data.view),
+    furnishing: clearable(data.furnishing),
     rentalPrice: data.rentalPrice ? Number(data.rentalPrice) : undefined,
-    marketPrice: data.marketPrice ? Number(data.marketPrice) : undefined,
+    marketPrice: num(data.marketPrice),
     securityDeposit: data.securityDeposit ? Number(data.securityDeposit) : undefined,
     adminFee: data.adminFee ? Number(data.adminFee) : undefined,
     ejariFeeFils: data.ejariFeeFils ? Number(data.ejariFeeFils) : undefined,
     commission: data.commission ? Number(data.commission) : undefined,
-    serviceCharges: data.serviceCharges ? Number(data.serviceCharges) : undefined,
+    serviceCharges: num(data.serviceCharges),
     minLeaseMonths: data.minLeaseMonths ? Number(data.minLeaseMonths) : undefined,
     noticePeriodDays: data.noticePeriodDays ? Number(data.noticePeriodDays) : undefined,
     rentEscalationPct: data.rentEscalationPct ? Number(data.rentEscalationPct) : undefined,
-    description: data.description || undefined,
+    description: clearable(data.description),
   };
-}
-
-// ─── Unit Photo Manager ───────────────────────────────────
-function UnitPhotoManager({ unit, propertyId, onClose }: { unit: Unit; propertyId: number; onClose: () => void }) {
-  const qc = useQueryClient();
-  const qKey = ['unit-media', unit.id];
-
-  const { data: photos = [], isLoading } = useQuery<UnitMediaItem[]>({
-    queryKey: qKey,
-    queryFn: () => apiGet(`/properties/${propertyId}/units/${unit.id}/media`),
-  });
-
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (!files.length) return;
-    setUploading(true);
-    setUploadError(null);
-    try {
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        await fetch(`/api/properties/${propertyId}/units/${unit.id}/media`, {
-          method: 'POST',
-          credentials: 'include',
-          body: fd,
-        }).then(async (r) => {
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            throw new Error((err as { message?: string }).message ?? 'Upload failed');
-          }
-        });
-      }
-      await qc.invalidateQueries({ queryKey: qKey });
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
-  }, [propertyId, unit.id, qc, qKey]);
-
-  const deletePhoto = useMutation({
-    mutationFn: (mediaId: number) => apiDelete(`/properties/${propertyId}/units/${unit.id}/media/${mediaId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
-  });
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0]">
-          <div>
-            <h2 className="font-semibold text-[#1a1916]">Photos — #{unit.unitNumber}</h2>
-            <p className="text-xs text-[#9b9890] mt-0.5">{photos.length}/20 photos</p>
-          </div>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer"><X size={20} /></button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {isLoading ? (
-            <div className="flex justify-center py-10"><Loader2 size={24} className="animate-spin text-[#2e9f82]" /></div>
-          ) : photos.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 text-[#9b9890]">
-              <Camera size={36} className="mb-3 opacity-30" />
-              <p className="text-sm">No photos yet</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3">
-              {photos.map((p) => (
-                <div key={p.id} className="relative group rounded-xl overflow-hidden bg-[#f4f3ef] aspect-square">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={p.url.startsWith('http') ? p.url : `${process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001'}${p.url}`}
-                    alt={p.caption ?? 'Unit photo'}
-                    className="w-full h-full object-cover"
-                  />
-                  <button
-                    onClick={() => { if (confirm('Delete this photo?')) deletePhoto.mutate(p.id); }}
-                    className="absolute top-1.5 right-1.5 bg-white/90 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-700 cursor-pointer"
-                  >
-                    <Trash size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {uploadError && (
-            <p className="mt-4 text-xs text-red-500 flex items-center gap-1">
-              <AlertCircle size={12} /> {uploadError}
-            </p>
-          )}
-        </div>
-
-        <div className="px-6 py-4 border-t border-[#e8e6e0]">
-          <label className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-medium cursor-pointer transition-opacity ${photos.length >= 20 || uploading ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-90'}`} style={{ background: '#2e9f82', color: '#fff' }}>
-            {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-            {uploading ? 'Uploading…' : 'Add Photos'}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              multiple
-              disabled={photos.length >= 20 || uploading}
-              onChange={handleFileChange}
-              className="sr-only"
-            />
-          </label>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── Property card (new design) ──────────────────────────
 function PropertyCard({
   property, units, contracts, expanded, onToggle, onEdit, onDelete,
-  onAddUnit, onEditUnit, onDeleteUnit, onSubmitListing, onWithdrawListing, onManagePhotos,
+  onAddUnit, onEditUnit, onDeleteUnit, onSubmitListing, onWithdrawListing,
+  onShowDetails, onPreviewUnit,
 }: {
   property: Property; units: Unit[]; contracts: ContractSummary[]; expanded: boolean;
   onToggle: () => void; onEdit: () => void; onDelete: () => void;
   onAddUnit: () => void; onEditUnit: (u: Unit) => void; onDeleteUnit: (uid: number) => void;
   onSubmitListing: (u: Unit) => void; onWithdrawListing: (u: Unit) => void;
-  onManagePhotos: (u: Unit) => void;
+  onShowDetails: () => void; onPreviewUnit: (u: Unit, contract: ContractSummary | null) => void;
 }) {
   // Units load lazily on expand. Until then, fall back to the property-level
   // aggregates returned by GET /properties so the collapsed card shows real
@@ -414,7 +327,15 @@ function PropertyCard({
       <div className={s.propH} onClick={onToggle} role="button">
         <div className={s.propInfo}>
           <div className={s.propName}>
-            {property.buildingName}
+            <span
+              role="button"
+              onClick={e => { e.stopPropagation(); onShowDetails(); }}
+              title="View property details"
+              style={{ cursor: 'pointer' }}
+              onMouseEnter={e => { (e.target as HTMLElement).style.textDecoration = 'underline'; }}
+              onMouseLeave={e => { (e.target as HTMLElement).style.textDecoration = 'none'; }}>
+              {property.buildingName}
+            </span>
             <span className={s.propCat}>{categoryLabel(property.spaceCategory)}</span>
           </div>
           <div className={s.propAddr}>
@@ -442,6 +363,15 @@ function PropertyCard({
             </div>
           )}
           <div className={s.propActions}>
+            <button
+              type="button"
+              className={s.actsBtn}
+              onClick={(e) => { e.stopPropagation(); onShowDetails(); }}
+              title="View property details"
+              aria-label="View property details"
+            >
+              <Eye size={14} />
+            </button>
             <button
               type="button"
               className={s.actsBtn}
@@ -548,7 +478,14 @@ function PropertyCard({
 
                 return (
                   <div key={u.id} className={cn(s.unit, isConfirmingDelete && s.unitConfirmDel)}>
-                    <div className={s.unitNum}>{u.unitNumber}</div>
+                    <button
+                      type="button"
+                      className={s.unitNum}
+                      title="Preview unit details"
+                      onClick={() => onPreviewUnit(u, contract ?? null)}
+                      style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', textAlign: 'inherit' }}>
+                      {u.unitNumber}
+                    </button>
 
                     <div className={s.unitMeta}>
                       <div className={s.unitTop}>
@@ -596,22 +533,12 @@ function PropertyCard({
                         </>
                       )}
 
+                      {/* CEO doctrine: three actions only — Preview (admin
+                          popup, NOT the public page) · Edit · Delete. Floor
+                          plan, photos and the contract live INSIDE preview/edit. */}
                       <div className={s.unitActs}>
-                        <Link href={`/listings/units/${u.id}`} target="_blank" className={s.actsBtn} title="Preview listing">
+                        <button type="button" className={s.actsBtn} onClick={() => onPreviewUnit(u, contract ?? null)} title="Preview unit">
                           <Eye size={14} />
-                        </Link>
-                        {contract && (
-                          <Link href={`/rental-provider/dashboard/contracts/${contract.id}/v2`} className={s.actsBtn} title="View contract">
-                            <FileText size={14} />
-                          </Link>
-                        )}
-                        {u.floorPlanUrl && (
-                          <a href={u.floorPlanUrl} target="_blank" rel="noreferrer" className={s.actsBtn} title="View floor plan">
-                            <MapIcon size={14} />
-                          </a>
-                        )}
-                        <button type="button" className={s.actsBtn} onClick={() => onManagePhotos(u)} title="Manage photos">
-                          <Camera size={14} />
                         </button>
                         <button type="button" className={s.actsBtn} onClick={() => onEditUnit(u)} title="Edit unit">
                           <Pencil size={14} />
@@ -674,7 +601,10 @@ export default function PortfolioPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: Property }>({ open: false });
   const [unitModal, setUnitModal] = useState<{ open: boolean; propertyId?: number; propertyCategory?: string; editingUnit?: Unit }>({ open: false });
-  const [photoModal, setPhotoModal] = useState<{ open: boolean; unit?: Unit; propertyId?: number }>({ open: false });
+  // Read-only preview popups + portfolio map
+  const [detailsProperty, setDetailsProperty] = useState<Property | null>(null);
+  const [unitPreview, setUnitPreview] = useState<{ property: Property; unit: Unit; contract: ContractSummary | null } | null>(null);
+  const [showMap, setShowMap] = useState(false);
 
   const { data: properties = [], isLoading, error } = useQuery<Property[]>({
     queryKey: ['properties'],
@@ -734,23 +664,41 @@ export default function PortfolioPage() {
     mutationFn: ({ propertyId, unitId }: { propertyId: number; unitId: number }) =>
       apiPatch<Unit>(`/properties/${propertyId}/units/${unitId}/submit-listing`, {}),
     onSuccess: (_, vars) => qc.invalidateQueries({ queryKey: ['units', vars.propertyId] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to submit listing'),
   });
   const withdrawListing = useMutation({
     mutationFn: ({ propertyId, unitId }: { propertyId: number; unitId: number }) =>
       apiPatch<Unit>(`/properties/${propertyId}/units/${unitId}/withdraw-listing`, {}),
     onSuccess: (_, vars) => qc.invalidateQueries({ queryKey: ['units', vars.propertyId] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to withdraw listing'),
   });
 
-  const handleSaveProperty = useCallback(async (data: PropertyFormData) => {
+  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null) => {
     const dto = formToCreateDto(data);
+    let propertyId: number;
     if (propertyModal.editing) {
       await updateProperty.mutateAsync({ id: propertyModal.editing.id, dto });
+      propertyId = propertyModal.editing.id;
     } else {
-      await createProperty.mutateAsync(dto);
+      const created = await createProperty.mutateAsync(dto);
+      propertyId = created.id;
+    }
+    // Standalone properties carry ONE title deed at property level (multi-unit
+    // buildings attach deeds per unit instead — see UnitFormModal).
+    if (titleDeed && propertyId) {
+      try {
+        await uploadOwnedDocument({
+          ownerType: 'property', ownerId: propertyId,
+          documentKey: 'title_deed', category: 'legal',
+          displayName: 'Title deed', file: titleDeed,
+        });
+      } catch (e) {
+        alert(`The property was saved, but the title deed upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      }
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
 
-  const handleSaveUnit = useCallback(async (data: UnitFormData, floorPlan?: File | null) => {
+  const handleSaveUnit = useCallback(async (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null) => {
     if (!unitModal.propertyId) return;
     const dto = unitFormToDto(data);
     const saved = unitModal.editingUnit
@@ -768,6 +716,18 @@ export default function PortfolioPage() {
         // non-fatal: the unit saved; only the floor-plan upload failed
       }
       qc.invalidateQueries({ queryKey: ['units', unitModal.propertyId] });
+    }
+    // Per-unit title deed (multi-unit buildings only).
+    if (titleDeed && saved?.id) {
+      try {
+        await uploadOwnedDocument({
+          ownerType: 'unit', ownerId: saved.id,
+          documentKey: 'title_deed', category: 'legal',
+          displayName: `Title deed — Unit ${data.unitNumber || saved.id}`, file: titleDeed,
+        });
+      } catch (e) {
+        alert(`The unit was saved, but the title deed upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      }
     }
   }, [unitModal, createUnit, updateUnit, qc]);
 
@@ -796,6 +756,9 @@ export default function PortfolioPage() {
             </p>
           </div>
           <div className={s.heroRight}>
+            <button type="button" className={cn(s.btn, s.btnAccent)} onClick={() => setShowMap(true)} title="See all properties on a map">
+              <MapIcon size={14} /> Map
+            </button>
             <button type="button" className={cn(s.btn, s.btnPrimary)} onClick={() => router.push('/rental-provider/dashboard/portfolio/add')}>
               <Plus size={14} /> Add property
             </button>
@@ -948,7 +911,8 @@ export default function PortfolioPage() {
                   onDeleteUnit={(uid) => deleteUnit.mutate({ propertyId: p.id, unitId: uid })}
                   onSubmitListing={(u) => submitListing.mutate({ propertyId: p.id, unitId: u.id })}
                   onWithdrawListing={(u) => withdrawListing.mutate({ propertyId: p.id, unitId: u.id })}
-                  onManagePhotos={(u) => setPhotoModal({ open: true, unit: u, propertyId: p.id })}
+                  onShowDetails={() => setDetailsProperty(p)}
+                  onPreviewUnit={(u, c) => setUnitPreview({ property: p, unit: u, contract: c })}
                 />
               );
             })}
@@ -968,6 +932,7 @@ export default function PortfolioPage() {
             subCommunityId:      propertyModal.editing.subCommunityId ?? null,
             makaniNumber:        propertyModal.editing.makaniNumber ?? '',
             plotNumber:          propertyModal.editing.plotNumber ?? '',
+            street:              propertyModal.editing.street ?? '',
             propertyDescription: propertyModal.editing.propertyDescription ?? '',
             latitude:            propertyModal.editing.latitude,
             longitude:           propertyModal.editing.longitude,
@@ -992,10 +957,11 @@ export default function PortfolioPage() {
             unitTier:         unitModal.editingUnit.unitTier,
             floor:            unitModal.editingUnit.floor ?? '',
             premiseNumber:    unitModal.editingUnit.premiseNumber ?? '',
-            bedrooms:         unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : '1',
+            bedrooms:         unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : 'Studio',
             bathrooms:        unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
             unitSizeSqft:     unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
             view:             unitModal.editingUnit.view ?? '',
+            furnishing:       unitModal.editingUnit.furnishing ?? 'Unfurnished',
             amenities:        amenitiesFromUnit(unitModal.editingUnit),
             rentalPrice:      unitModal.editingUnit.rentalPrice != null ? String(unitModal.editingUnit.rentalPrice) : '',
             marketPrice:      unitModal.editingUnit.marketPrice != null ? String(unitModal.editingUnit.marketPrice) : '',
@@ -1004,21 +970,47 @@ export default function PortfolioPage() {
             ejariFeeFils:     unitModal.editingUnit.ejariFeeFils != null ? String(unitModal.editingUnit.ejariFeeFils) : '',
             commission:       unitModal.editingUnit.commission != null ? String(unitModal.editingUnit.commission) : '',
             serviceCharges:   unitModal.editingUnit.serviceCharges != null ? String(unitModal.editingUnit.serviceCharges) : '',
-            minLeaseMonths:   '',
-            noticePeriodDays: '',
-            rentEscalationPct: '',
+            ...leaseTermsFromUnit(unitModal.editingUnit),
             description:      unitModal.editingUnit.description ?? '',
           } : undefined}
           existingFloorPlanUrl={unitModal.editingUnit?.floorPlanUrl ?? null}
+          propertyStandalone={properties.find(p => p.id === unitModal.propertyId)?.isStandaloneUnit ?? undefined}
+          propertyId={unitModal.propertyId}
+          editingUnitId={unitModal.editingUnit?.id}
           onClose={() => setUnitModal({ open: false })}
           onSave={handleSaveUnit}
         />
 
-        {photoModal.open && photoModal.unit && photoModal.propertyId && (
-          <UnitPhotoManager
-            unit={photoModal.unit}
-            propertyId={photoModal.propertyId}
-            onClose={() => setPhotoModal({ open: false })}
+        {/* Read-only preview popups + portfolio map */}
+        {detailsProperty && (
+          <PropertyDetailsModal
+            property={detailsProperty}
+            stats={{
+              units: detailsProperty.unitCount ?? 0,
+              occupied: detailsProperty.occupiedCount ?? 0,
+              rentTotal: detailsProperty.rentTotal ?? 0,
+            }}
+            onClose={() => setDetailsProperty(null)}
+          />
+        )}
+        {unitPreview && (
+          <UnitPreviewModal
+            propertyId={unitPreview.property.id}
+            propertyName={unitPreview.property.buildingName}
+            unit={unitPreview.unit}
+            contract={unitPreview.contract ? {
+              id: unitPreview.contract.id,
+              tenantName: unitPreview.contract.tenant?.name ?? null,
+              endDate: unitPreview.contract.endDate,
+              status: unitPreview.contract.status,
+            } : null}
+            onClose={() => setUnitPreview(null)}
+          />
+        )}
+        {showMap && (
+          <PortfolioMapModal
+            properties={properties}
+            onClose={() => setShowMap(false)}
           />
         )}
       </div>

@@ -281,8 +281,12 @@ export default async function ListingsView({ country, emirate, searchParams }: P
                 <div className={`lst-results${view === 'list' ? ' list' : ''}`}>
                   {data.items.map(({ unit, property, coverPhotoUrl }) => {
                     const catKey  = property.spaceCategory.toLowerCase();
+                    // unit_media.url is stored ABSOLUTE in every storage mode —
+                    // only prefix genuinely relative paths.
                     const cardImg = coverPhotoUrl
-                      ? `${BACKEND_HOST}/uploads/${coverPhotoUrl}`
+                      ? (coverPhotoUrl.startsWith('http') || coverPhotoUrl.startsWith('/')
+                          ? coverPhotoUrl
+                          : `${BACKEND_HOST}/uploads/${coverPhotoUrl}`)
                       : fallbackImg(catKey, unit.id);
                     const label   = unit.unitName ?? `Unit ${unit.unitNumber}`;
                     const price   = fmtAed(unit.rentalPrice);

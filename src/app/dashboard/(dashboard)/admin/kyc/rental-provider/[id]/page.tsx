@@ -122,6 +122,8 @@ function complianceIcon(s: ComplianceStatus) {
 
 function docStatusBadge(s: DocStatus) {
   if (!s) return <span className="text-xs text-gray-400">Not uploaded</span>;
+  // The API serves lowercase enum values — normalize before mapping.
+  const key = String(s).toUpperCase();
   const map: Record<string, string> = {
     ATTACHED: "bg-amber-100 text-amber-700",
     PROCESSED: "bg-blue-100 text-blue-700",
@@ -129,7 +131,7 @@ function docStatusBadge(s: DocStatus) {
     EXPIRED: "bg-red-100 text-red-700",
   };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[s] ?? "bg-gray-100 text-gray-600"}`}>
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[key] ?? "bg-gray-100 text-gray-600"}`}>
       {s}
     </span>
   );
@@ -545,7 +547,7 @@ export default function RpKycDetailPage() {
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
                     )}
-                    {item.uploaded && item.documentId && item.status === "ATTACHED" && (
+                    {item.uploaded && item.documentId && String(item.status).toLowerCase() === "attached" && (
                       <button
                         onClick={() => void verifyDoc(item.documentId!)}
                         disabled={verifyingDocId === item.documentId}

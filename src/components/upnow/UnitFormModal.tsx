@@ -248,9 +248,90 @@ interface Props {
   initial?: Partial<UnitFormData>;
   /** URL of a floor plan already attached (edit mode) — shows "current" state. */
   existingFloorPlanUrl?: string | null;
+  /** When the parent property is NOT standalone, each unit carries its own
+   *  title deed — pass false to surface the deed upload here. (Standalone
+   *  properties keep the deed on the property form instead.) */
+  propertyStandalone?: boolean;
+  /** Set both when editing an EXISTING unit — enables the inline photo
+   *  manager (photos upload/remove lives inside Edit, not a separate button). */
+  propertyId?: number;
+  editingUnitId?: number;
   onClose: () => void;
-  onSave: (data: UnitFormData, floorPlan?: File | null) => Promise<void>;
+  onSave: (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null) => Promise<void>;
   title?: string;
+}
+
+interface UnitMediaRow { id: number; url: string; caption?: string | null }
+
+/** Inline photo manager — list / add / remove this unit's photos from inside
+ *  the edit form (CEO: no separate camera button on the row). */
+function PhotosSection({ propertyId, unitId }: { propertyId: number; unitId: number }) {
+  const [photos, setPhotos] = useState<UnitMediaRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const reload = async () => {
+    try {
+      const r = await fetch(`/api/properties/${propertyId}/units/${unitId}/media`, { credentials: 'include' });
+      if (r.ok) setPhotos(await r.json());
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { void reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [propertyId, unitId]);
+
+  const onFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+    setBusy(true); setErr(null);
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const r = await fetch(`/api/properties/${propertyId}/units/${unitId}/media`, { method: 'POST', credentials: 'include', body: fd });
+        if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error((b as { message?: string }).message ?? 'Upload failed'); }
+      }
+      await reload();
+    } catch (ex) { setErr(ex instanceof Error ? ex.message : 'Upload failed'); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (id: number) => {
+    setBusy(true); setErr(null);
+    try {
+      await fetch(`/api/properties/${propertyId}/units/${unitId}/media/${id}`, { method: 'DELETE', credentials: 'include' });
+      await reload();
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Photos</label>
+      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="sr-only" onChange={onFiles} />
+      {loading ? (
+        <div className="text-xs text-[#9b9890] py-2">Loading photos…</div>
+      ) : (
+        <div className="grid grid-cols-4 gap-2">
+          {photos.map(p => (
+            <div key={p.id} className="relative group">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.url} alt={p.caption ?? 'Unit photo'} className="w-full h-16 object-cover rounded-lg border border-[#e8e6e0]" />
+              <button type="button" onClick={() => void remove(p.id)} disabled={busy}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-[#e8e6e0] text-[#9b9890] hover:text-[#b91c1c] items-center justify-center hidden group-hover:flex cursor-pointer shadow">
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
+            className="h-16 border-2 border-dashed border-[#e8e6e0] rounded-lg flex items-center justify-center text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
+            <Upload size={15} />
+          </button>
+        </div>
+      )}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+    </div>
+  );
 }
 
 // ─── View typeahead ───────────────────────────────────────
@@ -301,12 +382,15 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
 const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
 const INPUT_ERR = 'w-full border border-red-400 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-red-400';
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, onClose, onSave, title }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof UnitFormData, string>>>({});
   const [saving, setSaving] = useState(false);
   const [floorPlan, setFloorPlan] = useState<File | null>(null);
   const floorPlanInputRef = useRef<HTMLInputElement>(null);
+  // Per-unit title deed — only for units of NON-standalone (multi-unit) properties.
+  const [titleDeed, setTitleDeed] = useState<File | null>(null);
+  const titleDeedInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -319,6 +403,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
       setForm({ ...defaults, ...initial });
       setErrors({});
       setFloorPlan(null);
+      setTitleDeed(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -329,11 +414,13 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
       if (k === 'rentalPrice') {
         const rent = Number(v);
         if (!isNaN(rent) && rent > 0) {
-          next.securityDeposit = String(Math.round(rent * 0.05));
-          next.adminFee        = String(Math.round(rent * 0.05));
-          next.commission      = String(Math.round(rent * 0.05));
+          // Only auto-fill fees that are still blank — never clobber values the
+          // user set (or that a stored unit already carries in edit mode).
+          if (!prev.securityDeposit) next.securityDeposit = String(Math.round(rent * 0.05));
+          if (!prev.adminFee)        next.adminFee        = String(Math.round(rent * 0.05));
+          if (!prev.commission)      next.commission      = String(Math.round(rent * 0.05));
           // Ejari fee: AED 220 for residential only; 0 for all others
-          next.ejariFeeFils    = propertyCategory === 'residential' ? '220' : '';
+          if (!prev.ejariFeeFils && propertyCategory === 'residential') next.ejariFeeFils = '220';
         }
       }
       return next;
@@ -364,7 +451,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     e.preventDefault();
     if (!validate()) return;
     setSaving(true);
-    try { await onSave(form, floorPlan); onClose(); }
+    try { await onSave(form, floorPlan, propertyStandalone === false ? titleDeed : null); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -679,6 +766,45 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               </a>
             )}
           </div>
+
+          {/* Title deed — only for units of multi-unit (non-standalone) properties;
+              standalone properties carry one deed on the property form instead. */}
+          {propertyStandalone === false && (
+            <div>
+              <input
+                ref={titleDeedInputRef}
+                type="file"
+                accept="application/pdf,image/png,image/jpeg,image/webp"
+                className="sr-only"
+                onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setTitleDeed(f); e.target.value = ''; }}
+              />
+              <label className="block text-xs font-medium text-[#6b6860] mb-1.5">
+                Title deed <span className="text-[#9b9890] font-normal">(this unit)</span>
+              </label>
+              {titleDeed ? (
+                <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+                  <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                  <span className="text-sm text-[#1a1916] truncate flex-1">{titleDeed.name}</span>
+                  <button type="button" onClick={() => titleDeedInputRef.current?.click()} className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
+                  <button type="button" onClick={() => setTitleDeed(null)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => titleDeedInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+                >
+                  <Upload size={15} className="text-[#c8c6c0]" />
+                  Attach this unit&apos;s title deed (PDF or image)
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Photos — manage inside Edit (existing units only) */}
+          {propertyId != null && editingUnitId != null && (
+            <PhotosSection propertyId={propertyId} unitId={editingUnitId} />
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

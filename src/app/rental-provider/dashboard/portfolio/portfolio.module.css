@@ -94,6 +94,9 @@
 .btnPrimary:disabled { background: #b8d8cd; border-color: #b8d8cd; cursor: not-allowed; color: #fff; }
 .btnGhost { background: #fff; color: var(--ink-2); border-color: var(--line); }
 .btnGhost:hover { border-color: var(--ink-3); color: var(--ink); }
+/* Highlighted secondary — jade-tinted so it stands out next to the solid primary */
+.btnAccent { background: var(--green-t); color: var(--green-d); border-color: var(--green); }
+.btnAccent:hover { background: var(--green); border-color: var(--green); color: #fff; }
 .btnSm { padding: 7px 12px; font-size: 12px; border-radius: 8px; }
 
 /* Property cards */
