@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { Files, FileText, ExternalLink, X, Loader2, AlertTriangle } from 'lucide-react';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import { docLabel } from '@/lib/docLabel';
 
 export type CustomerDoc = {
   id: number; documentKey: string; displayName: string | null; category: string | null;
@@ -16,14 +17,20 @@ export type CustomerDoc = {
   ownerType?: string | null; leaseId?: number | null;
 };
 
-const prettyKey = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-const docTone = (s: string | null | undefined) =>
-  s === 'processed' ? 'bg-[#d8f2e8] text-[#1a7a5a]' : s === 'pending' ? 'bg-[#fee2e2] text-[#b91c1c]' : 'bg-[#eef2ff] text-[#3730a3]';
+export type LeaseMeta = { id: number; ref: string; startDate: string | null; endDate: string | null };
+
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return '—';
   const dt = new Date(`${d.slice(0, 10)}T00:00:00Z`);
   return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 };
+const monthYear = (d: string | null | undefined) => {
+  if (!d) return '—';
+  const dt = new Date(`${d.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+};
+const leaseLabel = (l: LeaseMeta) => `${l.ref} · ${monthYear(l.startDate)} – ${monthYear(l.endDate)}`;
+const catLabel = (c: string | null) => (c ? c.replace(/_/g, ' ').replace(/^./, x => x.toUpperCase()) : 'Document');
 const KYC_KEY_RE = /emirates|passport|visa|trade_license|moa|poa|labour|establishment/;
 const isKycDoc = (d: CustomerDoc) =>
   (d.ownerType ?? 'customer') === 'customer' &&
@@ -41,11 +48,15 @@ const GROUPS: { key: 'kyc' | 'financial' | 'contract' | 'other'; label: string }
   { key: 'other',     label: 'Other documents' },
 ];
 
-export function CustomerDocsModal({ tenantId, tenantName, documents, onClose }: {
+export function CustomerDocsModal({ tenantId, tenantName, documents, leases, excludeKyc, onClose }: {
   /** Needed when `documents` isn't preloaded — the modal fetches the customer detail itself. */
   tenantId?: number | null;
   tenantName?: string | null;
   documents?: CustomerDoc[];
+  /** When provided, documents are grouped per lease (ref + period) instead of by category. */
+  leases?: LeaseMeta[];
+  /** Hide KYC docs (e.g. the tenant page already shows them in its own section). */
+  excludeKyc?: boolean;
   onClose: () => void;
 }) {
   const [docs, setDocs] = useState<CustomerDoc[] | null>(documents ?? null);
@@ -69,9 +80,38 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, onClose }: 
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const groups = (docs ?? [])
-    .length ? GROUPS.map(g => ({ ...g, items: (docs ?? []).filter(d => groupOf(d) === g.key) })).filter(g => g.items.length) : [];
-  const openable = (docs ?? []).filter(d => d.fileUrl);
+  const shown = (excludeKyc ? (docs ?? []).filter(d => !isKycDoc(d)) : (docs ?? []));
+  const groups: { key: string; label: string; items: CustomerDoc[] }[] = (() => {
+    if (!shown.length) return [];
+    // Lease-aware grouping: one section per lease (ref + period), newest first,
+    // so the same paperwork (Ejari, Invoice, …) repeated across renewals reads
+    // as "this year vs last year" rather than as duplicates.
+    if (leases && leases.length) {
+      const byId = new Map(leases.map(l => [l.id, l]));
+      const byStart = [...leases].sort((a, b) => String(a.startDate ?? '').localeCompare(String(b.startDate ?? '')));
+      const earliest = byStart[0];                 // first contract — move-in happens here
+      const latest = byStart[byStart.length - 1];  // last contract — move-out happens here
+      const ordered = [...leases].sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
+      // Customer-owned tenancy-lifecycle docs carry no lease link, so anchor them
+      // to the lease they logically belong to (move-in → first lease, move-out → last).
+      const resolveLeaseId = (d: CustomerDoc): number | null => {
+        if (d.leaseId && byId.has(d.leaseId)) return d.leaseId;
+        if (/move[_-]?out/i.test(d.documentKey)) return latest?.id ?? null;
+        if (/move[_-]?in/i.test(d.documentKey)) return earliest?.id ?? null;
+        return null;
+      };
+      const out: { key: string; label: string; items: CustomerDoc[] }[] = [];
+      for (const l of ordered) {
+        const items = shown.filter(d => resolveLeaseId(d) === l.id);
+        if (items.length) out.push({ key: `lease-${l.id}`, label: leaseLabel(l), items });
+      }
+      const general = shown.filter(d => resolveLeaseId(d) === null);
+      if (general.length) out.push({ key: 'general', label: 'Customer & general', items: general });
+      return out;
+    }
+    return GROUPS.map(g => ({ key: g.key, label: g.label, items: shown.filter(d => groupOf(d) === g.key) })).filter(g => g.items.length);
+  })();
+  const openable = shown.filter(d => d.fileUrl);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
@@ -79,7 +119,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, onClose }: 
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e8e6e0]">
           <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
-            <Files size={16} className="text-[#2e9f82]" /> All documents{docs ? ` (${docs.length})` : ''}{name ? ` — ${name}` : ''}
+            <Files size={16} className="text-[#2e9f82]" /> All documents{docs ? ` (${shown.length})` : ''}{name ? ` — ${name}` : ''}
           </h3>
           <div className="flex items-center gap-3">
             {openable.length > 0 && (
@@ -88,7 +128,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, onClose }: 
                 onClick={() => openDocsTogether(openable)}
                 className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
               >
-                <ExternalLink size={12} /> Open files
+                <ExternalLink size={12} /> View All
               </button>
             )}
             <button type="button" onClick={onClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
@@ -101,7 +141,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, onClose }: 
           {err && (
             <p className="text-sm text-[#b91c1c] flex items-center gap-2 py-4 justify-center"><AlertTriangle size={14} /> {err}</p>
           )}
-          {docs && docs.length === 0 && !err && (
+          {docs && shown.length === 0 && !err && (
             <p className="text-sm text-[#9b9890] py-4 text-center">No documents on file for this customer.</p>
           )}
           {groups.map(g => (
@@ -111,10 +151,15 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, onClose }: 
                 {g.items.map(d => (
                   <div key={d.id} className="flex items-center gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-1.5 min-h-[34px]">
                     <FileText size={14} className="text-[#9b9890] shrink-0" />
-                    <span className="text-[12.5px] font-medium text-[#1a1916] truncate">{d.displayName || prettyKey(d.documentKey)}</span>
-                    <span className={`inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 ${docTone(d.status)}`}>
-                      {d.fileUrl ? (d.status ?? 'attached').replace(/^./, x => x.toUpperCase()) : 'Requested'}
-                    </span>
+                    <span className="text-[12.5px] font-medium text-[#1a1916] truncate">{docLabel(d, docs ?? [])}</span>
+                    <span className="text-[10px] text-[#9b9890] shrink-0 hidden sm:inline">{catLabel(d.category)}</span>
+                    {/* Only surface states that need action — a "Processed/Attached" badge on
+                        every file is noise. Show "Requested" (no file yet) or "Pending review". */}
+                    {!d.fileUrl ? (
+                      <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#fef3c7] text-[#92400e]">Requested</span>
+                    ) : d.status === 'pending' ? (
+                      <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#fee2e2] text-[#b91c1c]">Pending review</span>
+                    ) : null}
                     {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
                     {d.fileUrl && (
                       <a href={d.fileUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 shrink-0">View <ExternalLink size={11} /></a>

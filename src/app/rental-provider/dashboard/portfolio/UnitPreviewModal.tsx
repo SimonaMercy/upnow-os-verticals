@@ -31,6 +31,7 @@ interface Unit {
   unitSizeSqft: number | null;
   unitSizeSqm: number | null;
   view: string | null;
+  furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
   marketPrice: number | null;
@@ -101,6 +102,27 @@ const fmtDate = (v: string | null | undefined) => {
 
 const titleCase = (s: string) =>
   s.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** The `facilities` column packs amenities + optional lease terms as JSON
+ *  (bare array, or { amenities, leaseTerms }). Parse it for display. */
+function parseFacilities(facilities: string | null): {
+  amenities: string[];
+  minLeaseMonths?: number; noticePeriodDays?: number; rentEscalationPct?: number;
+} {
+  if (!facilities) return { amenities: [] };
+  try {
+    const parsed = JSON.parse(facilities);
+    if (Array.isArray(parsed)) return { amenities: parsed as string[] };
+    if (parsed && typeof parsed === 'object') {
+      const lt = (parsed as { leaseTerms?: Record<string, number> }).leaseTerms ?? {};
+      return {
+        amenities: Array.isArray((parsed as { amenities?: string[] }).amenities) ? (parsed as { amenities: string[] }).amenities : [],
+        minLeaseMonths: lt.minLeaseMonths, noticePeriodDays: lt.noticePeriodDays, rentEscalationPct: lt.rentEscalationPct,
+      };
+    }
+    return { amenities: [] };
+  } catch { return { amenities: [] }; }
+}
 
 function Chip({ tone, children }: { tone: 'green' | 'amber' | 'gray'; children: React.ReactNode }) {
   const cls =
@@ -211,10 +233,9 @@ export function UnitPreviewModal({
 
   const unitTitle = unit.unitName || `Unit ${unit.unitNumber ?? unit.id}`;
 
+  // One rent per unit (annual rent). marketPrice mirrors it, so we don't show a
+  // separate "market benchmark" or rent-vs-market gap.
   const rent = unit.rentalPrice;
-  const market = unit.marketPrice;
-  const gap = rent != null && market != null && rent > 0 ? market - rent : null;
-  const gapPct = gap !== null && rent ? (gap / rent) * 100 : null;
 
   const details: Array<[string, string | null]> = [
     ['Type', unit.unitType ? titleCase(unit.unitType) : null],
@@ -236,14 +257,22 @@ export function UnitPreviewModal({
         : null,
     ],
     ['View', unit.view],
-    ['Facilities', unit.facilities],
+    ['Furnishing', unit.furnishing ? titleCase(unit.furnishing) : null],
   ];
   const visibleDetails = details.filter(
     ([, v]) => v !== null && v !== undefined && String(v).trim() !== '',
   );
 
+  // Amenities + lease terms are packed into the facilities JSON column.
+  const { amenities, minLeaseMonths, noticePeriodDays, rentEscalationPct } = parseFacilities(unit.facilities);
+  const leaseRows: Array<[string, string | null]> = [
+    ['Min. lease', minLeaseMonths != null ? `${minLeaseMonths} month${minLeaseMonths === 1 ? '' : 's'}` : null],
+    ['Notice period', noticePeriodDays != null ? `${noticePeriodDays} day${noticePeriodDays === 1 ? '' : 's'}` : null],
+    ['Rent escalation', rentEscalationPct != null ? `${rentEscalationPct}% / yr` : null],
+  ];
+  const visibleLease = leaseRows.filter(([, v]) => v !== null);
+
   const pricingRows: Array<[string, string | null]> = [
-    ['Market benchmark', aed(market)],
     ['Security deposit', aed(unit.securityDeposit)],
     ['Admin fee', aed(unit.adminFee)],
     // ejariFeeFils is actually whole AED despite the column name.
@@ -284,7 +313,10 @@ export function UnitPreviewModal({
               {unit.availability && (
                 <Chip tone={availabilityTone(unit.availability)}>{titleCase(unit.availability)}</Chip>
               )}
-              {unit.listingStatus && (
+              {/* Listing status is only meaningful while the unit is on the
+                  market — for an occupied unit it's moot (and an "Expired"
+                  listing next to "Occupied" reads as contradictory). */}
+              {unit.listingStatus && (unit.availability ?? '').toLowerCase() !== 'occupied' && (
                 <Chip tone={listingTone(unit.listingStatus)}>{titleCase(unit.listingStatus)}</Chip>
               )}
               {unit.unitType && <Chip tone="gray">{titleCase(unit.unitType)}</Chip>}
@@ -348,6 +380,34 @@ export function UnitPreviewModal({
                   ))}
                 </dl>
               )}
+
+              {/* Lease terms (packed in facilities JSON) */}
+              {visibleLease.length > 0 && (
+                <div className="mt-3 border-t border-[#f4f3ef] pt-3">
+                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Lease terms</p>
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+                    {visibleLease.map(([label, value]) => (
+                      <div key={label} className="flex items-baseline justify-between gap-3">
+                        <dt className="text-xs text-[#9b9890]">{label}</dt>
+                        <dd className="text-right text-sm font-medium text-[#1a1916]">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
+
+              {/* Amenities (packed in facilities JSON) */}
+              {amenities.length > 0 && (
+                <div className="mt-3 border-t border-[#f4f3ef] pt-3">
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Amenities &amp; facilities</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {amenities.map((a) => (
+                      <span key={a} className="inline-flex items-center rounded-full bg-[#f0fdf8] border border-[#cfe9df] px-2.5 py-0.5 text-[11px] font-medium text-[#1a7a5a]">{a}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {unit.description && (
                 <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-[#6b6860]">
                   {unit.description}
@@ -367,7 +427,7 @@ export function UnitPreviewModal({
                     {rent != null ? `AED ${Number(rent).toLocaleString('en-AE')}` : '—'}
                   </p>
                 </div>
-                {(visiblePricing.length > 0 || gap !== null) && (
+                {visiblePricing.length > 0 && (
                   <div className="mt-3 space-y-2">
                     {visiblePricing.map(([label, value]) => (
                       <div key={label} className="flex items-baseline justify-between gap-3">
@@ -375,22 +435,6 @@ export function UnitPreviewModal({
                         <span className="text-sm font-medium text-[#1a1916]">{value}</span>
                       </div>
                     ))}
-                    {gap !== null && gapPct !== null && (
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="text-sm text-[#6b6860]">Gap vs market</span>
-                        <span
-                          className={`text-sm font-semibold ${
-                            gap > 0 ? 'text-[#166534]' : gap < 0 ? 'text-[#854d0e]' : 'text-[#6b6860]'
-                          }`}
-                        >
-                          {gap > 0
-                            ? `+AED ${gap.toLocaleString('en-AE')} uplift (${gapPct.toFixed(1)}%)`
-                            : gap < 0
-                              ? `AED ${Math.abs(gap).toLocaleString('en-AE')} above market (${Math.abs(gapPct).toFixed(1)}%)`
-                              : 'At market'}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 )}
               </Card>

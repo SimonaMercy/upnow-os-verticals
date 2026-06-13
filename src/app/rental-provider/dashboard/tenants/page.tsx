@@ -33,6 +33,7 @@ export default function TenantsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterActive, setFilterActive] = useState('all'); // all | active | inactive
+  const [renewalOnly, setRenewalOnly] = useState(false); // only renewals within 90d
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
@@ -76,9 +77,15 @@ export default function TenantsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const isRenewalSoon = (t: Customer) => {
+    const d = calcRenewalDays(t.latestActiveEnd);
+    return d !== null && d >= 0 && d <= 90;
+  };
+
   const filtered = customers.filter(t => {
     if (filterActive === 'active' && t.activeLeaseCount === 0) return false;
     if (filterActive === 'inactive' && t.activeLeaseCount > 0) return false;
+    if (renewalOnly && !isRenewalSoon(t)) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!t.name.toLowerCase().includes(q) && !t.email.toLowerCase().includes(q) && !(t.phone ?? '').toLowerCase().includes(q)) return false;
@@ -86,21 +93,18 @@ export default function TenantsPage() {
     return true;
   });
 
-  const hasFilters = filterActive !== 'all' || search !== '';
-  const clearFilters = () => { setFilterActive('all'); setSearch(''); };
+  const hasFilters = filterActive !== 'all' || search !== '' || renewalOnly;
+  const clearFilters = () => { setFilterActive('all'); setSearch(''); setRenewalOnly(false); };
 
   const activeLeases = customers.reduce((s, t) => s + t.activeLeaseCount, 0);
   const totalRent = customers.reduce((s, t) => s + t.totalActiveRent, 0);
-  const renewalSoon = customers.filter(t => {
-    const d = calcRenewalDays(t.latestActiveEnd);
-    return d !== null && d >= 0 && d <= 90;
-  }).length;
+  const renewalSoon = customers.filter(isRenewalSoon).length;
 
-  const SUMMARY = [
+  const SUMMARY: { label: string; value: string; onClick?: () => void; active?: boolean }[] = [
     { label: 'Total Customers',    value: loading ? '…' : String(customers.length) },
     { label: 'Active Leases',      value: loading ? '…' : String(activeLeases) },
     { label: 'Total Active Rent',  value: loading ? '…' : `AED ${totalRent.toLocaleString('en-AE')}` },
-    { label: 'Renewals Within 90d', value: loading ? '…' : String(renewalSoon) },
+    { label: 'Renewals Within 90d', value: loading ? '…' : String(renewalSoon), onClick: () => setRenewalOnly(v => !v), active: renewalOnly },
   ];
 
   return (
@@ -140,8 +144,13 @@ export default function TenantsPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {SUMMARY.map((s, i) => (
-          <div key={i} className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-xs text-[#6b6860] font-medium">{s.label}</div>
+          <div key={i}
+            onClick={s.onClick}
+            className={`bg-white rounded-2xl p-5 shadow-sm transition ${s.onClick ? 'cursor-pointer hover:shadow-md' : ''} ${s.active ? 'ring-2 ring-[#2e9f82]' : ''}`}>
+            <div className="text-xs text-[#6b6860] font-medium flex items-center gap-1.5">
+              {s.label}
+              {s.onClick && <span className="text-[#2e9f82]">{s.active ? '• filtering' : 'filter'}</span>}
+            </div>
             <div className="font-bold text-xl text-[#1a1916] mt-1">{s.value}</div>
           </div>
         ))}
@@ -192,18 +201,19 @@ export default function TenantsPage() {
             <table className="w-full text-left min-w-[800px]">
               <thead>
                 <tr className="bg-[#f4f3ef]">
-                  {['Name', 'Email', 'Phone', 'Nationality', 'Leases', 'Actions'].map(h => (
+                  {['Name', 'Email', 'Phone', 'Leases', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(t => (
-                  <tr key={t.id} className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916]">
+                  <tr key={t.id}
+                    onClick={() => router.push(`/rental-provider/dashboard/tenants/${t.id}`)}
+                    className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916] cursor-pointer">
                     <td className="px-4 py-3.5 font-medium">{t.name}</td>
                     <td className="px-4 py-3.5 text-[#6b6860]">{t.email || '—'}</td>
                     <td className="px-4 py-3.5 text-[#6b6860]">{t.phone || '—'}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{t.nationality || '—'}</td>
                     <td className="px-4 py-3.5">
                       <span className="font-medium">{t.leaseCount}</span>
                       {t.activeLeaseCount > 0 && (
@@ -211,12 +221,12 @@ export default function TenantsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3.5">
-                      <Link href={`/rental-provider/dashboard/tenants/${t.id}`} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
+                      <Link href={`/rental-provider/dashboard/tenants/${t.id}`} onClick={e => e.stopPropagation()} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
                     </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[#9b9890]">No customers match your filters.</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-[#9b9890]">No customers match your filters.</td></tr>
                 )}
               </tbody>
             </table>

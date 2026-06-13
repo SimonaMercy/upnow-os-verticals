@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { openDocsTogether } from '@/lib/openDocsTogether';
 import {
   X,
   MapPin,
@@ -12,6 +12,7 @@ import {
   FileText,
   Loader2,
   AlignLeft,
+  ChevronDown,
 } from 'lucide-react';
 
 interface Property {
@@ -19,8 +20,11 @@ interface Property {
   buildingName: string;
   spaceCategory: string;
   fullAddress: string | null;
+  countryName?: string | null;
   emirateName: string | null;
+  cityName?: string | null;
   communityName: string | null;
+  subCommunityName?: string | null;
   street: string | null;
   makaniNumber: string | null;
   plotNumber: string | null;
@@ -62,17 +66,15 @@ function docUrl(d: DocRecord): string | null {
   return d.fileUrl ?? d.file_url ?? d.url ?? null;
 }
 
-function docDate(d: DocRecord): string | null {
-  return d.createdAt ?? d.created_at ?? null;
-}
-
 function prettifyKey(key: string, d: DocRecord): string {
   const display = d.displayName ?? d.display_name;
   if (display) return display;
+  if (key === 'title_deed') return 'Title deed';
+  if (key.startsWith('building_drawing')) return 'Property drawing';
   if (key === 'building_documents') return 'Building documents / Title deed';
   if (key === 'site_plan') return 'Site plan';
   if (!key) return d.fileName ?? d.file_name ?? 'Document';
-  const words = key.replace(/_/g, ' ').trim();
+  const words = key.replace(/_\d{10,}.*$/, '').replace(/_/g, ' ').trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -99,6 +101,11 @@ export function PropertyDetailsModal({
   const [docs, setDocs] = useState<DocRecord[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState(false);
+  // Full property detail (the list object lacks the structured location names);
+  // fetched on open and merged over the passed-in property.
+  const [detail, setDetail] = useState<Partial<Property> | null>(null);
+  // Documents is a collapsible tab (collapsed by default).
+  const [docsOpen, setDocsOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,30 +124,47 @@ export function PropertyDetailsModal({
         if (!cancelled) setDocsLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [property.id]);
 
-  const locationRows: Array<[string, string]> = [];
-  if (property.fullAddress) locationRows.push(['Address', property.fullAddress]);
-  if (property.street) locationRows.push(['Street', property.street]);
-  if (property.communityName) locationRows.push(['Community', property.communityName]);
-  if (property.emirateName) locationRows.push(['Emirate', property.emirateName]);
-  if (property.makaniNumber) locationRows.push(['Makani', property.makaniNumber]);
-  if (property.plotNumber) locationRows.push(['Plot', property.plotNumber]);
-  if (property.numberOfFloors) locationRows.push(['Floors', property.numberOfFloors]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/properties/${property.id}`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setDetail(data);
+      } catch { /* fall back to the passed-in property */ }
+    })();
+    return () => { cancelled = true; };
+  }, [property.id]);
 
-  const hasMapLink = property.latitude != null && property.longitude != null;
-  const hasLocation = locationRows.length > 0 || hasMapLink;
+  // Merge: prefer freshly-fetched detail (full location names) over the list row.
+  const p: Property = { ...property, ...(detail ?? {}) };
+
+  // Address shows as a prominent line; the rest as tidy label/value cells.
+  const addressLine = p.fullAddress?.trim() || null;
+  const locCells: Array<{ label: string; value: string; mono?: boolean }> = [];
+  if (p.street) locCells.push({ label: 'Street', value: p.street });
+  if (p.subCommunityName) locCells.push({ label: 'Sub-community', value: p.subCommunityName });
+  if (p.communityName) locCells.push({ label: 'Community', value: p.communityName });
+  if (p.emirateName) locCells.push({ label: 'Emirate', value: p.emirateName });
+  if (p.countryName) locCells.push({ label: 'Country', value: p.countryName });
+  if (p.makaniNumber) locCells.push({ label: 'Makani', value: p.makaniNumber, mono: true });
+  if (p.plotNumber) locCells.push({ label: 'Plot', value: p.plotNumber, mono: true });
+  if (p.numberOfFloors) locCells.push({ label: 'Floors', value: p.numberOfFloors });
+
+  const hasMapLink = p.latitude != null && p.longitude != null;
+  const hasLocation = !!addressLine || locCells.length > 0 || hasMapLink;
 
   const amenities: Array<{ label: string; icon: typeof Dumbbell }> = [];
-  if (property.hasGym) amenities.push({ label: 'Gym', icon: Dumbbell });
-  if (property.hasPool) amenities.push({ label: 'Pool', icon: Waves });
-  if (property.hasParking) amenities.push({ label: 'Parking', icon: Car });
+  if (p.hasGym) amenities.push({ label: 'Gym', icon: Dumbbell });
+  if (p.hasPool) amenities.push({ label: 'Pool', icon: Waves });
+  if (p.hasParking) amenities.push({ label: 'Parking', icon: Car });
 
   const vacant = stats ? Math.max(0, stats.units - stats.occupied) : 0;
-  const addedOn = formatDate(property.createdAt);
+  const addedOn = formatDate(p.createdAt);
 
   return (
     <div
@@ -155,17 +179,15 @@ export function PropertyDetailsModal({
         <div className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-[#e8e6e0]">
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-[#1a1916] truncate">
-              {property.buildingName}
+              {p.buildingName}
             </h2>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#dcfce7] text-[#166534]">
-                {property.spaceCategory}
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#dcfce7] text-[#166534] capitalize">
+                {p.spaceCategory}
               </span>
-              {property.isStandaloneUnit && (
-                <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#f4f3ef] text-[#6b6860]">
-                  Standalone unit
-                </span>
-              )}
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#f4f3ef] text-[#6b6860]">
+                {p.isStandaloneUnit ? 'One title deed (single owner)' : 'Units titled separately'}
+              </span>
             </div>
           </div>
           <button
@@ -220,34 +242,42 @@ export function PropertyDetailsModal({
 
           {/* Location */}
           {hasLocation && (
-            <div className="border border-[#e8e6e0] rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
+            <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0eeea] bg-[#faf9f7]">
                 <MapPin className="w-4 h-4 text-[#2e9f82]" />
                 <h3 className="text-sm font-bold text-[#1a1916]">Location</h3>
               </div>
-              {locationRows.length > 0 && (
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                  {locationRows.map(([label, value]) => (
-                    <div key={label} className="flex gap-2 text-sm min-w-0">
-                      <dt className="text-[#9b9890] shrink-0 w-20">{label}</dt>
-                      <dd className="text-[#1a1916] font-medium break-words min-w-0">
-                        {value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              {hasMapLink && (
-                <a
-                  href={`https://maps.google.com/?q=${property.latitude},${property.longitude}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-3 text-sm font-semibold text-[#2e9f82] hover:underline"
-                >
-                  Open in Google Maps
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
+              <div className="p-4">
+                {addressLine && (
+                  <div className="mb-4">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-0.5">Address</div>
+                    <p className="text-sm text-[#1a1916] font-medium leading-snug break-words">{addressLine}</p>
+                  </div>
+                )}
+                {locCells.length > 0 && (
+                  <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-3.5">
+                    {locCells.map(({ label, value, mono }) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">{label}</dt>
+                        <dd className={`text-sm text-[#1a1916] mt-0.5 break-words ${mono ? 'font-mono tracking-tight' : 'font-medium'}`}>
+                          {value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {hasMapLink && (
+                  <a
+                    href={`https://maps.google.com/?q=${p.latitude},${p.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 mt-4 text-sm font-semibold text-[#2e9f82] hover:underline"
+                  >
+                    Open in Google Maps
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
             </div>
           )}
 
@@ -270,93 +300,104 @@ export function PropertyDetailsModal({
           )}
 
           {/* Description */}
-          {property.propertyDescription && (
+          {p.propertyDescription && (
             <div className="border border-[#e8e6e0] rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">
                 <AlignLeft className="w-4 h-4 text-[#2e9f82]" />
                 <h3 className="text-sm font-bold text-[#1a1916]">Description</h3>
               </div>
               <p className="text-sm text-[#6b6860] whitespace-pre-line">
-                {property.propertyDescription}
+                {p.propertyDescription}
               </p>
             </div>
           )}
 
-          {/* Documents */}
-          <div className="border border-[#e8e6e0] rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <FileText className="w-4 h-4 text-[#2e9f82]" />
-              <h3 className="text-sm font-bold text-[#1a1916]">Documents</h3>
+          {/* Documents — collapsible tab */}
+          <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0eeea] bg-[#faf9f7]">
+              <button
+                type="button"
+                onClick={() => setDocsOpen((o) => !o)}
+                className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer"
+                aria-expanded={docsOpen}
+              >
+                <FileText className="w-4 h-4 text-[#2e9f82] shrink-0" />
+                <h3 className="text-sm font-bold text-[#1a1916]">Property Documents</h3>
+                {!docsLoading && !docsError && docs.length > 0 && (
+                  <span className="text-xs font-semibold text-[#9b9890]">{docs.length}</span>
+                )}
+                <ChevronDown
+                  className={`w-4 h-4 text-[#9b9890] ml-auto transition-transform ${docsOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {!docsLoading && !docsError && docs.some((d) => docUrl(d)) && (
+                <button
+                  type="button"
+                  onClick={() => openDocsTogether(docs.map((d) => ({ fileUrl: docUrl(d) })))}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#2e9f82] hover:underline shrink-0 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> View all
+                </button>
+              )}
             </div>
-            {docsLoading ? (
-              <div className="flex items-center gap-2 text-sm text-[#9b9890] py-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading documents…
-              </div>
-            ) : docsError ? (
-              <p className="text-sm text-[#9b9890] py-1">
-                Could not load documents.
-              </p>
-            ) : docs.length === 0 ? (
-              <p className="text-sm text-[#9b9890] py-1">
-                No documents uploaded — add the title deed from the property
-                edit form.
-              </p>
-            ) : (
-              <ul className="divide-y divide-[#f4f3ef]">
-                {docs.map((d, i) => {
-                  const url = docUrl(d);
-                  const uploaded = formatDate(docDate(d));
-                  return (
-                    <li
-                      key={d.id ?? `${docKey(d)}-${i}`}
-                      className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
-                    >
-                      <FileText className="w-4 h-4 text-[#9b9890] shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-[#1a1916] truncate">
-                          {prettifyKey(docKey(d), d)}
-                        </div>
-                        {uploaded && (
-                          <div className="text-xs text-[#9b9890]">
-                            Uploaded {uploaded}
-                          </div>
-                        )}
-                      </div>
-                      {url && (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-sm font-semibold text-[#2e9f82] hover:underline shrink-0"
+            {docsOpen && (
+              <div className="p-4">
+                {docsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-[#9b9890] py-1">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading documents…
+                  </div>
+                ) : docsError ? (
+                  <p className="text-sm text-[#9b9890] py-1">
+                    Could not load documents.
+                  </p>
+                ) : docs.length === 0 ? (
+                  <p className="text-sm text-[#9b9890] py-1">
+                    No documents uploaded — add the title deed from the property
+                    edit form.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-[#f4f3ef]">
+                    {docs.map((d, i) => {
+                      const url = docUrl(d);
+                      return (
+                        <li
+                          key={d.id ?? `${docKey(d)}-${i}`}
+                          className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
                         >
-                          Open
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+                          <FileText className="w-4 h-4 text-[#9b9890] shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-[#1a1916] truncate">
+                              {prettifyKey(docKey(d), d)}
+                            </div>
+                          </div>
+                          {url && (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-sm font-semibold text-[#2e9f82] hover:underline shrink-0"
+                            >
+                              Open
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-[#e8e6e0]">
-          {addedOn ? (
+        {addedOn && (
+          <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-t border-[#e8e6e0]">
             <span className="text-xs text-[#9b9890]">Added {addedOn}</span>
-          ) : (
-            <span />
-          )}
-          <Link
-            href={`/rental-provider/dashboard/portfolio/${property.id}`}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#2e9f82] hover:underline"
-          >
-            Open full page
-            <ExternalLink className="w-3.5 h-3.5" />
-          </Link>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

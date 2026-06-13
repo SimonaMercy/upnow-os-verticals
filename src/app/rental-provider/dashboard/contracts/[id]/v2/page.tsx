@@ -3159,13 +3159,9 @@ export default function ContractV2Page() {
                   duplicated here). */}
               <div className="hsub">
                 <Building2 size={13} />
-                {contract.property.id && !isManagerView ? (
-                  <Link href={`/rental-provider/dashboard/portfolio/${contract.property.id}`} className="chain-link" title="Open property details">
-                    {contract.property.buildingName ?? 'Property'}
-                  </Link>
-                ) : (
-                  <span>{contract.property.buildingName ?? '—'}</span>
-                )}
+                {/* Property name is plain text — the standalone property page was
+                    removed; property details live in the portfolio popup. */}
+                <span>{contract.property.buildingName ?? '—'}</span>
                 <ChevronRight size={12} style={{ opacity: .5 }} />
                 {contract.property.id && contract.unit.id && !isManagerView ? (
                   <Link href={`/rental-provider/dashboard/portfolio/${contract.property.id}/units/${contract.unit.id}`} className="chain-link" title="Open unit details">

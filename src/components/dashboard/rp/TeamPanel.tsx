@@ -63,7 +63,7 @@ interface Invitation {
 
 // ─── Permission groups for the UI ────────────────────────────────────────────
 
-const PERM_GROUPS = [
+export const PERM_GROUPS = [
   {
     label: 'Properties',
     description: 'Listing and property management',
@@ -123,7 +123,7 @@ const PERM_GROUPS = [
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
-const metaDefaults = {
+export const metaDefaults = {
   can_list_properties:    false,
   can_edit_properties:    false,
   can_publish_listings:   false,
@@ -205,11 +205,33 @@ function PermToggle({
 
 // ─── Invite Manager Modal ─────────────────────────────────────────────────────
 
-function InviteManagerModal({ onClose }: { onClose: () => void }) {
+export interface InviteManagerModalProps {
+  onClose: () => void;
+  /** Prefill name / email / phone and pre-check permissions (e.g. for a POA holder). */
+  initialValues?: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+    metadata?: Partial<InviteForm['metadata']>;
+  };
+  /** Optional heading override (e.g. "Invite POA holder as manager"). */
+  title?: string;
+  /** Called after a successful invite, before the modal closes. */
+  onInvited?: () => void;
+}
+
+export function InviteManagerModal({ onClose, initialValues, title = 'Invite Manager', onInvited }: InviteManagerModalProps) {
   const qc = useQueryClient();
-  const { register, handleSubmit, control, formState: { errors }, watch } = useForm<InviteForm>({
+  const { register, handleSubmit, control, formState: { errors } } = useForm<InviteForm>({
     resolver: zodResolver(inviteSchema),
-    defaultValues: { metadata: metaDefaults },
+    defaultValues: {
+      firstName: initialValues?.firstName ?? '',
+      lastName: initialValues?.lastName ?? '',
+      email: initialValues?.email ?? '',
+      phone: initialValues?.phone ?? '',
+      metadata: { ...metaDefaults, ...(initialValues?.metadata ?? {}) },
+    },
   });
 
   const metaError = (errors as { metadata?: { message?: string } }).metadata?.message;
@@ -219,6 +241,7 @@ function InviteManagerModal({ onClose }: { onClose: () => void }) {
       apiPost('/invitations', { ...data, role: 'manager' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['rp-invites'] });
+      onInvited?.();
       onClose();
     },
   });
@@ -237,7 +260,7 @@ function InviteManagerModal({ onClose }: { onClose: () => void }) {
         style={{ background: 'var(--color-base-100)', border: '1px solid var(--color-base-200)' }}
       >
         <div className="flex items-center justify-between mb-5">
-          <h2 id="invite-manager-title" className="text-lg font-bold">Invite Manager</h2>
+          <h2 id="invite-manager-title" className="text-lg font-bold">{title}</h2>
           <button onClick={onClose} className="p-1 rounded-lg" style={{ color: 'var(--color-neutral-400)' }}>
             <X className="w-5 h-5" />
           </button>

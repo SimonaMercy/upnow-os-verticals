@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
+import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
 import { UnitPreviewModal } from '@/app/rental-provider/dashboard/portfolio/UnitPreviewModal';
 import { PortfolioMapModal } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
@@ -123,9 +124,23 @@ export default function ManagerPropertiesPage() {
   // The modal is used only for EDITING property details (Add uses the full
   // wizard at /dashboard/manager/properties/add). Unit add/edit lives in the
   // wizard + accordion, same as the landlord portal.
-  async function handleSaveProperty(form: PropertyFormData) {
+  async function handleSaveProperty(form: PropertyFormData, titleDeed?: File | null, drawings?: File[]) {
     if (!propertyModal.editing) return;
-    await apiPatch(`/properties/${propertyModal.editing.id}`, formToCreateDto(form));
+    const propertyId = propertyModal.editing.id;
+    await apiPatch(`/properties/${propertyId}`, formToCreateDto(form));
+    // Standalone title deed (property-level) + building drawings (multiple).
+    if (titleDeed) {
+      try {
+        await uploadOwnedDocument({ ownerType: 'property', ownerId: propertyId, documentKey: 'title_deed', category: 'legal', displayName: 'Title deed', file: titleDeed });
+      } catch (e) { alert(`Saved, but the title deed upload failed: ${e instanceof Error ? e.message : 'unknown error'}`); }
+    }
+    if (drawings?.length) {
+      for (let i = 0; i < drawings.length; i++) {
+        try {
+          await uploadOwnedDocument({ ownerType: 'property', ownerId: propertyId, documentKey: `building_drawing_${Date.now()}_${i}`, category: 'property', displayName: drawings[i].name || `Property drawing ${i + 1}`, file: drawings[i] });
+        } catch (e) { alert(`Saved, but a building drawing upload failed: ${e instanceof Error ? e.message : 'unknown error'}`); }
+      }
+    }
     await queryClient.invalidateQueries({ queryKey: ['manager-properties'] });
     setPropertyModal({ open: false });
   }
@@ -326,6 +341,7 @@ export default function ManagerPropertiesPage() {
           isStandaloneUnit:    propertyModal.editing.isStandaloneUnit,
           numberOfFloors:      propertyModal.editing.numberOfFloors ?? '',
         } : undefined}
+        propertyId={propertyModal.editing?.id}
         onClose={() => setPropertyModal({ open: false })}
         onSave={handleSaveProperty}
       />
@@ -377,6 +393,7 @@ export default function ManagerPropertiesPage() {
             unitSizeSqft: unitPreview.unit.unitSizeSqft != null ? Number(unitPreview.unit.unitSizeSqft) : null,
             unitSizeSqm: unitPreview.unit.unitSizeSqm != null ? Number(unitPreview.unit.unitSizeSqm) : null,
             view: unitPreview.unit.view,
+            furnishing: null,
             facilities: null,
             rentalPrice: unitPreview.unit.rentalPrice != null ? Number(unitPreview.unit.rentalPrice) : null,
             marketPrice: unitPreview.unit.marketPrice != null ? Number(unitPreview.unit.marketPrice) : null,

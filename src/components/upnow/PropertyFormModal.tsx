@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload } from 'lucide-react';
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Pencil, Check } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
 
 // ─── Types from backend location endpoints ────────────────
 interface Country      { id: number; nameEn: string; code: string; }
@@ -624,9 +624,17 @@ interface Props {
   onClose: () => void;
   /** titleDeed only travels for STANDALONE properties (one deed for the whole
    *  property); multi-unit buildings attach deeds per unit instead. */
-  onSave: (data: PropertyFormData, titleDeed?: File | null) => Promise<void>;
+  onSave: (data: PropertyFormData, titleDeed?: File | null, drawings?: File[]) => Promise<void>;
   title?: string;
+  /** Edit only — the property whose existing documents (title deed + building
+   *  drawings) we load so the form can show and remove them. */
+  propertyId?: number;
 }
+
+/** A property's already-uploaded document (title deed / building drawing). */
+export interface PropertyDoc { id: number; documentKey: string; displayName: string | null; fileUrl: string }
+/** Uploads accept PDFs + common image types only. */
+export const PROPERTY_DOC_ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
 
 function FieldLabel({ label, required }: { label: string; required?: boolean }) {
   return (
@@ -640,17 +648,42 @@ const INPUT   = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-
 const SELECT  = cn(INPUT, 'appearance-none');
 const DISABLED_CLS = 'opacity-50 cursor-not-allowed';
 
-export function PropertyFormModal({ open, initial, onClose, onSave, title }: Props) {
-  const isEdit = !!initial?.spaceCategory;
-  const [form, setForm] = useState<PropertyFormData>({ ...EMPTY, ...initial });
-  const [errors, setErrors] = useState<Partial<Record<keyof PropertyFormData, string>>>({});
-  const [saving, setSaving] = useState(false);
+// ─── Shared, controlled property form body ──────────────────────────────────
+// Single source of truth for BOTH the Edit modal and the Add wizard (RP +
+// manager), so the two can never drift. Owns the location cascade + building
+// search auto-fill + the document pickers; the PARENT owns value / errors /
+// file state and submission.
+export function PropertyFields({
+  value, setValue, errors, setErrors, isEdit = false,
+  titleDeed, setTitleDeed,
+  drawings, setDrawings,
+  existingDocs = [], onRemoveExisting, onRenameExisting,
+}: {
+  value: PropertyFormData;
+  setValue: Dispatch<SetStateAction<PropertyFormData>>;
+  errors: Partial<Record<keyof PropertyFormData, string>>;
+  setErrors: Dispatch<SetStateAction<Partial<Record<keyof PropertyFormData, string>>>>;
+  isEdit?: boolean;
+  titleDeed: File | null;
+  setTitleDeed: (f: File | null) => void;
+  drawings: File[];
+  setDrawings: Dispatch<SetStateAction<File[]>>;
+  existingDocs?: PropertyDoc[];
+  onRemoveExisting?: (id: number) => void;
+  onRenameExisting?: (id: number, name: string) => void | Promise<void>;
+}) {
   const [autoFilled, setAutoFilled] = useState(false);
-  // Only load Google Maps SDK after a search result is selected (or in edit mode with coords)
-  const [showMap, setShowMap] = useState(!!(initial?.latitude && initial?.longitude));
-  // Title deed (standalone properties only — buildings attach deeds per unit)
-  const [titleDeed, setTitleDeed] = useState<File | null>(null);
+  const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
   const titleDeedInputRef = useRef<HTMLInputElement>(null);
+  const drawingsInputRef = useRef<HTMLInputElement>(null);
+  // Inline rename of an already-uploaded document (title deed / building drawing).
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const commitRename = (id: number) => {
+    const name = renameDraft.trim();
+    if (name && onRenameExisting) void onRenameExisting(id, name);
+    setRenamingId(null);
+  };
 
   // Location data — full chain Country → Emirate → City → Community → Sub-Community
   const [countries,         setCountries]         = useState<Country[]>([]);
@@ -667,20 +700,31 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
   const [loadCommsFor,      setLoadCommsFor]      = useState<number | null>(null);
   const [loadSubsFor,       setLoadSubsFor]       = useState<number | null>(null);
   const defaultCountryIdRef = useRef<number | null>(null);
-
   const pendingCommunityRef = useRef<string>('');
 
-  // Load countries once on mount; auto-select UAE
+  // Load countries once on mount; auto-select UAE when nothing chosen yet
   useEffect(() => {
     apiGet<Country[]>('/locations/countries').then(cs => {
       setCountries(cs);
       const ae = cs.find(c => c.code === 'AE');
       if (ae) {
         defaultCountryIdRef.current = ae.id;
-        setLoadEmiratesFor(ae.id);
-        setForm(prev => prev.countryId ? prev : { ...prev, countryId: ae.id, countryName: ae.nameEn });
+        setValue(prev => prev.countryId ? prev : { ...prev, countryId: ae.id, countryName: ae.nameEn });
+        setLoadEmiratesFor(prev => prev ?? ae.id);
       }
     }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Initialise the cascade from the incoming value once. The Edit modal remounts
+  // this component (via a key) each time it opens, so this re-derives per open;
+  // the wizard mounts it once. Names backfill as each list loads.
+  useEffect(() => {
+    if (value.countryId) setLoadEmiratesFor(value.countryId);
+    setLoadCitiesFor(value.emirateId ?? null);
+    setLoadCommsFor(value.cityId ?? null);
+    setLoadSubsFor(value.communityId ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load emirates when country changes
@@ -690,42 +734,19 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
       .then(setEmirates).catch(() => {});
   }, [loadEmiratesFor]);
 
-  // Reset form when modal opens — resolve names immediately from already-loaded lists
-  useEffect(() => {
-    if (!open) return;
-    const countryId   = initial?.countryId   ?? defaultCountryIdRef.current;
-    const emirateId   = initial?.emirateId   ?? null;
-    const cityId      = initial?.cityId      ?? null;
-    const countryName = countryId ? (countries.find(c => c.id === countryId)?.nameEn ?? '') : '';
-    const emirateName = emirateId ? (emirates.find(e => e.id === emirateId)?.nameEn  ?? '') : '';
-    setForm({ ...EMPTY, ...initial, countryId, countryName, emirateName, communityName: '', subCommunityName: '' });
-    setAutoFilled(false);
-    setCities([]);
-    setCommunities([]);
-    setSubCommunities([]);
-    setLoadEmiratesFor(countryId);
-    setLoadCitiesFor(emirateId);
-    setLoadCommsFor(cityId);
-    setLoadSubsFor(initial?.communityId ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  // City cascade — triggered by loadCitiesFor (set on open and on emirate change).
-  // For the UAE every emirate has exactly one city, so we auto-select it to keep
-  // the flow feeling like Emirate → Community.
+  // City cascade — for the UAE every emirate has one city, auto-selected so the
+  // flow feels like Emirate → Community.
   useEffect(() => {
     if (!loadCitiesFor) { setCities([]); return; }
     setLoadingCities(true);
     apiGet<City[]>(`/locations/emirates/${loadCitiesFor}/cities`)
       .then(cs => {
         setCities(cs);
-        setForm(prev => {
-          // Backfill cityName on edit
+        setValue(prev => {
           if (prev.cityId && !prev.cityName) {
             const match = cs.find(c => c.id === prev.cityId);
             if (match) return { ...prev, cityName: match.nameEn };
           }
-          // Auto-select the single city (UAE smooth path) when none chosen yet
           if (!prev.cityId && cs.length === 1) {
             setLoadCommsFor(cs[0].id);
             return { ...prev, cityId: cs[0].id, cityName: cs[0].nameEn };
@@ -736,16 +757,14 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
       .finally(() => setLoadingCities(false));
   }, [loadCitiesFor]);
 
-  // Community cascade — triggered by loadCommsFor (set on city change / auto-select)
+  // Community cascade
   useEffect(() => {
     if (!loadCommsFor) { setCommunities([]); return; }
     setLoadingComms(true);
     apiGet<Community[]>(`/locations/cities/${loadCommsFor}/communities`)
       .then(comms => {
         setCommunities(comms);
-        // Backfill communityName for edit / cache-autofill flow, and kick the
-        // sub-community cascade for the already-selected community.
-        setForm(prev => {
+        setValue(prev => {
           if (prev.communityId) {
             const match = comms.find(c => c.id === prev.communityId);
             if (match) {
@@ -755,7 +774,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
           }
           return prev;
         });
-        // Mapbox pending community fuzzy-match
+        // Fuzzy-match a community name carried over from a Mapbox/Google result
         if (pendingCommunityRef.current) {
           const pending = pendingCommunityRef.current.toLowerCase().trim();
           const tokenize = (s: string) => s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
@@ -768,10 +787,8 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
             const score    = overlap / Math.max(pendingTokens.length, dbTokens.length);
             if (score > bestScore) { bestScore = score; bestMatch = c; }
           }
-          console.log('[Community] pending:', pending, '| bestMatch:', bestMatch?.nameEn, '| score:', bestScore);
-          console.log('[Community] all options:', comms.map(c => c.nameEn));
           if (bestMatch && bestScore >= 0.5) {
-            setForm(prev => ({ ...prev, communityId: bestMatch!.id, communityName: bestMatch!.nameEn }));
+            setValue(prev => ({ ...prev, communityId: bestMatch!.id, communityName: bestMatch!.nameEn }));
             setLoadSubsFor(bestMatch!.id);
           }
           pendingCommunityRef.current = '';
@@ -780,14 +797,14 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
       .finally(() => setLoadingComms(false));
   }, [loadCommsFor]);
 
-  // Sub-Community cascade — triggered by loadSubsFor (set on community change)
+  // Sub-Community cascade
   useEffect(() => {
     if (!loadSubsFor) { setSubCommunities([]); return; }
     setLoadingSubs(true);
     apiGet<SubCommunity[]>(`/locations/communities/${loadSubsFor}/sub-communities`)
       .then(subs => {
         setSubCommunities(subs);
-        setForm(prev => {
+        setValue(prev => {
           if (prev.subCommunityId && !prev.subCommunityName) {
             const match = subs.find(s => s.id === prev.subCommunityId);
             if (match) return { ...prev, subCommunityName: match.nameEn };
@@ -799,13 +816,13 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
   }, [loadSubsFor]);
 
   const upd = <K extends keyof PropertyFormData>(k: K, v: PropertyFormData[K]) => {
-    setForm(prev => ({ ...prev, [k]: v }));
+    setValue(prev => ({ ...prev, [k]: v }));
     setErrors(prev => ({ ...prev, [k]: undefined }));
   };
 
   const handleCountryChange = (val: string) => {
     const country = countries.find(c => c.id === Number(val));
-    setForm(prev => ({
+    setValue(prev => ({
       ...prev,
       countryId: val ? Number(val) : null, countryName: country?.nameEn ?? '',
       emirateId: null, emirateName: '',
@@ -820,7 +837,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
 
   const handleEmirateChange = (val: string) => {
     const em = emirates.find(e => e.id === Number(val));
-    setForm(prev => ({
+    setValue(prev => ({
       ...prev,
       emirateId: val ? Number(val) : null, emirateName: em?.nameEn ?? '',
       cityId: null, cityName: '',
@@ -835,7 +852,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
 
   const handleCityChange = (val: string) => {
     const city = cities.find(c => c.id === Number(val));
-    setForm(prev => ({
+    setValue(prev => ({
       ...prev,
       cityId: val ? Number(val) : null, cityName: city?.nameEn ?? '',
       communityId: null, communityName: '',
@@ -848,7 +865,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
 
   const handleCommunityChange = (val: string) => {
     const comm = communities.find(c => c.id === Number(val));
-    setForm(prev => ({
+    setValue(prev => ({
       ...prev,
       communityId: val ? Number(val) : null, communityName: comm?.nameEn ?? '',
       subCommunityId: null, subCommunityName: '',
@@ -859,15 +876,13 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
 
   const handleSubCommunityChange = (val: string) => {
     const sub = subCommunities.find(s => s.id === Number(val));
-    setForm(prev => ({
+    setValue(prev => ({
       ...prev,
       subCommunityId: val ? Number(val) : null, subCommunityName: sub?.nameEn ?? '',
     }));
   };
 
   const handleSearchSelect = (r: SearchResult) => {
-    // When result carries direct IDs (from building_cache), use them as-is.
-    // Otherwise fall back to name-matching against loaded emirates list.
     const newEmirateId: number | null = r.emirateId !== undefined
       ? (r.emirateId ?? null)
       : (() => {
@@ -885,9 +900,8 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
     const emirateName = emirates.find(e => e.id === newEmirateId)?.nameEn ?? r.emirateName;
 
     if (r.communityId != null) {
-      // Direct community ID from cache — no fuzzy match needed
       pendingCommunityRef.current = '';
-      setForm(prev => ({
+      setValue(prev => ({
         ...prev,
         ...(r.featureType === 'poi'  && r.name   && { buildingName: r.name }),
         ...(r.featureType !== 'area' && r.street && { street: r.street }),
@@ -896,12 +910,12 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
         emirateId:     newEmirateId,
         emirateName,
         communityId:   r.communityId ?? null,
-        communityName: '',  // backfilled by cascade after communities load
+        communityName: '',
         googlePlaceId: r.googlePlaceId ?? prev.googlePlaceId,
       }));
     } else {
       pendingCommunityRef.current = r.communityName;
-      setForm(prev => ({
+      setValue(prev => ({
         ...prev,
         ...(r.featureType === 'poi'  && r.name   && { buildingName: r.name }),
         ...(r.featureType !== 'area' && r.street && { street: r.street }),
@@ -911,16 +925,12 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
         emirateName,
         communityId:   null,
         communityName: '',
-        // For Google results, r.id === placeId; for local/cache results it has a prefix
         googlePlaceId: r.googlePlaceId != null
           ? r.googlePlaceId
           : (!r.id.startsWith('cache_') && !r.id.startsWith('local_') ? r.id : prev.googlePlaceId),
       }));
     }
 
-    // Trigger the city cascade for the resolved emirate. For the UAE this
-    // auto-selects the single city, which in turn loads communities — and the
-    // community cascade backfills / matches the pre-set communityId from cache.
     setLoadCitiesFor(newEmirateId);
     setLoadCommsFor(null);
     setLoadSubsFor(null);
@@ -930,19 +940,330 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
     setErrors(prev => ({ ...prev, buildingName: undefined, emirateId: undefined }));
   };
 
-  const validate = (): boolean => {
-    const errs: typeof errors = {};
-    if (!form.spaceCategory) errs.spaceCategory = 'Required';
-    if (!form.emirateId)     errs.emirateId = 'Required';
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
+  const existingDeed = existingDocs.find(d => d.documentKey === 'title_deed') ?? null;
+  const existingDrawings = existingDocs.filter(d => d.documentKey.startsWith('building_drawing'));
+
+  const addDrawings = (files: FileList | null) => {
+    if (!files?.length) return;
+    setDrawings(prev => [...prev, ...Array.from(files)]);
+  };
+
+  // An already-uploaded property document — view, rename (inline), remove.
+  const renderExistingDoc = (d: PropertyDoc) => renamingId === d.id ? (
+    <div key={d.id} className="flex items-center gap-2 border border-[#cfe9df] bg-[#f0fdf8] rounded-lg px-3 py-2 mb-2">
+      <input
+        className={INPUT}
+        value={renameDraft}
+        autoFocus
+        placeholder="Name this document…"
+        onChange={e => setRenameDraft(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitRename(d.id); } if (e.key === 'Escape') setRenamingId(null); }}
+      />
+      <button type="button" onClick={() => commitRename(d.id)} title="Save name" className="shrink-0 w-7 h-7 rounded-lg bg-[#2e9f82] text-white grid place-items-center cursor-pointer"><Check size={13} /></button>
+      <button type="button" onClick={() => setRenamingId(null)} title="Cancel" className="shrink-0 w-7 h-7 rounded-lg bg-[#f4f3ef] text-[#6b6860] grid place-items-center cursor-pointer"><X size={13} /></button>
+    </div>
+  ) : (
+    <div key={d.id} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-2">
+      <FileText size={14} className="text-[#2e9f82] shrink-0" />
+      <a href={d.fileUrl} target="_blank" rel="noreferrer" className="text-sm text-[#1a1916] truncate flex-1 hover:underline">{d.displayName || 'Document'}</a>
+      <span className="text-[10px] text-[#9b9890] shrink-0">on file</span>
+      {onRenameExisting && (
+        <button type="button" onClick={() => { setRenamingId(d.id); setRenameDraft(d.displayName || ''); }} title="Rename" className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#2e9f82] cursor-pointer"><Pencil size={11} /></button>
+      )}
+      {onRemoveExisting && (
+        <button type="button" onClick={() => onRemoveExisting(d.id)} title="Remove" className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><Trash2 size={11} /></button>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {/* Category — only field the user sets manually */}
+      <div>
+        <FieldLabel label="Category" required />
+        {isEdit ? (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] text-sm text-[#3d3b35]">
+            <span className="flex-1 capitalize">{SPACE_CATEGORIES.find(c => c.id === value.spaceCategory)?.label ?? value.spaceCategory}</span>
+            <span className="text-[10px] text-[#9b9890] font-medium">Locked</span>
+          </div>
+        ) : (
+          <>
+            <select className={cn(SELECT, errors.spaceCategory && 'border-red-400')}
+              value={value.spaceCategory} onChange={e => upd('spaceCategory', e.target.value)}>
+              <option value="">Select category</option>
+              {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+            {errors.spaceCategory && <p className="text-xs text-red-500 mt-1">{errors.spaceCategory}</p>}
+          </>
+        )}
+      </div>
+
+      {/* Search + Map — triggers auto-fill of all fields below */}
+      <div>
+        <FieldLabel label="Search Building / Address" />
+        {autoFilled ? (
+          <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8f2e8] rounded-lg px-3 py-2 mb-2">
+            <CheckCircle2 size={13} className="shrink-0" />
+            <span>Fields auto-filled from search — review and adjust below</span>
+          </div>
+        ) : (
+          <p className="text-[10px] text-[#9b9890] mb-2">Search to auto-fill all fields below, or fill in manually</p>
+        )}
+        <BuildingSearch onSelect={handleSearchSelect} onManualEntry={() => setAutoFilled(false)} />
+        <p className="text-[10px] text-[#9b9890] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
+        {showMap ? (
+          <MapPicker
+            latitude={value.latitude} longitude={value.longitude}
+            onChange={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowMap(true)}
+            className="w-full h-[220px] rounded-xl border border-dashed border-[#e8e6e0] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
+          >
+            <MapPin size={20} className="opacity-40" />
+            <span className="text-xs">Search above to pin location, or click to open map</span>
+          </button>
+        )}
+      </div>
+
+      {/* Location chain: Country → Emirate. The City tier is hidden for now —
+          it still auto-selects internally (one city per UAE emirate) so the
+          community list loads and cityId is saved; we just don't show it. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <FieldLabel label="Country" required />
+          <select className={SELECT} value={value.countryId ?? ''} onChange={e => handleCountryChange(e.target.value)}>
+            <option value="">Select Country</option>
+            {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+          </select>
+        </div>
+        <div>
+          <FieldLabel label="Emirate / Region" required />
+          <select
+            className={cn(SELECT, errors.emirateId && 'border-red-400', !value.countryId && DISABLED_CLS)}
+            value={value.emirateId ?? ''}
+            onChange={e => handleEmirateChange(e.target.value)}
+            disabled={!value.countryId}
+          >
+            <option value="">{value.countryId ? 'Select Emirate' : 'Select Country first'}</option>
+            {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
+          </select>
+          {errors.emirateId && <p className="text-xs text-red-500 mt-1">{errors.emirateId}</p>}
+        </div>
+      </div>
+
+      {/* Community + (Sub-Community only when the community has any) */}
+      <div className={cn('grid gap-3', subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1')}>
+        <div>
+          <FieldLabel label="Community / Area" />
+          <select
+            className={cn(SELECT, (!value.cityId || loadingComms) && DISABLED_CLS)}
+            value={value.communityId ?? ''}
+            onChange={e => handleCommunityChange(e.target.value)}
+            disabled={!value.cityId || loadingComms}
+          >
+            <option value="">{loadingComms ? 'Loading…' : value.cityId ? 'Select Community' : 'Select City first'}</option>
+            {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+          </select>
+        </div>
+        {subCommunities.length > 0 && (
+          <div>
+            <FieldLabel label="Sub-Community" />
+            <select
+              className={cn(SELECT, loadingSubs && DISABLED_CLS)}
+              value={value.subCommunityId ?? ''}
+              onChange={e => handleSubCommunityChange(e.target.value)}
+              disabled={loadingSubs}
+            >
+              <option value="">Select Sub-Community (optional)</option>
+              {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Building Name | Street — auto-filled from search */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <FieldLabel label="Building / Property Name" />
+          <input
+            className={cn(INPUT, errors.buildingName && 'border-red-400')}
+            placeholder="e.g. Al Safa Tower, Palm Residences"
+            value={value.buildingName}
+            onChange={e => upd('buildingName', e.target.value)}
+          />
+          {errors.buildingName && <p className="text-xs text-red-500 mt-1">{errors.buildingName}</p>}
+        </div>
+        <div>
+          <FieldLabel label="Street / Address" />
+          <StreetSearch
+            value={value.street}
+            onChange={v => upd('street', v)}
+            onCoords={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
+          />
+        </div>
+      </div>
+
+      {/* Plot Number | Makani Number — manual (Makani = Dubai's 10-digit geo address) */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <FieldLabel label="Plot Number" />
+          <input className={INPUT} placeholder="e.g. PLOT-12345" value={value.plotNumber}
+            onChange={e => upd('plotNumber', e.target.value)} />
+        </div>
+        <div>
+          <FieldLabel label="Makani Number" />
+          <input className={INPUT} placeholder="e.g. 1234567890" value={value.makaniNumber}
+            onChange={e => upd('makaniNumber', e.target.value)} />
+        </div>
+      </div>
+
+      {/* Title-deed structure — one deed for the whole property (single owner)
+          vs a deed per unit (units owned/titled separately). Drives where the
+          title deed attaches. */}
+      <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc]">
+        <input
+          type="checkbox"
+          checked={value.isStandaloneUnit}
+          onChange={e => upd('isStandaloneUnit', e.target.checked)}
+          className="mt-0.5 accent-[#2e9f82]"
+        />
+        <span>
+          <span className="block text-sm font-medium text-[#1a1916]">One title deed for the whole property (single owner)</span>
+          <span className="block text-[11px] text-[#9b9890] mt-0.5">
+            On — a single owner holds the entire property under one title deed: a villa,
+            a standalone office, or a whole building owned by one party (deed attached below).
+            Off — units are owned separately, each with its own title deed added in the unit form.
+          </span>
+        </span>
+      </label>
+
+      {/* Title deed — standalone properties only; optional. */}
+      {value.isStandaloneUnit && (
+        <div>
+          <input
+            ref={titleDeedInputRef}
+            type="file"
+            accept={PROPERTY_DOC_ACCEPT}
+            className="sr-only"
+            onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setTitleDeed(f); e.target.value = ''; }}
+          />
+          <FieldLabel label="Title deed" />
+          {/* Already on file (edit) — view / rename / remove */}
+          {existingDeed && !titleDeed && renderExistingDoc(existingDeed)}
+          {titleDeed ? (
+            <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+              <Upload size={14} className="text-[#2e9f82] shrink-0" />
+              <span className="text-sm text-[#1a1916] truncate flex-1">{titleDeed.name}</span>
+              <button type="button" onClick={() => titleDeedInputRef.current?.click()} className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
+              <button type="button" onClick={() => setTitleDeed(null)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => titleDeedInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+            >
+              <Upload size={15} className="text-[#c8c6c0]" />
+              {existingDeed ? 'Replace the title deed (PDF or image)' : 'Attach the title deed (PDF or image)'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Building drawings — property-level, multiple PDFs / images, optional. */}
+      <div>
+        <input
+          ref={drawingsInputRef}
+          type="file"
+          multiple
+          accept={PROPERTY_DOC_ACCEPT}
+          className="sr-only"
+          onChange={e => { addDrawings(e.target.files); e.target.value = ''; }}
+        />
+        <FieldLabel label="Property drawings" />
+        {(existingDrawings.length > 0 || drawings.length > 0) && (
+          <div className="space-y-1.5 mb-2">
+            {existingDrawings.map(renderExistingDoc)}
+            {drawings.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+                <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                <span className="text-sm text-[#1a1916] truncate flex-1">{f.name}</span>
+                <button type="button" onClick={() => setDrawings(prev => prev.filter((_, j) => j !== i))} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => drawingsInputRef.current?.click()}
+          className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+        >
+          <Upload size={15} className="text-[#c8c6c0]" />
+          Add property drawings (PDF or images — multiple allowed)
+        </button>
+      </div>
+    </>
+  );
+}
+
+export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId }: Props) {
+  const isEdit = !!initial?.spaceCategory;
+  const [form, setForm] = useState<PropertyFormData>({ ...EMPTY, ...initial });
+  const [errors, setErrors] = useState<Partial<Record<keyof PropertyFormData, string>>>({});
+  const [saving, setSaving] = useState(false);
+  const [titleDeed, setTitleDeed] = useState<File | null>(null);
+  const [drawings, setDrawings] = useState<File[]>([]);
+  const [existingDocs, setExistingDocs] = useState<PropertyDoc[]>([]);
+  // Bumped each open so PropertyFields remounts and re-derives its cascade.
+  const [openSeq, setOpenSeq] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setForm({ ...EMPTY, ...initial });
+    setErrors({}); setTitleDeed(null); setDrawings([]);
+    setOpenSeq(s => s + 1);
+    if (propertyId) {
+      apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
+        .then(ds => setExistingDocs(ds.filter(d => d.documentKey === 'title_deed' || d.documentKey.startsWith('building_drawing'))))
+        .catch(() => setExistingDocs([]));
+    } else {
+      setExistingDocs([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const removeExisting = async (id: number) => {
+    try {
+      await apiDelete(`/documents/${id}`);
+      setExistingDocs(prev => prev.filter(d => d.id !== id));
+    } catch (e) {
+      alert(`Could not remove the document: ${e instanceof Error ? e.message : 'unknown error'}`);
+    }
+  };
+
+  const renameExisting = async (id: number, name: string) => {
+    // Optimistic — update the label immediately, persist via PATCH.
+    setExistingDocs(prev => prev.map(d => d.id === id ? { ...d, displayName: name } : d));
+    try {
+      await apiPatch(`/documents/${id}`, { displayName: name });
+    } catch (e) {
+      alert(`Could not rename the document: ${e instanceof Error ? e.message : 'unknown error'}`);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    const errs: Partial<Record<keyof PropertyFormData, string>> = {};
+    if (!form.spaceCategory) errs.spaceCategory = 'Required';
+    if (!form.emirateId)     errs.emirateId = 'Required';
+    setErrors(errs);
+    // Title deed is OPTIONAL — even for a standalone property.
+    if (Object.keys(errs).length > 0) return;
     setSaving(true);
-    try { await onSave(form, form.isStandaloneUnit ? titleDeed : null); onClose(); }
+    try { await onSave(form, form.isStandaloneUnit ? titleDeed : null, drawings); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -964,206 +1285,15 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title }: Pro
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-
-          {/* Category — only field the user sets manually */}
-          <div>
-            <FieldLabel label="Category" required />
-            {isEdit ? (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] text-sm text-[#3d3b35]">
-                <span className="flex-1 capitalize">{SPACE_CATEGORIES.find(c => c.id === form.spaceCategory)?.label ?? form.spaceCategory}</span>
-                <span className="text-[10px] text-[#9b9890] font-medium">Locked</span>
-              </div>
-            ) : (
-              <>
-                <select className={cn(SELECT, errors.spaceCategory && 'border-red-400')}
-                  value={form.spaceCategory} onChange={e => upd('spaceCategory', e.target.value)}>
-                  <option value="">Select category</option>
-                  {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
-                {errors.spaceCategory && <p className="text-xs text-red-500 mt-1">{errors.spaceCategory}</p>}
-              </>
-            )}
-          </div>
-
-          {/* Search + Map — triggers auto-fill of all fields below */}
-          <div>
-            <FieldLabel label="Search Building / Address" />
-            {autoFilled ? (
-              <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8f2e8] rounded-lg px-3 py-2 mb-2">
-                <CheckCircle2 size={13} className="shrink-0" />
-                <span>Fields auto-filled from search — review and adjust below</span>
-              </div>
-            ) : (
-              <p className="text-[10px] text-[#9b9890] mb-2">Search to auto-fill all fields below, or fill in manually</p>
-            )}
-            <BuildingSearch onSelect={handleSearchSelect} onManualEntry={() => setAutoFilled(false)} />
-            <p className="text-[10px] text-[#9b9890] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
-            {showMap ? (
-              <MapPicker
-                latitude={form.latitude} longitude={form.longitude}
-                onChange={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowMap(true)}
-                className="w-full h-[220px] rounded-xl border border-dashed border-[#e8e6e0] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
-              >
-                <MapPin size={20} className="opacity-40" />
-                <span className="text-xs">Search above to pin location, or click to open map</span>
-              </button>
-            )}
-          </div>
-
-          {/* Location chain: Country → Emirate → City → Community → Sub-Community.
-              Auto-filled from search where possible; City auto-selects its single
-              option for the UAE. */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <FieldLabel label="Country" required />
-              <select
-                className={SELECT}
-                value={form.countryId ?? ''}
-                onChange={e => handleCountryChange(e.target.value)}
-              >
-                <option value="">Select Country</option>
-                {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-              </select>
-            </div>
-            <div>
-              <FieldLabel label="Emirate / Region" required />
-              <select
-                className={cn(SELECT, errors.emirateId && 'border-red-400', !form.countryId && DISABLED_CLS)}
-                value={form.emirateId ?? ''}
-                onChange={e => handleEmirateChange(e.target.value)}
-                disabled={!form.countryId}
-              >
-                <option value="">{form.countryId ? 'Select Emirate' : 'Select Country first'}</option>
-                {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
-              </select>
-              {errors.emirateId && <p className="text-xs text-red-500 mt-1">{errors.emirateId}</p>}
-            </div>
-            <div>
-              <FieldLabel label="City" />
-              <select
-                className={cn(SELECT, (!form.emirateId || loadingCities) && DISABLED_CLS)}
-                value={form.cityId ?? ''}
-                onChange={e => handleCityChange(e.target.value)}
-                disabled={!form.emirateId || loadingCities}
-              >
-                <option value="">{loadingCities ? 'Loading…' : form.emirateId ? 'Select City' : 'Select Emirate first'}</option>
-                {cities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <FieldLabel label="Community / Area" />
-              <select
-                className={cn(SELECT, (!form.cityId || loadingComms) && DISABLED_CLS)}
-                value={form.communityId ?? ''}
-                onChange={e => handleCommunityChange(e.target.value)}
-                disabled={!form.cityId || loadingComms}
-              >
-                <option value="">{loadingComms ? 'Loading…' : form.cityId ? 'Select Community' : 'Select City first'}</option>
-                {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-              </select>
-            </div>
-            <div>
-              <FieldLabel label="Sub-Community" />
-              <select
-                className={cn(SELECT, (!form.communityId || loadingSubs) && DISABLED_CLS)}
-                value={form.subCommunityId ?? ''}
-                onChange={e => handleSubCommunityChange(e.target.value)}
-                disabled={!form.communityId || loadingSubs}
-              >
-                <option value="">{loadingSubs ? 'Loading…' : form.communityId ? 'Select Sub-Community' : 'Select Community first'}</option>
-                {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Building Name | Street — auto-filled from search */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <FieldLabel label="Building / Property Name" />
-              <input
-                className={cn(INPUT, errors.buildingName && 'border-red-400')}
-                placeholder="e.g. Al Safa Tower, Palm Residences"
-                value={form.buildingName}
-                onChange={e => upd('buildingName', e.target.value)}
-              />
-              {errors.buildingName && <p className="text-xs text-red-500 mt-1">{errors.buildingName}</p>}
-            </div>
-            <div>
-              <FieldLabel label="Street / Address" />
-              <StreetSearch
-                value={form.street}
-                onChange={v => upd('street', v)}
-                onCoords={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
-              />
-            </div>
-          </div>
-
-          {/* Plot Number — manual only */}
-          <div>
-            <FieldLabel label="Plot Number" />
-            <input className={INPUT} placeholder="e.g. PLOT-12345" value={form.plotNumber}
-              onChange={e => upd('plotNumber', e.target.value)} />
-          </div>
-
-          {/* Standalone toggle — drives where the title deed attaches:
-              standalone = ONE deed on the property (below); multi-unit
-              building = a deed per unit, inside each unit's form. */}
-          <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc]">
-            <input
-              type="checkbox"
-              checked={form.isStandaloneUnit}
-              onChange={e => upd('isStandaloneUnit', e.target.checked)}
-              className="mt-0.5 accent-[#2e9f82]"
-            />
-            <span>
-              <span className="block text-sm font-medium text-[#1a1916]">Standalone unit (villa, single office…)</span>
-              <span className="block text-[11px] text-[#9b9890] mt-0.5">
-                The property is one rentable unit with one title deed (attached below).
-                Leave off for multi-unit buildings — each unit then carries its own deed.
-              </span>
-            </span>
-          </label>
-
-          {/* Title deed — standalone properties only (the whole property is one
-              owned unit, so one deed lives here; multi-unit buildings attach a
-              deed per unit instead, inside each unit's form). */}
-          {form.isStandaloneUnit && (
-            <div>
-              <input
-                ref={titleDeedInputRef}
-                type="file"
-                accept="application/pdf,image/png,image/jpeg,image/webp"
-                className="sr-only"
-                onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setTitleDeed(f); e.target.value = ''; }}
-              />
-              <FieldLabel label="Title deed" />
-              {titleDeed ? (
-                <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
-                  <Upload size={14} className="text-[#2e9f82] shrink-0" />
-                  <span className="text-sm text-[#1a1916] truncate flex-1">{titleDeed.name}</span>
-                  <button type="button" onClick={() => titleDeedInputRef.current?.click()} className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
-                  <button type="button" onClick={() => setTitleDeed(null)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => titleDeedInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-3 text-xs text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
-                >
-                  <Upload size={15} className="text-[#c8c6c0]" />
-                  Attach the title deed (PDF or image)
-                </button>
-              )}
-            </div>
-          )}
+          <PropertyFields
+            key={openSeq}
+            value={form} setValue={setForm}
+            errors={errors} setErrors={setErrors}
+            isEdit={isEdit}
+            titleDeed={titleDeed} setTitleDeed={setTitleDeed}
+            drawings={drawings} setDrawings={setDrawings}
+            existingDocs={existingDocs} onRemoveExisting={removeExisting} onRenameExisting={renameExisting}
+          />
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

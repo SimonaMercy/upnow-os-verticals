@@ -37,7 +37,9 @@
   min-height: 100%;
 }
 .app input, .app textarea, .app select { font-family: inherit; color: inherit; font-size: 14px; }
-.app button { font-family: inherit; color: inherit; }
+/* Inherit font only — NOT color: `.app button` (0,1,1) would otherwise beat the
+   colour classes like .btnPrimary (0,1,0) and force button text to black. */
+.app button { font-family: inherit; }
 
 /* Main */
 .main { padding: 32px 36px 64px; max-width: 1320px; margin: 0 auto; width: 100%; }

@@ -278,10 +278,9 @@ export default function UnitDetailPage() {
         new Date(b.endDate || 0).getTime() - new Date(a.endDate || 0).getTime(),
     )[0];
 
+  // One rent per unit (annual rent); marketPrice mirrors it, so no separate
+  // benchmark/gap.
   const rent = unit.rentalPrice;
-  const market = unit.marketPrice;
-  const gap = rent != null && market != null && rent > 0 ? market - rent : null;
-  const gapPct = gap !== null && rent ? (gap / rent) * 100 : null;
 
   const details: Array<[string, string | null]> = [
     ['Type', unit.unitType ? titleCase(unit.unitType) : null],
@@ -308,7 +307,6 @@ export default function UnitDetailPage() {
   const visibleDetails = details.filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '');
 
   const pricingRows: Array<[string, string | null]> = [
-    ['Market benchmark', aed(market)],
     ['Security deposit', aed(unit.securityDeposit)],
     ['Admin fee', aed(unit.adminFee)],
     ['Service charges', aed(unit.serviceCharges)],
@@ -525,20 +523,6 @@ export default function UnitDetailPage() {
                     <span className="text-sm font-medium text-[#1a1916]">{value}</span>
                   </div>
                 ))}
-              {gap !== null && gapPct !== null && (
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm text-[#6b6860]">Gap vs market</span>
-                  <span
-                    className={`text-sm font-semibold ${gap > 0 ? 'text-[#166534]' : gap < 0 ? 'text-[#854d0e]' : 'text-[#6b6860]'}`}
-                  >
-                    {gap > 0
-                      ? `+AED ${gap.toLocaleString('en-AE')} uplift (${gapPct.toFixed(1)}%)`
-                      : gap < 0
-                        ? `AED ${Math.abs(gap).toLocaleString('en-AE')} above market (${Math.abs(gapPct).toFixed(1)}%)`
-                        : 'At market'}
-                  </span>
-                </div>
-              )}
             </div>
           </Card>
 

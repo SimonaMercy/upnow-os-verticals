@@ -120,6 +120,17 @@ export const UNIT_TIERS = [
   { id: 'elite',    label: 'Elite' },
 ];
 
+/** Unit area conversion — capture one, compute the other. 1 sqm = 10.7639 sqft. */
+export const SQFT_PER_SQM = 10.7639;
+export const sqftFromSqm = (sqm: string): string => {
+  const n = parseFloat(sqm);
+  return Number.isFinite(n) && n > 0 ? String(Math.round(n * SQFT_PER_SQM)) : '';
+};
+export const sqmFromSqft = (sqft: string): string => {
+  const n = parseFloat(sqft);
+  return Number.isFinite(n) && n > 0 ? String(Math.round(n / SQFT_PER_SQM)) : '';
+};
+
 // Default minimum lease months by category
 const DEFAULT_MIN_LEASE: Record<string, string> = {
   residential: '12',
@@ -148,6 +159,7 @@ export interface UnitFormData {
   bedrooms: string;
   bathrooms: string;
   unitSizeSqft: string;
+  unitSizeSqm: string;
   view: string;
   furnishing: string;
   amenities: string[];
@@ -235,7 +247,7 @@ function ordinal(n: string): string {
 
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
-  floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', view: '',
+  floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', unitSizeSqm: '', view: '',
   furnishing: 'Unfurnished', amenities: [], rentalPrice: '', marketPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
   serviceCharges: '', minLeaseMonths: '12', noticePeriodDays: '60',
@@ -311,21 +323,32 @@ function PhotosSection({ propertyId, unitId }: { propertyId: number; unitId: num
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="sr-only" onChange={onFiles} />
       {loading ? (
         <div className="text-xs text-[#9b9890] py-2">Loading photos…</div>
+      ) : photos.length === 0 ? (
+        <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
+          className="w-full border-2 border-dashed border-[#e8e6e0] rounded-xl py-8 flex flex-col items-center justify-center gap-1.5 text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
+          <Upload size={20} />
+          <span className="text-xs font-medium">Add photos</span>
+          <span className="text-[10px] text-[#b0ae9a]">PNG, JPG or WebP · multiple allowed</span>
+        </button>
       ) : (
-        <div className="grid grid-cols-4 gap-2">
-          {photos.map(p => (
-            <div key={p.id} className="relative group">
+        <div className="grid grid-cols-3 gap-2.5">
+          {photos.map((p, i) => (
+            <div key={p.id} className="relative group aspect-[4/3]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={p.caption ?? 'Unit photo'} className="w-full h-16 object-cover rounded-lg border border-[#e8e6e0]" />
+              <img src={p.url} alt={p.caption ?? 'Unit photo'} className="w-full h-full object-cover rounded-lg border border-[#e8e6e0]" />
+              {i === 0 && (
+                <span className="absolute bottom-1 left-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Cover</span>
+              )}
               <button type="button" onClick={() => void remove(p.id)} disabled={busy}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-[#e8e6e0] text-[#9b9890] hover:text-[#b91c1c] items-center justify-center hidden group-hover:flex cursor-pointer shadow">
-                <X size={11} />
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 border border-[#e8e6e0] text-[#9b9890] hover:text-[#b91c1c] flex items-center justify-center cursor-pointer shadow disabled:opacity-50">
+                <X size={12} />
               </button>
             </div>
           ))}
           <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
-            className="h-16 border-2 border-dashed border-[#e8e6e0] rounded-lg flex items-center justify-center text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
-            <Upload size={15} />
+            className="aspect-[4/3] border-2 border-dashed border-[#e8e6e0] rounded-lg flex flex-col items-center justify-center gap-1 text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
+            <Upload size={18} />
+            <span className="text-[11px] font-medium">Add</span>
           </button>
         </div>
       )}
@@ -381,6 +404,15 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
 
 const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
 const INPUT_ERR = 'w-full border border-red-400 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-red-400';
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <span className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890]">{children}</span>
+      <div className="h-px flex-1 bg-[#eeece6]" />
+    </div>
+  );
+}
 
 export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
@@ -441,7 +473,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     const errs: typeof errors = {};
     if (!form.unitNumber.trim()) errs.unitNumber  = 'Required';
     if (!form.unitType)          errs.unitType    = 'Required';
-    if (!form.unitSizeSqft)      errs.unitSizeSqft = 'Required';
+    if (!form.unitSizeSqft && !form.unitSizeSqm) errs.unitSizeSqft = 'Required';
     if (!form.rentalPrice)       errs.rentalPrice  = 'Required';
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -451,7 +483,10 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     e.preventDefault();
     if (!validate()) return;
     setSaving(true);
-    try { await onSave(form, floorPlan, propertyStandalone === false ? titleDeed : null); onClose(); }
+    // One price: the annual rent is also the market/list price, so keep them in
+    // lock-step rather than exposing a second field.
+    const payload = { ...form, marketPrice: form.rentalPrice };
+    try { await onSave(payload, floorPlan, propertyStandalone === false ? titleDeed : null); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -477,6 +512,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
 
+          <SectionHeading>Basics</SectionHeading>
+
           {/* Listing Unit Title */}
           <div>
             <label className="block text-xs font-medium text-[#6b6860] mb-1">Listing Unit Title</label>
@@ -488,8 +525,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             />
           </div>
 
-          {/* Unit Type + Unit Number + Floor */}
-          <div className="grid grid-cols-3 gap-3">
+          {/* Unit Type + Unit Tier */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Type <span className="text-red-500">*</span></label>
               <select
@@ -502,6 +539,20 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               </select>
               {errors.unitType && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitType}</p>}
             </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Tier</label>
+              <select
+                className={cn(INPUT, 'appearance-none')}
+                value={form.unitTier}
+                onChange={e => upd('unitTier', e.target.value)}
+              >
+                {UNIT_TIERS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Unit Number + Floor + Utility Premises */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Number <span className="text-red-500">*</span></label>
               <input
@@ -521,7 +572,18 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
                 onChange={e => upd('floor', e.target.value)}
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Utility Premises No.</label>
+              <input
+                className={INPUT}
+                placeholder="e.g. 1234567"
+                value={form.premiseNumber}
+                onChange={e => upd('premiseNumber', e.target.value)}
+              />
+            </div>
           </div>
+
+          <SectionHeading>Specifications</SectionHeading>
 
           {/* Beds + Baths + Furnishing — residential only */}
           {showBedBath && (
@@ -555,57 +617,46 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             <ViewInput value={form.view} onChange={v => upd('view', v)} />
           </div>
 
-          {/* Size + Annual Rent */}
+          {/* Size — capture sq.ft OR sq.m; the other auto-computes. */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.ft) <span className="text-red-500">*</span></label>
               <input
-                type="number" min="0"
+                type="number" min="0" step="any"
                 className={errors.unitSizeSqft ? INPUT_ERR : INPUT}
                 placeholder="e.g. 1200"
                 value={form.unitSizeSqft}
-                onChange={e => upd('unitSizeSqft', e.target.value)}
+                onChange={e => setForm(f => ({ ...f, unitSizeSqft: e.target.value, unitSizeSqm: sqmFromSqft(e.target.value) }))}
               />
               {errors.unitSizeSqft && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqft}</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.m)</label>
               <input
-                type="number" min="0"
-                className={errors.rentalPrice ? INPUT_ERR : INPUT}
-                placeholder="e.g. 85000"
-                value={form.rentalPrice}
-                onChange={e => upd('rentalPrice', e.target.value)}
+                type="number" min="0" step="any"
+                className={INPUT}
+                placeholder="e.g. 111"
+                value={form.unitSizeSqm}
+                onChange={e => setForm(f => ({ ...f, unitSizeSqm: e.target.value, unitSizeSqft: sqftFromSqm(e.target.value) }))}
               />
-              {errors.rentalPrice && <p className="text-[10px] text-red-500 mt-0.5">{errors.rentalPrice}</p>}
+              <p className="text-[10px] text-[#9b9890] mt-0.5">Auto-converts with sq.ft.</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Market Rent (AED)</label>
-              <input
-                type="number" min="0"
-                className={INPUT}
-                placeholder="e.g. 90000"
-                value={form.marketPrice}
-                onChange={e => upd('marketPrice', e.target.value)}
-              />
-              <p className="text-[10px] text-[#9b9890] mt-0.5">Benchmark for pricing comparison — optional.</p>
-            </div>
-          </div>
+          <SectionHeading>Pricing</SectionHeading>
 
-          {/* DEWA premises number — fills the Ejari contract "Premises No. (DEWA)" field */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Utility Premises No.</label>
-              <input
-                className={INPUT}
-                placeholder="e.g. 1234567"
-                value={form.premiseNumber}
-                onChange={e => upd('premiseNumber', e.target.value)}
-              />
-            </div>
+          {/* Annual rent — the single price (used for the listing and to pre-fill
+              the contract; a discount becomes the contract's annual rent). */}
+          <div>
+            <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
+            <input
+              type="number" min="0" step="any"
+              className={errors.rentalPrice ? INPUT_ERR : INPUT}
+              placeholder="e.g. 85000"
+              value={form.rentalPrice}
+              onChange={e => upd('rentalPrice', e.target.value)}
+            />
+            {errors.rentalPrice && <p className="text-[10px] text-red-500 mt-0.5">{errors.rentalPrice}</p>}
           </div>
 
           {/* Financial Details */}
@@ -619,12 +670,12 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Security Deposit</label>
-                <input type="number" min="0" className={INPUT} placeholder="e.g. 10000"
+                <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 10000"
                   value={form.securityDeposit} onChange={e => upd('securityDeposit', e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Admin Fee</label>
-                <input type="number" min="0" className={INPUT} placeholder="e.g. 5000"
+                <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 5000"
                   value={form.adminFee} onChange={e => upd('adminFee', e.target.value)} />
               </div>
             </div>
@@ -633,7 +684,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">
                   Ejari Fee {!isResidential && <span className="text-[#9b9890] font-normal">(residential only)</span>}
                 </label>
-                <input type="number" min="0" className={INPUT}
+                <input type="number" min="0" step="any" className={INPUT}
                   placeholder={isResidential ? '220' : 'N/A'}
                   disabled={!isResidential}
                   value={form.ejariFeeFils}
@@ -643,13 +694,13 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Commission</label>
-                <input type="number" min="0" className={INPUT} placeholder="e.g. 4000"
+                <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 4000"
                   value={form.commission} onChange={e => upd('commission', e.target.value)} />
               </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-[#3d3b35] mb-1">Service Charges (AED/yr)</label>
-              <input type="number" min="0" className={INPUT} placeholder="e.g. 8000"
+              <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 8000"
                 value={form.serviceCharges} onChange={e => upd('serviceCharges', e.target.value)} />
             </div>
           </div>
@@ -660,7 +711,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Min. Lease (months)</label>
-                <input type="number" min="0" className={INPUT} placeholder="12"
+                <input type="number" min="0" step="any" className={INPUT} placeholder="12"
                   value={form.minLeaseMonths} onChange={e => upd('minLeaseMonths', e.target.value)} />
                 <p className="text-[10px] text-[#6b82b8] mt-0.5">
                   {propertyCategory === 'venues' ? '0 = per-event' : propertyCategory === 'workspaces' ? '1 = monthly' : '12 = 1 year'}
@@ -668,7 +719,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Notice Period (days)</label>
-                <input type="number" min="0" className={INPUT} placeholder="60"
+                <input type="number" min="0" step="any" className={INPUT} placeholder="60"
                   value={form.noticePeriodDays} onChange={e => upd('noticePeriodDays', e.target.value)} />
               </div>
               <div>
@@ -680,9 +731,10 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             </div>
           </div>
 
+          <SectionHeading>Amenities &amp; facilities</SectionHeading>
+
           {/* Amenities — category-filtered */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-2">Amenities & Facilities</label>
             <div className="flex flex-wrap gap-2">
               {amenityList.map(a => (
                 <button
@@ -730,6 +782,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               onChange={e => upd('description', e.target.value)}
             />
           </div>
+
+          <SectionHeading>Media</SectionHeading>
 
           {/* Floor plan */}
           <div>

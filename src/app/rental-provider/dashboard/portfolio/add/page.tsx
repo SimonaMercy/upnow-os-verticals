@@ -5,18 +5,18 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Plus, Trash2, Upload, Download, CheckCircle2,
   AlertCircle, Loader2, FileSpreadsheet, ChevronDown, ChevronUp,
-  ImagePlus, X, Camera, Copy, MapPin, Building2,
+  ImagePlus, X, Camera, Copy, Building2,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
+import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import {
-  SPACE_CATEGORIES, BuildingSearch, StreetSearch,
-  type PropertyFormData, type SearchResult, type LocalSuggestion,
+  PropertyFields, type PropertyFormData,
 } from '@/components/upnow/PropertyFormModal';
-import { MapPicker } from '@/components/upnow/MapPicker';
 import {
   RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
   WORKSPACES_UNIT_TYPES, VENUES_UNIT_TYPES,
   FURNISHING_OPTIONS, UNIT_TYPE_LABELS, getAmenitiesForCategory,
+  UNIT_TIERS, sqftFromSqm, sqmFromSqft,
 } from '@/components/upnow/UnitFormModal';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
@@ -29,10 +29,6 @@ function Label({ t, req }: { t: string; req?: boolean }) {
       {t}{req && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
-}
-
-function FieldErr({ msg }: { msg?: string }) {
-  return msg ? <p className="text-[10px] text-red-500 mt-0.5">{msg}</p> : null;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -48,7 +44,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 interface Country      { id: number; nameEn: string; code: string }
 interface Emirate      { id: number; nameEn: string }
 interface Community    { id: number; nameEn: string }
-interface SubCommunity { id: number; nameEn: string }
 interface WizardProperty {
   id: number; buildingName: string; spaceCategory: string; fullAddress: string | null;
   emirateId: number | null; communityId: number | null;
@@ -62,18 +57,22 @@ interface UnitRow {
   expanded: boolean;
   unitName: string;
   unitType: string;
+  unitTier: string;
   unitNumber: string;
   floor: string;
   premiseNumber: string;
   bedrooms: string;
   bathrooms: string;
+  unitSizeSqft: string;
   unitSizeSqm: string;
   furnishing: string;
   rentalPrice: string;
+  marketPrice: string;
   securityDeposit: string;
   adminFee: string;
   ejariFeeFils: string;
   commission: string;
+  serviceCharges: string;
   view: string;
   amenities: string[];
   minLeaseMonths: string;
@@ -88,10 +87,10 @@ function emptyRow(expanded = true): UnitRow {
   return {
     id: Math.random().toString(36).slice(2),
     expanded,
-    unitName: '', unitType: '', unitNumber: '',
-    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqm: '',
-    furnishing: 'Unfurnished', rentalPrice: '',
-    securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
+    unitName: '', unitType: '', unitTier: 'standard', unitNumber: '',
+    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', unitSizeSqm: '',
+    furnishing: 'Unfurnished', rentalPrice: '', marketPrice: '',
+    securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '', serviceCharges: '',
     view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
     rentEscalationPct: '', description: '', stagedPhotos: [], stagedFloorPlan: null,
   };
@@ -211,20 +210,15 @@ export default function AddListingPage() {
   /* property form */
   const [pf, setPf]   = useState<PropertyFormData>({ ...EMPTY_PROP });
   const [pe, setPe]   = useState<Partial<Record<keyof PropertyFormData, string>>>({});
-  const [countries, setCountries]     = useState<Country[]>([]);
-  const [emirates, setEmirates]       = useState<Emirate[]>([]);
-  const [communities, setCommunities] = useState<Community[]>([]);
-  const [subCommunities, setSubCommunities] = useState<SubCommunity[]>([]);
-  const [loadingComms, setLoadingComms] = useState(false);
-  const [loadingSubs, setLoadingSubs] = useState(false);
-  // loadCommsFor holds an emirateId — communities loaded directly from emirate (city tier is internal-only)
-  const [loadCommsFor, setLoadCommsFor] = useState<number | null>(null);
-  const [loadSubsFor, setLoadSubsFor] = useState<number | null>(null);
+  // Property documents collected in the form; uploaded after the property row
+  // is created (mirrors the Edit modal via the shared PropertyFields component).
+  const [titleDeed, setTitleDeed] = useState<File | null>(null);
+  const [drawings, setDrawings]   = useState<File[]>([]);
+  // countries + emirates also feed the CSV bulk-importer's name→id resolution,
+  // so they live here even though PropertyFields runs its own location cascade.
+  const [countries, setCountries] = useState<Country[]>([]);
+  const [emirates, setEmirates]   = useState<Emirate[]>([]);
   const defaultCountryIdRef = useRef<number | null>(null);
-  const [autoFilled, setAutoFilled]   = useState(false);
-  const [showMap, setShowMap]         = useState(false);
-  const [buildingQuery, setBuildingQuery] = useState('');
-  const pendingCommunityRef           = useRef<string>('');
 
   /* existing property search */
   const [existingProps, setExistingProps] = useState<WizardProperty[]>([]);
@@ -282,145 +276,14 @@ export default function AddListingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pf.countryId]);
 
-  // Community cascade — emirate-based (UAE city = emirate, so we skip the city tier in the UI)
+  // Property location cascade + building-search auto-fill now live inside the
+  // shared <PropertyFields> component (used by Add + Edit, RP + manager), so the
+  // wizard no longer maintains its own copy. Changing the category still clears
+  // per-unit amenities, so that one hook stays here on pf.spaceCategory.
   useEffect(() => {
-    if (!loadCommsFor) { setCommunities([]); return; }
-    setLoadingComms(true);
-    apiGet<Community[]>(`/locations/emirates/${loadCommsFor}/communities`)
-      .then(comms => {
-        setCommunities(comms);
-        setPf(prev => {
-          if (prev.communityId) {
-            const match = comms.find(c => c.id === prev.communityId);
-            if (match) {
-              setLoadSubsFor(prev.communityId);
-              if (!prev.communityName) return { ...prev, communityName: match.nameEn };
-            }
-          }
-          return prev;
-        });
-        if (pendingCommunityRef.current) {
-          const pending   = pendingCommunityRef.current.toLowerCase().trim();
-          const normalize = (s: string) => s.replace(/[^a-z0-9]/g, '');
-          const tokenize  = (s: string) => s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
-          const pendNorm  = normalize(pending);
-          const pTokens   = tokenize(pending);
-          let bestScore = 0; let bestMatch: Community | null = null;
-          for (const c of comms) {
-            const dbLow  = c.nameEn.toLowerCase();
-            const dbNorm = normalize(dbLow);
-            const dbT    = tokenize(dbLow);
-            let score: number;
-            if (dbNorm === pendNorm) {
-              score = 1;
-            } else if (pendNorm.length >= 4 && (pendNorm.includes(dbNorm) || dbNorm.includes(pendNorm))) {
-              // substring containment — handles "businessbay" ↔ "businessbayresidences"
-              score = 0.8;
-            } else {
-              // token overlap with partial matching ("muweila" matches "muweilah")
-              score = pTokens.filter(t => dbT.some(dt => dt.includes(t) || t.includes(dt))).length /
-                      Math.max(pTokens.length, dbT.length);
-            }
-            if (score > bestScore) { bestScore = score; bestMatch = c; }
-          }
-          if (bestMatch && bestScore >= 0.4) {
-            setPf(prev => ({ ...prev, communityId: bestMatch!.id, communityName: bestMatch!.nameEn }));
-            setLoadSubsFor(bestMatch!.id);
-          }
-          pendingCommunityRef.current = '';
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingComms(false));
-  }, [loadCommsFor]);
-
-  // Sub-Community cascade
-  useEffect(() => {
-    if (!loadSubsFor) { setSubCommunities([]); return; }
-    setLoadingSubs(true);
-    apiGet<SubCommunity[]>(`/locations/communities/${loadSubsFor}/sub-communities`)
-      .then(subs => {
-        setSubCommunities(subs);
-        setPf(prev => {
-          if (prev.subCommunityId && !prev.subCommunityName) {
-            const match = subs.find(s => s.id === prev.subCommunityId);
-            if (match) return { ...prev, subCommunityName: match.nameEn };
-          }
-          return prev;
-        });
-      })
-      .catch(() => {})
-      .finally(() => setLoadingSubs(false));
-  }, [loadSubsFor]);
-
-  const updP = <K extends keyof PropertyFormData>(k: K, v: PropertyFormData[K]) => {
-    setPf(prev => ({ ...prev, [k]: v }));
-    setPe(prev => ({ ...prev, [k]: undefined }));
-    // Clear amenities on all units when category changes so stale selections don't carry over
-    if (k === 'spaceCategory') {
-      setRows(prev => prev.map(r => ({ ...r, amenities: [] })));
-    }
-  };
-
-  const handleSearchSelect = (r: SearchResult) => {
-    const newEmirateId: number | null = r.emirateId !== undefined
-      ? (r.emirateId ?? null)
-      : (() => {
-          const mb = r.emirateName.trim().toLowerCase();
-          if (!mb) {
-            const label = r.label.toLowerCase();
-            return emirates.find(e => label.includes(e.nameEn.toLowerCase()))?.id ?? null;
-          }
-          return emirates.find(e => {
-            const db = e.nameEn.toLowerCase();
-            return db === mb || mb.includes(db) || db.includes(mb);
-          })?.id ?? null;
-        })();
-
-    const emirateName = emirates.find(e => e.id === newEmirateId)?.nameEn ?? r.emirateName;
-    const googlePlaceId = r.googlePlaceId != null
-      ? r.googlePlaceId
-      : (!r.id.startsWith('cache_') && !r.id.startsWith('local_') ? r.id : null);
-
-    if (r.communityId != null) {
-      pendingCommunityRef.current = '';
-      setPf(prev => ({
-        ...prev,
-        ...(r.featureType === 'poi'  && r.name   && { buildingName: r.name }),
-        ...(r.featureType !== 'area' && r.street && { street: r.street }),
-        latitude:      r.lat || prev.latitude,
-        longitude:     r.lng || prev.longitude,
-        emirateId:     newEmirateId,
-        emirateName,
-        communityId:   r.communityId ?? null,
-        communityName: '',
-        googlePlaceId: googlePlaceId ?? prev.googlePlaceId,
-      }));
-    } else {
-      pendingCommunityRef.current = r.communityName;
-      setPf(prev => ({
-        ...prev,
-        ...(r.featureType === 'poi'  && r.name   && { buildingName: r.name }),
-        ...(r.featureType !== 'area' && r.street && { street: r.street }),
-        latitude:      r.lat || prev.latitude,
-        longitude:     r.lng || prev.longitude,
-        emirateId:     newEmirateId,
-        emirateName,
-        communityId:   null,
-        communityName: '',
-        googlePlaceId: googlePlaceId ?? prev.googlePlaceId,
-      }));
-    }
-
-    // Load communities directly from emirate (city tier not needed for UAE).
-    setLoadSubsFor(null);
-    setSubCommunities([]);
-    setLoadCommsFor(null);
-    setTimeout(() => setLoadCommsFor(newEmirateId), 0);
-    setAutoFilled(true);
-    setShowMap(true);
-    setPe(prev => ({ ...prev, buildingName: undefined, emirateId: undefined }));
-  };
+    setRows(prev => prev.map(r => ({ ...r, amenities: [] })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pf.spaceCategory]);
 
   /* ── unit row helpers ── */
   const updRow = useCallback((id: string, patch: Partial<UnitRow>) => {
@@ -508,7 +371,7 @@ export default function AddListingPage() {
       const e: Partial<Record<keyof UnitRow, string>> = {};
       if (!r.unitNumber.trim()) { e.unitNumber = 'Required'; ok = false; }
       if (!r.unitType)          { e.unitType   = 'Required'; ok = false; }
-      if (!r.unitSizeSqm)      { e.unitSizeSqm = 'Required'; ok = false; }
+      if (!r.unitSizeSqft && !r.unitSizeSqm) { e.unitSizeSqft = 'Required'; ok = false; }
       if (!r.rentalPrice)       { e.rentalPrice = 'Required'; ok = false; }
       if (Object.keys(e).length) newRowErrors[r.id] = e;
     }
@@ -540,7 +403,9 @@ export default function AddListingPage() {
           buildingName: pf.buildingName,
           spaceCategory: pf.spaceCategory,
           fullAddress: parts.join(', ') || undefined,
+          countryId: pf.countryId ?? undefined,
           emirateId: pf.emirateId ?? undefined,
+          cityId: pf.cityId ?? undefined,
           communityId: pf.communityId ?? undefined,
           subCommunityId: pf.subCommunityId ?? undefined,
           latitude: pf.latitude ?? undefined,
@@ -555,6 +420,22 @@ export default function AddListingPage() {
         });
         propId   = created.id;
         propName = created.buildingName;
+        // Standalone title deed + building drawings (property-level documents).
+        // Failures are collected and surfaced (don't silently drop uploads).
+        const docErrs: string[] = [];
+        if (titleDeed) {
+          try {
+            await uploadOwnedDocument({ ownerType: 'property', ownerId: propId, documentKey: 'title_deed', category: 'legal', displayName: 'Title deed', file: titleDeed });
+          } catch (e) { docErrs.push(`Title deed: ${e instanceof Error ? e.message : 'upload failed'}`); }
+        }
+        for (let i = 0; i < drawings.length; i++) {
+          try {
+            await uploadOwnedDocument({ ownerType: 'property', ownerId: propId, documentKey: `building_drawing_${Date.now()}_${i}`, category: 'property', displayName: drawings[i].name || `Property drawing ${i + 1}`, file: drawings[i] });
+          } catch (e) { docErrs.push(`${drawings[i].name || `Drawing ${i + 1}`}: ${e instanceof Error ? e.message : 'upload failed'}`); }
+        }
+        if (docErrs.length) {
+          alert(`The property was created, but ${docErrs.length} document(s) failed to upload:\n\n${docErrs.join('\n')}`);
+        }
       } else {
         propId   = selectedPropId!;
         propName = existingProps.find(p => p.id === propId)?.buildingName ?? 'Property';
@@ -569,17 +450,22 @@ export default function AddListingPage() {
           const created = await apiPost<{ id: number }>(`/properties/${propId}/units`, {
             unitName:         r.unitName        || undefined,
             unitType:         r.unitType,
+            unitTier:         r.unitTier || 'standard',
             unitNumber:       r.unitNumber,
             floor:            r.floor           || undefined,
             premiseNumber:    r.premiseNumber   || undefined,
             bedrooms:         r.bedrooms && r.bedrooms !== 'Studio' ? Number(r.bedrooms) : undefined,
             bathrooms:        r.bathrooms       ? Number(r.bathrooms)       : undefined,
+            unitSizeSqft:    r.unitSizeSqft   ? Number(r.unitSizeSqft)   : undefined,
             unitSizeSqm:     r.unitSizeSqm    ? Number(r.unitSizeSqm)    : undefined,
             rentalPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
+            // One price: market = the annual rent (kept in lock-step).
+            marketPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
             securityDeposit:  r.securityDeposit ? Number(r.securityDeposit) : undefined,
             adminFee:         r.adminFee        ? Number(r.adminFee)        : undefined,
             ejariFeeFils:     r.ejariFeeFils    ? Number(r.ejariFeeFils)    : undefined,
             commission:       r.commission      ? Number(r.commission)      : undefined,
+            serviceCharges:   r.serviceCharges  ? Number(r.serviceCharges)  : undefined,
             minLeaseMonths:   r.minLeaseMonths   ? Number(r.minLeaseMonths)   : undefined,
             noticePeriodDays: r.noticePeriodDays ? Number(r.noticePeriodDays) : undefined,
             rentEscalationPct: r.rentEscalationPct ? Number(r.rentEscalationPct) : undefined,
@@ -752,6 +638,7 @@ export default function AddListingPage() {
             bedrooms:         row.bedrooms     ? Number(row.bedrooms)  : undefined,
             bathrooms:        row.bathrooms    ? Number(row.bathrooms) : undefined,
             unitSizeSqm:     row.size_sqm    ? Number(row.size_sqm) : undefined,
+            unitSizeSqft:    row.size_sqm    ? Number(sqftFromSqm(row.size_sqm)) || undefined : undefined,
             rentalPrice:      rent > 0         ? rent                  : undefined,
             securityDeposit:  secDep,
             adminFee,
@@ -787,22 +674,6 @@ export default function AddListingPage() {
   const propCategory = selectedPropId
     ? (existingProps.find(p => p.id === selectedPropId)?.spaceCategory ?? '')
     : pf.spaceCategory;
-
-  // Local suggestions for BuildingSearch — filters RP's own properties
-  const localBuildingSuggestions: LocalSuggestion[] = buildingQuery.length >= 2
-    ? existingProps
-        .filter(p => p.buildingName?.toLowerCase().includes(buildingQuery.toLowerCase()))
-        .slice(0, 4)
-        .map(p => ({
-          id:          String(p.id),
-          name:        p.buildingName || 'Unnamed',
-          label:       p.fullAddress ?? '',
-          lat:         p.latitude  != null ? Number(p.latitude)  : null,
-          lng:         p.longitude != null ? Number(p.longitude) : null,
-          emirateId:   p.emirateId   ?? null,
-          communityId: p.communityId ?? null,
-        }))
-    : [];
 
   /* ══════════════════════════════════════════════════════════════════════════ */
   return (
@@ -928,151 +799,20 @@ export default function AddListingPage() {
                 </div>
               )}
 
-              {/* New property form — hidden when an existing property is selected */}
-              {!selectedPropId && (<>
-
-              {/* Category — only field the user sets manually */}
-              <div>
-                <Label t="Category" req />
-                <select className={SELECT} value={pf.spaceCategory} onChange={e => updP('spaceCategory', e.target.value)}>
-                  <option value="">Select category</option>
-                  {SPACE_CATEGORIES.map(c => (
-                    <option key={c.id} value={c.id}>{c.label}</option>
-                  ))}
-                </select>
-                <FieldErr msg={pe.spaceCategory} />
-              </div>
-
-              {/* Search + Map — triggers auto-fill of all fields below */}
-              <div>
-                <Label t="Search Building / Address" />
-                {autoFilled ? (
-                  <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8f2e8] rounded-lg px-3 py-2 mb-2">
-                    <CheckCircle2 size={13} className="shrink-0" />
-                    <span>
-                      Fields auto-filled
-                      {pf.buildingName ? ` · ${pf.buildingName}` : ''}
-                      {pf.communityName ? `, ${pf.communityName}` : ''}
-                      {pf.emirateName   ? `, ${pf.emirateName}`   : ''}
-                      {' '}— review and adjust below
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-[10px] text-[#9b9890] mb-2">Search to auto-fill all fields below, or fill in manually</p>
-                )}
-                <BuildingSearch
-                  onSelect={handleSearchSelect}
-                  onManualEntry={() => setAutoFilled(false)}
-                  onQueryChange={setBuildingQuery}
-                  localSuggestions={localBuildingSuggestions}
+              {/* New property form — hidden when an existing property is
+                  selected. Shared <PropertyFields> = byte-identical to the Edit
+                  modal (RP + manager): Category, Country→Emirate→City→Community
+                  →Sub, Building Name / Street / Plot, Standalone + Title Deed,
+                  and Building drawings. */}
+              {!selectedPropId && (
+                <PropertyFields
+                  value={pf} setValue={setPf}
+                  errors={pe} setErrors={setPe}
+                  isEdit={false}
+                  titleDeed={titleDeed} setTitleDeed={setTitleDeed}
+                  drawings={drawings} setDrawings={setDrawings}
                 />
-                <p className="text-[10px] text-[#9b9890] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
-                {showMap ? (
-                  <MapPicker
-                    latitude={pf.latitude} longitude={pf.longitude}
-                    onChange={(lat, lng) => { updP('latitude', lat); updP('longitude', lng); }}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowMap(true)}
-                    className="w-full h-[220px] rounded-xl border border-dashed border-[#e8e6e0] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
-                  >
-                    <MapPin size={20} className="opacity-40" />
-                    <span className="text-xs">Search above to pin location, or click to open map</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Location chain: Country → Emirate → Community → Sub-Community */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label t="Country" req />
-                  <select className={SELECT} value={pf.countryId ?? ''} onChange={e => {
-                    const id = e.target.value ? Number(e.target.value) : null;
-                    const name = countries.find(c => c.id === id)?.nameEn ?? '';
-                    setPf(prev => ({ ...prev, countryId: id, countryName: name, emirateId: null, emirateName: '', cityId: null, cityName: '', communityId: null, communityName: '', subCommunityId: null, subCommunityName: '' }));
-                    setLoadCommsFor(null); setLoadSubsFor(null);
-                    setCommunities([]); setSubCommunities([]);
-                  }}>
-                    <option value="">Select</option>
-                    {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <Label t="Emirate / Region" req />
-                  <select className={SELECT} value={pf.emirateId ?? ''} disabled={!pf.countryId} onChange={e => {
-                    const id = e.target.value ? Number(e.target.value) : null;
-                    const name = emirates.find(em => em.id === id)?.nameEn ?? '';
-                    setPf(prev => ({ ...prev, emirateId: id, emirateName: name, cityId: null, cityName: '', communityId: null, communityName: '', subCommunityId: null, subCommunityName: '' }));
-                    setLoadCommsFor(id); setLoadSubsFor(null);
-                    setCommunities([]); setSubCommunities([]);
-                  }}>
-                    <option value="">{pf.countryId ? 'Select' : 'Select country first'}</option>
-                    {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
-                  </select>
-                  <FieldErr msg={pe.emirateId} />
-                </div>
-              </div>
-
-              <div className={`grid gap-3 ${pf.communityId && !loadingSubs && subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                <div>
-                  <Label t="Community / Area" />
-                  <select className={SELECT} value={pf.communityId ?? ''} disabled={!pf.emirateId || loadingComms}
-                    onChange={e => {
-                      const id = e.target.value ? Number(e.target.value) : null;
-                      const name = communities.find(c => c.id === id)?.nameEn ?? '';
-                      setPf(prev => ({ ...prev, communityId: id, communityName: name, subCommunityId: null, subCommunityName: '' }));
-                      setLoadSubsFor(id); setSubCommunities([]);
-                    }}>
-                    <option value="">
-                      {loadingComms ? 'Loading…' : pf.emirateId ? 'Select community (optional)' : 'Select emirate first'}
-                    </option>
-                    {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-                  </select>
-                </div>
-                {pf.communityId && !loadingSubs && subCommunities.length > 0 && (
-                  <div>
-                    <Label t="Sub-Community" />
-                    <select className={SELECT} value={pf.subCommunityId ?? ''}
-                      onChange={e => {
-                        const id = e.target.value ? Number(e.target.value) : null;
-                        const name = subCommunities.find(s => s.id === id)?.nameEn ?? '';
-                        updP('subCommunityId', id); updP('subCommunityName', name);
-                      }}>
-                      <option value="">Select (optional)</option>
-                      {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* Building Name | Street — auto-filled from search */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label t="Building / Property Name" />
-                  <input className={INPUT} placeholder="e.g. Marina Heights"
-                    value={pf.buildingName} onChange={e => updP('buildingName', e.target.value)} />
-                  <FieldErr msg={pe.buildingName} />
-                </div>
-                <div>
-                  <Label t="Street / Address" />
-                  <StreetSearch
-                    value={pf.street}
-                    onChange={v => updP('street', v)}
-                    onCoords={(lat, lng) => { updP('latitude', lat); updP('longitude', lng); }}
-                  />
-                </div>
-              </div>
-
-              {/* Plot Number — manual only */}
-              <div>
-                <Label t="Plot Number" />
-                <input className={INPUT} placeholder="e.g. 123-456"
-                  value={pf.plotNumber} onChange={e => updP('plotNumber', e.target.value)} />
-              </div>
-
-              </>)}
+              )}
             </div>
           </Section>
         )}
@@ -1468,6 +1208,12 @@ function UnitCard({
               {errors.unitType && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitType}</p>}
             </div>
             <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Tier</label>
+              <select className={SELECT_C} value={row.unitTier} onChange={e => onUpdate({ unitTier: e.target.value })}>
+                {UNIT_TIERS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Number <span className="text-red-500">*</span></label>
               <input className={errors.unitNumber ? INPUT_ERR : INPUT_C}
                 placeholder="e.g. 101, G-02"
@@ -1519,37 +1265,50 @@ function UnitCard({
             <ViewInput value={row.view} onChange={v => onUpdate({ view: v })} />
           </div>
 
-          {/* Row 4: Size + Annual Rent */}
+          {/* Row 4: Size (sq.ft ↔ sq.m, capture one) */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.m) <span className="text-red-500">*</span></label>
-              <input type="number" min="0"
-                className={errors.unitSizeSqm ? INPUT_ERR : INPUT_C}
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.ft) <span className="text-red-500">*</span></label>
+              <input type="number" min="0" step="any"
+                className={errors.unitSizeSqft ? INPUT_ERR : INPUT_C}
                 placeholder="e.g. 1200"
-                value={row.unitSizeSqm}
-                onChange={e => onUpdate({ unitSizeSqm: e.target.value })} />
-              {errors.unitSizeSqm && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqm}</p>}
+                value={row.unitSizeSqft}
+                onChange={e => onUpdate({ unitSizeSqft: e.target.value, unitSizeSqm: sqmFromSqft(e.target.value) })} />
+              {errors.unitSizeSqft && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqft}</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
-              <input type="number" min="0"
-                className={errors.rentalPrice ? INPUT_ERR : INPUT_C}
-                placeholder="e.g. 85000"
-                value={row.rentalPrice}
-                onChange={e => {
-                  const val = e.target.value;
-                  const rent = parseFloat(val);
-                  const patch: Partial<UnitRow> = { rentalPrice: val };
-                  if (!isNaN(rent) && rent > 0) {
-                    patch.securityDeposit = String(Math.round(rent * 0.05));
-                    patch.adminFee        = String(Math.round(rent * 0.05));
-                    patch.ejariFeeFils    = isResidentialUnit ? '220' : '';
-                    patch.commission      = String(Math.round(rent * 0.05));
-                  }
-                  onUpdate(patch);
-                }} />
-              {errors.rentalPrice && <p className="text-[10px] text-red-500 mt-0.5">{errors.rentalPrice}</p>}
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.m)</label>
+              <input type="number" min="0" step="any"
+                className={INPUT_C}
+                placeholder="e.g. 111"
+                value={row.unitSizeSqm}
+                onChange={e => onUpdate({ unitSizeSqm: e.target.value, unitSizeSqft: sqftFromSqm(e.target.value) })} />
+              <p className="text-[10px] text-[#9b9890] mt-0.5">Auto-converts with sq.ft.</p>
             </div>
+          </div>
+
+          {/* Row 5: Annual rent — the single price (also the market/list price;
+              a discount becomes the contract's annual rent). Mirrored into
+              marketPrice on submit, so we don't expose a second field. */}
+          <div>
+            <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
+            <input type="number" min="0" step="any"
+              className={errors.rentalPrice ? INPUT_ERR : INPUT_C}
+              placeholder="e.g. 85000"
+              value={row.rentalPrice}
+              onChange={e => {
+                const val = e.target.value;
+                const rent = parseFloat(val);
+                const patch: Partial<UnitRow> = { rentalPrice: val };
+                if (!isNaN(rent) && rent > 0) {
+                  patch.securityDeposit = String(Math.round(rent * 0.05));
+                  patch.adminFee        = String(Math.round(rent * 0.05));
+                  patch.ejariFeeFils    = isResidentialUnit ? '220' : '';
+                  patch.commission      = String(Math.round(rent * 0.05));
+                }
+                onUpdate(patch);
+              }} />
+            {errors.rentalPrice && <p className="text-[10px] text-red-500 mt-0.5">{errors.rentalPrice}</p>}
           </div>
 
           {/* Financial details box */}
@@ -1563,14 +1322,14 @@ function UnitCard({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Security Deposit</label>
-                <input type="number" min="0" className={INPUT_C}
+                <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 10000"
                   value={row.securityDeposit}
                   onChange={e => onUpdate({ securityDeposit: e.target.value })} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Admin Fee</label>
-                <input type="number" min="0" className={INPUT_C}
+                <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 5000"
                   value={row.adminFee}
                   onChange={e => onUpdate({ adminFee: e.target.value })} />
@@ -1579,17 +1338,26 @@ function UnitCard({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Ejari Fee</label>
-                <input type="number" min="0" className={INPUT_C}
+                <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="220"
                   value={row.ejariFeeFils}
                   onChange={e => onUpdate({ ejariFeeFils: e.target.value })} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#3d3b35] mb-1">Commission</label>
-                <input type="number" min="0" className={INPUT_C}
+                <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 4000"
                   value={row.commission}
                   onChange={e => onUpdate({ commission: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Service Charges</label>
+                <input type="number" min="0" step="any" className={INPUT_C}
+                  placeholder="e.g. 3000"
+                  value={row.serviceCharges}
+                  onChange={e => onUpdate({ serviceCharges: e.target.value })} />
               </div>
             </div>
           </div>

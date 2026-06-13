@@ -20,6 +20,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import {
   PropertyFormModal,
@@ -267,6 +268,7 @@ function unitFormToDto(data: UnitFormData) {
     floor: clearable(data.floor),
     premiseNumber: clearable(data.premiseNumber),
     unitSizeSqft: num(data.unitSizeSqft) ?? undefined,
+    unitSizeSqm: num(data.unitSizeSqm) ?? undefined,
     bedrooms: data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
     bathrooms: num(data.bathrooms) ?? undefined,
     amenities: data.amenities, // empty array clears amenities (kept lease terms are merged server-side)
@@ -341,7 +343,7 @@ function PropertyCard({
           <div className={s.propAddr}>
             <MapPin size={12} />
             <span>{property.fullAddress ?? '—'}</span>
-            {property.makaniNumber && <code>Makani {property.makaniNumber}</code>}
+            {/* Makani shown in the property details popup, not on the list card. */}
           </div>
         </div>
 
@@ -594,6 +596,7 @@ function PropertyCard({
 export default function PortfolioPage() {
   const qc = useQueryClient();
   const router = useRouter();
+  const { user } = useAuth();
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'residential' | 'commercial' | 'industrial'>('all');
   const [search, setSearch] = useState('');
   const [unitTypeFilter, setUnitTypeFilter] = useState('');
@@ -673,7 +676,7 @@ export default function PortfolioPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to withdraw listing'),
   });
 
-  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null) => {
+  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null, drawings?: File[]) => {
     const dto = formToCreateDto(data);
     let propertyId: number;
     if (propertyModal.editing) {
@@ -694,6 +697,21 @@ export default function PortfolioPage() {
         });
       } catch (e) {
         alert(`The property was saved, but the title deed upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      }
+    }
+    // Building drawings — property-level, multiple. Key by index+timestamp so
+    // each is a distinct document row.
+    if (drawings?.length && propertyId) {
+      for (let i = 0; i < drawings.length; i++) {
+        try {
+          await uploadOwnedDocument({
+            ownerType: 'property', ownerId: propertyId,
+            documentKey: `building_drawing_${Date.now()}_${i}`, category: 'property',
+            displayName: drawings[i].name || `Property drawing ${i + 1}`, file: drawings[i],
+          });
+        } catch (e) {
+          alert(`The property was saved, but a building drawing upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+        }
       }
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
@@ -735,8 +753,13 @@ export default function PortfolioPage() {
   const totalProperties = properties.length;
   const totalUnits     = properties.reduce((sum, p) => sum + (p.unitCount ?? 0), 0);
   const totalListed    = properties.reduce((sum, p) => sum + (p.listedCount ?? 0), 0);
-  const activeLeases   = allContracts.filter((c) => c.contractActive).length;
-  const occupancyPct   = totalUnits > 0 ? Math.round((activeLeases / totalUnits) * 100) : 0;
+  // Active leases = distinct units that hold an in-force lease. After an import
+  // a unit and its renewal can BOTH be contract_active, so counting contract
+  // rows double-counts (2 leases on 1 unit → the old 200% occupancy). Dedupe by
+  // unit so the figure matches reality.
+  const activeLeases = new Set(
+    allContracts.filter((c) => c.contractActive && c.unit?.id != null).map((c) => c.unit!.id),
+  ).size;
 
   const filtersDirty = !!search || !!unitTypeFilter || selectedViews.length > 0;
 
@@ -744,16 +767,30 @@ export default function PortfolioPage() {
     <div className={s.app}>
       <div className={s.main}>
 
+        {/* Needs attention — profile completeness nudge (shown until resolved) */}
+        {user && !user.phone && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff7e6', border: '1px solid #f5d98b', borderRadius: 12, padding: '12px 16px', marginBottom: 16 }}>
+            <AlertCircle size={18} style={{ color: '#9a6b00', flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: '#7a5600' }}>Needs attention</div>
+              <div style={{ fontSize: 12.5, color: '#9a6b00' }}>Add a phone number to your profile so customers and your team can reach you.</div>
+            </div>
+            <Link href="/rental-provider/dashboard/profile" className={cn(s.btn, s.btnPrimary, s.btnSm)} style={{ flexShrink: 0 }}>
+              Add phone number
+            </Link>
+          </div>
+        )}
+
         {/* Hero */}
         <div className={s.hero}>
           <div className={s.heroLeft}>
             <div className={s.heroEyebrow}><Building2 size={12} /> Portfolio</div>
             <h1 className={s.heroTitle}>Your properties</h1>
-            <p className={s.heroDesc}>
-              {totalProperties === 0
-                ? "You haven't added a property yet — once you do, manage all buildings, units, and listings from this dashboard."
-                : `Manage your ${totalProperties} propert${totalProperties === 1 ? 'y' : 'ies'}, ${totalUnits} unit${totalUnits === 1 ? '' : 's'}, and listings in one place.`}
-            </p>
+            {totalProperties === 0 && (
+              <p className={s.heroDesc}>
+                You haven&apos;t added a property yet — once you do, manage all buildings, units, and listings from this dashboard.
+              </p>
+            )}
           </div>
           <div className={s.heroRight}>
             <button type="button" className={cn(s.btn, s.btnAccent)} onClick={() => setShowMap(true)} title="See all properties on a map">
@@ -781,7 +818,7 @@ export default function PortfolioPage() {
             <div className={s.kpi}>
               <div className={s.kpiLbl}>Active leases</div>
               <div className={s.kpiVal}>{activeLeases}</div>
-              <div className={s.kpiSub}>{occupancyPct}% occupancy</div>
+              <div className={s.kpiSub}>Units currently rented</div>
             </div>
             <div className={s.kpi}>
               <div className={s.kpiLbl}>Live listings</div>
@@ -802,7 +839,7 @@ export default function PortfolioPage() {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setCategoryFilter(key)}
+                  onClick={() => { setCategoryFilter(key); setUnitTypeFilter(''); }}
                   className={cn(s.rangetabBtn, active && s.active)}
                 >
                   {label}
@@ -835,16 +872,27 @@ export default function PortfolioPage() {
                 onChange={(e) => setUnitTypeFilter(e.target.value)}
                 className={s.sel}
               >
-                <option value="">All unit types</option>
-                <optgroup label="Residential">
-                  {RESIDENTIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                </optgroup>
-                <optgroup label="Commercial">
-                  {COMMERCIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                </optgroup>
-                <optgroup label="Industrial">
-                  {INDUSTRIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                </optgroup>
+                {/* Scope sub-types to the selected category — only show that
+                    category's types; "All" keeps the grouped full list. */}
+                <option value="">{categoryFilter === 'all' ? 'All unit types' : `All ${categoryFilter} types`}</option>
+                {categoryFilter === 'all' ? (
+                  <>
+                    <optgroup label="Residential">
+                      {RESIDENTIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                    </optgroup>
+                    <optgroup label="Commercial">
+                      {COMMERCIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                    </optgroup>
+                    <optgroup label="Industrial">
+                      {INDUSTRIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                    </optgroup>
+                  </>
+                ) : (
+                  (categoryFilter === 'residential' ? RESIDENTIAL_UNIT_TYPES
+                    : categoryFilter === 'commercial' ? COMMERCIAL_UNIT_TYPES
+                    : INDUSTRIAL_UNIT_TYPES
+                  ).map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)
+                )}
               </select>
             </div>
 
@@ -942,6 +990,7 @@ export default function PortfolioPage() {
             isStandaloneUnit:    propertyModal.editing.isStandaloneUnit,
             numberOfFloors:      propertyModal.editing.numberOfFloors ?? '',
           } : undefined}
+          propertyId={propertyModal.editing?.id}
           onClose={() => setPropertyModal({ open: false })}
           onSave={handleSaveProperty}
         />
@@ -960,6 +1009,7 @@ export default function PortfolioPage() {
             bedrooms:         unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : 'Studio',
             bathrooms:        unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
             unitSizeSqft:     unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
+            unitSizeSqm:      unitModal.editingUnit.unitSizeSqm != null ? String(unitModal.editingUnit.unitSizeSqm) : '',
             view:             unitModal.editingUnit.view ?? '',
             furnishing:       unitModal.editingUnit.furnishing ?? 'Unfurnished',
             amenities:        amenitiesFromUnit(unitModal.editingUnit),

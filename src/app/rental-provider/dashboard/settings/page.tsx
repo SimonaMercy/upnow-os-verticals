@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Settings, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock } from 'lucide-react';
-import { TeamPanel } from '@/components/dashboard/rp/TeamPanel';
+import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck } from 'lucide-react';
+import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
+import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 
 /* ─────────────────────────────────────────────────────────────
    General settings types
@@ -455,7 +456,27 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'team';
+type MainTab = 'general' | 'fee_rules' | 'team' | 'notifications';
+
+// POA document keys — surfaced inline in the POA card and excluded from the
+// general KYC Documents card so they aren't shown twice.
+const POA_DOC_KEYS = ['poa_document', 'poa_holder_emirates_id', 'poa_holder_passport', 'poa_holder_visa'];
+
+// Default permissions pre-selected when inviting a POA holder as a manager.
+// The landlord can edit every flag inline before sending.
+const POA_INVITE_DEFAULTS: Record<string, boolean> = {
+  ...metaDefaults,
+  can_act_as_poa: true,
+  can_sign_documents: true,
+  can_manage_documents: true,
+  can_manage_agreements: true,
+};
+
+type BankAccount = { id: string; accountName: string; bankName: string; iban: string; accountNumber: string };
+const newBankAccount = (): BankAccount => ({
+  id: (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `bank_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+  accountName: '', bankName: '', iban: '', accountNumber: '',
+});
 
 const EMIRATES_LIST = ['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','Fujairah','Umm Al Quwain'] as const;
 
@@ -486,16 +507,28 @@ export default function SettingsPage() {
   const [savingBiz, setSavingBiz]           = useState(false);
   const [bizSaved, setBizSaved]             = useState(false);
   const [bizError, setBizError]             = useState<string | null>(null);
+  // Bumped after a successful profile save so the KYC documents panel re-fetches
+  // its checklist — picks up POA documents the moment "POA assigned" is saved.
+  const [docsReloadKey, setDocsReloadKey]   = useState(0);
   // Additional landlord-profile fields (merged from the standalone Profile page)
   const [authorizedSignatoryName, setAuthorizedSignatoryName] = useState('');
-  const [passportNumber, setPassportNumber] = useState('');
   const [legalNoticesAddress, setLegalNoticesAddress] = useState('');
   const [hasPoa, setHasPoa]                 = useState(false);
   const [poaPersonPhone, setPoaPersonPhone] = useState('');
   const [poaPersonEmail, setPoaPersonEmail] = useState('');
-  const [bankAccountName, setBankAccountName] = useState('');
-  const [bankIban, setBankIban]             = useState('');
-  const [bankName, setBankName]             = useState('');
+  // Authorized Signatory & POA — own card, own save
+  const [savingPoa, setSavingPoa]           = useState(false);
+  const [poaSaved, setPoaSaved]             = useState(false);
+  const [poaError, setPoaError]             = useState<string | null>(null);
+  const [poaInviteOpen, setPoaInviteOpen]   = useState(false);
+  const [sendingPoaInvite, setSendingPoaInvite] = useState(false);
+  const [poaPerms, setPoaPerms]             = useState<Record<string, boolean>>(POA_INVITE_DEFAULTS);
+  const [inviteMsg, setInviteMsg]           = useState<string | null>(null);
+  // Banking — own card, own save, supports multiple accounts
+  const [bankAccounts, setBankAccounts]     = useState<BankAccount[]>([]);
+  const [savingBank, setSavingBank]         = useState(false);
+  const [bankSaved, setBankSaved]           = useState(false);
+  const [bankError, setBankError]           = useState<string | null>(null);
 
   // ── Contract date config ─────────────────────────────────────
   const [preferredDays,    setPreferredDays]    = useState<number[]>([]);
@@ -560,14 +593,24 @@ export default function SettingsPage() {
         if (ct) setCompanyType(ct);
         if (p.parentBrokerageName) setParentBrokerageName(p.parentBrokerageName as string);
         setAuthorizedSignatoryName((p.authorizedSignatoryName as string) ?? '');
-        setPassportNumber((p.passportNumber as string) ?? '');
         setLegalNoticesAddress((p.legalNoticesAddress as string) ?? '');
         setHasPoa(Boolean(p.hasPoa));
         setPoaPersonPhone((p.poaPersonPhone as string) ?? '');
         setPoaPersonEmail((p.poaPersonEmail as string) ?? '');
-        setBankAccountName((p.bankAccountName as string) ?? '');
-        setBankIban((p.bankIban as string) ?? '');
-        setBankName((p.bankName as string) ?? '');
+        // Banking — backend returns bankAccounts (synthesised from legacy single
+        // columns when needed). Fall back to an empty starter row if none.
+        const accts = Array.isArray(p.bankAccounts) ? (p.bankAccounts as Array<Record<string, unknown>>) : [];
+        setBankAccounts(
+          accts.length
+            ? accts.map(a => ({
+                id: (a.id as string) || newBankAccount().id,
+                accountName: (a.accountName as string) ?? '',
+                bankName: (a.bankName as string) ?? '',
+                iban: (a.iban as string) ?? '',
+                accountNumber: (a.accountNumber as string) ?? '',
+              }))
+            : [],
+        );
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
@@ -656,17 +699,10 @@ export default function SettingsPage() {
         payload.emiratesIdNumber = emiratesId || null;
         payload.nationality = nationality || null;
       }
-      // Additional landlord-profile fields (shared across entity types)
-      payload.authorizedSignatoryName = authorizedSignatoryName || null;
-      payload.passportNumber = passportNumber || null;
+      // Legal notices address stays on the profile form.
       payload.legalNoticesAddress = legalNoticesAddress || null;
-      payload.hasPoa = hasPoa;
-      payload.poaPersonName = authorizedSignatoryName || null;
-      payload.poaPersonPhone = hasPoa ? (poaPersonPhone || null) : null;
-      payload.poaPersonEmail = hasPoa ? (poaPersonEmail || null) : null;
-      payload.bankAccountName = bankAccountName || null;
-      payload.bankIban = bankIban || null;
-      payload.bankName = bankName || null;
+      // Authorized Signatory & POA are saved from their own card (handleSavePoa).
+      // Banking is saved from its own card (handleSaveBank) — not here.
       const res = await fetch('/api/profiles/rental-provider/me', {
         method: 'PATCH',
         credentials: 'include',
@@ -694,10 +730,129 @@ export default function SettingsPage() {
       // Re-fetch auth session so sidebar + header reflect any name changes
       await refresh();
       setBizSaved(true);
+      // Refresh the documents checklist so a POA toggle change is reflected
+      setDocsReloadKey(k => k + 1);
     } catch {
       setBizError('Failed to save. Please try again.');
     } finally {
       setSavingBiz(false);
+    }
+  };
+
+  const handleSaveBank = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingBank(true);
+    setBankError(null);
+    setBankSaved(false);
+    try {
+      // Drop fully-empty rows so a blank starter doesn't get persisted.
+      const clean = bankAccounts
+        .map(b => ({
+          id: b.id,
+          accountName: b.accountName.trim(),
+          bankName: b.bankName.trim(),
+          iban: b.iban.trim(),
+          accountNumber: b.accountNumber.trim() || undefined,
+        }))
+        .filter(b => b.accountName || b.bankName || b.iban);
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bankAccounts: clean }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setBankSaved(true);
+    } catch {
+      setBankError('Failed to save. Please try again.');
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  const handleSavePoa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingPoa(true);
+    setPoaError(null);
+    setPoaSaved(false);
+    try {
+      const payload: Record<string, unknown> = {
+        hasPoa,
+        authorizedSignatoryName: authorizedSignatoryName || null,
+        poaPersonName: authorizedSignatoryName || null,
+        poaPersonPhone: hasPoa ? (poaPersonPhone || null) : null,
+        poaPersonEmail: hasPoa ? (poaPersonEmail || null) : null,
+      };
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setPoaSaved(true);
+      // Refresh the inline POA documents (they're server-gated on hasPoa).
+      setDocsReloadKey(k => k + 1);
+    } catch {
+      setPoaError('Failed to save. Please try again.');
+    } finally {
+      setSavingPoa(false);
+    }
+  };
+
+  // Toggling POA persists the flag immediately so the documents checklist
+  // (which the backend gates on hasPoa) populates right away — no need to hit
+  // "Save" first just to see the required documents.
+  const toggleHasPoa = async (v: boolean) => {
+    setHasPoa(v);
+    setPoaSaved(false);
+    setInviteMsg(null);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hasPoa: v }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      // Refresh the inline documents panel now that the server knows hasPoa.
+      setDocsReloadKey(k => k + 1);
+    } catch {
+      setPoaError('Could not update the Power of Attorney setting. Please try again.');
+    }
+  };
+
+  // Send the POA-holder manager invite with whatever permissions the landlord
+  // selected in the inline editor. Reuses the name / phone / email above.
+  const handleSendPoaInvite = async () => {
+    const email = poaPersonEmail.trim();
+    if (!email) { setInviteMsg('Enter the POA holder’s email above first.'); return; }
+    if (!Object.values(poaPerms).some(Boolean)) { setInviteMsg('Select at least one permission.'); return; }
+    setSendingPoaInvite(true);
+    setInviteMsg(null);
+    try {
+      const full = (authorizedSignatoryName.trim() || email.split('@')[0]).trim();
+      const [firstName, ...rest] = full.split(/\s+/).filter(Boolean);
+      const res = await fetch('/api/invitations', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          firstName: firstName || 'POA',
+          lastName: rest.join(' ') || undefined,
+          phone: poaPersonPhone.trim() || undefined,
+          role: 'manager',
+          metadata: poaPerms,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setInviteMsg('Invitation sent. Once they accept, their Emirates ID, Passport & Visa appear here and on their own account — shared.');
+      setPoaInviteOpen(false);
+    } catch {
+      setInviteMsg('Could not send the invitation. Please try again.');
+    } finally {
+      setSendingPoaInvite(false);
     }
   };
 
@@ -795,7 +950,7 @@ export default function SettingsPage() {
             mainTab === 'general' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
           }`}
         >
-          <Settings size={14} /> General
+          <User size={14} /> Profile
         </button>
         <button
           onClick={() => setMainTab('fee_rules')}
@@ -813,10 +968,37 @@ export default function SettingsPage() {
         >
           <Users size={14} /> Team
         </button>
+        <button
+          onClick={() => setMainTab('notifications')}
+          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+            mainTab === 'notifications' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+          }`}
+        >
+          <Bell size={14} /> Notifications
+        </button>
       </div>
 
       {/* ── Team tab ───────────────────────────────────────────── */}
       {mainTab === 'team' && <TeamPanel />}
+
+      {/* ── Notifications tab ──────────────────────────────────── */}
+      {mainTab === 'notifications' && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <h2 className="font-semibold text-base text-[#1a1916] mb-1">Notification Preferences</h2>
+          <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about.</p>
+          <div className="space-y-4">
+            {NOTIF_KEYS.map(key => (
+              <div key={key} className="flex items-center justify-between py-1">
+                <div>
+                  <p className="text-sm font-medium text-[#1a1916]">{NOTIF_LABELS[key].title}</p>
+                  <p className="text-xs text-[#9b9890]">{NOTIF_LABELS[key].description}</p>
+                </div>
+                <Toggle value={notifs[key]} onChange={v => setNotifs(prev => ({ ...prev, [key]: v }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── General tab ────────────────────────────────────────── */}
       {mainTab === 'general' && (
@@ -1060,54 +1242,11 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Authorized signatory, POA & banking — merged from the standalone Profile page */}
-              <div className="mt-6 pt-5 border-t border-[#eef0ec] space-y-4">
-                <h3 className="text-sm font-semibold text-[#1a1916]">Authorized Signatory &amp; Power of Attorney</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Authorized Signatory Name</label>
-                    <input value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Person who signs on your behalf" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Passport No.</label>
-                    <input value={passportNumber} onChange={e => { setPassportNumber(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="e.g. A12345678" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Legal Notices Address</label>
-                  <input value={legalNoticesAddress} onChange={e => { setLegalNoticesAddress(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Address where legal correspondence should be sent" />
-                </div>
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input type="checkbox" checked={hasPoa} onChange={e => { setHasPoa(e.target.checked); setBizSaved(false); }} className="w-4 h-4 accent-[#2e9f82]" />
-                  <span className="text-sm text-[#3d3b35]">A Power of Attorney holder acts on my behalf</span>
-                </label>
-                {hasPoa && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Phone</label>
-                      <input value={poaPersonPhone} onChange={e => { setPoaPersonPhone(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="+971 50 123 4567" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Email</label>
-                      <input value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="signatory@example.com" />
-                    </div>
-                  </div>
-                )}
-                <h3 className="text-sm font-semibold text-[#1a1916] pt-2">Banking Details</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Account Holder Name</label>
-                    <input value={bankAccountName} onChange={e => { setBankAccountName(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Name on bank account" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Bank Name</label>
-                    <input value={bankName} onChange={e => { setBankName(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="e.g. Emirates NBD" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6b6860] block mb-1">IBAN</label>
-                  <input value={bankIban} onChange={e => { setBankIban(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="AE07 0331 2345 6789 0123 456" />
-                </div>
+              {/* Legal Notices Address — general profile field (Authorized
+                  Signatory & POA now live in their own card below). */}
+              <div className="mt-6 pt-5 border-t border-[#eef0ec]">
+                <label className="text-xs font-medium text-[#6b6860] block mb-1">Legal Notices Address</label>
+                <input value={legalNoticesAddress} onChange={e => { setLegalNoticesAddress(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Address where legal correspondence should be sent" />
               </div>
 
               <div className="flex items-center gap-3 mt-5 flex-wrap">
@@ -1121,39 +1260,191 @@ export default function SettingsPage() {
             </div>}
           </form>
 
-          {/* Notification Preferences */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-semibold text-base text-[#1a1916] mb-4">Notification Preferences</h2>
-            <div className="space-y-4">
-              {NOTIF_KEYS.map(key => (
-                <div key={key} className="flex items-center justify-between py-1">
-                  <div>
-                    <p className="text-sm font-medium text-[#1a1916]">{NOTIF_LABELS[key].title}</p>
-                    <p className="text-xs text-[#9b9890]">{NOTIF_LABELS[key].description}</p>
-                  </div>
-                  <Toggle value={notifs[key]} onChange={v => setNotifs(prev => ({ ...prev, [key]: v }))} />
-                </div>
-              ))}
+          {/* Authorized Signatory & Power of Attorney — its own card, saved
+              independently. When a POA holder acts on the landlord's behalf, the
+              required POA documents can be attached right here. */}
+          <form onSubmit={handleSavePoa} className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
+                <FileText size={18} className="text-[#166651]" />
+              </div>
+              <div className="flex-1">
+                <h2 className="font-semibold text-base text-[#1a1916]">Authorized Signatory &amp; Power of Attorney</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">Record who signs on your behalf and attach their Power of Attorney documents.</p>
+              </div>
             </div>
+
+            {/* Switch */}
+            <div className="flex items-center justify-between gap-3 py-2.5 px-3.5 rounded-xl border border-[#e8e6e0] bg-[#fbfbf8]">
+              <p className="text-sm font-medium text-[#3d3b35]">A Power of Attorney holder acts on my behalf</p>
+              <Toggle value={hasPoa} onChange={toggleHasPoa} />
+            </div>
+
+            {hasPoa && (
+              <div className="space-y-4 mt-4 pl-3.5 border-l-2 border-[#e7f5f0]">
+                <div>
+                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Authorized Signatory Name</label>
+                  <input value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Person who signs on your behalf" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Phone</label>
+                    <input value={poaPersonPhone} onChange={e => { setPoaPersonPhone(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="+971 50 123 4567" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Email</label>
+                    <input value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="signatory@example.com" />
+                  </div>
+                </div>
+
+                {/* Invite the holder to act on the landlord's behalf inside the app */}
+                <div className="p-4 rounded-xl border border-[#dbeee6] bg-[#f4fbf8]">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <Users size={18} className="text-[#166651] mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#1a1916]">Let them act on your behalf</p>
+                        <p className="text-xs text-[#6b6860] mt-0.5">Invite as a manager — a popup lets you review and edit their permissions (POA pre-selected) before sending. Their ID documents stay shared.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setInviteMsg(null); setPoaInviteOpen(true); }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer flex-shrink-0"
+                      style={{ background: '#2e9f82' }}
+                    >
+                      <Send size={14} /> Invite as manager
+                    </button>
+                  </div>
+                  {inviteMsg && <p className="text-xs text-[#166651] mt-2">{inviteMsg}</p>}
+                </div>
+
+                {/* POA documents — attached directly here */}
+                <div className="pt-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#9b9890] mb-2">Required Documents</p>
+                  <KycDocumentsPanel
+                    key={`poa-${docsReloadKey}`}
+                    profileApiPath="/profiles/rental-provider/me"
+                    ownerType="rental_provider"
+                    compact
+                    onlyKeys={POA_DOC_KEYS}
+                  />
+                  <p className="text-[11px] text-[#9b9890] mt-2">The holder’s Emirates ID, Passport &amp; Visa are shared with their manager account once they’re invited and linked.</p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 mt-5 flex-wrap">
+              {poaError && <p className="text-xs text-red-600 flex-1">{poaError}</p>}
+              {poaSaved && !savingPoa && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+              <SaveButton saving={savingPoa} label="Save Signatory & POA" />
+            </div>
+          </form>
+
+          {/* Banking Details — its own card; a landlord may hold multiple
+              accounts. Saved independently of the profile form. */}
+          <form onSubmit={handleSaveBank} className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
+                <CreditCard size={18} className="text-[#166651]" />
+              </div>
+              <div className="flex-1">
+                <h2 className="font-semibold text-base text-[#1a1916]">Banking Details</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">Accounts you collect rent into. You can add more than one — the first is treated as your primary account.</p>
+              </div>
+            </div>
+
+            {bankAccounts.length === 0 && (
+              <p className="text-sm text-[#9b9890] py-3">No bank accounts added yet.</p>
+            )}
+
+            <div className="space-y-3">
+              {bankAccounts.map((acct, i) => {
+                const update = (patch: Partial<BankAccount>) => {
+                  setBankAccounts(prev => prev.map(b => b.id === acct.id ? { ...b, ...patch } : b));
+                  setBankSaved(false);
+                };
+                return (
+                  <div key={acct.id} className="rounded-xl border border-[#e8e6e0] p-4 relative">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#166651]">
+                        Account {i + 1}
+                        {i === 0 && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-[#e7f5f0] text-[#1f7e66]">Primary</span>}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setBankAccounts(prev => prev.filter(b => b.id !== acct.id)); setBankSaved(false); }}
+                        className="text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"
+                        aria-label="Remove account"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-[#6b6860] block mb-1">Account Holder Name</label>
+                        <input value={acct.accountName} onChange={e => update({ accountName: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Name on bank account" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-[#6b6860] block mb-1">Bank Name</label>
+                        <input value={acct.bankName} onChange={e => update({ bankName: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="e.g. Emirates NBD" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-[#6b6860] block mb-1">IBAN</label>
+                        <input value={acct.iban} onChange={e => update({ iban: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="AE07 0331 2345 6789 0123 456" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-[#6b6860] block mb-1">Account No. <span className="text-[#c9c7c1]">(optional)</span></label>
+                        <input value={acct.accountNumber} onChange={e => update({ accountNumber: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="1234567890" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setBankAccounts(prev => [...prev, newBankAccount()]); setBankSaved(false); }}
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[#2e9f82] cursor-pointer hover:underline"
+            >
+              <Plus size={15} /> Add bank account
+            </button>
+
+            <div className="flex items-center gap-3 mt-5 flex-wrap">
+              {bankError && <p className="text-xs text-red-600 flex-1">{bankError}</p>}
+              {bankSaved && !savingBank && <p className="text-xs text-[#2e9f82] flex-1">Banking details saved.</p>}
+              <SaveButton saving={savingBank} label="Save Banking Details" />
+            </div>
+          </form>
+
+          {/* KYC Documents — landlord / rental-provider identity, licensing,
+              banking and (when assigned) Power of Attorney documents. Reuses the
+              shared KycDocumentsPanel which drives the presigned-S3 upload flow.
+              Remounts via docsReloadKey after a profile save so a POA toggle is
+              picked up immediately. */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
+                <ShieldCheck size={18} className="text-[#166651]" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-base text-[#1a1916]">KYC Documents</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">
+                  Upload your identity and licensing documents for verification.
+                  {hasPoa && ' Power of Attorney documents are attached in the Authorized Signatory & POA section above.'}
+                </p>
+              </div>
+            </div>
+            <KycDocumentsPanel
+              key={docsReloadKey}
+              profileApiPath="/profiles/rental-provider/me"
+              ownerType="rental_provider"
+              compact
+              excludeKeys={POA_DOC_KEYS}
+            />
           </div>
 
-          {/* Team Management — now a dedicated tab */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-base text-[#1a1916]">Team Management</h2>
-              <button
-                onClick={() => setMainTab('team')}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-white cursor-pointer"
-                style={{ background: '#2e9f82' }}
-              >
-                <Users size={13} /> Manage Team
-              </button>
-            </div>
-            <p className="text-sm text-[#6b6860]">
-              Invite managers and team members and set their permissions in the{' '}
-              <button type="button" onClick={() => setMainTab('team')} className="text-[#2e9f82] underline cursor-pointer">Team tab</button>.
-            </p>
-          </div>
         </div>
       )}
 
@@ -1451,6 +1742,77 @@ export default function SettingsPage() {
                 saved={feesSaved}
                 error={feesError}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POA holder invite popup — editable permissions */}
+      {poaInviteOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/40" onClick={() => setPoaInviteOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#eef0ec]">
+              <h3 className="font-semibold text-base text-[#1a1916]">Invite to act as manager</h3>
+              <button type="button" onClick={() => setPoaInviteOpen(false)} aria-label="Close" className="text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 max-h-[68vh] overflow-y-auto">
+              {/* Recipient */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                <div>
+                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Name</label>
+                  <input value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Person who signs on your behalf" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Email</label>
+                  <input value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="signatory@example.com" />
+                </div>
+              </div>
+
+              {/* Permissions */}
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-semibold text-[#1a1916]">Permissions</p>
+                <button type="button" onClick={() => setPoaPerms({ ...POA_INVITE_DEFAULTS })} className="text-[11px] text-[#2e9f82] underline cursor-pointer hover:text-[#1f7e66]">
+                  Reset to POA defaults
+                </button>
+              </div>
+              <div className="space-y-4">
+                {PERM_GROUPS.map(group => (
+                  <div key={group.label}>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">{group.label}</p>
+                    <div className="space-y-2">
+                      {group.perms.map(perm => (
+                        <div key={perm.key} className="flex items-center justify-between gap-3">
+                          <span className="text-[13px] text-[#3d3b35]">{perm.label}</span>
+                          <Toggle value={!!poaPerms[perm.meta]} onChange={v => setPoaPerms(p => ({ ...p, [perm.meta]: v }))} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#eef0ec]">
+              {inviteMsg && <p className="text-xs text-red-600 mr-auto">{inviteMsg}</p>}
+              {!Object.values(poaPerms).some(Boolean) && <p className="text-[11px] text-[#9b9890] mr-auto">Select at least one permission.</p>}
+              <button type="button" onClick={() => setPoaInviteOpen(false)} className="px-4 py-2 rounded-lg text-sm font-medium border border-[#e8e6e0] text-[#3d3b35] cursor-pointer hover:bg-[#f4f3ef]">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendPoaInvite}
+                disabled={sendingPoaInvite || !poaPersonEmail.trim() || !Object.values(poaPerms).some(Boolean)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: '#2e9f82' }}
+              >
+                {sendingPoaInvite ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {sendingPoaInvite ? 'Sending…' : 'Send invitation'}
+              </button>
             </div>
           </div>
         </div>
