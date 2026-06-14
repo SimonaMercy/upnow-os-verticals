@@ -24,6 +24,7 @@ import {
   LayoutGrid, Rows3, Search,
 } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
+import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
 
 interface Plan {
   displayName: string;
@@ -43,11 +44,27 @@ interface Plan {
   // representative financial details for the layout (editable plan-wide)
   securityDeposit: number | null; adminFee: number | null; ejariFee: number | null;
   commission: number | null; serviceCharges: number | null;
+  // current plan-wide lease terms (from the units' facilities JSON)
+  leaseTerms: LeaseTerms | null;
+  // latest Agreement addendum version for the layout (file-based)
+  termsVersion: {
+    id: number; versionNo: number; effectiveAt: string; versionsCount: number;
+    addendumUrl: string | null; addendumFileName: string | null;
+  } | null;
   unpricedCount: number;
   unitCount: number;
   sampleUnitId: number;
   floorPlanUrl: string | null;
   flags: string[];
+}
+interface LeaseTerms {
+  minLeaseMonths?: number; noticePeriodDays?: number; rentEscalationPct?: number;
+  rentalType?: string; numberOfPayments?: number; advancePayment?: number;
+  gracePeriodDays?: number; latePaymentFee?: number;
+}
+interface TermsVersion {
+  id: number; versionNo: number; effectiveAt: string; contractsCount: number;
+  addendumUrl: string | null; addendumFileName: string | null;
 }
 interface PropOpt { id: number; buildingName: string }
 interface FeeRuleLite { feeType: string; valueType: string; value: number; isActive: boolean }
@@ -122,6 +139,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [data, setData] = useState<Resp | null>(null);
   const [propertyId, setPropertyId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState('all');
+  // Plan/layout selector — 'all' or a planKey (propertyId::planLabel). Lets the
+  // RP target one specific layout so it's clear which plan they're editing.
+  const [planFilter, setPlanFilter] = useState('all');
   const [sort, setSort] = useState('default');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'grid' | 'row'>('row');
@@ -157,7 +177,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   useEffect(() => { load(); }, [load]);
 
   const reload = () => load(propertyId);
-  const onProperty = (v: string) => { setTypeFilter('all'); load(v === 'all' ? null : Number(v), 'all'); };
+  const onProperty = (v: string) => { setTypeFilter('all'); setPlanFilter('all'); load(v === 'all' ? null : Number(v), 'all'); };
+  // Changing the unit-type scope can hide the selected plan, so reset it.
+  const onType = (v: string) => { setTypeFilter(v); setPlanFilter('all'); };
 
   const pickImage = (p: Plan) => { targetPlan.current = { planLabel: p.planLabel, propertyId: p.propertyId }; fileRef.current?.click(); };
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,8 +213,22 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const k = p.unitType ?? 'other'; m[k] = (m[k] ?? 0) + p.unitCount; return m;
   }, {})).sort((a, b) => b[1] - a[1]).map(([t]) => t);
 
+  // Plan selector options — scoped to the current unit-type filter. The label
+  // spells out the exact layout (Plan · beds · size, + building in "all" mode)
+  // so the RP knows precisely which plan they're about to edit.
+  const planMatchesType = (p: Plan) => typeFilter === 'all' || (p.unitType ?? 'other') === typeFilter;
+  const typePlans = allPlans.filter(planMatchesType);
+  const planOptions = [
+    { value: 'all', label: 'All plans' },
+    ...typePlans.map(p => ({
+      value: planKey(p),
+      label: `${propertyId == null ? `${p.buildingName.trim()} — ` : ''}${p.displayName} · ${bedLabel(p.bedrooms)} · ${sizeLabel(p.sqftMin, p.sqftMax)} sqft`,
+    })),
+  ];
+
   const filtered = allPlans.filter(p => {
-    if (typeFilter !== 'all' && (p.unitType ?? 'other') !== typeFilter) return false;
+    if (!planMatchesType(p)) return false;
+    if (planFilter !== 'all' && planKey(p) !== planFilter) return false;
     if (q && ![p.displayName, p.planLabel, bedLabel(p.bedrooms), p.buildingName]
       .some(s => s != null && s.toLowerCase().includes(q))) return false;
     return true;
@@ -426,8 +462,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           )}
 
           {typeOptions.length > 1 && (
-            <Select label="Unit type" value={typeFilter} onChange={setTypeFilter}
+            <Select label="Unit type" value={typeFilter} onChange={onType}
               options={[{ value: 'all', label: 'All types' }, ...typeOptions.map(t => ({ value: t, label: typeLabel(t === 'other' ? null : t) }))]} />
+          )}
+
+          {typePlans.length > 1 && (
+            <Select label="Plan" value={planFilter} onChange={setPlanFilter} options={planOptions} />
           )}
 
           {/* Sort + view toggle, pinned right */}
@@ -590,12 +630,40 @@ function Select({ label, value, onChange, options }: {
 // AND the deposit/fees/service charges, written to every unit on the layout
 // (the "plan → all units" model).
 const FIN_FIELDS = [
-  { key: 'securityDeposit', label: 'Security deposit' },
-  { key: 'adminFee',        label: 'Admin fee' },
-  { key: 'ejariFee',        label: 'Ejari fee' },
+  { key: 'securityDeposit', label: 'Security Deposit' },
+  { key: 'adminFee',        label: 'Admin Fee' },
+  { key: 'ejariFee',        label: 'Ejari Fee' },
   { key: 'commission',      label: 'Commission' },
-  { key: 'serviceCharges',  label: 'Service charges' },
+  { key: 'serviceCharges',  label: 'Service Charges (AED/yr)' },
 ] as const;
+
+// Lease terms + leasing configuration — also plan-wide, written to every unit's
+// facilities JSON. Labels mirror the per-unit form (UnitFormModal) verbatim so
+// the two editors look identical.
+const LEASE_TERM_FIELDS = [
+  { key: 'minLeaseMonths',    label: 'Min. Lease (months)',    placeholder: '12', step: '1',   max: undefined as number | undefined },
+  { key: 'noticePeriodDays',  label: 'Notice Period (days)',   placeholder: '60', step: '1',   max: undefined },
+  { key: 'rentEscalationPct', label: 'Rent Escalation (%/yr)', placeholder: 'e.g. 5', step: '0.5', max: 100 },
+] as const;
+const LEASE_CONFIG_FIELDS = [
+  { key: 'numberOfPayments', label: 'Number of Payments', placeholder: 'e.g. 4 cheques', step: '1',   max: undefined as number | undefined },
+  { key: 'advancePayment',   label: 'Advance Payment (AED)', placeholder: 'e.g. 5000',  step: 'any', max: undefined },
+  { key: 'gracePeriodDays',  label: 'Grace Period (days)',   placeholder: 'e.g. 7',     step: '1',   max: undefined },
+  { key: 'latePaymentFee',   label: 'Late Payment Fee (AED)', placeholder: 'e.g. 500',  step: 'any', max: undefined },
+] as const;
+// Every numeric lease key the editor manages (validation + save).
+const LEASE_NUM_KEYS = [...LEASE_TERM_FIELDS, ...LEASE_CONFIG_FIELDS] as readonly { key: string; label: string }[];
+const RENTAL_TYPES = [
+  { id: 'daily', label: 'Daily' }, { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' }, { id: 'quarterly', label: 'Quarterly' },
+  { id: 'yearly', label: 'Yearly' }, { id: 'custom', label: 'Custom' },
+];
+const fmtDate = (s?: string | null) =>
+  s ? new Date(s).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+// Shared form styling — matches UnitFormModal so both unit editors look the same.
+const FORM_INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+const FORM_LABEL = 'block text-xs font-medium text-[#3d3b35] mb-1';
 
 function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
   plan: Plan; manager?: { rp: number }; rpQ: string;
@@ -628,6 +696,53 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
   const [overridden, setOverridden] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Lease terms + leasing configuration (plan-wide), seeded from current values.
+  const lt = plan.leaseTerms ?? {};
+  const [lease, setLease] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const f of LEASE_NUM_KEYS) {
+      const v = (lt as Record<string, number | undefined>)[f.key];
+      seed[f.key] = v != null ? String(v) : '';
+    }
+    return seed;
+  });
+  const [rentalType, setRentalType] = useState<string>(lt.rentalType || 'yearly');
+  // Agreement addendum — a staged .docx to upload (mints a new version on save),
+  // plus the version timeline.
+  const [addendumFile, setAddendumFile] = useState<File | null>(null);
+  const [addendumErr, setAddendumErr] = useState<string | null>(null);
+  const [addendumChecking, setAddendumChecking] = useState(false);
+  const addendumInputRef = useRef<HTMLInputElement>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [versions, setVersions] = useState<TermsVersion[] | null>(null);
+  const [verLoading, setVerLoading] = useState(false);
+
+  const onAddendumPick = async (f: File | undefined) => {
+    if (!f) return;
+    setAddendumErr(null); setAddendumChecking(true);
+    try {
+      const res = await validateAddendumFile(f);
+      if (res.ok) setAddendumFile(f);
+      else setAddendumErr(res.error ?? 'Invalid addendum file.');
+    } finally { setAddendumChecking(false); }
+  };
+
+  const toggleHistory = async () => {
+    if (showHistory) { setShowHistory(false); return; }
+    setShowHistory(true);
+    if (versions || verLoading) return;
+    setVerLoading(true);
+    try {
+      const qs = new URLSearchParams({ propertyId: String(plan.propertyId), planLabel: plan.planLabel });
+      const url = manager
+        ? `/manager/units/terms-versions?${[rpQ, qs.toString()].filter(Boolean).join('&')}`
+        : `/properties/floor-plans/terms-versions?${qs.toString()}`;
+      const r = await apiGet<{ versions: TermsVersion[] }>(url);
+      setVersions(r.versions ?? []);
+    } catch { setVersions([]); }
+    finally { setVerLoading(false); }
+  };
 
   // When the rent changes, re-default the rule-driven fees the user hasn't touched.
   const onRentChange = (raw: string) => {
@@ -676,6 +791,19 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
       if (!Number.isFinite(price) || price < 0) { setErr('Enter a valid annual rent'); return; }
     }
 
+    // Lease terms + leasing config + Special Conditions — the editor is the
+    // source of truth, so the whole set is submitted; a blank numeric clears
+    // that term on the layout. The backend versions the Special Conditions.
+    const leaseBody: Record<string, unknown> = { propertyId: plan.propertyId, planLabel: plan.planLabel };
+    for (const f of LEASE_NUM_KEYS) {
+      const s = (lease[f.key] ?? '').trim();
+      if (s === '') continue;
+      const n = Number(s);
+      if (!Number.isFinite(n) || n < 0) { setErr(`Enter a valid ${f.label.toLowerCase()}`); return; }
+      leaseBody[f.key] = n;
+    }
+    if (rentalType) leaseBody.rentalType = rentalType;
+
     setSaving(true); setErr(null);
     try {
       if (price != null) {
@@ -683,6 +811,17 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
           { propertyId: plan.propertyId, planLabel: plan.planLabel, rentalPrice: price });
       }
       await apiPatch(manager ? `/manager/units/financials?${rpQ}` : '/properties/floor-plans/financials', finBody);
+      await apiPatch(manager ? `/manager/units/lease-terms?${rpQ}` : '/properties/floor-plans/lease-terms', leaseBody);
+      // A staged addendum mints a new version (multipart, like the floor-plan image).
+      if (addendumFile) {
+        const fd = new FormData();
+        fd.append('file', addendumFile);
+        fd.append('propertyId', String(plan.propertyId));
+        fd.append('planLabel', plan.planLabel);
+        const r = await fetch(manager ? `/api/manager/units/addendum?${rpQ}` : '/api/properties/floor-plans/addendum',
+          { method: 'POST', credentials: 'include', body: fd });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j as { message?: string }).message ?? 'Addendum upload failed'); }
+      }
       onSaved();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not save');
@@ -692,55 +831,164 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,19,18,0.55)' }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white overflow-hidden" onClick={e => e.stopPropagation()}
+      <div className="w-full max-w-2xl rounded-2xl bg-white overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}
         style={{ boxShadow: '0 20px 60px -10px rgba(0,0,0,0.3)' }}>
         <div className="px-5 py-4 border-b" style={{ borderColor: '#efece6' }}>
-          <h3 className="font-semibold text-base" style={{ color: 'var(--neutral-900,#1a1916)' }}>Pricing &amp; financial details</h3>
+          <h3 className="font-semibold text-base" style={{ color: 'var(--neutral-900,#1a1916)' }}>
+            {plan.buildingName} · {plan.displayName}
+          </h3>
           <p className="text-xs mt-0.5" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-            {plan.buildingName} · {bedLabel(plan.bedrooms)} · applies to all {plan.unitCount} unit{plan.unitCount === 1 ? '' : 's'} on this layout
+            {bedLabel(plan.bedrooms)} · {sizeLabel(plan.sqftMin, plan.sqftMax)} sqft · applies to all {plan.unitCount} unit{plan.unitCount === 1 ? '' : 's'} on this layout
           </p>
         </div>
-        <div className="p-5 space-y-4">
-          {/* Annual rent — the single price */}
+        <div className="p-5 space-y-4 overflow-y-auto">
+          {/* Annual rent — the single price (drives the fee auto-defaults). */}
           <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--neutral-600,#57544d)' }}>Annual Rent (AED) <span style={{ color: '#6b6860' }}>· per year</span></label>
-            <input type="number" min={0} step="any" autoFocus value={vals.rentalPrice}
+            <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED)</label>
+            <input type="number" min={0} step="any" autoFocus placeholder="e.g. 85000" value={vals.rentalPrice}
               onChange={e => onRentChange(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') save(); }}
-              className="w-full border rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none"
-              style={{ borderColor: 'var(--primary,#2e9f82)', color: 'var(--neutral-900,#1a1916)' }} />
+              className={FORM_INPUT} />
           </div>
 
-          <div className="border-t pt-4" style={{ borderColor: '#efece6' }}>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--neutral-500,#6b6860)' }}>Financial details</p>
-              <button type="button" onClick={resetToRules} className="text-[11px] font-semibold underline" style={{ color: 'var(--primary,#2e9f82)' }}>
+          {/* Financial Details */}
+          <div className="rounded-xl border border-[#a7f3d0] bg-[#f0fdf8] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a7a5a]">Financial Details</p>
+              <button type="button" onClick={resetToRules} className="text-[10px] font-semibold text-[#1a7a5a] underline">
                 Reset to fee rules
               </button>
             </div>
-            <p className="text-[11px] mb-2.5" style={{ color: 'var(--neutral-400,#9b9890)' }}>
-              Defaulted from your Fee Rules off the annual rent — override if this layout differs.
-            </p>
             <div className="grid grid-cols-2 gap-3">
               {FIN_FIELDS.map(f => {
                 const ruled = RULE_KEYS.includes(f.key);
                 return (
                   <div key={f.key}>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--neutral-600,#57544d)' }}>
-                      {f.label} (AED)
+                    <label className={FORM_LABEL}>
+                      {f.label}
                       {ruled && overridden.has(f.key) && (
-                        <span className="ml-1 text-[10px] font-semibold" style={{ color: '#92400e' }}>· custom</span>
+                        <span className="ml-1 text-[10px] font-semibold text-[#92400e]">· custom</span>
                       )}
                     </label>
-                    <input type="number" min={0} step="any" value={vals[f.key]}
+                    <input type="number" min={0} step="any" className={FORM_INPUT} value={vals[f.key]}
                       onChange={e => onFeeChange(f.key, e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') save(); }}
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
-                      style={{ borderColor: 'var(--neutral-300,#d8d6d0)', color: 'var(--neutral-900,#1a1916)' }} />
+                      onKeyDown={e => { if (e.key === 'Enter') save(); }} />
                   </div>
                 );
               })}
             </div>
+          </div>
+
+          {/* Lease Terms — plan-wide; written to every unit's facilities JSON. */}
+          <div className="rounded-xl border border-[#dbeafe] bg-[#eff6ff] p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#1e40af]">Lease Terms</p>
+            <div className="grid grid-cols-3 gap-3">
+              {LEASE_TERM_FIELDS.map(f => (
+                <div key={f.key}>
+                  <label className={FORM_LABEL}>{f.label}</label>
+                  <input type="number" min={0} step={f.step} max={f.max} className={FORM_INPUT}
+                    placeholder={f.placeholder} value={lease[f.key] ?? ''}
+                    onChange={e => setLease(v => ({ ...v, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Leasing Configuration — rental cadence + payment terms. */}
+          <div className="rounded-xl border border-[#ede9fe] bg-[#f5f3ff] p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#6d28d9]">Leasing Configuration</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={FORM_LABEL}>Rental Type</label>
+                <select value={rentalType} onChange={e => setRentalType(e.target.value)} className={`${FORM_INPUT} appearance-none`}>
+                  {RENTAL_TYPES.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+              {LEASE_CONFIG_FIELDS.map(f => (
+                <div key={f.key}>
+                  <label className={FORM_LABEL}>{f.label}</label>
+                  <input type="number" min={0} step={f.step} className={FORM_INPUT}
+                    placeholder={f.placeholder} value={lease[f.key] ?? ''}
+                    onChange={e => setLease(v => ({ ...v, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Agreement — Addendum (versioned FILE). Upload a .docx (with the
+              signature block); each upload mints a new version. The latest flows
+              into new contracts; signed contracts keep the version they used. */}
+          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Addendum</p>
+              <a href={ADDENDUM_SAMPLE_URL} download className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
+                <Download size={11} /> Download sample
+              </a>
+            </div>
+            <p className="text-[10px] text-[#a16207]">
+              {plan.termsVersion
+                ? `Current v${plan.termsVersion.versionNo} · uploaded ${fmtDate(plan.termsVersion.effectiveAt)}. New contracts use the latest; signed contracts keep their version.`
+                : 'Attach the addendum that new contracts from this layout will carry.'}
+            </p>
+
+            <input ref={addendumInputRef} type="file" accept={ADDENDUM_ACCEPT} className="sr-only"
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void onAddendumPick(f); }} />
+
+            {/* Current addendum on file (latest version). */}
+            {plan.termsVersion?.addendumUrl && !addendumFile && (
+              <a href={plan.termsVersion.addendumUrl} target="_blank" rel="noreferrer"
+                className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 text-[#1a1916] hover:bg-[#fdf6e3]">
+                <Upload size={14} className="text-[#b45309] shrink-0" />
+                <span className="text-sm truncate flex-1">{plan.termsVersion.addendumFileName ?? 'Addendum'}</span>
+                <span className="text-[11px] text-[#9b9890]">on file</span>
+              </a>
+            )}
+
+            {/* Staged replacement, pending save. */}
+            {addendumFile && (
+              <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
+                <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                <span className="text-sm text-[#1a1916] truncate flex-1">{addendumFile.name}</span>
+                <button type="button" onClick={() => { setAddendumFile(null); setAddendumErr(null); }}
+                  className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+              </div>
+            )}
+
+            <button type="button" onClick={() => addendumInputRef.current?.click()} disabled={addendumChecking}
+              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-2.5 text-xs text-[#9b9890] hover:border-[#b45309] hover:bg-[#fffbeb] transition-colors cursor-pointer disabled:opacity-50">
+              {addendumChecking ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className="text-[#c8c6c0]" />}
+              {addendumChecking ? 'Checking signature fields…'
+                : plan.termsVersion?.addendumUrl ? 'Replace addendum (Word .docx)' : 'Attach addendum (Word .docx)'}
+            </button>
+            {addendumErr && <p className="text-[11px] text-red-600">{addendumErr}</p>}
+
+            {plan.termsVersion && (
+              <button type="button" onClick={toggleHistory} className="text-[11px] font-semibold text-[#b45309] underline">
+                {showHistory ? 'Hide' : 'View'} history · {plan.termsVersion.versionsCount} version{plan.termsVersion.versionsCount === 1 ? '' : 's'}
+              </button>
+            )}
+            {showHistory && (
+              <div className="rounded-lg border border-[#fde68a] bg-white p-3 space-y-2.5">
+                {verLoading && (
+                  <div className="text-xs flex items-center gap-1.5 text-[#6b6860]">
+                    <Loader2 size={13} className="animate-spin" /> Loading history…
+                  </div>
+                )}
+                {!verLoading && versions && versions.length === 0 && (
+                  <p className="text-xs text-[#9b9890]">No versions yet — uploading an addendum creates v1.</p>
+                )}
+                {!verLoading && versions?.map(v => (
+                  <div key={v.id} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="font-semibold text-[#1a1916] shrink-0">v{v.versionNo}</span>
+                    {v.addendumUrl
+                      ? <a href={v.addendumUrl} target="_blank" rel="noreferrer" className="text-[#b45309] truncate flex-1 hover:underline">{v.addendumFileName ?? 'Addendum'}</a>
+                      : <span className="italic text-[#bdbab2] flex-1">No file</span>}
+                    <span className="text-[#9b9890] shrink-0">{fmtDate(v.effectiveAt)}</span>
+                    <span className="text-[#9b9890] shrink-0">· {v.contractsCount} contract{v.contractsCount === 1 ? '' : 's'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         {err && <div className="px-5 pb-1 text-xs" style={{ color: '#b91c1c' }}>{err}</div>}
@@ -748,7 +996,7 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
           <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: '#f1efe9', color: '#6b6860' }}>Cancel</button>
           <button onClick={save} disabled={saving}
             className="px-4 py-2 rounded-lg text-sm font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-60" style={{ background: 'var(--primary,#2e9f82)' }}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Save to all units
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Save to layout
           </button>
         </div>
       </div>
