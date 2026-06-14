@@ -24,7 +24,7 @@ import {
 
 
 interface ContractGap { contractId: number; customer: string | null; property: string | null; unit: string | null; status: string | null; annualRent: number | null; noContractDoc: boolean; noPaymentPlan: boolean; noDeposit: boolean; noEjari: boolean; }
-interface PropertyGap { id: number; property: string | null; category: string | null; noGeo: boolean; noFloors: boolean; noDescription: boolean; noStreet: boolean; noEmirate: boolean; noCity: boolean; noCommunity: boolean; noSubCommunity: boolean; noMakani: boolean; noPlot: boolean; noAddress: boolean; }
+interface PropertyGap { id: number; property: string | null; category: string | null; noPhotos: boolean; noGeo: boolean; noFloors: boolean; noDescription: boolean; noStreet: boolean; noCountry: boolean; noEmirate: boolean; noCity: boolean; noCommunity: boolean; noSubCommunity: boolean; noMakani: boolean; noPlot: boolean; noAddress: boolean; noFeatures: boolean; }
 interface Landlord { name: string | null; entityType: string | null; noCompanyName: boolean; noContactAddress: boolean; noBank: boolean; noTradeLicense: boolean; noEid: boolean; noPassport: boolean; noNationality: boolean; noDob: boolean; noGender: boolean; noTitleDeedDoc: boolean; noEidDoc: boolean; noLegalNoticesAddr: boolean; noRenewalPct: boolean; noPreferredStartDays: boolean; noPreferredChequeDays: boolean; noPoa: boolean; }
 interface RenewalPending { customer: string | null; property: string | null; unit: string | null; expiredOn: string | null; daysOverdue: number | null; annualRent: number | null; overdue: boolean; }
 interface KycIndividual { customer: string | null; units: string | null; noEid: boolean; noNationality: boolean; noDob: boolean; noGender: boolean; noPhone: boolean; noOccupation: boolean; noPhoto: boolean; noIdentityDoc: boolean; }
@@ -252,9 +252,11 @@ export function DataGapsView({
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                       <TD>{p.property ?? '—'}</TD><TD>{p.category ?? '—'}</TD>
                       <td className="px-4 py-2.5">
+                        <MissingChip label="Photos" on={p.noPhotos} />
                         <MissingChip label="Full address" on={p.noAddress} />
                         <MissingChip label="Map location" on={p.noGeo} />
                         <MissingChip label="Street" on={p.noStreet} />
+                        <MissingChip label="Country" on={p.noCountry} />
                         <MissingChip label="Emirate" on={p.noEmirate} />
                         <MissingChip label="City" on={p.noCity} />
                         <MissingChip label="Community" on={p.noCommunity} />
@@ -263,6 +265,7 @@ export function DataGapsView({
                         <MissingChip label="Plot no." on={p.noPlot} />
                         <MissingChip label="No. of floors" on={p.noFloors} />
                         <MissingChip label="Description" on={p.noDescription} />
+                        <MissingChip label="Features" on={p.noFeatures} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
                         <Link href="/rental-provider/dashboard/portfolio" className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
