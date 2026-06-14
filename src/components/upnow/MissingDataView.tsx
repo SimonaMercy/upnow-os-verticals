@@ -202,7 +202,6 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
       { key: 'noAddress', label: 'Full address' }, { key: 'noGeo', label: 'Map location' },
       { key: 'noStreet', label: 'Street' }, { key: 'noEmirate', label: 'Emirate' },
       { key: 'noCity', label: 'City' }, { key: 'noCommunity', label: 'Community' },
-      { key: 'noSubCommunity', label: 'Sub-community' },
       { key: 'noMakani', label: 'Makani' }, { key: 'noPlot', label: 'Plot no.' },
       { key: 'noFloors', label: 'No. of floors' }, { key: 'noDescription', label: 'Description' },
     ],
