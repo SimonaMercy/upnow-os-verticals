@@ -18,6 +18,7 @@ export const PROPERTY_DOC_SLOTS: PropertyDocSlot[] = [
   { key: 'architectural_drawings', label: 'Architectural Drawings', category: 'property',   multiple: true },
   { key: 'site_plan',              label: 'Site Plan',              category: 'property',   multiple: false },
   { key: 'noc_documents',          label: 'NOC Documents',          category: 'legal',      multiple: true },
+  { key: 'other_document',         label: 'Other Documents',        category: 'property',   multiple: true },
 ];
 
 /** Does a stored document belong to this slot? (exact key, or prefixed for multiples) */

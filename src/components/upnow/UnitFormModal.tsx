@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Loader2, Upload } from 'lucide-react';
+import { X, Loader2, Upload, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
-export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'townhouse', 'penthouse', 'studio', 'duplex_loft'];
+export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'townhouse', 'penthouse', 'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home'];
 export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
 export const INDUSTRIAL_UNIT_TYPES  = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
 export const WORKSPACES_UNIT_TYPES  = ['coworking_desk', 'private_office', 'meeting_room', 'day_office'];
@@ -23,6 +24,7 @@ export const UNIT_TYPE_LABELS: Record<string, string> = {
   // Residential
   apartment: 'Apartment', villa: 'Villa', townhouse: 'Townhouse',
   penthouse: 'Penthouse', studio: 'Studio', duplex_loft: 'Duplex / Loft',
+  room: 'Room', bed_space: 'Bed Space', holiday_home: 'Holiday Home',
   // Commercial
   office_fitted: 'Office (Fitted)', office_shell_core: 'Office (Shell & Core)',
   retail_shop: 'Retail Shop', showroom: 'Showroom',
@@ -54,7 +56,7 @@ function unitTypesForCategory(category: string): string[] {
 const AMENITIES_MAP: Record<string, string[]> = {
   residential: [
     'Central A/C', 'Parking', 'Swimming Pool', 'Gym', 'Security', 'CCTV',
-    'Balcony', 'Elevator', 'Concierge', 'Playground', "Maid's Room", 'Storage',
+    'Balcony', 'Terrace', 'Elevator', 'Concierge', 'Playground', "Maid's Room", 'Storage',
     'Built-in Wardrobes', 'Shared Pool', 'Covered Parking', 'Pet Friendly',
     'High-Speed Internet', 'Smart Home', '24/7 Security', 'Kids Play Area',
   ],
@@ -114,6 +116,14 @@ const VIEW_OPTIONS = [
 ];
 
 export const FURNISHING_OPTIONS = ['Unfurnished', 'Semi-Furnished', 'Fully Furnished'];
+export const RENTAL_TYPE_OPTIONS = [
+  { id: 'daily', label: 'Daily' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+  { id: 'quarterly', label: 'Quarterly' },
+  { id: 'yearly', label: 'Yearly' },
+  { id: 'custom', label: 'Custom' },
+];
 export const UNIT_TIERS = [
   { id: 'standard', label: 'Standard' },
   { id: 'premium',  label: 'Premium' },
@@ -158,6 +168,7 @@ export interface UnitFormData {
   premiseNumber: string;
   bedrooms: string;
   bathrooms: string;
+  parkingSpaces: string;
   unitSizeSqft: string;
   unitSizeSqm: string;
   view: string;
@@ -173,6 +184,13 @@ export interface UnitFormData {
   minLeaseMonths: string;
   noticePeriodDays: string;
   rentEscalationPct: string;
+  // Leasing configuration
+  rentalType: string;
+  numberOfPayments: string;
+  advancePayment: string;
+  gracePeriodDays: string;
+  latePaymentFee: string;
+  specialConditions: string;
   description: string;
 }
 
@@ -247,11 +265,15 @@ function ordinal(n: string): string {
 
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
-  floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', unitSizeSqm: '', view: '',
+  floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '',
+  unitSizeSqft: '', unitSizeSqm: '', view: '',
   furnishing: 'Unfurnished', amenities: [], rentalPrice: '', marketPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
   serviceCharges: '', minLeaseMonths: '12', noticePeriodDays: '60',
-  rentEscalationPct: '', description: '',
+  rentEscalationPct: '',
+  rentalType: 'yearly', numberOfPayments: '', advancePayment: '',
+  gracePeriodDays: '', latePaymentFee: '', specialConditions: '',
+  description: '',
 };
 
 interface Props {
@@ -268,8 +290,10 @@ interface Props {
    *  manager (photos upload/remove lives inside Edit, not a separate button). */
   propertyId?: number;
   editingUnitId?: number;
+  /** Addendum / amendment files already attached to this unit (edit mode). */
+  existingAddendums?: { id: number; name: string; url: string }[];
   onClose: () => void;
-  onSave: (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null) => Promise<void>;
+  onSave: (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null, addendums?: File[]) => Promise<void>;
   title?: string;
 }
 
@@ -357,6 +381,68 @@ function PhotosSection({ propertyId, unitId }: { propertyId: number; unitId: num
   );
 }
 
+/** Stage addendum / amendment files for upload; lists any already attached.
+ *  Each upload must be a .docx that still carries both signature fields — we
+ *  validate on select and reject otherwise. A sample is offered to download. */
+function AddendumsSection({ files, onAdd, onRemove, existing }: {
+  files: File[];
+  onAdd: (fs: File[]) => void;
+  onRemove: (i: number) => void;
+  existing?: { id: number; name: string; url: string }[];
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const onFiles = async (selected: File[]) => {
+    setError(null);
+    setChecking(true);
+    try {
+      const accepted: File[] = [];
+      for (const f of selected) {
+        const res = await validateAddendumFile(f);
+        if (res.ok) accepted.push(f);
+        else { setError(res.error ?? 'Invalid addendum file.'); break; }
+      }
+      if (accepted.length) onAdd(accepted);
+    } finally { setChecking(false); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="block text-xs font-medium text-[#3d3b35]">Addendums / Amendments <span className="text-[#9b9890] font-normal">(optional)</span></label>
+        <a href={ADDENDUM_SAMPLE_URL} download className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
+          <Download size={11} /> Download sample
+        </a>
+      </div>
+      <input ref={inputRef} type="file" multiple accept={ADDENDUM_ACCEPT} className="sr-only"
+        onChange={e => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void onFiles(fs); }} />
+      {(existing ?? []).map(d => (
+        <a key={d.id} href={d.url} target="_blank" rel="noreferrer"
+          className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5 text-[#1a1916] hover:bg-[#f4f3ef]">
+          <Upload size={14} className="text-[#b45309] shrink-0" />
+          <span className="text-sm truncate flex-1">{d.name}</span>
+          <span className="text-[11px] text-[#9b9890]">attached</span>
+        </a>
+      ))}
+      {files.map((f, i) => (
+        <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5">
+          <Upload size={14} className="text-[#2e9f82] shrink-0" />
+          <span className="text-sm text-[#1a1916] truncate flex-1">{f.name}</span>
+          <button type="button" onClick={() => onRemove(i)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+        </div>
+      ))}
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={checking}
+        className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-2.5 text-xs text-[#9b9890] hover:border-[#b45309] hover:bg-[#fffbeb] transition-colors cursor-pointer disabled:opacity-50">
+        {checking ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className="text-[#c8c6c0]" />}
+        {checking ? 'Checking signature fields…' : 'Attach addendum / amendment (Word .docx)'}
+      </button>
+      {error && <p className="text-[11px] text-red-600 mt-1.5">{error}</p>}
+    </div>
+  );
+}
+
 // ─── View typeahead ───────────────────────────────────────
 function ViewInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -414,7 +500,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, onClose, onSave, title }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, existingAddendums, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof UnitFormData, string>>>({});
   const [saving, setSaving] = useState(false);
@@ -423,6 +509,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
   // Per-unit title deed — only for units of NON-standalone (multi-unit) properties.
   const [titleDeed, setTitleDeed] = useState<File | null>(null);
   const titleDeedInputRef = useRef<HTMLInputElement>(null);
+  // Addendum / amendment files staged for upload on save.
+  const [addendums, setAddendums] = useState<File[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -436,6 +524,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
       setErrors({});
       setFloorPlan(null);
       setTitleDeed(null);
+      setAddendums([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -486,7 +575,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     // One price: the annual rent is also the market/list price, so keep them in
     // lock-step rather than exposing a second field.
     const payload = { ...form, marketPrice: form.rentalPrice };
-    try { await onSave(payload, floorPlan, propertyStandalone === false ? titleDeed : null); onClose(); }
+    try { await onSave(payload, floorPlan, propertyStandalone === false ? titleDeed : null, addendums); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -611,10 +700,17 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             </div>
           )}
 
-          {/* View */}
-          <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">View</label>
-            <ViewInput value={form.view} onChange={v => upd('view', v)} />
+          {/* View + Parking allocation */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">View</label>
+              <ViewInput value={form.view} onChange={v => upd('view', v)} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Parking</label>
+              <input type="number" min="0" step="1" className={INPUT} placeholder="e.g. 1"
+                value={form.parkingSpaces} onChange={e => upd('parkingSpaces', e.target.value)} />
+            </div>
           </div>
 
           {/* Size — capture sq.ft OR sq.m; the other auto-computes. */}
@@ -729,6 +825,56 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
                 <p className="text-[10px] text-[#6b82b8] mt-0.5">Leave blank = RERA index</p>
               </div>
             </div>
+          </div>
+
+          {/* Leasing Configuration — rental cadence + payment terms. Annual rent
+              stays the single rate; the rental type only drives how the payment
+              plan is sliced (e.g. monthly = annual ÷ 12). */}
+          <div className="rounded-xl border border-[#ede9fe] bg-[#f5f3ff] p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#6d28d9]">Leasing Configuration</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Rental Type</label>
+                <select className={cn(INPUT, 'appearance-none')} value={form.rentalType} onChange={e => upd('rentalType', e.target.value)}>
+                  {RENTAL_TYPE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+                <p className="text-[10px] text-[#8b7fc0] mt-0.5">Drives the payment-plan cadence</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Number of Payments</label>
+                <input type="number" min="1" step="1" className={INPUT} placeholder="e.g. 4 cheques"
+                  value={form.numberOfPayments} onChange={e => upd('numberOfPayments', e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Advance Payment (AED)</label>
+                <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 5000"
+                  value={form.advancePayment} onChange={e => upd('advancePayment', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Grace Period (days)</label>
+                <input type="number" min="0" step="1" className={INPUT} placeholder="e.g. 7"
+                  value={form.gracePeriodDays} onChange={e => upd('gracePeriodDays', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Late Payment Fee (AED)</label>
+                <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 500"
+                  value={form.latePaymentFee} onChange={e => upd('latePaymentFee', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Agreement — special conditions, attached as an addendum document
+              that flows into contracts created for this unit. */}
+          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Special Conditions</p>
+            <AddendumsSection
+              files={addendums}
+              onAdd={fs => setAddendums(prev => [...prev, ...fs])}
+              onRemove={i => setAddendums(prev => prev.filter((_, x) => x !== i))}
+              existing={existingAddendums}
+            />
           </div>
 
           <SectionHeading>Amenities &amp; facilities</SectionHeading>

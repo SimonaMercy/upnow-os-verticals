@@ -20,6 +20,7 @@ import ExecutiveOverview from '@/app/rental-provider/dashboard/reports/Executive
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
+import { MissingDataView, MISSING_REPORTS } from '@/components/upnow/MissingDataView';
 
 export default function ManagerReportsPage() {
   const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
@@ -74,6 +75,15 @@ export default function ManagerReportsPage() {
     return (
       <DataGapsView
         endpoint={`/api/manager/reports/data-gaps?rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+      />
+    );
+  }
+  if (openSlug && MISSING_REPORTS[openSlug]) {
+    return (
+      <MissingDataView
+        config={MISSING_REPORTS[openSlug]}
+        endpoint={`/api/manager/reports/${openSlug}?rp=${effectiveRp}`}
         onBack={() => navigate(null)}
       />
     );

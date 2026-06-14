@@ -9,7 +9,7 @@ import {
   Banknote, TrendingUp,
 } from 'lucide-react';
 
-export type GroupKey = 'portfolio' | 'leasing' | 'collections' | 'financial' | 'operations';
+export type GroupKey = 'portfolio' | 'leasing' | 'collections' | 'financial' | 'operations' | 'missingdata';
 
 export interface ReportTile {
   slug: string;
@@ -28,6 +28,7 @@ export const GROUPS: { key: GroupKey; title: string; blurb: string; Icon: React.
   { key: 'collections', title: 'Rent & Collections',     blurb: 'Money in — rent roll, cheques, receivables, cashflow.', Icon: Wallet },
   { key: 'financial',   title: 'Financial & Compliance', blurb: 'Deposits, fees, VAT and statements.',                   Icon: ScrollText },
   { key: 'operations',  title: 'Data & Operations',      blurb: 'Data quality, vendors and team.',                       Icon: Wrench },
+  { key: 'missingdata', title: 'Missing Data Worklists',  blurb: 'Records & fields still to fill — open one, fix it, and it clears. Print to PDF for data entry.', Icon: AlertCircle },
 ];
 
 export const REPORT_TILES: ReportTile[] = [
@@ -52,8 +53,14 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'fee-taxation',       title: 'Fee & VAT (Taxation)',     description: 'Admin, ejari & commission fees + rent VAT per year — net, VAT and gross.', Icon: ScrollText,  available: true, group: 'financial' },
   { slug: 'income-statement',   title: 'Income Statement',         description: 'Revenue by stream — rent, admin, ejari, deposits.',                    Icon: BarChart2,    available: false, group: 'financial' },
   // ── Data & Operations ──────────────────────────────────────────────────
-  { slug: 'data-gaps',          title: 'Data Gaps & Exceptions',   description: 'Active leases missing a deposit, KYC gaps, the renewal backlog, and units missing details.', Icon: AlertCircle, available: true, group: 'operations' },
+  { slug: 'data-gaps',          title: 'Data Gaps & Exceptions',   description: 'A live worklist of missing data — contracts missing docs/payment plans/deposit, property & unit fields, customer KYC, and the landlord profile. Print to PDF.', Icon: AlertCircle, available: true, group: 'operations' },
   { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false, group: 'operations' },
   { slug: 'manager-performance', title: 'Manager Performance Report', description: 'Per-asset-manager activity and deal velocity.',                     Icon: Users,        available: false, group: 'operations' },
+  // ── Missing Data Worklists (separate live report per entity) ────────────
+  { slug: 'missing-properties', title: 'Missing Properties Data',   description: 'Properties missing location or descriptive fields — geo, floors, street, sub-community, makani, plot, description.', Icon: MapPin,      available: true, group: 'missingdata' },
+  { slug: 'missing-units',      title: 'Missing Units Data',        description: 'Units missing pricing, fees, specs or media — rent, deposit, admin/ejari/commission, beds/baths, size, floor plan, images.', Icon: Building2,  available: true, group: 'missingdata' },
+  { slug: 'missing-customers',  title: 'Missing Customers Data',    description: 'Customers missing KYC — Emirates ID, ID document, nationality, DOB, gender, phone, occupation, trade licence.', Icon: Users,       available: true, group: 'missingdata' },
+  { slug: 'missing-contracts',  title: 'Missing Contract Data',     description: 'Contracts missing a document, payment plan, security deposit or Ejari number — active & pending first.', Icon: FileText,    available: true, group: 'missingdata' },
+  { slug: 'missing-landlord',   title: 'Missing Landlord Profile Data', description: 'Landlord profile & configuration still unset — bank, trade licence, title-deed & EID docs, renewal %, preferred days, POA.', Icon: ShieldCheck, available: true, group: 'missingdata' },
 ];
 

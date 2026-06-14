@@ -696,6 +696,15 @@ function DocSlotCard({
           : <FileText size={16} className="shrink-0 text-[#c8c6c0]" />}
         <span className="text-sm font-medium text-[#1a1916]">{label}</span>
         <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">Optional</span>
+        <span
+          className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+          style={multiple
+            ? { background: '#eef4ff', color: '#2563eb' }
+            : { background: '#f4f3ef', color: '#9b9890' }}
+          title={multiple ? 'You can attach several files' : 'One file — uploading again replaces it'}
+        >
+          {multiple ? 'Multiple' : 'Single'}
+        </span>
         {hasAny && <span className="text-[11px] text-[#16a34a] font-medium">{count} file{count === 1 ? '' : 's'}</span>}
         <label className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
           style={{ background: hasAny && !multiple ? '#f4f3ef' : '#2e9f82', color: hasAny && !multiple ? '#6b6860' : '#fff' }}>
@@ -908,19 +917,11 @@ export function PropertyFields({
     setErrors(prev => ({ ...prev, [k]: undefined }));
   };
 
-  // Property Features multi-select helpers
-  const [featureDraft, setFeatureDraft] = useState('');
+  // Property Features multi-select helper (preset list only).
   const toggleFeature = (f: string) =>
     upd('sharedAmenities', value.sharedAmenities.includes(f)
       ? value.sharedAmenities.filter(a => a !== f)
       : [...value.sharedAmenities, f]);
-  const addFeature = () => {
-    const f = featureDraft.trim();
-    if (f && !value.sharedAmenities.some(a => a.toLowerCase() === f.toLowerCase())) {
-      upd('sharedAmenities', [...value.sharedAmenities, f]);
-    }
-    setFeatureDraft('');
-  };
 
   // Extra document slots (affection plan, completion cert, architectural
   // drawings, site plan, NOC) — queue files; uploaded by the parent on save.
@@ -1216,6 +1217,29 @@ export function PropertyFields({
         </div>
       )}
 
+      {/* Property Features — multi-select from the preset list only. */}
+      <div>
+        <FieldLabel label="Property features" />
+        <div className="flex flex-wrap gap-1.5">
+          {[...PROPERTY_FEATURES, ...value.sharedAmenities.filter(a => !PROPERTY_FEATURES.includes(a))].map(feat => {
+            const on = value.sharedAmenities.includes(feat);
+            return (
+              <button
+                key={feat}
+                type="button"
+                onClick={() => toggleFeature(feat)}
+                className={cn(
+                  'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors cursor-pointer',
+                  on ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]',
+                )}
+              >
+                {feat}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* ── Property documents — same slot pattern as KYC / contract docs ── */}
       <div>
         <p className="text-[11px] font-bold uppercase tracking-wider text-[#9b9890] mb-2">Property documents</p>
@@ -1239,74 +1263,60 @@ export function PropertyFields({
           </span>
         </label>
 
-        <div className="space-y-2.5">
-          {value.isStandaloneUnit && (
-            <DocSlotCard
-              label="Title Deed" multiple={false}
-              existing={existingDeed}
-              queued={titleDeed ? [titleDeed] : []}
-              onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
-              onRemoveQueued={() => setTitleDeed(null)}
-              onRemoveExisting={onRemoveExisting}
-              onView={setViewerDoc}
-            />
-          )}
-          <DocSlotCard
-            label="Building Floor Plans" multiple
-            existing={existingDrawings}
-            queued={drawings}
-            onAdd={addDrawings}
-            onRemoveQueued={i => setDrawings(prev => prev.filter((_, j) => j !== i))}
-            onRemoveExisting={onRemoveExisting}
-            onView={setViewerDoc}
-          />
-          {PROPERTY_DOC_SLOTS.map(slot => (
-            <DocSlotCard
-              key={slot.key}
-              label={slot.label} multiple={slot.multiple}
-              existing={existingDocs.filter(d => docBelongsToSlot(d.documentKey, slot))}
-              queued={extraDocs[slot.key] ?? []}
-              onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
-              onRemoveQueued={i => removeSlotFile(slot.key, i)}
-              onRemoveExisting={onRemoveExisting}
-              onView={setViewerDoc}
-            />
-          ))}
-        </div>
-      </div>
+        <div className="space-y-4">
+          {/* Single-file documents — one file each (re-uploading replaces it). */}
+          <div className="space-y-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Single file</p>
+            {value.isStandaloneUnit && (
+              <DocSlotCard
+                label="Title Deed" multiple={false}
+                existing={existingDeed}
+                queued={titleDeed ? [titleDeed] : []}
+                onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
+                onRemoveQueued={() => setTitleDeed(null)}
+                onRemoveExisting={onRemoveExisting}
+                onView={setViewerDoc}
+              />
+            )}
+            {PROPERTY_DOC_SLOTS.filter(s => !s.multiple).map(slot => (
+              <DocSlotCard
+                key={slot.key}
+                label={slot.label} multiple={slot.multiple}
+                existing={existingDocs.filter(d => docBelongsToSlot(d.documentKey, slot))}
+                queued={extraDocs[slot.key] ?? []}
+                onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
+                onRemoveQueued={i => removeSlotFile(slot.key, i)}
+                onRemoveExisting={onRemoveExisting}
+                onView={setViewerDoc}
+              />
+            ))}
+          </div>
 
-      {/* Property Features — single multi-select list + free-text custom add. */}
-      <div>
-        <FieldLabel label="Property features" />
-        <div className="flex flex-wrap gap-1.5">
-          {[...PROPERTY_FEATURES, ...value.sharedAmenities.filter(a => !PROPERTY_FEATURES.includes(a))].map(feat => {
-            const on = value.sharedAmenities.includes(feat);
-            return (
-              <button
-                key={feat}
-                type="button"
-                onClick={() => toggleFeature(feat)}
-                className={cn(
-                  'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors cursor-pointer',
-                  on ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]',
-                )}
-              >
-                {feat}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex items-center gap-2 mt-2">
-          <input
-            value={featureDraft}
-            onChange={e => setFeatureDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFeature(); } }}
-            placeholder="Other shared amenity…"
-            className={cn(INPUT, 'flex-1')}
-          />
-          <button type="button" onClick={addFeature} className="text-xs font-semibold text-[#2e9f82] px-3 py-2 rounded-lg border border-[#e8e6e0] hover:border-[#2e9f82] cursor-pointer">
-            Add
-          </button>
+          {/* Multi-file documents — attach several. */}
+          <div className="space-y-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Multiple files</p>
+            <DocSlotCard
+              label="Building Floor Plans" multiple
+              existing={existingDrawings}
+              queued={drawings}
+              onAdd={addDrawings}
+              onRemoveQueued={i => setDrawings(prev => prev.filter((_, j) => j !== i))}
+              onRemoveExisting={onRemoveExisting}
+              onView={setViewerDoc}
+            />
+            {PROPERTY_DOC_SLOTS.filter(s => s.multiple).map(slot => (
+              <DocSlotCard
+                key={slot.key}
+                label={slot.label} multiple={slot.multiple}
+                existing={existingDocs.filter(d => docBelongsToSlot(d.documentKey, slot))}
+                queued={extraDocs[slot.key] ?? []}
+                onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
+                onRemoveQueued={i => removeSlotFile(slot.key, i)}
+                onRemoveExisting={onRemoveExisting}
+                onView={setViewerDoc}
+              />
+            ))}
+          </div>
         </div>
       </div>
 

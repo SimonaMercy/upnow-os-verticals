@@ -39,9 +39,11 @@ interface Unit {
   premiseNumber: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
+  parkingSpaces: number | null;
   unitSizeSqft: number | null;
   unitSizeSqm: number | null;
   view: string | null;
+  furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
   marketPrice: number | null;
@@ -122,6 +124,27 @@ const fmtDate = (v: string | null | undefined) => {
 const titleCase = (s: string) =>
   s.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
+interface LeaseTerms {
+  minLeaseMonths?: number | string; noticePeriodDays?: number | string; rentEscalationPct?: number | string;
+  rentalType?: string; numberOfPayments?: number | string; advancePayment?: number | string;
+  gracePeriodDays?: number | string; latePaymentFee?: number | string; specialConditions?: string;
+}
+
+/** Read the units.facilities JSON (bare array or {amenities, leaseTerms}). */
+function parseFacilities(facilities: string | null): { amenities: string[]; leaseTerms: LeaseTerms } {
+  if (!facilities) return { amenities: [], leaseTerms: {} };
+  try {
+    const parsed = JSON.parse(facilities);
+    if (Array.isArray(parsed)) return { amenities: parsed as string[], leaseTerms: {} };
+    if (parsed && typeof parsed === 'object') {
+      return { amenities: (parsed.amenities as string[]) ?? [], leaseTerms: (parsed.leaseTerms as LeaseTerms) ?? {} };
+    }
+    return { amenities: [], leaseTerms: {} };
+  } catch { return { amenities: [], leaseTerms: {} }; }
+}
+
+interface LastMoveOut { contractId: number; recordedAt: string | null }
+
 function Chip({ tone, children }: { tone: 'green' | 'amber' | 'gray'; children: React.ReactNode }) {
   const cls =
     tone === 'green'
@@ -188,6 +211,7 @@ export default function UnitDetailPage() {
   const [media, setMedia] = useState<UnitMedia[]>([]);
   const [history, setHistory] = useState<PriceHistory | null>(null);
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
+  const [lastMoveOut, setLastMoveOut] = useState<LastMoveOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -211,15 +235,17 @@ export default function UnitDetailPage() {
           return;
         }
         // Secondary data — tolerate individual failures.
-        const [m, h, c] = await Promise.allSettled([
+        const [m, h, c, mo] = await Promise.allSettled([
           apiGet<UnitMedia[]>(`/properties/${propertyId}/units/${unitId}/media`),
           apiGet<PriceHistory>(`/properties/${propertyId}/units/${unitId}/price-history`),
           apiGet<ContractSummary[]>(`/contracts`),
+          apiGet<LastMoveOut | null>(`/contracts/unit/${unitId}/last-moveout`),
         ]);
         if (cancelled) return;
         if (m.status === 'fulfilled') setMedia(m.value || []);
         if (h.status === 'fulfilled') setHistory(h.value);
         if (c.status === 'fulfilled') setContracts(c.value || []);
+        if (mo.status === 'fulfilled') setLastMoveOut(mo.value);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load unit');
       } finally {
@@ -282,6 +308,10 @@ export default function UnitDetailPage() {
   // benchmark/gap.
   const rent = unit.rentalPrice;
 
+  // Parse the facilities JSON into amenities + leasing config (see buildFacilities).
+  const { amenities, leaseTerms } = parseFacilities(unit.facilities);
+  const rentalTypeLabel = leaseTerms.rentalType ? titleCase(String(leaseTerms.rentalType)) : null;
+
   const details: Array<[string, string | null]> = [
     ['Type', unit.unitType ? titleCase(unit.unitType) : null],
     ['Tier', unit.unitTier ? titleCase(unit.unitTier) : null],
@@ -289,6 +319,8 @@ export default function UnitDetailPage() {
     ['Premise no.', unit.premiseNumber],
     ['Bedrooms', unit.bedrooms != null ? String(unit.bedrooms) : null],
     ['Bathrooms', unit.bathrooms != null ? String(unit.bathrooms) : null],
+    ['Parking', unit.parkingSpaces != null && unit.parkingSpaces > 0 ? String(unit.parkingSpaces) : null],
+    ['Furnishing', unit.furnishing],
     [
       'Size',
       unit.unitSizeSqft != null || unit.unitSizeSqm != null
@@ -301,10 +333,23 @@ export default function UnitDetailPage() {
         : null,
     ],
     ['View', unit.view],
-    ['Facilities', unit.facilities],
+    ['Amenities', amenities.length ? amenities.join(', ') : null],
     ['Plan', unit.planLabel],
   ];
   const visibleDetails = details.filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '');
+
+  const num = (v: number | string | undefined) => (v != null && v !== '' ? String(v) : null);
+  const leasingRows: Array<[string, string | null]> = [
+    ['Rental type', rentalTypeLabel],
+    ['Min. lease', num(leaseTerms.minLeaseMonths) ? `${leaseTerms.minLeaseMonths} months` : null],
+    ['Notice period', num(leaseTerms.noticePeriodDays) ? `${leaseTerms.noticePeriodDays} days` : null],
+    ['Rent escalation', num(leaseTerms.rentEscalationPct) ? `${leaseTerms.rentEscalationPct}%/yr` : null],
+    ['No. of payments', num(leaseTerms.numberOfPayments)],
+    ['Advance payment', leaseTerms.advancePayment != null ? aed(Number(leaseTerms.advancePayment)) : null],
+    ['Grace period', num(leaseTerms.gracePeriodDays) ? `${leaseTerms.gracePeriodDays} days` : null],
+    ['Late payment fee', leaseTerms.latePaymentFee != null ? aed(Number(leaseTerms.latePaymentFee)) : null],
+  ];
+  const visibleLeasing = leasingRows.filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '');
 
   const pricingRows: Array<[string, string | null]> = [
     ['Security deposit', aed(unit.securityDeposit)],
@@ -395,6 +440,49 @@ export default function UnitDetailPage() {
               </p>
             )}
           </Card>
+
+          {/* b2. Leasing configuration */}
+          {(visibleLeasing.length > 0 || leaseTerms.specialConditions) && (
+            <Card>
+              <SectionTitle icon={<FileText className="h-4 w-4" />}>Leasing Configuration</SectionTitle>
+              {visibleLeasing.length > 0 && (
+                <dl className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+                  {visibleLeasing.map(([label, value]) => (
+                    <div key={label} className="flex items-baseline justify-between gap-4 border-b border-[#f4f3ef] pb-2">
+                      <dt className="text-xs font-medium uppercase tracking-wide text-[#9b9890]">{label}</dt>
+                      <dd className="text-right text-sm font-medium text-[#1a1916]">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {leaseTerms.specialConditions && (
+                <div className="mt-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-[#9b9890] mb-1">Special Conditions</p>
+                  <p className="whitespace-pre-line text-sm leading-relaxed text-[#6b6860]">{String(leaseTerms.specialConditions)}</p>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* b3. Last move-out condition (reference) */}
+          {lastMoveOut && (
+            <Card>
+              <SectionTitle icon={<History className="h-4 w-4" />}>Last Move-out Condition</SectionTitle>
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-[#6b6860]">
+                  A move-out inspection was recorded for this unit
+                  {lastMoveOut.recordedAt ? ` on ${fmtDate(lastMoveOut.recordedAt)}` : ''}. Use it as a reference for the unit&apos;s last known condition.
+                </p>
+                <Link
+                  href={`/rental-provider/dashboard/contracts/${lastMoveOut.contractId}/inspection?type=move_out`}
+                  className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] px-3 py-2 text-sm font-medium text-[#2e9f82] hover:bg-[#f0fdf8]"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  View move-out form
+                </Link>
+              </div>
+            </Card>
+          )}
 
           {/* c. Floor plan */}
           {unit.floorPlanUrl && (

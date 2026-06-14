@@ -17,8 +17,9 @@ import {
   RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
   WORKSPACES_UNIT_TYPES, VENUES_UNIT_TYPES,
   FURNISHING_OPTIONS, UNIT_TYPE_LABELS, getAmenitiesForCategory,
-  UNIT_TIERS, sqftFromSqm, sqmFromSqft,
+  UNIT_TIERS, RENTAL_TYPE_OPTIONS, sqftFromSqm, sqmFromSqft,
 } from '@/components/upnow/UnitFormModal';
+import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
 const INPUT  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
@@ -64,6 +65,7 @@ interface UnitRow {
   premiseNumber: string;
   bedrooms: string;
   bathrooms: string;
+  parkingSpaces: string;
   unitSizeSqft: string;
   unitSizeSqm: string;
   furnishing: string;
@@ -79,9 +81,16 @@ interface UnitRow {
   minLeaseMonths: string;
   noticePeriodDays: string;
   rentEscalationPct: string;
+  rentalType: string;
+  numberOfPayments: string;
+  advancePayment: string;
+  gracePeriodDays: string;
+  latePaymentFee: string;
+  specialConditions: string;
   description: string;
   stagedPhotos: StagedPhoto[];
   stagedFloorPlan: File | null;
+  stagedAddendums: File[];
 }
 
 function emptyRow(expanded = true): UnitRow {
@@ -89,11 +98,14 @@ function emptyRow(expanded = true): UnitRow {
     id: Math.random().toString(36).slice(2),
     expanded,
     unitName: '', unitType: '', unitTier: 'standard', unitNumber: '',
-    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', unitSizeSqft: '', unitSizeSqm: '',
+    floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '', unitSizeSqft: '', unitSizeSqm: '',
     furnishing: 'Unfurnished', rentalPrice: '', marketPrice: '',
     securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '', serviceCharges: '',
     view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
-    rentEscalationPct: '', description: '', stagedPhotos: [], stagedFloorPlan: null,
+    rentEscalationPct: '',
+    rentalType: 'yearly', numberOfPayments: '', advancePayment: '',
+    gracePeriodDays: '', latePaymentFee: '', specialConditions: '',
+    description: '', stagedPhotos: [], stagedFloorPlan: null, stagedAddendums: [],
   };
 }
 
@@ -322,7 +334,7 @@ export default function AddListingPage() {
   const dupRow = (id: string) => {
     const src = rows.find(r => r.id === id);
     if (!src) return;
-    const dup: UnitRow = { ...src, id: Math.random().toString(36).slice(2), expanded: true, unitNumber: '', stagedPhotos: [], stagedFloorPlan: null };
+    const dup: UnitRow = { ...src, id: Math.random().toString(36).slice(2), expanded: true, unitNumber: '', stagedPhotos: [], stagedFloorPlan: null, stagedAddendums: [] };
     setRows(prev => {
       const idx = prev.findIndex(r => r.id === id);
       const next = [...prev.map(r => ({ ...r, expanded: false }))];
@@ -461,6 +473,7 @@ export default function AddListingPage() {
             premiseNumber:    r.premiseNumber   || undefined,
             bedrooms:         r.bedrooms && r.bedrooms !== 'Studio' ? Number(r.bedrooms) : undefined,
             bathrooms:        r.bathrooms       ? Number(r.bathrooms)       : undefined,
+            parkingSpaces:    r.parkingSpaces   ? Number(r.parkingSpaces)   : undefined,
             unitSizeSqft:    r.unitSizeSqft   ? Number(r.unitSizeSqft)   : undefined,
             unitSizeSqm:     r.unitSizeSqm    ? Number(r.unitSizeSqm)    : undefined,
             rentalPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
@@ -474,6 +487,12 @@ export default function AddListingPage() {
             minLeaseMonths:   r.minLeaseMonths   ? Number(r.minLeaseMonths)   : undefined,
             noticePeriodDays: r.noticePeriodDays ? Number(r.noticePeriodDays) : undefined,
             rentEscalationPct: r.rentEscalationPct ? Number(r.rentEscalationPct) : undefined,
+            rentalType:       r.rentalType       || undefined,
+            numberOfPayments: r.numberOfPayments ? Number(r.numberOfPayments) : undefined,
+            advancePayment:   r.advancePayment   ? Number(r.advancePayment)   : undefined,
+            gracePeriodDays:  r.gracePeriodDays  ? Number(r.gracePeriodDays)  : undefined,
+            latePaymentFee:   r.latePaymentFee   ? Number(r.latePaymentFee)   : undefined,
+            specialConditions: r.specialConditions || undefined,
             view:             r.view            || undefined,
             furnishing:       r.furnishing      || undefined,
             amenities:        r.amenities.length ? r.amenities : undefined,
@@ -532,6 +551,29 @@ export default function AddListingPage() {
           }
           planDone++;
           setSaveProgress({ phase: 'Uploading floor plans…', done: planDone, total: planRows.length });
+        }
+      }
+
+      /* 5. Upload staged addendum / amendment documents (one record per file) */
+      const addendumRows = unitIds.filter(({ rowId }) => rows.find(r => r.id === rowId)?.stagedAddendums.length);
+      if (addendumRows.length > 0) {
+        setSaveProgress({ phase: 'Uploading addendums…', done: 0, total: addendumRows.length });
+        let addDone = 0;
+        for (const { rowId, unitId } of addendumRows) {
+          const row = rows.find(r => r.id === rowId)!;
+          for (let i = 0; i < row.stagedAddendums.length; i++) {
+            try {
+              await uploadOwnedDocument({
+                ownerType: 'unit', ownerId: unitId,
+                documentKey: `addendum_${Date.now()}_${i}`, category: 'legal',
+                displayName: row.stagedAddendums[i].name, file: row.stagedAddendums[i],
+              });
+            } catch {
+              errs.push(`Addendum for unit "${row.unitNumber}": upload failed`);
+            }
+          }
+          addDone++;
+          setSaveProgress({ phase: 'Uploading addendums…', done: addDone, total: addendumRows.length });
         }
       }
 
@@ -728,11 +770,11 @@ export default function AddListingPage() {
       </div>
 
       {/* ── Main content ── */}
-      <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
+      <div className="max-w-6xl mx-auto px-6 py-6 space-y-5">
 
         {/* ══ DONE ══ */}
         {done && (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 text-center">
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 text-center max-w-2xl mx-auto">
             <div className="w-16 h-16 rounded-full bg-[#d8f2e8] flex items-center justify-center mx-auto mb-4">
               <CheckCircle2 size={32} className="text-[#2e9f82]" />
             </div>
@@ -1143,8 +1185,23 @@ function UnitCard({
 }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const floorPlanInputRef = useRef<HTMLInputElement>(null);
+  const addendumInputRef = useRef<HTMLInputElement>(null);
   const dragIdxRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [addendumErr, setAddendumErr] = useState<string | null>(null);
+  const [addendumChecking, setAddendumChecking] = useState(false);
+  const onAddendumFiles = async (selected: File[]) => {
+    setAddendumErr(null); setAddendumChecking(true);
+    try {
+      const accepted: File[] = [];
+      for (const f of selected) {
+        const res = await validateAddendumFile(f);
+        if (res.ok) accepted.push(f);
+        else { setAddendumErr(res.error ?? 'Invalid addendum file.'); break; }
+      }
+      if (accepted.length) onUpdate({ stagedAddendums: [...row.stagedAddendums, ...accepted] });
+    } finally { setAddendumChecking(false); }
+  };
   const showBedBath = !row.unitType || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
   const isResidentialUnit = propCategory === 'residential' || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
 
@@ -1266,10 +1323,17 @@ function UnitCard({
             </div>
           )}
 
-          {/* View */}
-          <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">View</label>
-            <ViewInput value={row.view} onChange={v => onUpdate({ view: v })} />
+          {/* View + Parking allocation */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">View</label>
+              <ViewInput value={row.view} onChange={v => onUpdate({ view: v })} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6860] mb-1">Parking</label>
+              <input type="number" min="0" step="1" className={INPUT_C} placeholder="e.g. 1"
+                value={row.parkingSpaces} onChange={e => onUpdate({ parkingSpaces: e.target.value })} />
+            </div>
           </div>
 
           {/* Row 4: Size (sq.ft ↔ sq.m, capture one) */}
@@ -1367,6 +1431,86 @@ function UnitCard({
                   onChange={e => onUpdate({ serviceCharges: e.target.value })} />
               </div>
             </div>
+          </div>
+
+          {/* Leasing Configuration — cadence, lease terms + payment terms.
+              Annual rent stays the rate; rental type only slices the plan. */}
+          <div className="rounded-xl border border-[#ede9fe] bg-[#f5f3ff] p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#6d28d9]">Leasing Configuration</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Rental Type</label>
+                <select className={SELECT_C} value={row.rentalType} onChange={e => onUpdate({ rentalType: e.target.value })}>
+                  {RENTAL_TYPE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Min. Lease (months)</label>
+                <input type="number" min="0" step="any" className={INPUT_C} placeholder="12"
+                  value={row.minLeaseMonths} onChange={e => onUpdate({ minLeaseMonths: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Notice (days)</label>
+                <input type="number" min="0" step="any" className={INPUT_C} placeholder="60"
+                  value={row.noticePeriodDays} onChange={e => onUpdate({ noticePeriodDays: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">No. of Payments</label>
+                <input type="number" min="1" step="1" className={INPUT_C} placeholder="e.g. 4"
+                  value={row.numberOfPayments} onChange={e => onUpdate({ numberOfPayments: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Advance Payment</label>
+                <input type="number" min="0" step="any" className={INPUT_C} placeholder="e.g. 5000"
+                  value={row.advancePayment} onChange={e => onUpdate({ advancePayment: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Rent Escalation (%/yr)</label>
+                <input type="number" min="0" max="100" step="0.5" className={INPUT_C} placeholder="e.g. 5"
+                  value={row.rentEscalationPct} onChange={e => onUpdate({ rentEscalationPct: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Grace Period (days)</label>
+                <input type="number" min="0" step="1" className={INPUT_C} placeholder="e.g. 7"
+                  value={row.gracePeriodDays} onChange={e => onUpdate({ gracePeriodDays: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Late Payment Fee (AED)</label>
+                <input type="number" min="0" step="any" className={INPUT_C} placeholder="e.g. 500"
+                  value={row.latePaymentFee} onChange={e => onUpdate({ latePaymentFee: e.target.value })} />
+              </div>
+            </div>
+          </div>
+
+          {/* Agreement — special conditions, attached as an addendum document.
+              Must be a .docx that keeps both signature fields (validated). */}
+          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="block text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Special Conditions</span>
+              <a href={ADDENDUM_SAMPLE_URL} download className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
+                <Download size={11} /> Download sample
+              </a>
+            </div>
+            <input ref={addendumInputRef} type="file" multiple accept={ADDENDUM_ACCEPT} className="sr-only"
+              onChange={e => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void onAddendumFiles(fs); }} />
+            {row.stagedAddendums.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5 bg-white">
+                <Upload size={14} className="text-[#2e9f82] shrink-0" />
+                <span className="text-sm text-[#1a1916] truncate flex-1">{f.name}</span>
+                <button type="button" onClick={() => onUpdate({ stagedAddendums: row.stagedAddendums.filter((_, x) => x !== i) })}
+                  className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+              </div>
+            ))}
+            <button type="button" onClick={() => addendumInputRef.current?.click()} disabled={addendumChecking}
+              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-2.5 text-xs text-[#9b9890] hover:border-[#b45309] hover:bg-white transition-colors cursor-pointer disabled:opacity-50">
+              {addendumChecking ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className="text-[#c8c6c0]" />}
+              {addendumChecking ? 'Checking signature fields…' : 'Attach addendum / amendment (Word .docx)'}
+            </button>
+            {addendumErr && <p className="text-[11px] text-red-600 mt-1.5">{addendumErr}</p>}
           </div>
 
           {/* Amenities */}

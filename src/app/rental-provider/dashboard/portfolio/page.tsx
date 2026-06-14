@@ -85,6 +85,7 @@ interface Unit {
   premiseNumber: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
+  parkingSpaces: number | null;
   unitSizeSqft: number | null;
   unitSizeSqm: number | null;
   view: string | null;
@@ -207,17 +208,30 @@ function amenitiesFromUnit(unit: Unit): string[] {
 
 function leaseTermsFromUnit(unit: Unit): {
   minLeaseMonths: string; noticePeriodDays: string; rentEscalationPct: string;
+  rentalType: string; numberOfPayments: string; advancePayment: string;
+  gracePeriodDays: string; latePaymentFee: string; specialConditions: string;
 } {
-  const empty = { minLeaseMonths: '', noticePeriodDays: '', rentEscalationPct: '' };
+  const empty = {
+    minLeaseMonths: '', noticePeriodDays: '', rentEscalationPct: '',
+    rentalType: 'yearly', numberOfPayments: '', advancePayment: '',
+    gracePeriodDays: '', latePaymentFee: '', specialConditions: '',
+  };
   if (!unit.facilities) return empty;
   try {
     const parsed = JSON.parse(unit.facilities);
     if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return empty;
-    const lt = (parsed as { leaseTerms?: Record<string, number> }).leaseTerms ?? {};
+    const lt = (parsed as { leaseTerms?: Record<string, number | string> }).leaseTerms ?? {};
+    const s = (v: number | string | undefined) => (v != null && v !== '' ? String(v) : '');
     return {
-      minLeaseMonths:    lt.minLeaseMonths    != null ? String(lt.minLeaseMonths)    : '',
-      noticePeriodDays:  lt.noticePeriodDays  != null ? String(lt.noticePeriodDays)  : '',
-      rentEscalationPct: lt.rentEscalationPct != null ? String(lt.rentEscalationPct) : '',
+      minLeaseMonths:    s(lt.minLeaseMonths),
+      noticePeriodDays:  s(lt.noticePeriodDays),
+      rentEscalationPct: s(lt.rentEscalationPct),
+      rentalType:        lt.rentalType != null && lt.rentalType !== '' ? String(lt.rentalType) : 'yearly',
+      numberOfPayments:  s(lt.numberOfPayments),
+      advancePayment:    s(lt.advancePayment),
+      gracePeriodDays:   s(lt.gracePeriodDays),
+      latePaymentFee:    s(lt.latePaymentFee),
+      specialConditions: s(lt.specialConditions),
     };
   } catch { return empty; }
 }
@@ -274,6 +288,7 @@ function unitFormToDto(data: UnitFormData) {
     unitSizeSqm: num(data.unitSizeSqm) ?? undefined,
     bedrooms: data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
     bathrooms: num(data.bathrooms) ?? undefined,
+    parkingSpaces: num(data.parkingSpaces) ?? undefined,
     amenities: data.amenities, // empty array clears amenities (kept lease terms are merged server-side)
     view: clearable(data.view),
     furnishing: clearable(data.furnishing),
@@ -287,6 +302,12 @@ function unitFormToDto(data: UnitFormData) {
     minLeaseMonths: data.minLeaseMonths ? Number(data.minLeaseMonths) : undefined,
     noticePeriodDays: data.noticePeriodDays ? Number(data.noticePeriodDays) : undefined,
     rentEscalationPct: data.rentEscalationPct ? Number(data.rentEscalationPct) : undefined,
+    rentalType: data.rentalType || undefined,
+    numberOfPayments: data.numberOfPayments ? Number(data.numberOfPayments) : undefined,
+    advancePayment: data.advancePayment ? Number(data.advancePayment) : undefined,
+    gracePeriodDays: data.gracePeriodDays ? Number(data.gracePeriodDays) : undefined,
+    latePaymentFee: data.latePaymentFee ? Number(data.latePaymentFee) : undefined,
+    specialConditions: clearable(data.specialConditions),
     description: clearable(data.description),
   };
 }
@@ -724,7 +745,7 @@ export default function PortfolioPage() {
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
 
-  const handleSaveUnit = useCallback(async (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null) => {
+  const handleSaveUnit = useCallback(async (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null, addendums?: File[]) => {
     if (!unitModal.propertyId) return;
     const dto = unitFormToDto(data);
     const saved = unitModal.editingUnit
@@ -753,6 +774,20 @@ export default function PortfolioPage() {
         });
       } catch (e) {
         alert(`The unit was saved, but the title deed upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      }
+    }
+    // Addendum / amendment files — one document per file under the unit.
+    if (addendums?.length && saved?.id) {
+      for (let i = 0; i < addendums.length; i++) {
+        try {
+          await uploadOwnedDocument({
+            ownerType: 'unit', ownerId: saved.id,
+            documentKey: `addendum_${Date.now()}_${i}`, category: 'legal',
+            displayName: addendums[i].name, file: addendums[i],
+          });
+        } catch (e) {
+          alert(`The unit was saved, but an addendum upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+        }
       }
     }
   }, [unitModal, createUnit, updateUnit, qc]);
@@ -1018,6 +1053,7 @@ export default function PortfolioPage() {
             premiseNumber:    unitModal.editingUnit.premiseNumber ?? '',
             bedrooms:         unitModal.editingUnit.bedrooms != null ? String(unitModal.editingUnit.bedrooms) : 'Studio',
             bathrooms:        unitModal.editingUnit.bathrooms != null ? String(unitModal.editingUnit.bathrooms) : '1',
+            parkingSpaces:    unitModal.editingUnit.parkingSpaces != null ? String(unitModal.editingUnit.parkingSpaces) : '',
             unitSizeSqft:     unitModal.editingUnit.unitSizeSqft != null ? String(unitModal.editingUnit.unitSizeSqft) : '',
             unitSizeSqm:      unitModal.editingUnit.unitSizeSqm != null ? String(unitModal.editingUnit.unitSizeSqm) : '',
             view:             unitModal.editingUnit.view ?? '',

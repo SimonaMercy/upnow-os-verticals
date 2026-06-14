@@ -14,7 +14,6 @@
  *   - Ejari upload / mark as registered
  *   - Utility doc surfacing (RP or customer)
  *   - Move-in inspection state mirror (rpSubmitted / tenantSig / rpCounterSig)
- *   - Addendums panel (kept below detail cards per product decision)
  *
  * Data fetching matches v1 exactly so the same backend endpoints power both:
  *   GET  /api/contracts/:id
@@ -33,7 +32,7 @@ import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
-import { KYC_DOCS, KYC_DOC_KEYS, getRentalSectionDocs, getRenewalRequiredDocs } from '@/lib/docRequirements';
+import { KYC_DOCS, getRentalSectionDocs, getRenewalRequiredDocs } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
@@ -42,7 +41,6 @@ import {
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
 } from 'lucide-react';
-import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1225,8 +1223,8 @@ function DetailsDrawer({
   const [upBusy, setUpBusy] = useState(false);
   const [upErr, setUpErr] = useState<string | null>(null);
   // Full mapped pack for the unit's category — KYC + commercial / industrial /
-  // residential section (company promotions applied). Shown on new contracts,
-  // and on renewals as the standing customer file under the renewal slots.
+  // residential section (company promotions applied). Shown on new contracts;
+  // renewals show only the re-verification slots (renewalDocs).
   const fullPackDocs = useMemo<DocReq[]>(
     () => [...KYC_DOCS, ...getRentalSectionDocs(contract.unit.type, contract.tenant.entityType)],
     [contract.unit.type, contract.tenant.entityType]);
@@ -1251,7 +1249,9 @@ function DetailsDrawer({
    *  type preselected and pop the file picker. */
   const prefillUpload = (d: DocReq) => {
     setShowUpload(true);
-    setUpType(d.key);
+    // Only preselect a type the picker actually knows — an unknown legacy key
+    // would slip past submitUpload's lookup. Blank → the user picks the type.
+    setUpType(DOC_TYPES.some(t => t.value === d.key) ? d.key : '');
     setUpExpiry('');
     setUpErr(null);
     requestAnimationFrame(() => {
@@ -1650,16 +1650,16 @@ function DetailsDrawer({
             // lease. Slots match uploads so the gaps are what need requesting.
             const isRenewal = contract.contractType === 'renewal';
             // Primary checklist: renewal → re-verification slots; new → full pack.
-            const expected: DocReq[] = isRenewal ? renewalDocs : fullPackDocs;
-            // On renewals the rest of the category pack still shows (standing
-            // customer file) so real gaps — a missing MOA or TRN — stay visible
-            // even though they aren't re-verified here. Identity/KYC docs are
-            // deliberately excluded: they were collected with the original
-            // lease and would only add noise on a renewal screen.
-            const renewalKeys = new Set(expected.map(d => d.key));
-            const standing: DocReq[] = isRenewal
-              ? fullPackDocs.filter(d => !KYC_DOC_KEYS.has(d.key) && !renewalKeys.has(d.key))
-              : [];
+            // On renewals we no longer surface the rest of the category pack as a
+            // "standing customer file" — those docs live on the original lease and
+            // only add noise here. Any that were uploaded still show under their
+            // group (Financial / Contract / …) below. Identity/KYC is also dropped
+            // on renewal (it carries over from the original lease), so a
+            // residential renewal shows no checklist at all — only licensing
+            // (commercial / industrial) is re-verified.
+            const expected: DocReq[] = isRenewal
+              ? renewalDocs.filter(d => d.category !== 'identity')
+              : fullPackDocs;
             const norm = (s: string | null | undefined) =>
               (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
             // Upload keys / display names that satisfy a slot without matching its
@@ -1688,13 +1688,10 @@ function DetailsDrawer({
             const askedNames = new Set(pendingAsks.map(d => norm(d.displayName ?? d.documentKey).replace(/_\d{10,}$/, '')));
             const askedFor = (req: DocReq) => askedNames.has(norm(req.label)) || askedNames.has(req.key);
             const checklist = expected.map(req => ({ req, doc: matchDoc(req.key) }));
-            const standingList = standing.map(req => ({ req, doc: matchDoc(req.key) }));
             const onFile = checklist.filter(c => c.doc).length;
-            const standingOnFile = standingList.filter(c => c.doc).length;
-            const matchedIds = new Set([...checklist, ...standingList].map(c => c.doc?.id).filter((x): x is number => x != null));
+            const matchedIds = new Set(checklist.map(c => c.doc?.id).filter((x): x is number => x != null));
             // One file can satisfy two slots (legacy combined EID covers Front +
-            // Back; renewal + standing share files) — render it once so React
-            // keys stay unique.
+            // Back) — render it once so React keys stay unique.
             const seenIds = new Set<number>();
             const dedupeRows = (rows: { req: DocReq; doc: ContractDoc | undefined }[]) =>
               rows.filter(({ doc }) => {
@@ -1704,7 +1701,6 @@ function DetailsDrawer({
                 return true;
               });
             const checklistRows = dedupeRows(checklist);
-            const standingRows = dedupeRows(standingList);
             const category = spaceCategoryFromUnitType(contract.unit.type);
             const checklistTitle = isRenewal
               ? 'Renewal documents'
@@ -1722,6 +1718,15 @@ function DetailsDrawer({
 
             const renderDoc = (d: ContractDoc, replaceReq?: DocReq) => {
               const isKyc = d.ownerType === 'customer' || d.ownerType === 'tenant';
+              // Every document gets a Replace action: checklist rows pass their
+              // slot; standalone docs derive one from the doc itself so a newer
+              // upload supersedes it (matchDoc keeps the newest per key).
+              const replaceWith: DocReq = replaceReq ?? {
+                key: d.documentKey.replace(/_\d{10,}$/, ''),
+                label: d.displayName ?? d.documentKey.replace(/_/g, ' '),
+                category: d.category || 'other',
+                required: false,
+              };
               const ok  = ['approved', 'processed', 'complete'].includes(d.status);
               const stt = ok ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
               const lbl = ok ? (d.status === 'approved' ? 'Approved' : 'On file')
@@ -1736,11 +1741,9 @@ function DetailsDrawer({
                   </div>
                   <div className="dacts">
                     <a href={d.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> View</a>
-                    {replaceReq && (
-                      <button type="button" className="mini-btn view" title={`Upload a newer ${replaceReq.label}`} onClick={() => prefillUpload(replaceReq)}>
-                        <UploadCloud size={12} /> Replace
-                      </button>
-                    )}
+                    <button type="button" className="mini-btn view" title={`Upload a newer ${replaceWith.label}`} onClick={() => prefillUpload(replaceWith)}>
+                      <UploadCloud size={12} /> Replace
+                    </button>
                     {/* Review actions only while there's something to review —
                         verified docs don't carry dummy tick/cross buttons. */}
                     {isKyc && (stt === 'pending' || stt === 'rejected') && (
@@ -1804,30 +1807,27 @@ function DetailsDrawer({
                       slots show the real file, missing slots carry one-click
                       Upload / Request — plus extra customer uploads. */}
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
-                      {checklistTitle} · {onFile} of {checklist.length} on file
-                    </div>
-                    {isRenewal && (
-                      <p className="note" style={{ margin: '0 0 8px' }}>
-                        Only {category === 'residential' ? 'identity' : 'licensing'} is re-verified at renewal — the standing customer file is below.
-                      </p>
-                    )}
-                    {/* One list, one pattern — on-file and missing rows share
-                        the same row anatomy and 5px rhythm. */}
-                    <div className="doclist">
-                      {checklistRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
-                    </div>
-                    {isRenewal && standingRows.length > 0 && (
+                    {/* Checklist — full pack on a new lease; on a renewal only
+                        the licensing re-verification slots (residential renewals
+                        have none, so the whole block is hidden). */}
+                    {checklist.length > 0 && (
                       <>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
-                          Customer file — {category} set · {standingOnFile} of {standingList.length} on file
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                          {checklistTitle} · {onFile} of {checklist.length} on file
                         </div>
+                        {isRenewal && (
+                          <p className="note" style={{ margin: '0 0 8px' }}>
+                            Only licensing is re-verified at renewal.
+                          </p>
+                        )}
+                        {/* One list, one pattern — on-file and missing rows share
+                            the same row anatomy and 5px rhythm. */}
                         <div className="doclist">
-                          {standingRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
+                          {checklistRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
                         </div>
                       </>
                     )}
-                    {kycGroup && (
+                    {!isRenewal && kycGroup && (
                       <>
                         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
                           Additional customer documents ({kycGroup.items.length})
@@ -3393,11 +3393,6 @@ export default function ContractV2Page() {
             onUploadDoc={onUploadDoc}
             onRequestDoc={onRequestDoc}
           />
-        </div>
-
-        {/* Addendums (clauses are hidden by design — addendums are the mechanism) */}
-        <div style={{ marginTop: 24 }}>
-          <AddendumsPanel contractId={contract.id} role="landlord" contractStatus={contract.status} />
         </div>
       </div>
 

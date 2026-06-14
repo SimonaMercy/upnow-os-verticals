@@ -176,18 +176,24 @@ export default function CustomerDetailPage() {
   // KYC checklist (RP view): the identity docs this customer should have on
   // file. Missing ones get an inline upload affordance. Mirrors the customer
   // requirements in the backend document-requirements matrix.
+  // Match the slot's base key whether or not the upload carries a `_<timestamp>`
+  // (or `_front`/`_back`) suffix — RP-side uploads and "Replace" append one, so a
+  // strict `===` would leave the suffixed copy unmatched and re-listed as a
+  // phantom duplicate under "extra" docs.
+  const keyMatcher = (base: string) => (k: string) =>
+    new RegExp(`^${base}(_|$)`).test(k);
   const isEidKey = (k: string) => /^emirates_id(_|$)/.test(k);
   const KYC_REQS: { key: string; label: string; category: string; required: boolean; match: (k: string) => boolean }[] = isCompany
     ? [
-        { key: 'trade_license', label: 'Trade License', category: 'license', required: true, match: k => k === 'trade_license' },
-        { key: 'moa', label: 'Memorandum of Association (MOA)', category: 'compliance', required: true, match: k => k === 'moa' },
+        { key: 'trade_license', label: 'Trade License', category: 'license', required: true, match: keyMatcher('trade_license') },
+        { key: 'moa', label: 'Memorandum of Association (MOA)', category: 'compliance', required: true, match: keyMatcher('moa') },
         { key: 'emirates_id', label: 'Authorised Signatory Emirates ID', category: 'identity', required: true, match: isEidKey },
-        { key: 'passport', label: 'Passport', category: 'identity', required: false, match: k => k === 'passport' },
+        { key: 'passport', label: 'Passport', category: 'identity', required: false, match: keyMatcher('passport') },
         { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: k => /visa/.test(k) },
       ]
     : [
         { key: 'emirates_id', label: 'Emirates ID', category: 'identity', required: true, match: isEidKey },
-        { key: 'passport', label: 'Passport', category: 'identity', required: true, match: k => k === 'passport' },
+        { key: 'passport', label: 'Passport', category: 'identity', required: true, match: keyMatcher('passport') },
         { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: k => /visa/.test(k) },
       ];
   const kycChecklist = KYC_REQS.map(req => ({ req, docs: kycDocs.filter(d => req.match(d.documentKey)) }));
