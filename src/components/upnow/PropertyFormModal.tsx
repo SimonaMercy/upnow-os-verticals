@@ -1191,8 +1191,8 @@ export function PropertyFields({
         </div>
       </div>
 
-      {/* Plot Number | Makani Number — manual (Makani = Dubai's 10-digit geo address) */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Plot Number | Makani Number | Number of floors — manual (Makani = Dubai's 10-digit geo address) */}
+      <div className="grid grid-cols-3 gap-3">
         <div>
           <FieldLabel label="Plot Number" />
           <input className={INPUT} placeholder="e.g. PLOT-12345" value={value.plotNumber}
@@ -1203,6 +1203,22 @@ export function PropertyFields({
           <input className={INPUT} placeholder="e.g. 1234567890" value={value.makaniNumber}
             onChange={e => upd('makaniNumber', e.target.value)} />
         </div>
+        <div>
+          <FieldLabel label="Number of floors" />
+          <input className={INPUT} placeholder="e.g. 20 or G+12" value={value.numberOfFloors}
+            onChange={e => upd('numberOfFloors', e.target.value)} />
+        </div>
+      </div>
+
+      {/* Property description — free text, shown on the listing + property profile. */}
+      <div>
+        <FieldLabel label="Property description" />
+        <textarea
+          className={cn(INPUT, 'min-h-[88px] resize-y leading-relaxed')}
+          placeholder="Optional — location highlights, shared facilities, building notes…"
+          value={value.propertyDescription}
+          onChange={e => upd('propertyDescription', e.target.value)}
+        />
       </div>
 
       {/* Number of units — auto-derived (read-only). Units are added/managed in
