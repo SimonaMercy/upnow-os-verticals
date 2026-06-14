@@ -49,14 +49,14 @@ export function clearBuildingSearchCache() {
   // 2. sessionStorage entries written by this module
   try {
     Object.keys(sessionStorage)
-      .filter(k => k.startsWith('gp:ac:') || k.startsWith('street:'))
+      .filter(k => k.startsWith('gp:ac:'))
       .forEach(k => sessionStorage.removeItem(k));
   } catch { /* ignore */ }
 
   // 3. localStorage entries (same prefixes, defensive sweep)
   try {
     Object.keys(localStorage)
-      .filter(k => k.startsWith('gp:ac:') || k.startsWith('street:'))
+      .filter(k => k.startsWith('gp:ac:'))
       .forEach(k => localStorage.removeItem(k));
   } catch { /* ignore */ }
 
@@ -448,122 +448,6 @@ export function BuildingSearch({
           >
             Enter address manually ↓
           </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Street / Address search component ───────────────────
-export function StreetSearch({
-  value,
-  onChange,
-  onCoords,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onCoords?: (lat: number, lng: number) => void;
-}) {
-  const [query,       setQuery]       = useState(value);
-  const [suggestions, setSuggestions] = useState<{ placeId: string; main: string; secondary: string }[]>([]);
-  const [loading,     setLoading]     = useState(false);
-  const [open,        setOpen]        = useState(false);
-  const debounceRef                   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wrapperRef                    = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { setQuery(value); }, [value]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const runSearch = async (q: string) => {
-    if (q.length < 3) { setSuggestions([]); setOpen(false); return; }
-
-    // Check cache first — free
-    const cacheKey = 'street:' + q;
-    const cached = getAcCache(cacheKey);
-    if (cached) {
-      setSuggestions(cached.map(c => ({ placeId: c.placeId, main: c.main, secondary: c.secondary })));
-      setOpen(true);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      type StreetItem = { placePrediction: { placeId: string; structuredFormat: { mainText: { text: string }; secondaryText?: { text: string } } } };
-      const data = await apiPost<{ suggestions?: StreetItem[] }>('/places/autocomplete/street', { input: q });
-      const parsed = (data.suggestions ?? []).map((s) => ({
-        placeId:   s.placePrediction.placeId,
-        main:      s.placePrediction.structuredFormat.mainText.text,
-        secondary: s.placePrediction.structuredFormat.secondaryText?.text ?? '',
-      }));
-      setSuggestions(parsed);
-      setAcCache(cacheKey, parsed.map((p: { placeId: string; main: string; secondary: string }) => ({ ...p, types: [] })));
-      setOpen(true);
-    } catch { /* silent — user can still type freely */ }
-    finally { setLoading(false); }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setQuery(val);
-    onChange(val);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runSearch(val), 350);
-  };
-
-  const handlePick = async (s: { placeId: string; main: string; secondary: string }) => {
-    setQuery(s.main);
-    onChange(s.main);
-    setOpen(false);
-    if (onCoords) {
-      const detail = await fetchGooglePlaceDetails(s.placeId);
-      if (detail) onCoords(detail.lat, detail.lng);
-    }
-  };
-
-  return (
-    <div ref={wrapperRef} className="relative">
-      <div className="relative">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] pointer-events-none" />
-        <input
-          type="text"
-          className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-9 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82] transition-colors"
-          placeholder="e.g. Sheikh Zayed Road, Al Wasl Road…"
-          value={query}
-          onChange={handleChange}
-          onFocus={() => suggestions.length > 0 && setOpen(true)}
-          autoComplete="off"
-        />
-        {loading && (
-          <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#9b9890]" />
-        )}
-      </div>
-      {open && suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-[#e8e6e0] rounded-xl shadow-xl overflow-hidden">
-          <ul className="max-h-48 overflow-y-auto">
-            {suggestions.map(s => (
-              <li key={s.placeId}>
-                <button
-                  type="button"
-                  className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-[#f4f3ef] border-b border-[#f0eeea] last:border-0 transition-colors"
-                  onClick={() => handlePick(s)}
-                >
-                  <MapPin size={14} className="mt-0.5 text-[#2e9f82] shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[#1a1916] truncate">{s.main}</p>
-                    <p className="text-xs text-[#9b9890] leading-tight truncate">{s.secondary}</p>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
         </div>
       )}
     </div>
@@ -1184,10 +1068,13 @@ export function PropertyFields({
         </div>
         <div>
           <FieldLabel label="Street / Address" />
-          <StreetSearch
+          {/* Plain input — no autocomplete here; the "Search Building / Address"
+              field above already auto-fills the street and coordinates. */}
+          <input
+            className={INPUT}
+            placeholder="e.g. Sheikh Zayed Road, Al Wasl Road…"
             value={value.street}
-            onChange={v => upd('street', v)}
-            onCoords={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
+            onChange={e => upd('street', e.target.value)}
           />
         </div>
       </div>
