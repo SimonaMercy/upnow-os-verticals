@@ -29,7 +29,10 @@ export const REQUESTABLE_DOCS = [
   'Security Deposit Cheque',
   'NOC from Current Landlord',
   'Rental History',
-  'Utility Bill / DEWA',
+  'Utility Bill',
+  'Utility Registration',
+  'Utility Clearance',
+  'Utility Final Bill',
   'Utility / Move-out Clearance',
   'Move-in / Move-out Form',
   // Company / commercial

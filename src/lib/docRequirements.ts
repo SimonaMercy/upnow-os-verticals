@@ -81,6 +81,23 @@ export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
   { key: 'utility_clearance', label: 'Previous Utility Closing',    category: 'legal',   required: false, hint: 'Previous Utility clearance' },
 ];
 
+/**
+ * Universal contract-level slots shown on EVERY lease — new AND renewal.
+ * These are the two documents every tenancy carries regardless of unit type:
+ *   - Contract Registration — the Ejari / DLD tenancy registration certificate
+ *     (imported leases name the file "Contract Registration"; it is keyed
+ *     `ejari_certificate`).
+ *   - Payment Advice — the tenant's rent cheques. The same cheques recorded in
+ *     the Payments section; the imported file is named "Payment Advice".
+ * The checklist matches these by key + the name/cheque aliases in the v2 page,
+ * so the loose imported rows snap into these slots instead of floating under
+ * the generic Contract / Financial groups.
+ */
+export const CONTRACT_DOCS: DocReq[] = [
+  { key: 'ejari_certificate', label: 'Contract Registration', category: 'contract', required: false, hint: 'Ejari / DLD tenancy-contract registration certificate' },
+  { key: 'payment_advice',    label: 'Payment Advice',        category: 'payment',  required: false, hint: 'Rent cheques / payment advice — the cheques recorded in the Payments section' },
+];
+
 /** Keys that become REQUIRED for a company tenant on a commercial/industrial
  *  lease (the company's legal/licensing pack the Ejari registration needs). */
 const COMPANY_REQUIRED_KEYS = ['trade_license', 'moa', 'business_license'];
