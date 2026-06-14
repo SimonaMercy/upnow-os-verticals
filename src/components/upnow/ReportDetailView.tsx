@@ -15,7 +15,7 @@ import {
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
 } from 'lucide-react';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'leases-by-month' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -190,6 +190,39 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   // renewal-pipeline kept so older links/bookmarks still work).
   'renewal-forecast': RENEWAL_FORECAST_DEF,
   'renewal-pipeline': RENEWAL_FORECAST_DEF,
+  'leases-by-month': {
+    title: 'Leases by Month',
+    description: 'How many leases started each month — every lease bucketed by its start date, so you can see how many contracts commenced in January, February, and so on. Defaults to this year; use the period control to pick a different year or range. Expand a month to see every lease by customer.',
+    endpoint: '/api/reports/leases-by-month',
+    layout: 'grouped',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'monthLabel', label: 'Month' },
+      { key: 'contracts', label: 'Leases started', align: 'right', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'contracts', label: 'Leases started', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
+      { key: 'months', label: 'Months', type: 'number' },
+    ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'monthLabel',
+      countLabel: 'leases',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'startDate', label: 'Lease starts', type: 'date' },
+        { key: 'endDate', label: 'Lease ends', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'status', label: 'Status', type: 'stage' },
+      ],
+    },
+  },
   'security-deposits': {
     title: 'Security Deposits Report',
     description: 'Deposit register with full lifecycle — held, returned, partial-return and forfeited — with cheque/receipt reference and the net refund liability. A deposit is collected at lease start and refundable at lease end; the date range filters by when it was taken.',
