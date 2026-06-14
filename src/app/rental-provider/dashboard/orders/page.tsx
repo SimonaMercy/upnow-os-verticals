@@ -1,26 +1,28 @@
 /**
- * RP Contracts ("Orders") list page
+ * RP Contracts ("Orders") list page — LEASE-CENTRIC, today-anchored.
  *
- * Implements the "UpNow RP Orders" design (Jun 3 design package):
- *   - Hero with eyebrow / display headline / tagline + Export & New CTAs
- *   - 5 KPIs strip (Total / Active / Expiring 60d / Declined renewals /
- *     Active rent per year — last one rendered as a dark accent card)
- *   - Tab row with status counts (preserves the existing 9-status
- *     synthetic set: active, terminating, pending, issued, expired,
- *     renewal_pending, declined, superseded, terminated + an
- *     upcoming_renewal computed bucket)
- *   - Filter row: search across ref/customer/email/unit/property,
- *     property selector, reset, results count
- *   - Single table card. Each row is a Link that navigates to the v2
- *     Quest layout at /rental-provider/dashboard/contracts/[id]/v2,
- *     since v2 is the canonical detail page; the design's inline
- *     row-body is unused here so the page doesn't duplicate v2.
- *   - Pagination (10 per page)
+ * The headline is the CURRENT PORTFOLIO, not a raw row count. The backend
+ * (GET /contracts → listForRp) returns every contract row for the landlord —
+ * including the old + new rows of each renewal and every expired prior cycle —
+ * so a raw count double/triple-counts a unit. We collapse to ONE in-force lease
+ * per unit (`currentLeases`) for the headline, exactly mirroring the tenant-360
+ * collapse (contracts.service.ts getTenantDetail).
  *
- * Data fetch and the canonical `displayStatusOf` derivation are unchanged
- * from the previous version of this file so the synthetic statuses
- * (declined / renewal_pending / superseded / terminating) keep matching
- * what the lifecycle spec (docs/CONTRACT_LIFECYCLE.md) prescribes.
+ * Four buckets only:
+ *   - All       — current leases (one in-force lease per unit) = the "Total".
+ *   - Active    — current leases not expiring within EXPIRING_DAYS.
+ *   - Expiring  — current leases ending within EXPIRING_DAYS (renewal workload;
+ *                 a unit with a signed-ahead renewal shows here via its parent).
+ *   - Expired   — ended/terminated history (the ONLY year-filtered bucket).
+ *
+ * "In force" folds three DB realities into live occupancy: status=active,
+ * winding-down (accepted termination, `terminating`), and running-but-not-yet-
+ * activated imported leases (status=pending with the term already running,
+ * `needs_activation`) — the latter are live in practice, so they count as Active.
+ *
+ * The year picker scopes the WHOLE page (a lease counts for a year if its term
+ * overlaps it). The Total no longer inflates with the year because it's deduped
+ * per unit — the old 169 was a raw row count. Rows link to the v2 detail page.
  */
 'use client';
 
@@ -28,7 +30,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Search, Plus, X, FileText, ChevronLeft, ChevronRight,
-  Bell, Download, Clock, RotateCcw, Shield, Coins, Calendar,
+  Bell, Download, Clock, Shield, Coins, Calendar,
 } from 'lucide-react';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -37,7 +39,10 @@ import {
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
 type DisplayStatus = ContractStatus | 'declined' | 'needs_activation' | 'starts_later' | 'superseded' | 'terminating';
-type TabKey = DisplayStatus | 'all' | 'upcoming_renewal';
+type TabKey = 'all' | 'active' | 'expiring' | 'expired';
+
+/** Expiring window for the renewal-attention bucket. */
+const EXPIRING_DAYS = 90;
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
   active:           'Active',
@@ -46,25 +51,20 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   pending:          'Draft',
   issued:           'In Progress',
   declined:         'Declined',
-  needs_activation: 'Needs Activation',
-  starts_later:     'Starts Later',
+  needs_activation: 'Active',          // running lease not yet flipped in the DB — it IS live
+  starts_later:     'Signed ahead',
   superseded:       'Superseded',
   terminating:      'Terminating',
 };
 
+// Four buckets only. All = current leases (one in-force lease per unit);
+// Active = current leases not expiring soon; Expiring = current leases ending
+// within EXPIRING_DAYS; Expired = ended/terminated history (year-scoped).
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'all',              label: 'All' },
-  { key: 'active',           label: 'Active' },
-  { key: 'terminating',      label: 'Terminating' },
-  { key: 'needs_activation', label: 'Needs Activation' },
-  { key: 'starts_later',     label: 'Starts Later' },
-  { key: 'upcoming_renewal', label: 'Expiring ≤ 60d' },
-  { key: 'issued',           label: 'In Progress' },
-  { key: 'pending',          label: 'Draft' },
-  { key: 'declined',         label: 'Declined' },
-  { key: 'superseded',       label: 'Superseded' },
-  { key: 'expired',          label: 'Expired' },
-  { key: 'terminated',       label: 'Terminated' },
+  { key: 'all',      label: 'All' },
+  { key: 'active',   label: 'Active' },
+  { key: 'expiring', label: `Expiring < ${EXPIRING_DAYS}d` },
+  { key: 'expired',  label: 'Expired' },
 ];
 
 /** Local YYYY-MM-DD (no UTC shift) — the page's "today" for term-state checks. */
@@ -169,13 +169,20 @@ function initials(name: string | null): string {
   return name.split(' ').map(p => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 }
 
-function isExpiringSoon(c: Contract, now: Date, in60: Date): boolean {
-  // A live tenancy = signed-active OR running-but-not-activated; both need a
-  // renewal decision when the end date is close.
+/** A lease counted as a CURRENT lease: the tenant is in place and the term is
+ *  running today — signed-active, winding-down (terminating), or running-but-
+ *  not-yet-activated-in-the-DB (needs_activation). All three are live occupancy. */
+function isInForce(c: Pick<Contract, 'status' | 'contractType' | 'contractActive' | 'termination' | 'startDate' | 'endDate'>): boolean {
   const ds = displayStatusOf(c);
-  if (ds !== 'active' && ds !== 'needs_activation') return false;
-  const e = new Date(c.endDate);
-  return e >= now && e <= in60;
+  return ds === 'active' || ds === 'terminating' || ds === 'needs_activation';
+}
+
+/** Does this lease's term end within the expiring window (or has it already
+ *  slipped past while still in force)? Used to split current leases into
+ *  Active vs Expiring. */
+function endsSoon(c: Contract, soonBy: Date): boolean {
+  if (!c.endDate) return false;
+  return new Date(c.endDate) <= soonBy;
 }
 
 function daysTo(iso: string, now: Date): number {
@@ -191,11 +198,11 @@ function statusLabel(c: Contract): string {
 // ────────────────────────────────────────────────────────────────────────────
 
 function Row({
-  contract, now, in60,
-}: { contract: Contract; now: Date; in60: Date }) {
+  contract, now, soonBy,
+}: { contract: Contract; now: Date; soonBy: Date }) {
   const c = contract;
   const ds = displayStatusOf(c);
-  const soon = isExpiringSoon(c, now, in60);
+  const soon = isInForce(c) && endsSoon(c, soonBy);
   const d = soon ? daysTo(c.endDate, now) : null;
   const isRenewal = c.contractType === 'renewal';
   // Inner page = the v2 Quest layout. Each row navigates straight there
@@ -225,7 +232,7 @@ function Row({
       <div className="col-term">
         <div className="span">{fmtShort(c.startDate)} – {fmtShort(c.endDate)}</div>
         <div className={'end-note ' + (soon ? 'soon' : '')}>
-          {soon ? <span className="soon-pill">Expires {d}d</span> : <>Ends {fmtDate(c.endDate)}</>}
+          {soon ? <span className="soon-pill">{d !== null && d < 0 ? 'Overdue' : `Expires ${d}d`}</span> : <>Ends {fmtDate(c.endDate)}</>}
         </div>
       </div>
 
@@ -271,18 +278,16 @@ export default function OrdersPage() {
   useEffect(() => { setPage(1); }, [activeTab, search, filterAsset, filterYear]);
 
   const now = useMemo(() => new Date(), []);
-  const in60 = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 60); return d; }, []);
+  const soonBy = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + EXPIRING_DAYS); return d; }, []);
 
   const assets = useMemo(
     () => [...new Set(contracts.map(c => c.property.buildingName).filter((s): s is string => Boolean(s)))],
     [contracts],
   );
 
-  // Year options derived from contract start years (newest first). Parsed from
-  // the ISO date prefix to avoid any timezone drift.
+  // Year options — every year a contract's term touches, newest first. Parsed
+  // from the ISO prefix to avoid timezone drift.
   const yearOf = (d: string | null) => (d && /^\d{4}/.test(d) ? d.slice(0, 4) : null);
-  // Offer every year a contract touches (start OR end year) plus the current
-  // year, so any operational year can be selected — matching the overlap scope.
   const years = useMemo(() => {
     const set = new Set<string>();
     for (const c of contracts) {
@@ -293,11 +298,11 @@ export default function OrdersPage() {
     return [...set].sort((a, b) => b.localeCompare(a));
   }, [contracts]);
 
-  // Global year scope — every figure on the page (KPIs, tab counts, the list)
-  // is derived from this. A contract belongs to a year if its TERM OVERLAPS that
-  // year (started on/before Dec 31 AND ends on/after Jan 1), so leases that began
-  // in an earlier year but run through the selected year are included — not just
-  // the ones that *started* that year.
+  // Year scope — applies to the WHOLE page. A lease belongs to a year if its
+  // term OVERLAPS it (started on/before Dec 31 AND ends on/after Jan 1), plus a
+  // forward-dated renewal created in that year. 'all' = no scoping. The headline
+  // no longer inflates with the year because the live buckets dedupe per unit
+  // (see currentLeases) — the old 169 was a raw row count, now fixed.
   const yearScoped = useMemo(() => {
     if (filterYear === 'all') return contracts;
     const jan1 = `${filterYear}-01-01`;
@@ -305,12 +310,6 @@ export default function OrdersPage() {
     return contracts.filter(c => {
       const s = (c.startDate ?? '').slice(0, 10);
       const e = (c.endDate ?? '').slice(0, 10);
-      // A proposed/forward renewal's TERM starts after the current lease ends
-      // (often next year), so a pure term-overlap scope hides it from the year
-      // it was actually raised in. Surface FORWARD-dated contracts (term begins
-      // after this year) that were CREATED this year — i.e. renewals you proposed
-      // now for a future term. (Scoped to forward terms so 2026-imported leases
-      // with past terms don't flood the current-year view.)
       if (s && s > dec31 && (c.createdAt ?? '').slice(0, 4) === filterYear) return true;
       if (!s || s > dec31) return false;   // term starts after this year
       if (e && e < jan1) return false;     // term ended before this year
@@ -318,89 +317,88 @@ export default function OrdersPage() {
     });
   }, [contracts, filterYear]);
 
-  const tabCounts = useMemo(() => {
-    const counts: Partial<Record<TabKey, number>> = {};
-    counts.all = yearScoped.length;
-    for (const s of Object.keys(STATUS_LABELS) as DisplayStatus[]) {
-      counts[s] = yearScoped.filter(c => displayStatusOf(c) === s).length;
+  // ── CURRENT LEASES = one in-force lease per unit within scope. This is the
+  // headline "Total". A renewed unit keeps the old + new rows and prior cycles
+  // stay as expired rows, so a raw count double/triple-counts; collapsing per
+  // unit gives the real tenancy count (the fix for the inflated 169). ──
+  const currentLeases = useMemo(() => {
+    const byUnit = new Map<number | string, Contract>();
+    for (const c of yearScoped) {
+      if (!isInForce(c)) continue;
+      const key = c.unit.id ?? `c${c.id}`;
+      const prev = byUnit.get(key);
+      if (!prev) { byUnit.set(key, c); continue; }
+      // Changeover: an outgoing active lease and an incoming running lease can
+      // both be in force on one unit. Prefer the signed-active one; among equals
+      // keep the later end date (the lease that actually runs longest).
+      const prevLive = displayStatusOf(prev) !== 'needs_activation';
+      const curLive = displayStatusOf(c) !== 'needs_activation';
+      if (curLive && !prevLive) { byUnit.set(key, c); continue; }
+      if (curLive === prevLive && (c.endDate ?? '') > (prev.endDate ?? '')) byUnit.set(key, c);
     }
-    counts.upcoming_renewal = yearScoped.filter(c => isExpiringSoon(c, now, in60)).length;
-    return counts;
-  }, [yearScoped, now, in60]);
+    return [...byUnit.values()];
+  }, [yearScoped]);
+
+  const expiringLeases = useMemo(() => currentLeases.filter(c => endsSoon(c, soonBy)), [currentLeases, soonBy]);
+  const activeLeases   = useMemo(() => currentLeases.filter(c => !endsSoon(c, soonBy)), [currentLeases, soonBy]);
+
+  // Expired = ended/terminated leases within the selected year scope.
+  const expiredRows = useMemo(
+    () => yearScoped.filter(c => displayStatusOf(c) === 'expired' || c.status === 'terminated'),
+    [yearScoped],
+  );
+
+  // Future renewals already signed ahead — context only (their expiring parent
+  // already represents the unit in Expiring), never a headline bucket.
+  const signedAhead = useMemo(() => yearScoped.filter(c => displayStatusOf(c) === 'starts_later').length, [yearScoped]);
+
+  const tabCounts = useMemo<Record<TabKey, number>>(() => ({
+    all: currentLeases.length,
+    active: activeLeases.length,
+    expiring: expiringLeases.length,
+    expired: expiredRows.length,
+  }), [currentLeases, activeLeases, expiringLeases, expiredRows]);
+
+  const baseList = useMemo(() => {
+    switch (activeTab) {
+      case 'active':   return activeLeases;
+      case 'expiring': return expiringLeases;
+      case 'expired':  return expiredRows;
+      default:         return currentLeases;
+    }
+  }, [activeTab, currentLeases, activeLeases, expiringLeases, expiredRows]);
 
   const filtered = useMemo(() => {
-    return yearScoped.filter(c => {
-      if (activeTab === 'upcoming_renewal') {
-        if (!isExpiringSoon(c, now, in60)) return false;
-      } else if (activeTab !== 'all') {
-        if (displayStatusOf(c) !== activeTab) return false;
-      }
+    const list = baseList.filter(c => {
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const haystack = [
-          c.ref,
-          c.tenant.name,
-          c.tenant.email,
-          c.unit.number,
-          c.property.buildingName,
-        ].filter((s): s is string => Boolean(s)).join(' ').toLowerCase();
+        const haystack = [c.ref, c.tenant.name, c.tenant.email, c.unit.number, c.property.buildingName]
+          .filter((s): s is string => Boolean(s)).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [yearScoped, activeTab, filterAsset, search, now, in60]);
+    // Live tabs: soonest-ending first (renewal urgency). Expired: most recent first.
+    return [...list].sort((a, b) => activeTab === 'expired'
+      ? (b.endDate ?? '').localeCompare(a.endDate ?? '')
+      : (a.endDate ?? '').localeCompare(b.endDate ?? ''));
+  }, [baseList, activeTab, filterAsset, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  // Rent on LIVE tenancies (active / terminating / running-not-activated),
-  // deduped per unit (a changeover can briefly leave two running terms on one
-  // unit — count the later one). This is the "running rent" of the portfolio.
-  const runningRent = useMemo(() => {
-    const live = yearScoped.filter(c => {
-      const ds = displayStatusOf(c);
-      return ds === 'active' || ds === 'terminating' || ds === 'needs_activation';
-    });
-    const byUnit = new Map<number | string, Contract>();
-    for (const c of live) {
-      const key = c.unit.id ?? `c${c.id}`;
-      const prev = byUnit.get(key);
-      if (!prev || (c.endDate ?? '') > (prev.endDate ?? '')) byUnit.set(key, c);
-    }
-    return [...byUnit.values()].reduce((s, c) => s + c.annualRent, 0);
-  }, [yearScoped]);
-
-  // Today-strip: tenancy truth independent of the year filter — this is the
-  // number a landlord expects ("how many units are under a lease right now").
-  const todayStats = useMemo(() => {
-    const units = new Map<number | string, DisplayStatus>();
-    for (const c of contracts) {
-      const ds = displayStatusOf(c);
-      if (ds !== 'active' && ds !== 'terminating' && ds !== 'needs_activation') continue;
-      const key = c.unit.id ?? `c${c.id}`;
-      // active beats needs_activation when both run on one unit (changeover)
-      const prev = units.get(key);
-      if (!prev || prev === 'needs_activation') units.set(key, ds);
-    }
-    const vals = [...units.values()];
-    return {
-      tenancies: vals.length,
-      active: vals.filter(v => v === 'active' || v === 'terminating').length,
-      needsActivation: vals.filter(v => v === 'needs_activation').length,
-      startsLater: contracts.filter(c => displayStatusOf(c) === 'starts_later').length,
-    };
-  }, [contracts]);
+  // Running rent = annual rent across the current leases (already one per unit).
+  const runningRent = useMemo(() => currentLeases.reduce((s, c) => s + (c.annualRent || 0), 0), [currentLeases]);
 
   const hasFilters = filterAsset !== 'all' || search !== '';
 
   const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode }[] = [
-    { lbl: 'Total',              val: String(yearScoped.length),       ic: <FileText size={12} /> },
-    { lbl: 'Active',             val: String(tabCounts.active ?? 0),   ic: <Shield size={12} /> },
-    { lbl: 'Needs activation',   val: String(tabCounts.needs_activation ?? 0), ic: <RotateCcw size={12} /> },
-    { lbl: 'Expiring · 60d',     val: String(tabCounts.upcoming_renewal ?? 0), ic: <Clock size={12} /> },
-    { lbl: 'Running rent / yr',  val: fmtAedAmt(runningRent), aed: true, accent: true, ic: <Coins size={12} /> },
+    { lbl: 'Current leases',          val: String(currentLeases.length),  ic: <FileText size={12} /> },
+    { lbl: 'Active',                  val: String(activeLeases.length),   ic: <Shield size={12} /> },
+    { lbl: `Expiring · ${EXPIRING_DAYS}d`, val: String(expiringLeases.length), ic: <Clock size={12} /> },
+    { lbl: 'Running rent / yr',       val: fmtAedAmt(runningRent), aed: true, accent: true, ic: <Coins size={12} /> },
   ];
 
   return (
@@ -422,9 +420,9 @@ export default function OrdersPage() {
             <p>Every agreement across your portfolio and where it sits in its lifecycle — from draft to Ejari, renewal and termination.</p>
           </div>
           <div className="right">
-            <div className="year-global">
+            <div className="year-global" title="Scope the whole page by lease year">
               <Calendar size={14} />
-              <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter by year">
+              <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter leases by year">
                 <option value="all">All years</option>
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -446,17 +444,17 @@ export default function OrdersPage() {
           ))}
         </div>
 
-        {/* Tenancy truth as of today — independent of the year filter */}
+        {/* Context — the year filter scopes the whole page; the Total is
+            deduped per unit so it reflects real tenancies, not raw rows. */}
         <div className="today-strip">
-          As of today: <b>{todayStats.tenancies}</b> units are under a running lease
-          (<b>{todayStats.active}</b> active · <b>{todayStats.needsActivation}</b> running but not yet activated)
-          {todayStats.startsLater > 0 && <> · <b>{todayStats.startsLater}</b> future terms waiting to start</>}
+          <b>{currentLeases.length}</b> current leases{filterYear === 'all' ? '' : ` in ${filterYear}`} — one per unit
+          {signedAhead > 0 && <> · <b>{signedAhead}</b> renewals signed ahead (shown via their expiring lease)</>}
         </div>
 
         {/* Tabs */}
         <div className="rangetabs">
           <div className="tabs">
-            {TABS.filter(t => t.key === 'all' || (tabCounts[t.key] ?? 0) > 0).map(t => (
+            {TABS.map(t => (
               <button
                 key={t.key}
                 type="button"
@@ -493,7 +491,7 @@ export default function OrdersPage() {
               <X size={12} /> Reset
             </button>
           )}
-          <span className="results">{filtered.length} of {yearScoped.length}</span>
+          <span className="results">{filtered.length} of {baseList.length}</span>
         </div>
 
         {/* Table */}
@@ -523,7 +521,7 @@ export default function OrdersPage() {
             </div>
             <div className="rows">
               {rows.map(c => (
-                <Row key={c.id} contract={c} now={now} in60={in60} />
+                <Row key={c.id} contract={c} now={now} soonBy={soonBy} />
               ))}
             </div>
             {totalPages > 1 && (
