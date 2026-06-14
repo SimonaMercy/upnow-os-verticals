@@ -32,7 +32,7 @@ import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
-import { KYC_DOCS, getRentalSectionDocs, getRenewalRequiredDocs } from '@/lib/docRequirements';
+import { KYC_DOCS, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
@@ -130,6 +130,9 @@ interface ContractDetail {
     effectiveDate: string | null;
     response: 'pending' | 'accepted' | 'rejected' | null;
     respondedAt: string | null;
+    /** 'direct' = RP-side direct termination (no customer approval); the lease
+     *  stays active until the settlement is marked paid. NULL/'mutual' = legacy. */
+    method?: 'mutual' | 'direct' | null;
   } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
@@ -143,7 +146,7 @@ interface ContractDetail {
 // Step model
 // ────────────────────────────────────────────────────────────────────────────
 
-type StepKey = 'issue' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'settlement';
+type StepKey = 'issue' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'closeout' | 'settlement';
 type Tone = 'action' | 'waiting' | 'celebrate' | 'declined';
 type IconKey = 'document' | 'pen' | 'stamp' | 'bolt' | 'key' | 'active' | 'envelope' | 'alert' | 'clock' | 'wallet';
 
@@ -166,6 +169,9 @@ const STEPS_RENEWAL: Step[] = [
 // Appended after "Active" once a termination is accepted and the lease is
 // winding down (Phase 6c) — the actionable move-out inspection + settlement steps.
 const MOVE_OUT_STEP: Step = { key: 'moveout', short: 'Move-out', label: 'Move-out inspection', icon: 'key' };
+// Optional utility close-out (clearance + final bill) between move-out and the
+// deposit settlement — settlement stays reachable regardless of its state.
+const CLOSEOUT_STEP: Step = { key: 'closeout', short: 'Closeout', label: 'Utility closeout', icon: 'bolt' };
 const SETTLEMENT_STEP: Step = { key: 'settlement', short: 'Settlement', label: 'Deposit settlement', icon: 'wallet' };
 
 interface DerivedState {
@@ -179,6 +185,11 @@ interface DerivedState {
   utilityDoc: boolean;
   moveIn: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
   moveOut: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
+  /** Move-out document escape hatch — an uploaded move-out report stands in for
+   *  a full inspection on outdated/legacy leases. */
+  moveOutDoc: boolean;
+  /** Optional utility close-out documents (between move-out and settlement). */
+  closeout: { clearance: boolean; finalBill: boolean };
   settlementStatus: 'draft' | 'sent' | 'agreed' | 'paid' | null;
 }
 
@@ -189,9 +200,14 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     case 'ejari':   return st.ejariStatus === 'registered';
     case 'utility': return st.utilityDoc;
     case 'movein':  return st.moveIn.rpCounterSig;
-    case 'moveout': return st.moveOut.rpCounterSig;
+    case 'moveout': return st.moveOut.rpCounterSig || st.moveOutDoc;
+    // Closeout is OPTIONAL — settlement stays reachable regardless.
+    case 'closeout': return st.closeout.clearance && st.closeout.finalBill;
     case 'settlement': return st.settlementStatus === 'paid';
-    case 'active':  return st.status === 'active';
+    // active/expired/terminated all mean the lease reached activation — so the
+    // step machinery skips the "Activate" override for ended leases and lands
+    // the RP on the wind-down (or terminal panel) instead.
+    case 'active':  return st.status === 'active' || st.status === 'expired' || st.status === 'terminated';
     case 'terms':   return true; // renewal flow only shows terms once accepted by customer
     default:        return false;
   }
@@ -236,6 +252,10 @@ const BASE_DOC_TYPES = [
   { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: true  },
   { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
   { value: 'ejari',                  label: 'Ejari',                  category: 'property',   needsExpiry: true  },
+  { value: 'utility_registration',   label: 'Utility Registration',   category: 'property',   needsExpiry: false },
+  { value: 'move_out_report',        label: 'Move-out Report',        category: 'contract',   needsExpiry: false },
+  { value: 'utility_clearance',      label: 'Utility Clearance',      category: 'property',   needsExpiry: false },
+  { value: 'utility_final_bill',     label: 'Utility Final Bill',     category: 'property',   needsExpiry: false },
   { value: 'poa',                    label: 'POA',                    category: 'legal',      needsExpiry: false },
   { value: 'pdc',                    label: 'PDC',                    category: 'payment',    needsExpiry: false },
   { value: 'agreement',              label: 'Agreement',              category: 'contract',   needsExpiry: false },
@@ -259,6 +279,10 @@ function spaceCategoryFromUnitType(unitType: string | null): string {
 }
 
 function deriveState(contract: ContractDetail, signatures: { role: string; method?: string }[], insp: MoveInInsp | null, moveOutInsp: MoveInInsp | null, settlementStatus: DerivedState['settlementStatus']): DerivedState {
+  const docs = contract.documents ?? [];
+  const moveOutDoc = docs.some(d => /^move_?out/i.test(d.documentKey || '') || /move-?out/i.test(d.displayName || ''));
+  const clearance = docs.some(d => (d.documentKey || '').startsWith('utility_clearance') || /clearance/i.test(d.displayName || ''));
+  const finalBill = docs.some(d => (d.documentKey || '').startsWith('utility_final_bill') || /final.?bill/i.test(d.displayName || ''));
   return {
     status: contract.status,
     ejariStatus: contract.ejariStatus,
@@ -276,6 +300,8 @@ function deriveState(contract: ContractDetail, signatures: { role: string; metho
       tenantSig: !!moveOutInsp?.tenantSig,
       rpCounterSig: !!moveOutInsp?.rpCounterSig,
     },
+    moveOutDoc,
+    closeout: { clearance, finalBill },
     settlementStatus,
   };
 }
@@ -522,7 +548,7 @@ interface StepHandlers {
   contract: ContractDetail;
   state: DerivedState;
   setState: (patch: Partial<DerivedState>) => void;
-  openModal: (m: 'sign' | 'terminate' | 'renew') => void;
+  openModal: (m: 'sign' | 'terminate' | 'renew' | 'direct-terminate') => void;
   openDrawer: (tab: DrawerTab) => void;
   patchContract: (patch: Partial<ContractDetail>) => void;
   onActivate: () => Promise<void>;
@@ -533,6 +559,10 @@ interface StepHandlers {
   onMarkUtility: () => Promise<void>;
   onVerifyUtility: () => Promise<void>;
   onRevertToDraft: () => Promise<void>;
+  /** Wind-down uploads — work even while the lease is active. */
+  onUploadMoveOutDoc: () => void;
+  onUploadCloseoutClearance: () => void;
+  onUploadCloseoutFinalBill: () => void;
   signActionUrl: string;
   inspectionUrl: string;
   moveOutInspectionUrl: string;
@@ -668,16 +698,23 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
 
   if (key === 'utility') {
     const done = isDone('utility', st);
-    // Customer uploads "utility_proof_of_payment" (owner customer); RP may upload "utility".
+    // Move-in utility activation proof: the customer uploads
+    // "utility_proof_of_payment"; the RP's upload here is keyed
+    // "utility_registration" (legacy uploads used "utility_<ts>"). Clearance /
+    // final-bill are move-out docs and must NOT count as the move-in activation,
+    // so we match registration specifically.
     const proof = (h.contract.documents || []).find(d =>
-      d.documentKey === 'utility_proof_of_payment' || d.documentKey === 'utility' || /utility|dewa/i.test(d.documentKey));
+      d.documentKey === 'utility_proof_of_payment' ||
+      d.documentKey === 'utility' ||
+      /^utility_\d/.test(d.documentKey) ||
+      /^utility_registration(_|$)/.test(d.documentKey));
     const acc = h.contract.utilityAccountNumber;
-    const accSub = acc ? `DEWA account ${acc}` : 'DEWA activation proof on file';
+    const accSub = acc ? `Utility account ${acc}` : 'Utility activation proof on file';
     return done
       ? {
           tone: 'celebrate', icon: 'bolt', sub: 'Stop 4 · complete', label: 'Utility',
           headline: 'Utility account confirmed.',
-          body: proof ? `${TEN}'s utility proof is on file.` : 'DEWA activation proof is on file.',
+          body: proof ? `${TEN}'s utility proof is on file.` : 'Utility activation proof is on file.',
           timing: null,
           node: <Completed title="Utility account confirmed" sub={accSub} viewUrl={proof?.fileUrl} viewLabel="View bill" />,
         }
@@ -686,11 +723,11 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           headline: proof ? `${TEN} uploaded the utility proof.` : 'Attach the utility activation.',
           body: proof
             ? 'Review the proof the customer uploaded, then confirm the utility account to advance.'
-            : `Add the DEWA proof, let ${TEN} upload it, or mark it on file for imported leases.`,
+            : `Add the utility proof, let ${TEN} upload it, or mark it on file for imported leases.`,
           timing: proof ? null : 'Takes ~1 min',
           node: proof
             ? <UtilityReview proof={proof} accountNumber={acc} onConfirm={() => h.onVerifyUtility()} onUpload={h.onUploadUtility} lock={lock} />
-            : <UploadAction fileLabel="DEWA-activation.pdf" onUpload={h.onUploadUtility} onMark={() => h.onMarkUtility()} />,
+            : <UploadAction fileLabel="Utility-activation.pdf" onUpload={h.onUploadUtility} onMark={() => h.onMarkUtility()} />,
         };
   }
 
@@ -750,9 +787,54 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
                 <ClipboardCheck size={14} /> Open move-out inspection
               </Link>
+              <p className="note" style={{ marginTop: 8 }}>
+                Lease is outdated? Upload the move-out document instead of a full inspection.
+              </p>
+              <button className="btn btn-ghost btn-block" onClick={h.onUploadMoveOutDoc}>
+                <UploadCloud size={14} /> Upload move-out document instead
+              </button>
             </>
           ),
         };
+  }
+
+  if (key === 'closeout') {
+    const docs = h.contract.documents || [];
+    const clearanceDoc = docs.find(d => (d.documentKey || '').startsWith('utility_clearance') || /clearance/i.test(d.displayName || ''));
+    const finalBillDoc = docs.find(d => (d.documentKey || '').startsWith('utility_final_bill') || /final.?bill/i.test(d.displayName || ''));
+    const both = st.closeout.clearance && st.closeout.finalBill;
+    return {
+      tone: both ? 'celebrate' : 'action', icon: 'bolt', sub: 'Wind-down', label: 'Closeout',
+      headline: both ? 'Utility closeout complete.' : 'Close out the utility account.',
+      body: both
+        ? 'Utility clearance and final bill are on file. Proceed to the deposit settlement to close the lease.'
+        : 'Attach the utility clearance and final bill from the provider. This step is optional — you can proceed to settlement.',
+      timing: null,
+      node: (
+        <>
+          <div className="chklist">
+            <div className={'chkrow ' + (st.closeout.clearance ? 'on' : '')}>
+              <span className="cb">{st.closeout.clearance ? <Check size={12} /> : null}</span>
+              <span className="ct">Utility clearance</span>
+              {clearanceDoc
+                ? <a href={clearanceDoc.fileUrl} target="_blank" rel="noreferrer" className="ca"><ExternalLink size={12} /> View</a>
+                : <button className="ca" onClick={h.onUploadCloseoutClearance}>Upload</button>}
+            </div>
+            <div className={'chkrow ' + (st.closeout.finalBill ? 'on' : '')}>
+              <span className="cb">{st.closeout.finalBill ? <Check size={12} /> : null}</span>
+              <span className="ct">Utility final bill</span>
+              {finalBillDoc
+                ? <a href={finalBillDoc.fileUrl} target="_blank" rel="noreferrer" className="ca"><ExternalLink size={12} /> View</a>
+                : <button className="ca" onClick={h.onUploadCloseoutFinalBill}>Upload</button>}
+            </div>
+          </div>
+          <p className="note" style={{ marginTop: 8 }}>Optional — you can proceed to settlement.</p>
+          <Link href={h.settlementUrl} className="btn btn-jade btn-block">
+            <Wallet size={14} /> Proceed to settlement
+          </Link>
+        </>
+      ),
+    };
   }
 
   if (key === 'settlement') {
@@ -842,25 +924,80 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       ),
     };
   }
-  if (h.contract.termination && h.contract.termination.response === 'accepted' && h.contract.status === 'active') {
+  if (
+    h.contract.termination && h.contract.termination.response === 'accepted'
+    && (h.contract.status === 'active'
+        || (h.contract.status === 'expired' && h.contract.termination.method === 'direct'))
+  ) {
+    const isDirect = h.contract.termination.method === 'direct';
     return {
       tone: 'waiting', icon: 'clock', sub: 'Winding down', label: 'Terminating',
-      headline: 'Move-out scheduled.',
-      body: `The tenancy stays active until ${fmtDate(h.contract.termination.effectiveDate)}, then auto-terminates.`,
-      timing: 'Until effective date',
+      headline: isDirect ? 'Direct close-out in progress.' : 'Move-out scheduled.',
+      body: isDirect
+        ? 'Complete the move-out, utility closeout, then mark the settlement paid to close this lease.'
+        : `The tenancy stays active until ${fmtDate(h.contract.termination.effectiveDate)}, then auto-terminates.`,
+      timing: isDirect ? null : 'Until effective date',
       node: (
         <>
           <div className="qbanner waiting">
             <span className="bic"><Clock size={18} /></span>
             <div style={{ flex: 1 }}>
               <p className="bt">Effective {fmtDate(h.contract.termination.effectiveDate)}</p>
-              <p className="bp">Both parties have agreed. Complete the move-out inspection, then settle the security deposit.</p>
+              <p className="bp">
+                {isDirect
+                  ? 'Direct termination — the lease stays active until you mark the settlement paid.'
+                  : 'Both parties have agreed. Complete the move-out inspection, then settle the security deposit.'}
+              </p>
             </div>
           </div>
           <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
             <ClipboardCheck size={14} /> {st.moveOut.rpCounterSig ? 'View move-out inspection' : 'Open move-out inspection'}
           </Link>
         </>
+      ),
+    };
+  }
+
+  // Terminated — closed-out terminal record (direct or mutual).
+  if (h.contract.status === 'terminated') {
+    const isDirect = h.contract.termination?.method === 'direct';
+    return {
+      tone: 'celebrate', icon: 'active', sub: 'Lease ended', label: 'Terminated',
+      headline: 'Lease terminated.',
+      body: isDirect
+        ? 'This lease was closed out via a direct termination.'
+        : 'This lease has been terminated.',
+      timing: null,
+      node: (
+        <div className="stats">
+          <div className="stat">
+            <div className="sl">Deposit held</div>
+            <div className="sv jade">{fmtAed(h.contract.securityDepositAmount)}</div>
+          </div>
+        </div>
+      ),
+    };
+  }
+
+  // Expired (natural end) with no close-out yet — for outdated leases where the
+  // customer already vacated, offer a direct termination + wind-down right here
+  // instead of the misleading "Activate" override.
+  if (h.contract.status === 'expired') {
+    return {
+      tone: 'action', icon: 'active', sub: 'Lease expired', label: 'Expired',
+      headline: 'This lease has expired.',
+      body: 'The term has ended. If the customer has already vacated, terminate it directly to record the move-out, utility closeout and final settlement.',
+      timing: null,
+      node: (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-ghost"
+            style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
+            onClick={() => h.openModal('direct-terminate')}
+          >
+            <X size={14} /> Terminate directly
+          </button>
+        </div>
       ),
     };
   }
@@ -927,6 +1064,9 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             )}
             <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('terminate')}>
               <X size={14} /> Request termination
+            </button>
+            <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('direct-terminate')}>
+              <X size={14} /> Terminate directly
             </button>
           </div>
         </>
@@ -1237,7 +1377,7 @@ function DetailsDrawer({
   const DOC_TYPES = useMemo(() => {
     const fromChecklist: { value: string; label: string; category: string; needsExpiry: boolean }[] = [];
     const seen = new Set<string>();
-    for (const d of [...renewalDocs, ...fullPackDocs]) {
+    for (const d of [...CONTRACT_DOCS, ...renewalDocs, ...fullPackDocs]) {
       if (seen.has(d.key)) continue;
       seen.add(d.key);
       fromChecklist.push({ value: d.key, label: d.label, category: d.category, needsExpiry: EXPIRY_DOC_KEYS.has(d.key) });
@@ -1649,17 +1789,19 @@ function DetailsDrawer({
             // only the re-verification docs; the full pack lives on the original
             // lease. Slots match uploads so the gaps are what need requesting.
             const isRenewal = contract.contractType === 'renewal';
-            // Primary checklist: renewal → re-verification slots; new → full pack.
-            // On renewals we no longer surface the rest of the category pack as a
-            // "standing customer file" — those docs live on the original lease and
-            // only add noise here. Any that were uploaded still show under their
-            // group (Financial / Contract / …) below. Identity/KYC is also dropped
-            // on renewal (it carries over from the original lease), so a
-            // residential renewal shows no checklist at all — only licensing
-            // (commercial / industrial) is re-verified.
+            // Primary checklist:
+            //   • New lease → the unit category's full pack (KYC + commercial /
+            //     industrial / residential) PLUS the two universal contract docs
+            //     (Contract Registration / Ejari + Payment Advice).
+            //   • Renewal  → ONLY the two universal contract docs. The KYC +
+            //     financial / commercial pack lives on the original lease and is
+            //     not re-collected; the renewal just re-confirms the registration
+            //     and the rent cheques. (Previously a residential renewal showed
+            //     no checklist at all — that left the slots invisible.)
+            // Any other uploaded docs still surface under their group below.
             const expected: DocReq[] = isRenewal
-              ? renewalDocs.filter(d => d.category !== 'identity')
-              : fullPackDocs;
+              ? CONTRACT_DOCS
+              : [...fullPackDocs, ...CONTRACT_DOCS];
             const norm = (s: string | null | undefined) =>
               (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
             // Upload keys / display names that satisfy a slot without matching its
@@ -1675,6 +1817,13 @@ function DetailsDrawer({
               tax_registration: ['tax_registration_certificate', 'vat_tax_registration_trn', 'vat_certificate'],
               moa: ['moa_mom', 'memorandum_of_association', 'memorandum_of_association_moa'],
               business_license: ['business_activity_license'],
+              // Universal contract slots. The Ejari certificate is named
+              // "Contract Registration" on imported leases; the rent cheques
+              // ("Payment Advice") are the same cheques uploaded in the Payments
+              // stage (pdc / cheque-copy keys), so the slot snaps onto whichever
+              // landed first.
+              ejari_certificate: ['ejari', 'ejari_certificate', 'contract_registration', 'tenancy_contract_registration', 'ejari_registration'],
+              payment_advice: ['pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques'],
             };
             const matchDoc = (key: string): ContractDoc | undefined => {
               const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
@@ -1859,49 +2008,55 @@ function DetailsDrawer({
                     </div>
                   ))}
 
-                  {/* Upload document (Flow 5) */}
+                  {/* Upload document (Flow 5) — popup, matching the request modal */}
                   {showUpload && (
-                    <div ref={uploadBoxRef} style={{ margin: '6px 0 14px', padding: 14, border: '1px solid var(--mist-strong)', borderRadius: 12, background: 'var(--surface)' }}>
-                      <p className="subhead">Upload a document</p>
-                      <input ref={docFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: 'none' }}
-                        onChange={e => setUpFile(e.target.files?.[0] ?? null)} />
-                      <div className="field">
-                        <label>File</label>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => docFileRef.current?.click()}>Choose file</button>
-                          <span className="note" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{upFile ? upFile.name : 'No file chosen'}</span>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">
+                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={() => { setShowUpload(false); setUpErr(null); }} />
+                      <div ref={uploadBoxRef} style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 460, padding: 18, maxHeight: '90vh', overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+                          <p className="subhead" style={{ margin: 0 }}>Upload a document</p>
+                          <button type="button" className="mini-btn view" onClick={() => { setShowUpload(false); setUpErr(null); }}><X size={12} /></button>
                         </div>
-                      </div>
-                      <div className="field">
-                        <label>Document type</label>
-                        <select className="input" value={upType} onChange={e => { setUpType(e.target.value); setUpExpiry(''); }}>
-                          <option value="">Select type…</option>
-                          {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label>Visibility</label>
-                        <div style={{ display: 'flex', gap: 18 }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
-                            <input type="radio" name="v2DocVisibility" checked={!upVisible} onChange={() => setUpVisible(false)} /> Internal only
-                          </label>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
-                            <input type="radio" name="v2DocVisibility" checked={upVisible} onChange={() => setUpVisible(true)} /> Visible to customer
-                          </label>
-                        </div>
-                      </div>
-                      {upShowExpiry && (
+                        <input ref={docFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: 'none' }}
+                          onChange={e => setUpFile(e.target.files?.[0] ?? null)} />
                         <div className="field">
-                          <label>Expiry date (required for {upSelected?.label})</label>
-                          <input type="date" className="input" value={upExpiry} onChange={e => setUpExpiry(e.target.value)} />
+                          <label>File</label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => docFileRef.current?.click()}>Choose file</button>
+                            <span className="note" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{upFile ? upFile.name : 'No file chosen'}</span>
+                          </div>
                         </div>
-                      )}
-                      {upErr && <p className="note" style={{ color: 'var(--brick)' }}>{upErr}</p>}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                        <button className="btn btn-jade btn-sm" disabled={upBusy || !upFile || !upType || (upShowExpiry && !upExpiry)} onClick={() => void submitUpload()}>
-                          <UploadCloud size={14} /> {upBusy ? 'Uploading…' : 'Upload'}
-                        </button>
-                        <button className="btn btn-ghost btn-sm" disabled={upBusy} onClick={() => { setShowUpload(false); setUpErr(null); }}>Cancel</button>
+                        <div className="field">
+                          <label>Document type</label>
+                          <select className="input" value={upType} onChange={e => { setUpType(e.target.value); setUpExpiry(''); }}>
+                            <option value="">Select type…</option>
+                            {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="field">
+                          <label>Visibility</label>
+                          <div style={{ display: 'flex', gap: 18 }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                              <input type="radio" name="v2DocVisibility" checked={!upVisible} onChange={() => setUpVisible(false)} /> Internal only
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                              <input type="radio" name="v2DocVisibility" checked={upVisible} onChange={() => setUpVisible(true)} /> Visible to customer
+                            </label>
+                          </div>
+                        </div>
+                        {upShowExpiry && (
+                          <div className="field">
+                            <label>Expiry date (required for {upSelected?.label})</label>
+                            <input type="date" className="input" value={upExpiry} onChange={e => setUpExpiry(e.target.value)} />
+                          </div>
+                        )}
+                        {upErr && <p className="note" style={{ color: 'var(--brick)' }}>{upErr}</p>}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                          <button className="btn btn-jade btn-sm" disabled={upBusy || !upFile || !upType || (upShowExpiry && !upExpiry)} onClick={() => void submitUpload()}>
+                            <UploadCloud size={14} /> {upBusy ? 'Uploading…' : 'Upload'}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" disabled={upBusy} onClick={() => { setShowUpload(false); setUpErr(null); }}>Cancel</button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2411,6 +2566,68 @@ function TerminateModal({
   );
 }
 
+/** RP-side direct termination — ends the lease without customer approval (the
+ *  customer has already vacated). Starts the move-out → utility → settlement
+ *  close-out; the lease stays ACTIVE until the settlement is marked paid. */
+function DirectTerminateModal({
+  contract, onClose, onSubmitted,
+}: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
+  const [reason, setReason] = useState('');
+  const [effective, setEffective] = useState(new Date().toISOString().slice(0, 10));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/termination/direct`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, effectiveDate: effective }),
+      });
+      if (!res.ok) throw new Error(`Direct termination failed: ${res.status}`);
+      onSubmitted();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Direct termination failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mscrim" onClick={onClose}>
+      <div className="modal sm" onClick={e => e.stopPropagation()}>
+        <div className="mh">
+          <span className="mt">
+            <span className="mti" style={{ background: 'var(--brick)' }}><AlertCircle size={17} /></span>
+            Terminate directly
+          </span>
+          <button className="x" onClick={onClose}><X size={17} /></button>
+        </div>
+        <div className="mb">
+          <p className="note" style={{ marginBottom: 14 }}>
+            The customer has already vacated. This ends the lease without their approval and starts the move-out → utility → settlement close-out. The lease stays active until you complete the settlement.
+          </p>
+          <div className="field">
+            <label>Reason</label>
+            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Why are you ending this contract?" />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Effective date</label>
+            <input type="date" className="input" value={effective} onChange={e => setEffective(e.target.value)} />
+          </div>
+          {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+        </div>
+        <div className="mf">
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-brick btn-sm" disabled={!reason.trim() || !effective || busy} onClick={submit}>
+            Terminate directly
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RenewalProposeModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
@@ -2567,12 +2784,17 @@ export default function ContractV2Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
-  const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | null>(null);
-  // Ejari / DEWA-utility upload (ported from the old page so v2 is self-contained).
+  const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | null>(null);
+  // Ejari / utility upload (ported from the old page so v2 is self-contained).
   const ejariInputRef = useRef<HTMLInputElement>(null);
   const utilityInputRef = useRef<HTMLInputElement>(null);
+  // Wind-down doc uploads (move-out report + utility close-out). One shared
+  // hidden input + a "pending kind" so a single onChange routes to the right key.
+  const windDownInputRef = useRef<HTMLInputElement>(null);
+  const [windDownKind, setWindDownKind] = useState<'move_out' | 'clearance' | 'final_bill' | null>(null);
   const [ejariUploading, setEjariUploading] = useState(false);
   const [utilityUploading, setUtilityUploading] = useState(false);
+  const [windDownUploading, setWindDownUploading] = useState(false);
 
   const reload = useCallback(() => {
     if (!params?.id) return;
@@ -2598,7 +2820,8 @@ export default function ContractV2Page() {
         // down — either an accepted early termination, or the customer declined
         // the renewal to vacate (move-out at the scheduled lease end).
         const winding = (data.termination?.response === 'accepted' && data.status === 'active')
-          || !!data.vacateAtEnd;
+          || !!data.vacateAtEnd
+          || data.termination?.method === 'direct';
         // The wind-down (move-out inspection + deposit settlement) lives on the
         // ACTIVE lease. When the RP opened the archived renewal proposal whose
         // parent is vacating, pull the status from the parent so the declined
@@ -2664,10 +2887,13 @@ export default function ContractV2Page() {
   // The archived renewal proposal mirrors `vacateAtEnd` (from its parent) only so
   // its detail can show the declined-renewal summary — it must NOT render empty
   // wind-down steps, so gate the steps on the contract still being active.
+  // A direct termination keeps the wind-down visible while active AND after it
+  // closes to terminated (the lease only flips terminated once settlement is paid).
   const isWinding = (contract.termination?.response === 'accepted' && contract.status === 'active')
-    || (!!contract.vacateAtEnd && contract.contractActive !== false);
+    || (!!contract.vacateAtEnd && contract.contractActive !== false)
+    || contract.termination?.method === 'direct';
   const baseSteps = mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
-  const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, SETTLEMENT_STEP] : baseSteps;
+  const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, CLOSEOUT_STEP, SETTLEMENT_STEP] : baseSteps;
   const doneArr = steps.map(s => isDone(s.key, derived));
   const firstTodo = doneArr.findIndex(x => !x);
   const autoIdx = firstTodo >= 0 ? firstTodo : steps.length - 1;
@@ -2786,7 +3012,7 @@ export default function ContractV2Page() {
   const onUtilityFilePicked = async (file: File) => {
     setUtilityUploading(true);
     try {
-      await uploadContractDoc(file, 'Utility Proof', 'utility');
+      await uploadContractDoc(file, 'Utility Registration', 'utility_registration');
       void reload();
     } catch (e) { alert(e instanceof Error ? e.message : 'Utility upload failed'); }
     finally { setUtilityUploading(false); if (utilityInputRef.current) utilityInputRef.current.value = ''; }
@@ -2797,6 +3023,41 @@ export default function ContractV2Page() {
       if (!res.ok) throw new Error(`Mark utility failed: ${res.status}`);
       void reload();
     } catch { setLocalState({ utilityDoc: true }); }
+  };
+
+  // ── Wind-down document uploads (move-out report + utility close-out) ──
+  // These work even while the lease is active (they're part of the deferred
+  // close-out), so they do NOT gate on lock / readOnlyWorkflow. A single hidden
+  // input is reused; `windDownKind` routes the picked file to the right doc key.
+  const pickWindDownDoc = (kind: 'move_out' | 'clearance' | 'final_bill') => {
+    setWindDownKind(kind);
+    windDownInputRef.current?.click();
+  };
+  const onUploadMoveOutDoc = () => pickWindDownDoc('move_out');
+  const onUploadCloseoutClearance = () => pickWindDownDoc('clearance');
+  const onUploadCloseoutFinalBill = () => pickWindDownDoc('final_bill');
+  const onWindDownFilePicked = async (file: File, kind: 'move_out' | 'clearance' | 'final_bill') => {
+    const spec = {
+      move_out:   { name: 'Move-out report',     key: 'move_out_report' },
+      clearance:  { name: 'Utility Clearance',   key: 'utility_clearance' },
+      final_bill: { name: 'Utility Final Bill',  key: 'utility_final_bill' },
+    }[kind];
+    setWindDownUploading(true);
+    try {
+      await uploadContractDoc(file, spec.name, spec.key);
+      // Guide the RP to the next wind-down step after each upload: the move-out
+      // document advances to the utility closeout; once both closeout docs are
+      // in, advance to the settlement.
+      if (kind === 'move_out') {
+        setSelKey('closeout');
+      } else if (kind === 'clearance' && derived?.closeout.finalBill) {
+        setSelKey('settlement');
+      } else if (kind === 'final_bill' && derived?.closeout.clearance) {
+        setSelKey('settlement');
+      }
+      void reload();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Upload failed'); }
+    finally { setWindDownUploading(false); setWindDownKind(null); if (windDownInputRef.current) windDownInputRef.current.value = ''; }
   };
   const onVerifyUtility = async () => {
     try {
@@ -2976,6 +3237,7 @@ export default function ContractV2Page() {
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
+    onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
     signActionUrl: `${contractsBase}/${contract.id}`,
     inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
     moveOutInspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_out`,
@@ -3183,6 +3445,35 @@ export default function ContractV2Page() {
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Download size={14} /> PDF
             </Link>
+            {/* Always-available renewal entry — surfaces the existing renewal
+                feature on any live lease (incl. active renewal children, for
+                chained renewals) without hunting inside the Active step. Hidden
+                when a renewal is already in flight or the lease is terminating.
+                The backend (proposeRenewal) requires status=active, so it is not
+                shown on expired/terminated/draft rows. */}
+            {contract.status === 'active'
+              && contract.renewalAccepted !== 'pending'
+              && contract.renewalAccepted !== 'accepted'
+              && contract.termination?.response !== 'accepted' && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal('renew')}>
+                <RotateCcw size={14} /> Propose renewal
+              </button>
+            )}
+            {/* Always-available direct-termination entry — visible on every live
+                (active) or ended (expired) lease so the RP never has to hunt for
+                it inside a journey step. Hidden once a termination is already
+                accepted/direct (wind-down in progress) and on draft/terminated
+                rows where it doesn't apply. */}
+            {(contract.status === 'active' || contract.status === 'expired')
+              && contract.termination?.response !== 'accepted' && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
+                onClick={() => setModal('direct-terminate')}
+              >
+                <X size={14} /> Terminate directly
+              </button>
+            )}
             {derived.landlordSigned && (
               <span className="pill celebrate" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                 <BadgeCheck size={13} /> You signed
@@ -3253,6 +3544,33 @@ export default function ContractV2Page() {
             </div>
             <button className="btn btn-jade btn-sm" style={{ alignSelf: 'center' }} onClick={() => void onActivate()}>
               Activate now
+            </button>
+          </div>
+        )}
+
+        {/* Ended / overdue lease with no close-out recorded — the customer may
+            already have vacated (outdated/imported data). Offer a direct
+            termination + wind-down (move-out, utility closeout, settlement)
+            right here, mirroring the "needs activation" fix above. */}
+        {(contract.status === 'expired' || (contract.status === 'active' && !!endIso && endIso < todayIso))
+          && contract.termination?.method !== 'direct'
+          && contract.termination?.response !== 'accepted'
+          && !contract.vacateAtEnd
+          && !isSuperseded && !isDeclinedRenewal && (
+          <div className="qbanner waiting" style={{ marginBottom: 4 }}>
+            <span className="bic"><Key size={18} /></span>
+            <div style={{ flex: 1 }}>
+              <p className="bt">
+                {contract.status === 'expired' ? 'This lease has ended' : 'This lease is overdue'} — record the close-out if the customer has vacated
+              </p>
+              <p className="bp">
+                The term ended {fmtDate(contract.endDate)}. If {contract.tenant.name ?? 'the customer'} has
+                already moved out, terminate it directly to record the move-out, utility closeout and final
+                deposit settlement. The lease stays active until you mark the settlement paid.
+              </p>
+            </div>
+            <button className="btn btn-brick btn-sm" style={{ alignSelf: 'center' }} onClick={() => setModal('direct-terminate')}>
+              Terminate directly
             </button>
           </div>
         )}
@@ -3398,16 +3716,20 @@ export default function ContractV2Page() {
 
       {modal === 'sign' && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+      {modal === 'direct-terminate' && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); }} />}
       {modal === 'renew' && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
-      {/* Hidden file pickers for inline Ejari / DEWA-utility upload (self-contained, no redirect to the old page). */}
+      {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
       <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void onEjariFilePicked(f); }} />
       <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUtilityFilePicked(f); }} />
-      {(ejariUploading || utilityUploading) && (
+      {/* Wind-down doc picker (move-out report / utility clearance / final bill) — routed by windDownKind. */}
+      <input ref={windDownInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; const k = windDownKind; if (f && k) void onWindDownFilePicked(f, k); }} />
+      {(ejariUploading || utilityUploading || windDownUploading) && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
-          Uploading {ejariUploading ? 'Ejari' : 'utility'} document…
+          Uploading {ejariUploading ? 'Ejari' : utilityUploading ? 'utility' : 'wind-down'} document…
         </div>
       )}
 

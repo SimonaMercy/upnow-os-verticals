@@ -68,6 +68,8 @@ export default function SettlementPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [stamps, setStamps] = useState<{ sentAt: string | null; agreedAt: string | null; paidAt: string | null }>({ sentAt: null, agreedAt: null, paidAt: null });
 
+  const [isDirect, setIsDirect] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [acting, setActing] = useState<null | 'send' | 'paid'>(null);
@@ -101,6 +103,7 @@ export default function SettlementPage() {
           unit: c.unit?.number ?? c.unit?.unitNumber ?? '',
           tenantName: c.tenant?.name ?? '',
         });
+        setIsDirect(c.termination?.method === 'direct');
       }
       if (sRes.ok) {
         const s = await sRes.json() as ApiSettlement;
@@ -158,6 +161,13 @@ export default function SettlementPage() {
 
   async function markPaid() {
     setActing('paid'); setError(null);
+    // Direct close-out can pay straight from draft — persist any in-progress
+    // edits first so the lease isn't closed on stale figures (the send→paid
+    // path already saves via sendToCustomer()).
+    if (isDirect && status === 'draft') {
+      const ok = await save();
+      if (!ok) { setActing(null); return; }
+    }
     try {
       const res = await fetch(`/api/contracts/${contractId}/settlement/paid`, { method: 'POST', credentials: 'include' });
       if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to mark paid'); return; }
@@ -286,6 +296,9 @@ export default function SettlementPage() {
       </div>
 
       {/* Actions */}
+      {isDirect && status === 'draft' && (
+        <p className="text-xs text-[#6b6860]">Customer has vacated — you can record the refund and close the lease directly.</p>
+      )}
       <div className="flex flex-wrap items-center gap-3 pb-10">
         {!locked && (
           <>
@@ -299,7 +312,7 @@ export default function SettlementPage() {
             </button>
           </>
         )}
-        {(status === 'sent' || status === 'agreed') && (
+        {(status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
           <button onClick={() => void markPaid()} disabled={acting !== null}
             className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 transition-colors">
             {acting === 'paid' ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />} Mark refund paid
