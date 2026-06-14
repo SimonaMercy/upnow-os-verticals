@@ -13,6 +13,7 @@ import {
   Loader2,
   AlignLeft,
   ChevronDown,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 interface Property {
@@ -106,6 +107,9 @@ export function PropertyDetailsModal({
   const [detail, setDetail] = useState<Partial<Property> | null>(null);
   // Documents is a collapsible tab (collapsed by default).
   const [docsOpen, setDocsOpen] = useState(false);
+  // Building photos (read-only gallery) + click-to-enlarge lightbox.
+  const [photos, setPhotos] = useState<{ id: number; url: string }[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +144,19 @@ export function PropertyDetailsModal({
     return () => { cancelled = true; };
   }, [property.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/properties/${property.id}/media`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setPhotos(Array.isArray(data) ? data : []);
+      } catch { /* no photos */ }
+    })();
+    return () => { cancelled = true; };
+  }, [property.id]);
+
   // Merge: prefer freshly-fetched detail (full location names) over the list row.
   const p: Property = { ...property, ...(detail ?? {}) };
 
@@ -167,6 +184,7 @@ export function PropertyDetailsModal({
   const addedOn = formatDate(p.createdAt);
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
       onClick={onClose}
@@ -202,6 +220,36 @@ export function PropertyDetailsModal({
 
         {/* Body */}
         <div className="overflow-auto p-5 sm:p-6 space-y-4">
+          {/* Photos — read-only gallery; click to enlarge. Cover (first) is larger. */}
+          {photos.length > 0 && (
+            <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0eeea] bg-[#faf9f7]">
+                <ImageIcon className="w-4 h-4 text-[#2e9f82]" />
+                <h3 className="text-sm font-bold text-[#1a1916]">Photos</h3>
+                <span className="text-xs font-semibold text-[#9b9890]">{photos.length}</span>
+              </div>
+              <div className="p-4 grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {photos.map((ph, i) => (
+                  <button
+                    key={ph.id}
+                    type="button"
+                    onClick={() => setLightbox(ph.url)}
+                    className={`relative aspect-square rounded-lg overflow-hidden border group cursor-zoom-in
+                      ${i === 0 ? 'border-[#2e9f82]' : 'border-[#e8e6e0]'}`}
+                  >
+                    {i === 0 && (
+                      <span className="absolute bottom-0 left-0 right-0 bg-[#2e9f82] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
+                        COVER
+                      </span>
+                    )}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={ph.url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* KPI row */}
           {stats && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -400,5 +448,25 @@ export function PropertyDetailsModal({
         )}
       </div>
     </div>
+
+    {/* Lightbox — full-screen enlarged photo */}
+    {lightbox && (
+      <div
+        className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4 cursor-zoom-out"
+        onClick={() => setLightbox(null)}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={lightbox} alt="" className="max-w-full max-h-full object-contain rounded-lg" />
+        <button
+          type="button"
+          onClick={() => setLightbox(null)}
+          aria-label="Close"
+          className="absolute top-4 right-4 w-9 h-9 rounded-lg bg-black/50 hover:bg-black/70 text-white flex items-center justify-center"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+    )}
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { PROPERTY_DOC_SLOTS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
 import { DocPreviewModal } from './DocPreviewModal';
+import { PropertyPhotos } from './PropertyPhotos';
 
 // ─── Types from backend location endpoints ────────────────
 interface Country      { id: number; nameEn: string; code: string; }
@@ -1426,6 +1427,16 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
             unitCount={unitCount}
             extraDocs={extraDocs} setExtraDocs={setExtraDocs}
           />
+
+          {/* Building photos — live gallery (edit only; the Add flow stages
+              photos on the dedicated add page before the property exists). */}
+          {propertyId && (
+            <div className="pt-1 border-t border-[#f0ede8]">
+              <div className="pt-4">
+                <PropertyPhotos propertyId={propertyId} />
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

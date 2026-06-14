@@ -13,6 +13,7 @@ import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import {
   PropertyFields, type PropertyFormData,
 } from '@/components/upnow/PropertyFormModal';
+import { PropertyPhotos } from '@/components/upnow/PropertyPhotos';
 import {
   RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
   WORKSPACES_UNIT_TYPES, VENUES_UNIT_TYPES,
@@ -229,6 +230,8 @@ export default function AddListingPage() {
   const [titleDeed, setTitleDeed] = useState<File | null>(null);
   const [drawings, setDrawings]   = useState<File[]>([]);
   const [extraDocs, setExtraDocs] = useState<Record<string, File[]>>({});
+  // Building photos staged before the property exists; uploaded after create.
+  const [propertyPhotos, setPropertyPhotos] = useState<File[]>([]);
   // countries + emirates also feed the CSV bulk-importer's name→id resolution,
   // so they live here even though PropertyFields runs its own location cascade.
   const [countries, setCountries] = useState<Country[]>([]);
@@ -450,6 +453,15 @@ export default function AddListingPage() {
           } catch (e) { docErrs.push(`${drawings[i].name || `Drawing ${i + 1}`}: ${e instanceof Error ? e.message : 'upload failed'}`); }
         }
         docErrs.push(...await uploadExtraPropertyDocs(propId, extraDocs));
+        // Building photos → property media (public bucket).
+        for (let i = 0; i < propertyPhotos.length; i++) {
+          try {
+            const fd = new FormData();
+            fd.append('file', propertyPhotos[i]);
+            const res = await fetch(`/api/properties/${propId}/media`, { method: 'POST', body: fd, credentials: 'include' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          } catch (e) { docErrs.push(`Property photo ${i + 1}: ${e instanceof Error ? e.message : 'upload failed'}`); }
+        }
         if (docErrs.length) {
           alert(`The property was created, but ${docErrs.length} document(s) failed to upload:\n\n${docErrs.join('\n')}`);
         }
@@ -791,7 +803,7 @@ export default function AddListingPage() {
                 onClick={() => {
                   setDone(false); setRows([emptyRow(true)]); setMode('new');
                   setSelectedPropId(null); setPf({ ...EMPTY_PROP }); setCsvRows([]); setDoneErrs([]);
-                  setTitleDeed(null); setDrawings([]); setExtraDocs({});
+                  setTitleDeed(null); setDrawings([]); setExtraDocs({}); setPropertyPhotos([]);
                 }}
                 className="px-5 py-2.5 rounded-lg border border-[#2e9f82] text-[#2e9f82] text-sm font-medium hover:bg-[#f0fdf8] cursor-pointer"
               >
@@ -853,14 +865,19 @@ export default function AddListingPage() {
                   →Sub, Building Name / Street / Plot, Standalone + Title Deed,
                   and Building drawings. */}
               {!selectedPropId && (
-                <PropertyFields
-                  value={pf} setValue={setPf}
-                  errors={pe} setErrors={setPe}
-                  isEdit={false}
-                  titleDeed={titleDeed} setTitleDeed={setTitleDeed}
-                  drawings={drawings} setDrawings={setDrawings}
-                  extraDocs={extraDocs} setExtraDocs={setExtraDocs}
-                />
+                <>
+                  <PropertyFields
+                    value={pf} setValue={setPf}
+                    errors={pe} setErrors={setPe}
+                    isEdit={false}
+                    titleDeed={titleDeed} setTitleDeed={setTitleDeed}
+                    drawings={drawings} setDrawings={setDrawings}
+                    extraDocs={extraDocs} setExtraDocs={setExtraDocs}
+                  />
+                  <div className="mt-5 pt-5 border-t border-[#f0ede8]">
+                    <PropertyPhotos value={propertyPhotos} onChange={setPropertyPhotos} />
+                  </div>
+                </>
               )}
             </div>
           </Section>
