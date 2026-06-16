@@ -22,7 +22,7 @@ import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { PortfolioMapView } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { PropertyFormModal, type PropertyFormData } from '@/components/upnow/PropertyFormModal';
+import { PropertyFormModal, categoryDisplayLabel, type PropertyFormData } from '@/components/upnow/PropertyFormModal';
 import s from '@/app/rental-provider/dashboard/portfolio/portfolio.module.css';
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
@@ -108,7 +108,7 @@ interface OverviewStats {
 }
 
 function categoryLabel(c: string) {
-  return c.charAt(0).toUpperCase() + c.slice(1);
+  return categoryDisplayLabel(c);
 }
 
 export default function ManagerPropertiesPage() {

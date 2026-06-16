@@ -6,11 +6,12 @@ import { cn } from '@/lib/utils';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
-export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'townhouse', 'penthouse', 'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home'];
+export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'villa_compound', 'townhouse', 'penthouse', 'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home'];
 export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
 export const INDUSTRIAL_UNIT_TYPES  = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
 export const WORKSPACES_UNIT_TYPES  = ['coworking_desk', 'private_office', 'meeting_room', 'day_office'];
 export const VENUES_UNIT_TYPES      = ['event_hall', 'wedding_venue', 'conference_hall', 'private_dining', 'outdoor_venue'];
+export const LAND_UNIT_TYPES        = ['residential_land', 'commercial_land', 'industrial_land', 'mixed_use_land', 'agricultural_land', 'labour_accommodation_land'];
 
 // All non-residential types combined (useful for downstream checks)
 export const ALL_COMMERCIAL_TYPES = [
@@ -22,7 +23,7 @@ export const ALL_COMMERCIAL_TYPES = [
 
 export const UNIT_TYPE_LABELS: Record<string, string> = {
   // Residential
-  apartment: 'Apartment', villa: 'Villa', townhouse: 'Townhouse',
+  apartment: 'Apartment', villa: 'Villa', villa_compound: 'Villa Compound', townhouse: 'Townhouse',
   penthouse: 'Penthouse', studio: 'Studio', duplex_loft: 'Duplex / Loft',
   room: 'Room', bed_space: 'Bed Space', holiday_home: 'Holiday Home',
   // Commercial
@@ -39,6 +40,10 @@ export const UNIT_TYPE_LABELS: Record<string, string> = {
   event_hall: 'Event Hall', wedding_venue: 'Wedding Venue',
   conference_hall: 'Conference Hall', private_dining: 'Private Dining Room',
   outdoor_venue: 'Outdoor Venue',
+  // Land
+  residential_land: 'Residential Land', commercial_land: 'Commercial Land',
+  industrial_land: 'Industrial Land', mixed_use_land: 'Mixed-Use Land',
+  agricultural_land: 'Agricultural Land', labour_accommodation_land: 'Labour Accommodation Land',
 };
 
 function unitTypesForCategory(category: string): string[] {
@@ -48,7 +53,19 @@ function unitTypesForCategory(category: string): string[] {
     case 'industrial':   return INDUSTRIAL_UNIT_TYPES;
     case 'workspaces':   return WORKSPACES_UNIT_TYPES;
     case 'venues':       return VENUES_UNIT_TYPES;
+    case 'land':         return LAND_UNIT_TYPES;
+    case 'mixed_use':    return [...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES];
     default:             return [...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES];
+  }
+}
+
+// Categories without their own amenities / default-lease maps fall back to one of
+// the base buckets (unit TYPES are handled explicitly above).
+function resolveBaseCategory(category: string): string {
+  switch (category) {
+    case 'mixed_use':   return 'residential';
+    case 'land':        return 'commercial';
+    default:            return category;
   }
 }
 
@@ -102,7 +119,7 @@ export const AMENITIES = [
 ];
 
 export function getAmenitiesForCategory(category: string): string[] {
-  return AMENITIES_MAP[category] ?? AMENITIES_MAP.residential;
+  return AMENITIES_MAP[resolveBaseCategory(category)] ?? AMENITIES_MAP.residential;
 }
 
 const VIEW_OPTIONS = [
@@ -516,8 +533,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     if (open) {
       const defaults = {
         ...EMPTY_UNIT,
-        minLeaseMonths:  DEFAULT_MIN_LEASE[propertyCategory] ?? '12',
-        noticePeriodDays: DEFAULT_NOTICE[propertyCategory] ?? '60',
+        minLeaseMonths:  DEFAULT_MIN_LEASE[resolveBaseCategory(propertyCategory)] ?? '12',
+        noticePeriodDays: DEFAULT_NOTICE[resolveBaseCategory(propertyCategory)] ?? '60',
         ejariFeeFils: propertyCategory === 'residential' ? '220' : '',
       };
       setForm({ ...defaults, ...initial });

@@ -26,7 +26,7 @@ import Link from 'next/link';
 import {
   PropertyFormModal,
   type PropertyFormData,
-  SPACE_CATEGORIES,
+  categoryDisplayLabel,
 } from '@/components/upnow/PropertyFormModal';
 import s from './portfolio.module.css';
 import { PropertyDetailsModal } from './PropertyDetailsModal';
@@ -102,7 +102,7 @@ interface Unit {
 
 // ─── Helpers ──────────────────────────────────────────────
 function categoryLabel(cat: string): string {
-  return SPACE_CATEGORIES.find((c) => c.id === cat)?.label ?? cat;
+  return categoryDisplayLabel(cat);
 }
 
 // ─── API mappers ──────────────────────────────────────────

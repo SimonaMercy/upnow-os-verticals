@@ -454,14 +454,36 @@ export function BuildingSearch({
   );
 }
 
-// ─── Space categories ─────────────────────────────────────
+// ─── Property categories ──────────────────────────────────
+// The structural property types offered on the property form's Category dropdown.
+// Keep ids in sync with the backend SpaceCategory enum (src/shared/enums.ts).
 export const SPACE_CATEGORIES = [
-  { id: 'residential', label: 'Residential', icon: '🏠', desc: 'Apartments, Villas, Townhouses' },
-  { id: 'commercial',  label: 'Commercial',  icon: '🏢', desc: 'Offices, Retail, Clinics, Restaurants' },
-  { id: 'industrial',  label: 'Industrial',  icon: '🏗️', desc: 'Warehouses, Cold Storage, Logistics' },
-  { id: 'workspaces',  label: 'Workspaces',  icon: '💼', desc: 'Coworking, Private Offices, Meeting Rooms' },
-  { id: 'venues',      label: 'Venues',      icon: '🎪', desc: 'Event Halls, Wedding Venues, Conference' },
+  { id: 'residential', label: 'Residential', icon: '🏠', desc: 'Apartments, villas, townhouses' },
+  { id: 'commercial',  label: 'Commercial',  icon: '🏢', desc: 'Offices, retail, business premises' },
+  { id: 'industrial',  label: 'Industrial',  icon: '🏭', desc: 'Warehouses, storage, logistics' },
+  { id: 'land',        label: 'Land',        icon: '🌍', desc: 'Plot of land' },
+  { id: 'mixed_use',   label: 'Mixed-use',   icon: '🏬', desc: 'Combined residential + commercial' },
 ];
+
+// Category ids that are valid in the DB enum but no longer offered on the form
+// (villa/townhouse folded into Residential; retail/warehouse into Commercial/
+// Industrial; the original workspaces/venues buckets). Kept so any property
+// still holding one of these displays a clean label.
+export const LEGACY_CATEGORY_LABELS: Record<string, string> = {
+  villa:          'Villa',
+  villa_compound: 'Villa Compound',
+  townhouse:      'Townhouse',
+  retail:         'Retail',
+  warehouse:      'Warehouse',
+  workspaces:     'Workspaces',
+  venues:         'Venues',
+};
+
+/** Display label for any property category id (new structural type or legacy bucket). */
+export function categoryDisplayLabel(id: string | null | undefined): string {
+  if (!id) return '';
+  return SPACE_CATEGORIES.find((c) => c.id === id)?.label ?? LEGACY_CATEGORY_LABELS[id] ?? id;
+}
 
 export interface PropertyFormData {
   buildingName: string;
@@ -581,15 +603,6 @@ export function DocSlotCard({
           : <FileText size={16} className="shrink-0 text-[#c8c6c0]" />}
         <span className="text-sm font-medium text-[#1a1916]">{label}</span>
         <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">Optional</span>
-        <span
-          className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-          style={multiple
-            ? { background: '#eef4ff', color: '#2563eb' }
-            : { background: '#f4f3ef', color: '#9b9890' }}
-          title={multiple ? 'You can attach several files' : 'One file — uploading again replaces it'}
-        >
-          {multiple ? 'Multiple' : 'Single'}
-        </span>
         {hasAny && <span className="text-[11px] text-[#16a34a] font-medium">{count} file{count === 1 ? '' : 's'}</span>}
         <label className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
           style={{ background: hasAny && !multiple ? '#f4f3ef' : '#2e9f82', color: hasAny && !multiple ? '#6b6860' : '#fff' }}>
@@ -953,7 +966,7 @@ export function PropertyFields({
         <FieldLabel label="Category" required />
         {isEdit ? (
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] text-sm text-[#3d3b35]">
-            <span className="flex-1 capitalize">{SPACE_CATEGORIES.find(c => c.id === value.spaceCategory)?.label ?? value.spaceCategory}</span>
+            <span className="flex-1">{categoryDisplayLabel(value.spaceCategory)}</span>
             <span className="text-[10px] text-[#9b9890] font-medium">Locked</span>
           </div>
         ) : (
