@@ -258,6 +258,7 @@ const BASE_DOC_TYPES = [
   { value: 'utility_final_bill',     label: 'Utility Final Bill',     category: 'property',   needsExpiry: false },
   { value: 'poa',                    label: 'POA',                    category: 'legal',      needsExpiry: false },
   { value: 'pdc',                    label: 'PDC',                    category: 'payment',    needsExpiry: false },
+  { value: 'receipt',                label: 'Receipt',                category: 'payment',    needsExpiry: false },
   { value: 'agreement',              label: 'Agreement',              category: 'contract',   needsExpiry: false },
   { value: 'other',                  label: 'Others',                 category: 'other',      needsExpiry: false },
 ];
