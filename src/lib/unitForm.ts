@@ -168,18 +168,26 @@ export async function saveUnit(opts: {
   titleDeed?: File | null;
   addendums?: File[];
   propertyStandalone?: boolean;
+  // Manager portal: route create/update + floor-plan through the landlord-scoped
+  // /manager endpoints (gated by the manager's permissions for that landlord).
+  manager?: { rp: number };
 }): Promise<UnitRecord> {
-  const { propertyId, editingUnitId, data, floorPlan, titleDeed, addendums, propertyStandalone } = opts;
+  const { propertyId, editingUnitId, data, floorPlan, titleDeed, addendums, propertyStandalone, manager } = opts;
   const dto = unitFormToDto(data);
+  const unitBase = manager ? `/manager/properties/${propertyId}/units` : `/properties/${propertyId}/units`;
+  const mgrQ = manager ? `?rp=${manager.rp}` : '';
   const saved = editingUnitId
-    ? await apiPatch<UnitRecord>(`/properties/${propertyId}/units/${editingUnitId}`, dto)
-    : await apiPost<UnitRecord>(`/properties/${propertyId}/units`, dto);
+    ? await apiPatch<UnitRecord>(`${unitBase}/${editingUnitId}${mgrQ}`, dto)
+    : await apiPost<UnitRecord>(`${unitBase}${mgrQ}`, dto);
 
   if (floorPlan && saved?.id) {
     try {
       const fd = new FormData();
       fd.append('file', floorPlan);
-      const res = await fetch(`/api/properties/${propertyId}/units/${saved.id}/floor-plan`, {
+      const fpUrl = manager
+        ? `/api/manager/properties/${propertyId}/units/${saved.id}/floor-plan?rp=${manager.rp}`
+        : `/api/properties/${propertyId}/units/${saved.id}/floor-plan`;
+      const res = await fetch(fpUrl, {
         method: 'POST', credentials: 'include', body: fd,
       });
       if (!res.ok) throw new Error();

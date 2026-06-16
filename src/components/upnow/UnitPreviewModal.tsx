@@ -191,7 +191,7 @@ export function UnitPreviewModal({
   fetchQuery?: string;
   propertyName?: string | null;
   unit: Unit;
-  contract?: { id: number; tenantName: string | null; endDate: string | null; status: string } | null;
+  contract?: { id: number; tenantName: string | null; startDate: string | null; endDate: string | null; status: string; active?: boolean } | null;
   onClose: () => void;
 }) {
   const [media, setMedia] = useState<UnitMedia[]>([]);
@@ -441,7 +441,9 @@ export function UnitPreviewModal({
 
               {/* 7. Tenancy */}
               <Card>
-                <SectionTitle icon={<Users className="h-4 w-4" />}>Current Tenancy</SectionTitle>
+                <SectionTitle icon={<Users className="h-4 w-4" />}>
+                  {contract && contract.active === false ? 'Most Recent Contract' : 'Current Tenancy'}
+                </SectionTitle>
                 {contract ? (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
@@ -450,9 +452,17 @@ export function UnitPreviewModal({
                       </span>
                       <Chip tone={contractTone(contract.status)}>{titleCase(contract.status)}</Chip>
                     </div>
+                    {contract.startDate && (
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-sm text-[#6b6860]">{contract.active === false ? 'Lease started' : 'Lease starts'}</span>
+                        <span className="text-sm font-medium text-[#1a1916]">
+                          {fmtDate(contract.startDate)}
+                        </span>
+                      </div>
+                    )}
                     {contract.endDate && (
                       <div className="flex items-baseline justify-between gap-3">
-                        <span className="text-sm text-[#6b6860]">Lease ends</span>
+                        <span className="text-sm text-[#6b6860]">{contract.active === false ? 'Lease ended' : 'Lease ends'}</span>
                         <span className="text-sm font-medium text-[#1a1916]">
                           {fmtDate(contract.endDate)}
                         </span>
@@ -467,7 +477,7 @@ export function UnitPreviewModal({
                     </Link>
                   </div>
                 ) : (
-                  <p className="py-2 text-center text-sm text-[#9b9890]">Vacant — no running lease</p>
+                  <p className="py-2 text-center text-sm text-[#9b9890]">No contracts on record yet</p>
                 )}
               </Card>
             </div>
