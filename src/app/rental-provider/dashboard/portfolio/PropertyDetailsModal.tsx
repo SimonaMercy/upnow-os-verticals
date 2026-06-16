@@ -225,7 +225,11 @@ export function PropertyDetailsModal({
         const res = await fetch(`/api${fetchBase}/${property.id}/units${fetchQuery ? `?${fetchQuery}` : ''}`, { credentials: 'include' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (!cancelled) setUnits(Array.isArray(data) ? data : []);
+        // Sort by unit number naturally — the API orders by a varchar column, so
+        // "11" would otherwise sort before "2". Numeric-aware compare fixes it.
+        const rows: UnitLite[] = Array.isArray(data) ? data : [];
+        rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
+        if (!cancelled) setUnits(rows);
       } catch {
         if (!cancelled) setUnits([]);
       } finally {
@@ -538,7 +542,6 @@ export function PropertyDetailsModal({
                 /* Upload-capable slots — same DocSlotCard UI as the add/edit form. */
                 <div className="space-y-4">
                   <div className="space-y-2.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Single file</p>
                     {p.isStandaloneUnit && (
                       <DocSlotCard
                         label="Title Deed" multiple={false}
@@ -564,7 +567,6 @@ export function PropertyDetailsModal({
                     ))}
                   </div>
                   <div className="space-y-2.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Multiple files</p>
                     <DocSlotCard
                       label="Building Floor Plans" multiple
                       existing={propertyDocs.filter((d) => d.documentKey.startsWith('building_drawing'))}
