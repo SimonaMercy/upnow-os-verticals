@@ -553,7 +553,7 @@ const DISABLED_CLS = 'opacity-50 cursor-not-allowed';
  * View (in-app preview), and Upload / Replace / Add. Existing (already-uploaded)
  * docs and locally-queued files (create flow) render as rows beneath.
  */
-function DocSlotCard({
+export function DocSlotCard({
   label, multiple, existing, queued, onAdd, onRemoveQueued, onRemoveExisting, onView,
 }: {
   label: string;

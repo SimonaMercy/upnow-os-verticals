@@ -4,4 +4,4 @@
  * as the acting landlord, posts `rentalProviderId` on their behalf, shows the
  * "acting on behalf" banner, and returns to the manager portal when scoped.
  */
-export { default } from '@/app/rental-provider/dashboard/portfolio/add/page';
+export { default } from '@/app/rental-provider/dashboard/units/add/page';

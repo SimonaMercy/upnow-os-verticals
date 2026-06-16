@@ -61,15 +61,20 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
 }) {
   const [docs, setDocs] = useState<CustomerDoc[] | null>(documents ?? null);
   const [name, setName] = useState<string | null>(tenantName ?? null);
+  // Leases enable the per-lease grouping. Callers can pass them (tenant 360
+  // preloads them); the fetch path pulls them from the same endpoint so the
+  // contract page's cross-lease history groups per lease too.
+  const [leaseList, setLeaseList] = useState<LeaseMeta[] | null>(leases ?? null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (docs || !tenantId) return;
     fetch(`/api/contracts/tenants/${tenantId}`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status === 403 ? 'Not available for this account.' : `Error ${r.status}`)))
-      .then((d: { documents?: CustomerDoc[]; customer?: { name?: string | null } }) => {
+      .then((d: { documents?: CustomerDoc[]; leases?: LeaseMeta[]; customer?: { name?: string | null } }) => {
         setDocs(d.documents ?? []);
         setName(n => n ?? d.customer?.name ?? null);
+        if (d.leases?.length) setLeaseList(prev => prev ?? d.leases!.map(l => ({ id: l.id, ref: l.ref, startDate: l.startDate, endDate: l.endDate })));
       })
       .catch(e => setErr(e instanceof Error ? e.message : 'Failed to load'));
   }, [docs, tenantId]);
@@ -81,17 +86,19 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
   }, [onClose]);
 
   const shown = (excludeKyc ? (docs ?? []).filter(d => !isKycDoc(d)) : (docs ?? []));
+  // Prefer explicitly-passed leases; otherwise the ones fetched alongside docs.
+  const effLeases = (leases && leases.length) ? leases : leaseList;
   const groups: { key: string; label: string; items: CustomerDoc[] }[] = (() => {
     if (!shown.length) return [];
     // Lease-aware grouping: one section per lease (ref + period), newest first,
     // so the same paperwork (Ejari, Invoice, …) repeated across renewals reads
     // as "this year vs last year" rather than as duplicates.
-    if (leases && leases.length) {
-      const byId = new Map(leases.map(l => [l.id, l]));
-      const byStart = [...leases].sort((a, b) => String(a.startDate ?? '').localeCompare(String(b.startDate ?? '')));
+    if (effLeases && effLeases.length) {
+      const byId = new Map(effLeases.map(l => [l.id, l]));
+      const byStart = [...effLeases].sort((a, b) => String(a.startDate ?? '').localeCompare(String(b.startDate ?? '')));
       const earliest = byStart[0];                 // first contract — move-in happens here
       const latest = byStart[byStart.length - 1];  // last contract — move-out happens here
-      const ordered = [...leases].sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
+      const ordered = [...effLeases].sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
       // Customer-owned tenancy-lifecycle docs carry no lease link, so anchor them
       // to the lease they logically belong to (move-in → first lease, move-out → last).
       const resolveLeaseId = (d: CustomerDoc): number | null => {

@@ -226,7 +226,7 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
       { key: 'noPremise', label: 'Premise no.' }, { key: 'noDescription', label: 'Description' },
       { key: 'noFloorPlan', label: 'Floor plan' }, { key: 'noImages', label: 'Images' },
     ],
-    openHref: (row) => `${RP}/portfolio/${row.propertyId}/units/${row.unitId}`,
+    openHref: (row) => `${RP}/units/${row.unitId}`,
   },
   'missing-customers': {
     title: 'Missing Customers Data',

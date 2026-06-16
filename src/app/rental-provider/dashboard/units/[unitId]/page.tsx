@@ -202,8 +202,9 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 /* ---------- page ---------- */
 
 export default function UnitDetailPage() {
-  const params = useParams<{ propertyId: string; unitId: string }>();
-  const propertyId = Number(params.propertyId);
+  // The page now lives at /units/[unitId] — the owning property is resolved at
+  // load time (there's no get-unit-by-id endpoint), then drives the rest.
+  const params = useParams<{ unitId: string }>();
   const unitId = Number(params.unitId);
 
   const [property, setProperty] = useState<Property | null>(null);
@@ -216,28 +217,34 @@ export default function UnitDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!Number.isFinite(propertyId) || !Number.isFinite(unitId)) return;
+    if (!Number.isFinite(unitId)) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
+        // Resolve which property this unit belongs to (units/all is RP-scoped).
+        const allUnits = await apiGet<Unit[]>('/properties/units/all');
+        if (cancelled) return;
+        const target = allUnits.find((u) => u.id === unitId) || null;
+        if (!target) {
+          setError('Unit not found.');
+          return;
+        }
+        const pid = target.propertyId;
+
         const [prop, units] = await Promise.all([
-          apiGet<Property>(`/properties/${propertyId}`),
-          apiGet<Unit[]>(`/properties/${propertyId}/units`),
+          apiGet<Property>(`/properties/${pid}`),
+          apiGet<Unit[]>(`/properties/${pid}/units`),
         ]);
         if (cancelled) return;
         setProperty(prop);
-        const found = units.find((u) => u.id === unitId) || null;
+        const found = units.find((u) => u.id === unitId) || target;
         setUnit(found);
-        if (!found) {
-          setError('Unit not found in this property.');
-          return;
-        }
         // Secondary data — tolerate individual failures.
         const [m, h, c, mo] = await Promise.allSettled([
-          apiGet<UnitMedia[]>(`/properties/${propertyId}/units/${unitId}/media`),
-          apiGet<PriceHistory>(`/properties/${propertyId}/units/${unitId}/price-history`),
+          apiGet<UnitMedia[]>(`/properties/${pid}/units/${unitId}/media`),
+          apiGet<PriceHistory>(`/properties/${pid}/units/${unitId}/price-history`),
           apiGet<ContractSummary[]>(`/contracts`),
           apiGet<LastMoveOut | null>(`/contracts/unit/${unitId}/last-moveout`),
         ]);
@@ -255,7 +262,7 @@ export default function UnitDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [propertyId, unitId]);
+  }, [unitId]);
 
   /* ---------- loading / error ---------- */
 
@@ -273,11 +280,11 @@ export default function UnitDetailPage() {
     return (
       <div className="p-6">
         <Link
-          href={`/rental-provider/dashboard/portfolio/${propertyId}`}
+          href="/rental-provider/dashboard/units"
           className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-[#6b6860] hover:text-[#2e9f82]"
         >
           <ArrowLeft className="h-4 w-4" />
-          {property?.buildingName || 'Back to property'}
+          Back to units
         </Link>
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error || 'Unit not found.'}
@@ -365,11 +372,11 @@ export default function UnitDetailPage() {
     <div className="p-6">
       {/* 1. Back link */}
       <Link
-        href={`/rental-provider/dashboard/portfolio/${propertyId}`}
+        href="/rental-provider/dashboard/units"
         className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-[#6b6860] hover:text-[#2e9f82]"
       >
         <ArrowLeft className="h-4 w-4" />
-        {property?.buildingName || 'Back to property'}
+        Back to units
       </Link>
 
       {/* 2. Header card */}

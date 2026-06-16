@@ -298,7 +298,7 @@ export function DataGapsView({
                         <MissingChip label="Floor plan" on={u.noFloorPlan} /><MissingChip label="Images" on={u.noImages} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
-                        <Link href={`/rental-provider/dashboard/portfolio/${u.propertyId}/units/${u.unitId}`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
+                        <Link href={`/rental-provider/dashboard/units/${u.unitId}`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
                       </td>
                     </tr>
                   ))}

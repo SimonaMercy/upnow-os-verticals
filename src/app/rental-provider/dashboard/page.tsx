@@ -283,7 +283,7 @@ export default function RentalProviderDashboard() {
             <span className="hidden sm:inline">{refreshing ? 'Refreshing' : 'Refresh'}</span>
           </button>
           <Link
-            href="/rental-provider/dashboard/portfolio/add"
+            href="/rental-provider/dashboard/portfolio?add=1"
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-dark)] transition-colors"
           >
             <Building2 size={16} /> List Property

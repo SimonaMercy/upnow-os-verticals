@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, MapPin, X } from 'lucide-react';
+import { Loader2, MapPin } from 'lucide-react';
 
 const DEFAULT_LAT = 25.2048;
 const DEFAULT_LNG = 55.2708;
@@ -48,15 +48,22 @@ interface PortfolioMapProperty {
   occupiedCount?: number;
 }
 
-interface PortfolioMapModalProps {
+/**
+ * Inline portfolio map (no modal chrome). Used both as the Portfolio page's
+ * "Map" view and, wrapped in a dialog, by PortfolioMapModal.
+ */
+export function PortfolioMapView({
+  properties,
+  heightClass = 'h-[70vh]',
+}: {
   properties: PortfolioMapProperty[];
-  onClose: () => void;
-}
-
-export function PortfolioMapModal({ properties, onClose }: PortfolioMapModalProps) {
+  heightClass?: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const infoRef = useRef<google.maps.InfoWindow | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
+  const [ready, setReady] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +71,7 @@ export function PortfolioMapModal({ properties, onClose }: PortfolioMapModalProp
     (p) => !Number.isFinite(Number(p.latitude)) || !Number.isFinite(Number(p.longitude)) || p.latitude == null || p.longitude == null,
   );
 
+  // Create the map + InfoWindow once.
   useEffect(() => {
     let cancelled = false;
 
@@ -100,82 +108,11 @@ export function PortfolioMapModal({ properties, onClose }: PortfolioMapModalProp
         mapTypeControl: false,
         streetViewControl: false,
       });
-
-      const infoWindow = new google.maps.InfoWindow();
-      const bounds = new google.maps.LatLngBounds();
-      const markers: google.maps.Marker[] = [];
-
-      for (const property of properties) {
-        const lat = Number(property.latitude);
-        const lng = Number(property.longitude);
-        if (property.latitude == null || property.longitude == null) continue;
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-
-        const position = { lat, lng };
-        // Occupancy-coloured pin: jade = fully occupied, amber = has
-        // vacancies, grey = no unit data. Label = unit count.
-        const occ = property.occupiedCount ?? null;
-        const tot = property.unitCount ?? null;
-        const colour = tot == null || tot === 0 ? '#9b9890'
-          : occ != null && occ >= tot ? '#2e9f82'
-          : '#d97706';
-        const marker = new google.maps.Marker({
-          position,
-          map,
-          title: property.buildingName,
-          label: tot ? { text: String(tot), color: '#ffffff', fontSize: '11px', fontWeight: '700' } : undefined,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 14,
-            fillColor: colour,
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 2.5,
-          },
-        });
-
-        const parts: string[] = [
-          `<div style="font-weight:700;font-size:13px;color:#1a1916;margin-bottom:2px;">${escapeHtml(property.buildingName)}</div>`,
-        ];
-        if (property.fullAddress) {
-          parts.push(
-            `<div style="font-size:11px;color:#6b6860;margin-bottom:4px;">${escapeHtml(property.fullAddress)}</div>`,
-          );
-        }
-        if (property.unitCount != null || property.occupiedCount != null) {
-          const counts: string[] = [];
-          if (property.unitCount != null) counts.push(`${property.unitCount} unit${property.unitCount === 1 ? '' : 's'}`);
-          if (property.occupiedCount != null) counts.push(`${property.occupiedCount} occupied`);
-          parts.push(`<div style="font-size:11px;color:#6b6860;margin-bottom:4px;">${counts.join(' · ')}</div>`);
-        }
-        parts.push(
-          `<a href="/rental-provider/dashboard/portfolio/${property.id}" style="font-size:12px;font-weight:600;color:#2e9f82;text-decoration:none;">Open details</a>`,
-        );
-
-        marker.addListener('click', () => {
-          infoWindow.setContent(`<div style="font-family:inherit;max-width:240px;padding:2px;">${parts.join('')}</div>`);
-          infoWindow.open({ map, anchor: marker });
-        });
-
-        bounds.extend(position);
-        markers.push(marker);
-      }
-
-      if (markers.length > 1) {
-        map.fitBounds(bounds);
-      } else if (markers.length === 1) {
-        const pos = markers[0].getPosition();
-        if (pos) map.setCenter(pos);
-        map.setZoom(15);
-      }
-      // none: keep Dubai default center/zoom
-
-      map.addListener('idle', () => {
-        if (!cancelled) setMapLoaded(true);
-      });
+      map.addListener('idle', () => { if (!cancelled) setMapLoaded(true); });
 
       mapRef.current = map;
-      markersRef.current = markers;
+      infoRef.current = new google.maps.InfoWindow();
+      if (!cancelled) setReady(true);
     })();
 
     return () => {
@@ -183,74 +120,135 @@ export function PortfolioMapModal({ properties, onClose }: PortfolioMapModalProp
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current = [];
       mapRef.current = null;
+      infoRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // (Re)build markers whenever the property set changes — so the inline Map
+  // view stays in sync with the search / category filters. Keyed on a stable
+  // signature so it doesn't churn on every parent re-render.
+  const sig = properties
+    .map((p) => `${p.id}:${p.latitude},${p.longitude}:${p.unitCount ?? ''}:${p.occupiedCount ?? ''}`)
+    .join('|');
+  useEffect(() => {
+    const map = mapRef.current;
+    const infoWindow = infoRef.current;
+    if (!ready || !map || !infoWindow) return;
+
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+
+    const bounds = new google.maps.LatLngBounds();
+    const markers: google.maps.Marker[] = [];
+
+    for (const property of properties) {
+      const lat = Number(property.latitude);
+      const lng = Number(property.longitude);
+      if (property.latitude == null || property.longitude == null) continue;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const position = { lat, lng };
+      // Occupancy-coloured pin: jade = fully occupied, amber = has
+      // vacancies, grey = no unit data. Label = unit count.
+      const occ = property.occupiedCount ?? null;
+      const tot = property.unitCount ?? null;
+      const colour = tot == null || tot === 0 ? '#9b9890'
+        : occ != null && occ >= tot ? '#2e9f82'
+        : '#d97706';
+      const marker = new google.maps.Marker({
+        position,
+        map,
+        title: property.buildingName,
+        label: tot ? { text: String(tot), color: '#ffffff', fontSize: '11px', fontWeight: '700' } : undefined,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 14,
+          fillColor: colour,
+          fillOpacity: 1,
+          strokeColor: '#ffffff',
+          strokeWeight: 2.5,
+        },
+      });
+
+      const parts: string[] = [
+        `<div style="font-weight:700;font-size:13px;color:#1a1916;margin-bottom:2px;">${escapeHtml(property.buildingName)}</div>`,
+      ];
+      if (property.fullAddress) {
+        parts.push(
+          `<div style="font-size:11px;color:#6b6860;margin-bottom:4px;">${escapeHtml(property.fullAddress)}</div>`,
+        );
+      }
+      if (property.unitCount != null || property.occupiedCount != null) {
+        const counts: string[] = [];
+        if (property.unitCount != null) counts.push(`${property.unitCount} unit${property.unitCount === 1 ? '' : 's'}`);
+        if (property.occupiedCount != null) counts.push(`${property.occupiedCount} occupied`);
+        parts.push(`<div style="font-size:11px;color:#6b6860;margin-bottom:4px;">${counts.join(' · ')}</div>`);
+      }
+      parts.push(
+        `<a href="/rental-provider/dashboard/units?propertyId=${property.id}" style="font-size:12px;font-weight:600;color:#2e9f82;text-decoration:none;">Manage units</a>`,
+      );
+
+      marker.addListener('click', () => {
+        infoWindow.setContent(`<div style="font-family:inherit;max-width:240px;padding:2px;">${parts.join('')}</div>`);
+        infoWindow.open({ map, anchor: marker });
+      });
+
+      bounds.extend(position);
+      markers.push(marker);
+    }
+
+    if (markers.length > 1) {
+      map.fitBounds(bounds);
+    } else if (markers.length === 1) {
+      const pos = markers[0].getPosition();
+      if (pos) map.setCenter(pos);
+      map.setZoom(15);
+    }
+    // none: keep Dubai default center/zoom
+
+    markersRef.current = markers;
+    // `sig` is the stable trigger; `properties` is read fresh inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, sig]);
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-3">
-          <h2 className="text-lg font-bold text-[#1a1916] flex items-center gap-2">
-            <MapPin size={18} className="text-[#2e9f82]" />
-            Portfolio map
-          </h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg hover:bg-[#f4f3ef] flex items-center justify-center text-[#6b6860]"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="overflow-auto px-6 pb-6">
-          <div className="relative h-[70vh]">
-            {error ? (
-              <div className="h-full w-full rounded-xl bg-[#f4f3ef] border border-[#e8e6e0] flex items-center justify-center text-sm text-[#9b9890]">
-                <MapPin size={16} className="mr-2 text-[#c9c7c1]" />
-                {error}
+    <div>
+      <div className={`relative ${heightClass}`}>
+        {error ? (
+          <div className="h-full w-full rounded-xl bg-[#f4f3ef] border border-[#e8e6e0] flex items-center justify-center text-sm text-[#9b9890]">
+            <MapPin size={16} className="mr-2 text-[#c9c7c1]" />
+            {error}
+          </div>
+        ) : (
+          <>
+            <div ref={containerRef} className="h-full w-full rounded-xl overflow-hidden border border-[#e8e6e0]" />
+            {!mapLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-[#f4f3ef] text-xs text-[#9b9890]">
+                <Loader2 size={16} className="mr-2 animate-spin text-[#2e9f82]" />
+                Loading map…
               </div>
-            ) : (
-              <>
-                <div ref={containerRef} className="h-full w-full rounded-xl overflow-hidden border border-[#e8e6e0]" />
-                {!mapLoaded && (
-                  <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-[#f4f3ef] text-xs text-[#9b9890]">
-                    <Loader2 size={16} className="mr-2 animate-spin text-[#2e9f82]" />
-                    Loading map…
-                  </div>
-                )}
-              </>
             )}
-          </div>
+          </>
+        )}
+      </div>
 
-          {missing.length > 0 && (
-            <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#e8e6e0] bg-[#fef3c7] px-3 py-2">
-              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#fef3c7] text-[#854d0e] border border-[#854d0e]/20 shrink-0 mt-0.5">
-                {missing.length} unpinned
-              </span>
-              <p className="text-xs text-[#854d0e]">
-                {missing.length} {missing.length === 1 ? 'property has' : 'properties have'} no map pin yet — set
-                their location in the edit form: {missing.map((p) => p.buildingName).join(', ')}.
-              </p>
-            </div>
-          )}
-          {/* Pin legend */}
-          <div className="flex items-center gap-4 mt-2 text-[11px] text-[#6b6860]">
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#2e9f82] border-2 border-white shadow" /> Fully occupied</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#d97706] border-2 border-white shadow" /> Has vacancies</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#9b9890] border-2 border-white shadow" /> No unit data</span>
-            <span className="text-[#9b9890]">· number on the pin = units</span>
-          </div>
+      {missing.length > 0 && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#e8e6e0] bg-[#fef3c7] px-3 py-2">
+          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#fef3c7] text-[#854d0e] border border-[#854d0e]/20 shrink-0 mt-0.5">
+            {missing.length} unpinned
+          </span>
+          <p className="text-xs text-[#854d0e]">
+            {missing.length} {missing.length === 1 ? 'property has' : 'properties have'} no map pin yet — set
+            their location in the edit form: {missing.map((p) => p.buildingName).join(', ')}.
+          </p>
         </div>
+      )}
+      {/* Pin legend */}
+      <div className="flex items-center gap-4 mt-2 text-[11px] text-[#6b6860] flex-wrap">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#2e9f82] border-2 border-white shadow" /> Fully occupied</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#d97706] border-2 border-white shadow" /> Has vacancies</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#9b9890] border-2 border-white shadow" /> No unit data</span>
+        <span className="text-[#9b9890]">· number on the pin = units</span>
       </div>
     </div>
   );

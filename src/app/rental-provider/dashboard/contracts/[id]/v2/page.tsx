@@ -30,7 +30,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { openDocsTogether } from '@/lib/openDocsTogether';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
 import { KYC_DOCS, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
@@ -1005,28 +1004,45 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
 
   if (isDone('active', st)) {
     const next = h.contract.payments.find(p => (p.chequeStatus === 'pending' || (!p.paidAt && !p.chequeStatus)));
+    // Rent/fee payments already settled (cleared cheque or recorded paid date) →
+    // "collected". Excludes the security deposit — it has its own tile.
+    const collected = h.contract.payments
+      .filter(p => p.paymentType !== 'security_deposit' && (p.chequeStatus === 'cleared' || p.paidAt))
+      .reduce((s, p) => s + (p.amount || 0), 0);
     return {
       tone: 'celebrate', icon: 'active', sub: mode === 'renewal' ? 'Renewal · live' : 'Stop 6 · live',
       label: mode === 'renewal' ? 'Renewal active' : 'Active tenancy',
       headline: mode === 'renewal' ? 'The renewal is live.' : 'This tenancy is live.',
-      body: 'Manage payments, propose a renewal, or request termination at any time.',
+      body: 'Manage payments, propose a renewal, or end the tenancy at any time.',
       timing: null,
       node: (
         <>
+          {/* Live-lease summary — always populated (rent · term · deposit ·
+              collected) so a renewal with no pending cheque never shows blank
+              tiles; the next instalment, if any, surfaces as a flag below. */}
           <div className="stats">
             <div className="stat">
-              <div className="sl">Next payment</div>
-              <div className="sv">{next ? fmtAed(next.amount) : '—'}</div>
+              <div className="sl">Annual rent</div>
+              <div className="sv">{fmtAed(h.contract.annualRent)}</div>
             </div>
             <div className="stat">
-              <div className="sl">Due</div>
-              <div className="sv" style={{ fontSize: 15 }}>{next ? fmtDate(next.transactionDate) : '—'}</div>
+              <div className="sl">{mode === 'renewal' ? 'Renewal term' : 'Term'}</div>
+              <div className="sv" style={{ fontSize: 14 }}>{fmtDate(h.contract.startDate)} → {fmtDate(h.contract.endDate)}</div>
             </div>
             <div className="stat">
               <div className="sl">Deposit held</div>
               <div className="sv jade">{fmtAed(h.contract.securityDepositAmount)}</div>
             </div>
+            <div className="stat">
+              <div className="sl">Collected</div>
+              <div className="sv jade">{fmtAed(collected)}</div>
+            </div>
           </div>
+          {next && (
+            <div className="flag waiting" style={{ alignSelf: 'flex-start' }}>
+              <CreditCard size={13} /> Next payment {fmtAed(next.amount)} due {fmtDate(next.transactionDate)}
+            </div>
+          )}
           {h.contract.renewalAccepted === 'pending' && (
             <div className="flag waiting" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={13} /> Renewal proposed — awaiting {TEN}
@@ -1063,9 +1079,6 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                 <RotateCcw size={14} /> Propose renewal
               </button>
             )}
-            <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('terminate')}>
-              <X size={14} /> Request termination
-            </button>
             <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('direct-terminate')}>
               <X size={14} /> Terminate directly
             </button>
@@ -1430,6 +1443,8 @@ function DetailsDrawer({
   const reqInputRef = useRef<HTMLInputElement>(null);
   /** Cross-lease document history popup (shared CustomerDocsModal). */
   const [showDocsHistory, setShowDocsHistory] = useState(false);
+  /** "View all" popup — same modal, scoped to THIS contract's documents. */
+  const [showContractDocs, setShowContractDocs] = useState(false);
   const addReqDoc = (name: string) => {
     const n = name.trim();
     if (!n) return;
@@ -1772,18 +1787,6 @@ function DetailsDrawer({
             // show "Requested — awaiting upload" for them instead.
             const pendingAsks = (contract.documents ?? []).filter(d => !d.fileUrl);
             const all = (contract.documents ?? []).filter(d => !!d.fileUrl);
-            // Business segregation (CEO doctrine): KYC / Contract / Financial /
-            // Property — by document PURPOSE, not just by owner row.
-            const groupOf = (d: ContractDoc): string => {
-              // Payment proofs are FINANCIAL even when customer-owned; bank
-              // statements (banking) stay with the customer's KYC.
-              if (d.category === 'payment' || d.ownerType === 'security_deposit') return 'financial';
-              if (d.ownerType === 'customer' || d.ownerType === 'tenant') return 'kyc';
-              if (d.category === 'property' || d.category === 'report') return 'property';
-              if (d.ownerType === 'tenancy_contract' || d.category === 'contract' || d.category === 'legal' || d.category === 'inspection') return 'contract';
-              return 'other';
-            };
-
             // ── Expected-documents checklist (same mapping the customer journey
             // uses — src/lib/docRequirements). New lease → KYC + the unit
             // category's pack (commercial / industrial / residential). Renewal →
@@ -1839,7 +1842,6 @@ function DetailsDrawer({
             const askedFor = (req: DocReq) => askedNames.has(norm(req.label)) || askedNames.has(req.key);
             const checklist = expected.map(req => ({ req, doc: matchDoc(req.key) }));
             const onFile = checklist.filter(c => c.doc).length;
-            const matchedIds = new Set(checklist.map(c => c.doc?.id).filter((x): x is number => x != null));
             // One file can satisfy two slots (legacy combined EID covers Front +
             // Back) — render it once so React keys stay unique.
             const seenIds = new Set<number>();
@@ -1855,16 +1857,6 @@ function DetailsDrawer({
             const checklistTitle = isRenewal
               ? 'Renewal documents'
               : `Customer documents — ${category} set`;
-
-            const groups = [
-              { key: 'kyc',       label: 'Additional customer' },
-              { key: 'contract',  label: 'Contract' },
-              { key: 'financial', label: 'Financial' },
-              { key: 'property',  label: 'Property' },
-              { key: 'other',     label: 'Other' },
-            ].map(g => ({ ...g, items: all.filter(d => groupOf(d) === g.key && !matchedIds.has(d.id)) }))
-              .filter(g => g.items.length);
-            const openAll = () => openDocsTogether(all);
 
             const renderDoc = (d: ContractDoc, replaceReq?: DocReq) => {
               const isKyc = d.ownerType === 'customer' || d.ownerType === 'tenant';
@@ -1930,8 +1922,6 @@ function DetailsDrawer({
                 </div>
               );
             };
-            const tabGroups = groups.filter(g => g.key !== 'kyc');
-            const kycGroup = groups.find(g => g.key === 'kyc');
             return (
               <>
               <div className="sec">
@@ -1940,7 +1930,7 @@ function DetailsDrawer({
                   <span className="st">Documents ({all.length})</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                     {all.length > 0 && (
-                      <button type="button" className="mini-btn view" onClick={openAll}>
+                      <button type="button" className="mini-btn view" onClick={() => setShowContractDocs(true)}>
                         <ExternalLink size={12} /> View all
                       </button>
                     )}
@@ -1953,13 +1943,14 @@ function DetailsDrawer({
                   </div>
                 </div>
                 <div className="secb">
-                  {/* Customer file: expected-documents checklist — uploaded
-                      slots show the real file, missing slots carry one-click
-                      Upload / Request — plus extra customer uploads. */}
+                  {/* Customer file = the mapped checklist ONLY. Every other doc
+                      (payment slips, invoices, attachments, extra KYC uploads)
+                      lives in the "View all" popup, scoped to this contract —
+                      so the card stays the checklist, not a doc dump. */}
                   <div>
-                    {/* Checklist — full pack on a new lease; on a renewal only
-                        the licensing re-verification slots (residential renewals
-                        have none, so the whole block is hidden). */}
+                    {/* Checklist — new lease: full pack + the two universal
+                        contract docs; renewal: only Contract Registration +
+                        Payment Advice. Always non-empty (CONTRACT_DOCS). */}
                     {checklist.length > 0 && (
                       <>
                         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
@@ -1967,7 +1958,7 @@ function DetailsDrawer({
                         </div>
                         {isRenewal && (
                           <p className="note" style={{ margin: '0 0 8px' }}>
-                            Only licensing is re-verified at renewal.
+                            Renewal re-confirms the registration and the rent cheques.
                           </p>
                         )}
                         {/* One list, one pattern — on-file and missing rows share
@@ -1977,37 +1968,21 @@ function DetailsDrawer({
                         </div>
                       </>
                     )}
-                    {!isRenewal && kycGroup && (
-                      <>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
-                          Additional customer documents ({kycGroup.items.length})
-                        </div>
-                        <div className="doclist">
-                          {kycGroup.items.map(d => renderDoc(d))}
-                        </div>
-                      </>
-                    )}
-                    {contract.tenant.id != null && (
-                      <p className="note" style={{ marginTop: 8 }}>
-                        Need older or cross-lease files?{' '}
-                        <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowDocsHistory(true)}>
-                          Full document history
+                    {/* Everything else on this contract — one link, no inline dump. */}
+                    <p className="note" style={{ marginTop: 8 }}>
+                      {all.length > 0 && (
+                        <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowContractDocs(true)}>
+                          View all {all.length} document{all.length === 1 ? '' : 's'} on this contract
                         </button>
-                      </p>
-                    )}
+                      )}
+                      {all.length > 0 && contract.tenant.id != null && ' · '}
+                      {contract.tenant.id != null && (
+                        <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowDocsHistory(true)}>
+                          cross-lease history
+                        </button>
+                      )}
+                    </p>
                   </div>
-                  {/* Remaining groups — all together, stacked under the
-                      customer file (Contract / Financial / Property / Other) */}
-                  {tabGroups.map(g => (
-                    <div key={g.key}>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '10px 0 6px' }}>
-                        {g.label} documents ({g.items.length})
-                      </div>
-                      <div className="doclist">
-                        {g.items.map(d => renderDoc(d))}
-                      </div>
-                    </div>
-                  ))}
 
                   {/* Upload document (Flow 5) — popup, matching the request modal */}
                   {showUpload && (
@@ -2071,6 +2046,15 @@ function DetailsDrawer({
                   tenantId={contract.tenant.id}
                   tenantName={contract.tenant.name}
                   onClose={() => setShowDocsHistory(false)}
+                />
+              )}
+              {/* "View all" — this contract's documents only (passes them in, so
+                  the modal groups by category without a cross-lease fetch). */}
+              {showContractDocs && (
+                <CustomerDocsModal
+                  tenantName={contract.tenant.name}
+                  documents={all}
+                  onClose={() => setShowContractDocs(false)}
                 />
               )}
               {/* Request-a-document popup (Flow 6) */}
@@ -3427,7 +3411,7 @@ export default function ContractV2Page() {
                 <span>{contract.property.buildingName ?? '—'}</span>
                 <ChevronRight size={12} style={{ opacity: .5 }} />
                 {contract.property.id && contract.unit.id && !isManagerView ? (
-                  <Link href={`/rental-provider/dashboard/portfolio/${contract.property.id}/units/${contract.unit.id}`} className="chain-link" title="Open unit details">
+                  <Link href={`/rental-provider/dashboard/units/${contract.unit.id}`} className="chain-link" title="Open unit details">
                     Unit {contract.unit.number ?? '—'}
                   </Link>
                 ) : (

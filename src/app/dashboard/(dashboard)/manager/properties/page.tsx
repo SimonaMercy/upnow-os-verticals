@@ -8,17 +8,19 @@
  *   • actions (edit / add) gated by the manager's granted permissions
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type CSSProperties } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus } from 'lucide-react';
+import {
+  Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus,
+  LayoutGrid, Rows3, Map as MapIcon, Check, ArrowRight,
+} from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
-import { UnitPreviewModal } from '@/app/rental-provider/dashboard/portfolio/UnitPreviewModal';
-import { PortfolioMapModal } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
+import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
+import { PortfolioMapView } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { PropertyFormModal, type PropertyFormData } from '@/components/upnow/PropertyFormModal';
 import s from '@/app/rental-provider/dashboard/portfolio/portfolio.module.css';
@@ -36,6 +38,7 @@ interface ManagedProperty {
   rpName?:         string;
   unitCount?:      number;
   listedCount?:    number;
+  coverPhotoUrl?:  string | null;
   emirate?:        { nameEn: string } | null;
   community?:      { nameEn: string } | null;
   // Location FK ids + editable fields (the full Property entity is returned by
@@ -118,10 +121,11 @@ export default function ManagerPropertiesPage() {
   const [search, setSearch]     = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: ManagedProperty }>({ open: false });
-  // Read-only preview popups + map (shared with the landlord portal)
+  // Read-only preview popups (shared with the landlord portal)
   const [detailsProperty, setDetailsProperty] = useState<ManagedProperty | null>(null);
   const [unitPreview, setUnitPreview] = useState<{ property: ManagedProperty; unit: ManagedUnit } | null>(null);
-  const [showMap, setShowMap] = useState(false);
+  // Main content view: Row (accordion) · Grid (tiles + side panel) · Map (inline).
+  const [view, setView] = useState<'row' | 'grid' | 'map'>('row');
   const queryClient = useQueryClient();
 
   // The modal is used only for EDITING property details (Add uses the full
@@ -179,6 +183,10 @@ export default function ManagerPropertiesPage() {
     return true;
   });
 
+  // Grid view is master–detail: expandedId = the property whose listings show
+  // in the side panel. Null (or filtered-out) → the panel shows a prompt.
+  const selectedManaged = filtered.find(p => p.id === expandedId) ?? null;
+
   // KPIs — scoped to the selected landlord, or all
   const kpiProps = rpFilter
     ? (stats?.rps.find(r => r.id === rpFilter)?.propertyCount ?? scoped.length)
@@ -215,9 +223,6 @@ export default function ManagerPropertiesPage() {
             </p>
           </div>
           <div className={s.heroRight}>
-            <button type="button" className={s.btn} onClick={() => setShowMap(true)} title="See all managed properties on a map">
-              <MapPin size={14} /> Map
-            </button>
             {can('canEditProperties') && (
               <button
                 type="button"
@@ -280,7 +285,7 @@ export default function ManagerPropertiesPage() {
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search + view toggle */}
         {kpiProps > 0 && (
           <div className={s.filters}>
             <div className={s.search}>
@@ -288,6 +293,22 @@ export default function ManagerPropertiesPage() {
               <input type="text" placeholder="Search building, area, emirate…"
                 value={search} onChange={e => setSearch(e.target.value)} />
               {search && <button type="button" className={s.searchClear} onClick={() => setSearch('')}><X size={12} /></button>}
+            </div>
+
+            {/* View toggle — Row · Grid · Map */}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, padding: 4, borderRadius: 10, background: '#f1efe9' }}>
+              {([['row', Rows3, 'Row'], ['grid', LayoutGrid, 'Grid'], ['map', MapIcon, 'Map']] as const).map(([v, Icon, label]) => (
+                <button key={v} type="button" onClick={() => setView(v)} title={`${label} view`} aria-pressed={view === v}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                    fontSize: 12.5, fontWeight: 600, border: 0, cursor: 'pointer',
+                    ...(view === v
+                      ? { background: '#fff', color: '#1a1916', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
+                      : { background: 'transparent', color: '#6b6860' }),
+                  }}>
+                  <Icon size={15} /> <span>{label}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -306,21 +327,78 @@ export default function ManagerPropertiesPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {filtered.map(p => (
-              <PropertyCard
-                key={p.id}
-                p={p}
-                expanded={expandedId === p.id}
-                onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
-                canEdit={can('canEditProperties')}
-                onEdit={() => setPropertyModal({ open: true, editing: p })}
-                multiLandlord={!rpFilter}
-                onShowDetails={() => setDetailsProperty(p)}
-                onPreviewUnit={(u) => setUnitPreview({ property: p, unit: u })}
-              />
-            ))}
-          </div>
+          <>
+            {/* Row — accordion */}
+            {view === 'row' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {filtered.map(p => (
+                  <PropertyCard
+                    key={p.id}
+                    p={p}
+                    expanded={expandedId === p.id}
+                    onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                    canEdit={can('canEditProperties')}
+                    onEdit={() => setPropertyModal({ open: true, editing: p })}
+                    multiLandlord={!rpFilter}
+                    onShowDetails={() => setDetailsProperty(p)}
+                    onPreviewUnit={(u) => setUnitPreview({ property: p, unit: u })}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Grid — master–detail (tiles left, selected property's units right) */}
+            {view === 'grid' && (
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {filtered.map(p => (
+                    <ManagerPropertyGridCard
+                      key={p.id}
+                      p={p}
+                      selected={expandedId === p.id}
+                      multiLandlord={!rpFilter}
+                      canEdit={can('canEditProperties')}
+                      onSelect={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                      onEdit={() => setPropertyModal({ open: true, editing: p })}
+                      onShowDetails={() => setDetailsProperty(p)}
+                    />
+                  ))}
+                </div>
+                <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-auto">
+                  {selectedManaged ? (
+                    <ManagerUnitsPanel
+                      p={selectedManaged}
+                      canEdit={can('canEditProperties')}
+                      onEdit={() => setPropertyModal({ open: true, editing: selectedManaged })}
+                      onPreviewUnit={(u) => setUnitPreview({ property: selectedManaged, unit: u })}
+                    />
+                  ) : (
+                    <div className="rounded-2xl bg-white p-10 text-center" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+                      <Building2 size={22} className="mx-auto mb-2" style={{ color: '#c5c3bc' }} />
+                      <p className="text-sm" style={{ color: '#9b9890' }}>Select a property to see its unit listings.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Map — inline */}
+            {view === 'map' && (
+              <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+                <PortfolioMapView
+                  heightClass="h-[68vh]"
+                  properties={filtered.map(p => ({
+                    id: p.id,
+                    buildingName: p.buildingName,
+                    latitude: p.latitude ?? null,
+                    longitude: p.longitude ?? null,
+                    fullAddress: p.fullAddress ?? null,
+                    unitCount: p.unitCount,
+                  }))}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -355,6 +433,8 @@ export default function ManagerPropertiesPage() {
       {/* Read-only preview popups + map (shared components, manager-scoped data) */}
       {detailsProperty && (
         <PropertyDetailsModal
+          fetchBase="/manager/properties"
+          editable={can('canManageDocuments')}
           property={{
             id: detailsProperty.id,
             buildingName: detailsProperty.buildingName,
@@ -417,19 +497,6 @@ export default function ManagerPropertiesPage() {
           onClose={() => setUnitPreview(null)}
         />
       )}
-      {showMap && (
-        <PortfolioMapModal
-          properties={filtered.map(p => ({
-            id: p.id,
-            buildingName: p.buildingName,
-            latitude: p.latitude ?? null,
-            longitude: p.longitude ?? null,
-            fullAddress: p.fullAddress ?? null,
-            unitCount: p.unitCount,
-          }))}
-          onClose={() => setShowMap(false)}
-        />
-      )}
     </div>
   );
 }
@@ -447,18 +514,6 @@ function PropertyCard({
     queryFn:  () => apiGet<ManagedUnit[]>(`/manager/properties/${p.id}/units`),
     enabled:  expanded,
   });
-
-  const pill = (u: ManagedUnit) => {
-    if (u.availability === 'occupied')    return { cls: s.pillOcc,       label: 'Occupied' };
-    if (u.availability === 'maintenance') return { cls: s.pillMaint,     label: 'Maintenance' };
-    switch (u.listingStatus) {
-      case 'published': return { cls: s.pillPublished, label: 'Published' };
-      case 'pending':   return { cls: s.pillPending,   label: 'Pending' };
-      case 'in_review': return { cls: s.pillReview,    label: 'In review' };
-      case 'rejected':  return { cls: s.pillRejected,  label: 'Rejected' };
-      default:          return { cls: s.pillDraft,     label: 'Draft' };
-    }
-  };
 
   return (
     <div className={cn(s.prop, expanded && s.expanded)}>
@@ -519,62 +574,170 @@ function PropertyCard({
           <div className={s.unitH}>
             <div className={s.unitHTtl}>Units ({units.length})</div>
           </div>
-
-          {unitsLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '20px 0', color: 'var(--mute)', fontSize: 13 }}>
-              <Loader2 size={14} className="animate-spin" /> Loading units…
-            </div>
-          ) : units.length === 0 ? (
-            <div className={s.empty}>
-              <div className={s.emptyIc}><Building2 size={18} /></div>
-              <h3 className={s.emptyTtl}>No units</h3>
-              <p className={s.emptyDesc}>This property has no units yet.</p>
-            </div>
-          ) : (
-            <div className={s.units}>
-              {units.map(u => {
-                const info = pill(u);
-                const sizeStr = u.unitSizeSqft
-                  ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
-                  : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
-                return (
-                  <div key={u.id} className={s.unit}>
-                    <div className={s.unitNum}>{u.unitNumber}</div>
-                    <div className={s.unitMeta}>
-                      <div className={s.unitTop}>
-                        <span className={s.unitType}>{u.unitType.replace(/_/g, ' ')}</span>
-                        {u.bedrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bedrooms} BR</span></>)}
-                        {u.bathrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bathrooms} BA</span></>)}
-                        {sizeStr && (<><span className={s.unitDot} /><span className={s.unitSpec}>{sizeStr}</span></>)}
-                        {u.view && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.view}</span></>)}
-                      </div>
-                    </div>
-                    <div className={s.unitRight}>
-                      {(u.rentalPrice ?? u.marketPrice) && (
-                        <div className={s.unitPrice}>
-                          AED {Number(u.rentalPrice ?? u.marketPrice).toLocaleString('en-AE')}<small>per year</small>
-                        </div>
-                      )}
-                      <span className={cn(s.pill, info.cls)}><span className={s.pdot} /> {info.label}</span>
-                      <div className={s.unitActs}>
-                        <button type="button" className={s.actsBtn} title="Preview unit" onClick={() => onPreviewUnit(u)}>
-                          <Eye size={14} />
-                        </button>
-                        {canEdit && (
-                          <button type="button" className={s.actsBtn} title="Edit property" onClick={onEdit}>
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <ManagerUnitsList units={units} loading={unitsLoading} canEdit={canEdit} onPreviewUnit={onPreviewUnit} onEdit={onEdit} />
         </div>
       )}
 
+    </div>
+  );
+}
+
+/* ── Shared unit rendering (Row accordion + Grid side panel) ── */
+function pillFor(u: ManagedUnit) {
+  if (u.availability === 'occupied')    return { cls: s.pillOcc,       label: 'Occupied' };
+  if (u.availability === 'maintenance') return { cls: s.pillMaint,     label: 'Maintenance' };
+  switch (u.listingStatus) {
+    case 'published': return { cls: s.pillPublished, label: 'Published' };
+    case 'pending':   return { cls: s.pillPending,   label: 'Pending' };
+    case 'in_review': return { cls: s.pillReview,    label: 'In review' };
+    case 'rejected':  return { cls: s.pillRejected,  label: 'Rejected' };
+    default:          return { cls: s.pillDraft,     label: 'Draft' };
+  }
+}
+
+function ManagerUnitsList({ units, loading, canEdit, onPreviewUnit, onEdit }: {
+  units: ManagedUnit[]; loading: boolean; canEdit: boolean;
+  onPreviewUnit: (u: ManagedUnit) => void; onEdit: () => void;
+}) {
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '20px 0', color: 'var(--mute)', fontSize: 13 }}>
+      <Loader2 size={14} className="animate-spin" /> Loading units…
+    </div>
+  );
+  if (units.length === 0) return (
+    <div className={s.empty}>
+      <div className={s.emptyIc}><Building2 size={18} /></div>
+      <h3 className={s.emptyTtl}>No units</h3>
+      <p className={s.emptyDesc}>This property has no units yet.</p>
+    </div>
+  );
+  return (
+    <div className={s.units}>
+      {units.map(u => {
+        const info = pillFor(u);
+        const sizeStr = u.unitSizeSqft
+          ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
+          : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
+        return (
+          <div key={u.id} className={s.unit}>
+            <div className={s.unitNum}>{u.unitNumber}</div>
+            <div className={s.unitMeta}>
+              <div className={s.unitTop}>
+                <span className={s.unitType}>{u.unitType.replace(/_/g, ' ')}</span>
+                {u.bedrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bedrooms} BR</span></>)}
+                {u.bathrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bathrooms} BA</span></>)}
+                {sizeStr && (<><span className={s.unitDot} /><span className={s.unitSpec}>{sizeStr}</span></>)}
+                {u.view && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.view}</span></>)}
+              </div>
+            </div>
+            <div className={s.unitRight}>
+              {(u.rentalPrice ?? u.marketPrice) && (
+                <div className={s.unitPrice}>
+                  AED {Number(u.rentalPrice ?? u.marketPrice).toLocaleString('en-AE')}<small>per year</small>
+                </div>
+              )}
+              <span className={cn(s.pill, info.cls)}><span className={s.pdot} /> {info.label}</span>
+              <div className={s.unitActs}>
+                <button type="button" className={s.actsBtn} title="Preview unit" onClick={() => onPreviewUnit(u)}>
+                  <Eye size={14} />
+                </button>
+                {canEdit && (
+                  <button type="button" className={s.actsBtn} title="Edit property" onClick={onEdit}>
+                    <Pencil size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Property grid card (Grid view, master–detail) ── */
+function ManagerPropertyGridCard({
+  p, selected, multiLandlord, canEdit, onSelect, onEdit, onShowDetails,
+}: {
+  p: ManagedProperty; selected: boolean; multiLandlord: boolean; canEdit: boolean;
+  onSelect: () => void; onEdit: () => void; onShowDetails: () => void;
+}) {
+  const loc = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ') || p.fullAddress || '—';
+  const iconBtn: CSSProperties = {
+    width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center',
+    justifyContent: 'center', background: '#fff', border: '1px solid #e8e6e0', cursor: 'pointer',
+  };
+  return (
+    <div onClick={onSelect} role="button" aria-pressed={selected}
+      className="flex flex-col overflow-hidden cursor-pointer"
+      style={{
+        background: '#fff', borderRadius: 16,
+        boxShadow: selected
+          ? '0 0 0 2px #2e9f82, 0 2px 12px -2px rgba(0,0,0,0.10)'
+          : '0 2px 12px -2px rgba(0,0,0,0.06)',
+      }}>
+      <div className="p-5 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold text-base truncate" style={{ color: '#1a1916' }}>{p.buildingName || 'Unnamed Property'}</div>
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1.5 inline-block" style={{ background: '#f1efe9', color: '#57544d' }}>{categoryLabel(p.spaceCategory)}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button type="button" onClick={(e) => { e.stopPropagation(); onShowDetails(); }} title="View property details" style={iconBtn}><Eye size={14} color="#6b6860" /></button>
+            {canEdit && <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit property" style={iconBtn}><Pencil size={14} color="#6b6860" /></button>}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 mt-2.5 text-xs" style={{ color: '#6b6860' }}>
+          <MapPin size={12} className="shrink-0" /><span className="truncate">{loc}</span>
+        </div>
+        <div className="flex items-end gap-5 mt-4">
+          <div>
+            <div className="text-lg font-bold" style={{ color: '#1a1916' }}>{p.unitCount ?? 0}</div>
+            <div className="text-[11px]" style={{ color: '#9b9890' }}>Units</div>
+          </div>
+          {(p.listedCount ?? 0) > 0 && (
+            <div>
+              <div className="text-lg font-bold" style={{ color: '#1a1916' }}>{p.listedCount}</div>
+              <div className="text-[11px]" style={{ color: '#9b9890' }}>Listed</div>
+            </div>
+          )}
+          {multiLandlord && p.rpName && (
+            <div className="ml-auto text-right min-w-0">
+              <div className="text-xs font-semibold truncate" style={{ color: 'var(--color-primary, #2e9f82)', maxWidth: 120 }}>{p.rpName}</div>
+              <div className="text-[11px]" style={{ color: '#9b9890' }}>Landlord</div>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold"
+        style={{ borderTop: '1px solid #f0ede8', color: selected ? '#2e9f82' : '#6b6860' }}>
+        {selected ? <>Showing units <Check size={13} /></> : <>View units <ArrowRight size={13} /></>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Side panel — the selected property's units (own fetch) ── */
+function ManagerUnitsPanel({ p, canEdit, onEdit, onPreviewUnit }: {
+  p: ManagedProperty; canEdit: boolean; onEdit: () => void; onPreviewUnit: (u: ManagedUnit) => void;
+}) {
+  const loc = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ') || p.fullAddress || '—';
+  const { data: units = [], isLoading } = useQuery<ManagedUnit[]>({
+    queryKey: ['manager-units', p.id],
+    queryFn:  () => apiGet<ManagedUnit[]>(`/manager/properties/${p.id}/units`),
+  });
+  return (
+    <div className={cn(s.prop, s.expanded)}>
+      <div style={{ padding: '16px 18px 0' }}>
+        <div className="font-semibold text-base" style={{ color: '#1a1916' }}>{p.buildingName || 'Unnamed Property'}</div>
+        <div className="flex items-center gap-1.5 text-xs mt-1" style={{ color: '#6b6860' }}>
+          <MapPin size={12} className="shrink-0" /><span className="truncate">{loc}</span>
+        </div>
+      </div>
+      <div className={s.propBody}>
+        <div className={s.unitH}><div className={s.unitHTtl}>Units ({units.length})</div></div>
+        <ManagerUnitsList units={units} loading={isLoading} canEdit={canEdit} onPreviewUnit={onPreviewUnit} onEdit={onEdit} />
+      </div>
     </div>
   );
 }

@@ -21,10 +21,13 @@ import Link from 'next/link';
 import {
   BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
   ArrowRight, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
-  LayoutGrid, Rows3, Search,
+  LayoutGrid, Rows3, Search, Plus, Eye, Trash2,
 } from 'lucide-react';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiGet, apiPatch, apiDelete } from '@/lib/api';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
+import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
+import { saveUnit, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 
 interface Plan {
   displayName: string;
@@ -75,6 +78,16 @@ interface Resp {
   plans: Plan[];
   // RP's configured fee rules per category — used to default the per-layout fees
   feeRules: Record<string, FeeRuleLite[]> | null;
+}
+// Tenant + lease-end surfaced on each unit row (RP only).
+interface ContractSummary {
+  id: number;
+  status: string;
+  contractActive: boolean;
+  startDate: string | null;
+  endDate: string | null;
+  tenant: { id: number | null; name: string | null } | null;
+  unit: { id: number | null } | null;
 }
 
 // Plans are unique per (property, plan_label) — labels can repeat across
@@ -145,6 +158,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [sort, setSort] = useState('default');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'grid' | 'row'>('row');
+  // Primary axis: 'type' = layout cards grouped by unit type (default), 'unit' =
+  // a flat list of every individual unit (still grouped under its unit type).
+  const [mode, setMode] = useState<'type' | 'unit'>('type');
   const [loading, setLoading] = useState(true);
 
   // shared error surface (image upload, etc.)
@@ -174,12 +190,108 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rpQ]);
-  useEffect(() => { load(); }, [load]);
+  // Preselect a property when arriving via the portfolio "Manage units" link
+  // (?propertyId=). Read from the URL directly to avoid a Suspense boundary.
+  useEffect(() => {
+    const pid = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('propertyId') : null;
+    load(pid ? Number(pid) : undefined);
+  }, [load]);
 
   const reload = () => load(propertyId);
   const onProperty = (v: string) => { setTypeFilter('all'); setPlanFilter('all'); load(v === 'all' ? null : Number(v), 'all'); };
   // Changing the unit-type scope can hide the selected plan, so reset it.
   const onType = (v: string) => { setTypeFilter(v); setPlanFilter('all'); };
+
+  // ── Per-unit management lives in the "By unit" view. Units load lazily per
+  // property and are cached; any change re-fetches them AND reloads the plan
+  // aggregates so price ranges / flags stay in sync.
+  const [unitsByProperty, setUnitsByProperty] = useState<Record<number, UnitRecord[]>>({});
+  const [loadingUnits, setLoadingUnits] = useState<Set<number>>(new Set());
+  const [contracts, setContracts] = useState<ContractSummary[]>([]);
+  const [unitModal, setUnitModal] = useState<{ plan: Plan; editingUnit?: UnitRecord } | null>(null);
+  const [unitPreview, setUnitPreview] = useState<{ plan: Plan; unit: UnitRecord } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [busyUnit, setBusyUnit] = useState<number | null>(null);
+
+  // Contracts power the tenant / lease-end line on each unit row.
+  useEffect(() => {
+    if (manager) return;
+    apiGet<ContractSummary[]>('/contracts').then(setContracts).catch(() => {});
+  }, [manager]);
+
+  const loadUnitsForProperty = useCallback(async (pid: number) => {
+    setLoadingUnits(s => new Set(s).add(pid));
+    try {
+      const rows = await apiGet<UnitRecord[]>(manager ? `/manager/properties/${pid}/units` : `/properties/${pid}/units`);
+      setUnitsByProperty(m => ({ ...m, [pid]: rows }));
+    } catch {
+      setUnitsByProperty(m => ({ ...m, [pid]: m[pid] ?? [] }));
+    } finally {
+      setLoadingUnits(s => { const n = new Set(s); n.delete(pid); return n; });
+    }
+  // `manager` is constant for a mounted page (the landlord being managed).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // In the per-unit view, eagerly load units for every in-scope property — the
+  // by-type view loads them lazily on expand, but the flat list needs them all.
+  useEffect(() => {
+    if (mode !== 'unit' || !data) return;
+    const scope = propertyId != null ? [propertyId] : data.properties.map(p => p.id);
+    scope.forEach(pid => {
+      if (unitsByProperty[pid] == null && !loadingUnits.has(pid)) void loadUnitsForProperty(pid);
+    });
+  }, [mode, data, propertyId, unitsByProperty, loadingUnits, loadUnitsForProperty]);
+
+  // After any unit change, refresh that property's units AND the plan aggregates.
+  const refreshProperty = async (pid: number) => { await loadUnitsForProperty(pid); reload(); };
+
+  const onSaveUnit = async (
+    plan: Plan, editingUnit: UnitRecord | undefined,
+    data: Parameters<typeof saveUnit>[0]['data'],
+    floorPlan?: File | null, titleDeed?: File | null, addendums?: File[],
+  ) => {
+    await saveUnit({
+      propertyId: plan.propertyId, editingUnitId: editingUnit?.id, data,
+      floorPlan, titleDeed, addendums, propertyStandalone: false,
+      manager: manager ? { rp: manager.rp } : undefined,
+    });
+    await refreshProperty(plan.propertyId);
+  };
+
+  const onDeleteUnit = async (pid: number, unitId: number) => {
+    setBusyUnit(unitId);
+    try {
+      await apiDelete(manager ? `/manager/properties/${pid}/units/${unitId}?${rpQ}` : `/properties/${pid}/units/${unitId}`);
+      await refreshProperty(pid);
+    }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not delete unit'); }
+    finally { setBusyUnit(null); setConfirmDelete(null); }
+  };
+
+  const onListingAction = async (pid: number, unitId: number, action: 'submit-listing' | 'withdraw-listing') => {
+    setBusyUnit(unitId);
+    try {
+      await apiPatch(manager ? `/manager/properties/${pid}/units/${unitId}/${action}?${rpQ}` : `/properties/${pid}/units/${unitId}/${action}`, {});
+      await refreshProperty(pid);
+    }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Listing action failed'); }
+    finally { setBusyUnit(null); }
+  };
+
+  const statusPill = (u: UnitRecord): { label: string; bg: string; fg: string } => {
+    if (u.availability === 'occupied')    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
+    if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
+    switch (u.listingStatus) {
+      case 'published': return { label: 'Published', bg: '#d8f2e8', fg: '#1a7a5a' };
+      case 'pending':   return { label: 'Pending',   bg: '#fef3c7', fg: '#92400e' };
+      case 'in_review': return { label: 'In review', bg: '#dbeafe', fg: '#1e40af' };
+      case 'expired':   return { label: 'Expired',   bg: '#fef3c7', fg: '#92400e' };
+      case 'rejected':  return { label: 'Rejected',  bg: '#fee2e2', fg: '#b91c1c' };
+      default:          return { label: 'Draft',     bg: '#f1efe9', fg: '#6b6860' };
+    }
+  };
 
   const pickImage = (p: Plan) => { targetPlan.current = { planLabel: p.planLabel, propertyId: p.propertyId }; fileRef.current?.click(); };
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -275,6 +387,72 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     plans: plans.filter(p => (p.unitType ?? 'other') === t.unitType),
   }));
 
+  // ── Per-unit (flat) view — same scope/filters, grouped by unit type ──────
+  // Each unit resolves back to its layout Plan so the row's view/edit/delete/
+  // listing actions reuse the by-type machinery (falls back to a minimal plan
+  // if a unit somehow has no matching layout aggregate).
+  const buildingNameOf = (pid: number) =>
+    data?.properties.find(p => p.id === pid)?.buildingName?.trim() ?? '';
+  const planForUnit = (u: UnitRecord): Plan =>
+    allPlans.find(pl => pl.propertyId === u.propertyId && (pl.planLabel ?? '') === (u.planLabel ?? ''))
+    ?? ({
+      displayName: u.planLabel || 'Unit', planLabel: u.planLabel ?? '', propertyId: u.propertyId,
+      buildingName: buildingNameOf(u.propertyId), spaceCategory: null, unitType: u.unitType ?? null,
+      bedrooms: u.bedrooms ?? null, bathrooms: u.bathrooms ?? null,
+      sqftMin: 0, sqftMax: 0, sqmMin: 0, sqmMax: 0, avgSqft: null,
+      priceFrom: null, rentFrom: null, rentTo: null, marketFrom: null, marketTo: null, marketGap: null, aedPerSqft: null,
+      securityDeposit: null, adminFee: null, ejariFee: null, commission: null, serviceCharges: null,
+      leaseTerms: null, termsVersion: null, unpricedCount: 0, unitCount: 1, sampleUnitId: u.id,
+      floorPlanUrl: u.floorPlanUrl ?? null, flags: [],
+    } as Plan);
+
+  const inScopePropIds = propertyId != null ? [propertyId] : (data?.properties.map(p => p.id) ?? []);
+  const perUnitLoading = mode === 'unit'
+    && inScopePropIds.some(pid => unitsByProperty[pid] == null || loadingUnits.has(pid));
+
+  // Map the plan-level Sort onto unit fields so the control stays meaningful.
+  const unitSortVal = (u: UnitRecord): number | null => {
+    switch (sortField) {
+      case 'sqft':   return u.unitSizeSqft ?? null;
+      case 'market': return u.marketPrice ?? null;
+      case 'rent':   return u.rentalPrice ?? null;
+      default:       return null;
+    }
+  };
+  const byUnitNumber = (a: UnitRecord, b: UnitRecord) =>
+    (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true });
+
+  // All in-scope units, filtered by the active type/plan/search filters.
+  const scopedUnitRows = inScopePropIds
+    .flatMap(pid => unitsByProperty[pid] ?? [])
+    .map(u => ({ u, pl: planForUnit(u) }))
+    .filter(({ u, pl }) => {
+      if (typeFilter !== 'all' && (pl.unitType ?? 'other') !== typeFilter) return false;
+      if (planFilter !== 'all' && planKey({ propertyId: u.propertyId, planLabel: u.planLabel ?? '' }) !== planFilter) return false;
+      if (q && ![u.unitNumber, u.unitName, u.unitType, pl.buildingName]
+        .some(s => s != null && String(s).toLowerCase().includes(q))) return false;
+      return true;
+    });
+
+  // Group units under their unit type (largest group first); each group is
+  // ordered by the active Sort, falling back to unit number.
+  const unitGroups = Object.entries(
+    scopedUnitRows.reduce<Record<string, { u: UnitRecord; pl: Plan }[]>>((m, r) => {
+      const t = r.pl.unitType ?? 'other'; (m[t] ??= []).push(r); return m;
+    }, {}),
+  ).map(([unitType, items]) => ({
+    unitType,
+    items: sortField
+      ? [...items].sort((a, b) => {
+          const av = unitSortVal(a.u), bv = unitSortVal(b.u);
+          if (av == null && bv == null) return byUnitNumber(a.u, b.u);
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          return (av - bv) * sortDir;
+        })
+      : [...items].sort((a, b) => byUnitNumber(a.u, b.u)),
+  })).sort((a, b) => b.items.length - a.items.length);
+
   // ── shared bits, reused by both the grid card and the row ──────────────
   const flagChips = (p: Plan) => p.flags.length > 0 && (
     <div className="flex flex-wrap gap-1.5">
@@ -368,10 +546,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
           <div className="mt-auto pt-4">
             {priceBlock(p)}
-            <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
-              className="mt-3 inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-              View a unit <ArrowRight size={12} />
-            </Link>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
+                className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+                View a unit <ArrowRight size={12} />
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -413,10 +593,158 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         {/* Pricing */}
         <div className="flex flex-col justify-center items-end gap-1.5 shrink-0 w-[300px] max-w-[44%]">
           <div className="w-full">{priceBlock(p)}</div>
-          <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
-            className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-            View a unit <ArrowRight size={12} />
-          </Link>
+        </div>
+      </div>
+    );
+  };
+
+  // Per-unit display bits shared by the row and the grid card.
+  const unitMeta = (u: UnitRecord) => {
+    const contract = contracts.find(c => c.unit?.id === u.id && c.contractActive) ?? null;
+    const tenant = contract?.tenant?.name ?? null;
+    const fmtLease = (d: string | null | undefined) =>
+      d ? new Date(d).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+    const start = fmtLease(contract?.startDate);
+    const end = fmtLease(contract?.endDate);
+    const leaseRange = start && end ? `${start} → ${end}` : start ? `from ${start}` : end ? `until ${end}` : '';
+    const size = u.unitSizeSqft ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
+      : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
+    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice ?? u.marketPrice, busy: busyUnit === u.id };
+  };
+
+  // Listing / view / edit / delete buttons — shared by the unit row and card.
+  const unitActions = (p: Plan, u: UnitRecord, busy: boolean) => (
+    <>
+      {u.availability === 'available' && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
+        <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'submit-listing'); }}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: '#e6f7f1', color: 'var(--primary,#2e9f82)' }}>
+          {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
+        </button>
+      )}
+      {u.availability === 'available' && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
+        <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'withdraw-listing'); }}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: '#f1efe9', color: 'var(--neutral-600,#57544d)' }}>
+          Withdraw
+        </button>
+      )}
+      <button onClick={(e) => { e.stopPropagation(); setUnitPreview({ plan: p, unit: u }); }} title="View full unit details"
+        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap"
+        style={{ color: 'var(--primary,#2e9f82)', background: '#e6f7f1', border: '1px solid #cfe9df' }}>
+        <Eye size={13} /> View
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setUnitModal({ plan: p, editingUnit: u }); }} title="Edit unit"
+        className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: 'var(--neutral-500,#6b6860)', background: '#fff', border: '1px solid #e8e6e0' }}>
+        <Pencil size={14} />
+      </button>
+      {confirmDelete === u.id ? (
+        <span className="flex items-center gap-1">
+          <button disabled={busy} onClick={(e) => { e.stopPropagation(); onDeleteUnit(p.propertyId, u.id); }}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg disabled:opacity-50" style={{ background: '#fee2e2', color: '#b91c1c' }}>
+            {busy ? '…' : 'Delete'}
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ background: '#f1efe9', color: '#6b6860' }}>No</button>
+        </span>
+      ) : (
+        <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(u.id); }} title="Delete unit"
+          className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: '#b91c1c', background: '#fff', border: '1px solid #f1d5d5' }}>
+          <Trash2 size={14} />
+        </button>
+      )}
+    </>
+  );
+
+  // One unit row — used in the per-unit row view (`showBuilding` adds the
+  // building name, since rows can span properties).
+  const unitRow = (p: Plan, u: UnitRecord, showBuilding = false) => {
+    const { tenant, leaseRange, pill, size, price, busy } = unitMeta(u);
+    return (
+      <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
+        className="flex items-center gap-3 rounded-xl px-3 py-2.5 cursor-pointer transition-colors bg-[#fafaf8] border border-[#eef0ee] hover:bg-[#f3f7f5] hover:border-[#cfe9df]">
+        <button onClick={(e) => { e.stopPropagation(); setUnitPreview({ plan: p, unit: u }); }} title="Preview unit"
+          className="font-semibold text-sm shrink-0 hover:underline"
+          style={{ color: 'var(--neutral-900,#1a1916)', minWidth: 52, textAlign: 'left' }}>
+          {u.unitNumber}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap text-xs" style={{ color: 'var(--neutral-600,#57544d)' }}>
+            {showBuilding && p.buildingName && <span className="font-medium" style={{ color: 'var(--neutral-700,#44423c)' }}>{p.buildingName}</span>}
+            {u.unitName && <span className="font-medium" style={{ color: 'var(--neutral-800,#2d2b26)' }}>{u.unitName}</span>}
+            <span>{u.unitType.replace(/_/g, ' ')}</span>
+            {u.bedrooms != null && <span>· {u.bedrooms} BR</span>}
+            {u.bathrooms != null && <span>· {u.bathrooms} BA</span>}
+            {size && <span>· {size}</span>}
+            {u.view && <span>· {u.view}</span>}
+          </div>
+          {tenant && (
+            <div className="text-[11px] mt-0.5" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+              {tenant}{leaseRange ? ` · ${leaseRange}` : ''}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {price != null && (
+            <div className="text-sm font-bold whitespace-nowrap" style={{ color: 'var(--primary,#2e9f82)' }}>
+              AED {aed(Number(price))}
+            </div>
+          )}
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: pill.bg, color: pill.fg }}>
+            {pill.label}
+          </span>
+          {unitActions(p, u, busy)}
+        </div>
+      </div>
+    );
+  };
+
+  // One unit as a card — used in the per-unit grid view.
+  const unitCard = (p: Plan, u: UnitRecord, showBuilding = false) => {
+    const { tenant, leaseRange, pill, size, price, busy } = unitMeta(u);
+    return (
+      <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
+        className="flex flex-col overflow-hidden cursor-pointer transition-shadow hover:shadow-md"
+        style={{ background: 'var(--white,#fff)', borderRadius: 16, border: '1px solid #eef0ee', boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+        {/* Floor-plan thumbnail */}
+        <div className="relative" style={{ height: 132 }}>
+          <PlanThumb url={u.floorPlanUrl ?? p.floorPlanUrl} alt={u.unitNumber} />
+          <span className="absolute top-2 left-2 text-xs font-semibold px-2 py-0.5 rounded-full"
+            style={{ background: 'rgba(255,255,255,0.92)', color: 'var(--neutral-700,#44423c)' }}>
+            {u.unitNumber}
+          </span>
+          <span className="absolute top-2 right-2 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: pill.bg, color: pill.fg }}>
+            {pill.label}
+          </span>
+        </div>
+        {/* Body */}
+        <div className="flex flex-col flex-1 p-4">
+          {showBuilding && p.buildingName && (
+            <p className="text-xs font-medium truncate" style={{ color: 'var(--neutral-500,#6b6860)' }}>{p.buildingName}</p>
+          )}
+          {u.unitName && (
+            <h3 className="font-semibold text-sm truncate" style={{ color: 'var(--neutral-900,#1a1916)' }}>{u.unitName}</h3>
+          )}
+          <div className="flex items-center gap-1.5 flex-wrap text-xs mt-0.5" style={{ color: 'var(--neutral-600,#57544d)' }}>
+            <span>{u.unitType.replace(/_/g, ' ')}</span>
+            {u.bedrooms != null && <span>· {u.bedrooms} BR</span>}
+            {u.bathrooms != null && <span>· {u.bathrooms} BA</span>}
+            {size && <span>· {size}</span>}
+            {u.view && <span>· {u.view}</span>}
+          </div>
+          {tenant && (
+            <p className="text-[11px] mt-1 truncate" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+              {tenant}{leaseRange ? ` · ${leaseRange}` : ''}
+            </p>
+          )}
+          <div className="mt-auto pt-3">
+            {price != null && (
+              <div className="text-base font-bold whitespace-nowrap" style={{ color: 'var(--primary,#2e9f82)' }}>
+                AED {aed(Number(price))}<span className="text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}> /yr</span>
+              </div>
+            )}
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              {unitActions(p, u, busy)}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -428,24 +756,63 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
       <div className="max-w-6xl mx-auto px-5 py-8">
         {/* Header */}
-        <div>
-          <h1 className="font-bold" style={{ fontSize: 28, color: 'var(--neutral-900, #1a1916)', letterSpacing: '-0.02em' }}>
-            Units &amp; pricing
-          </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--neutral-500, #6b6860)' }}>
-            {building ? `${building} · pricing by floor-plan layout` : 'All properties · pricing by floor-plan layout'}
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="font-bold" style={{ fontSize: 28, color: 'var(--neutral-900, #1a1916)', letterSpacing: '-0.02em' }}>
+              Units &amp; pricing
+            </h1>
+            <p className="mt-1 text-sm" style={{ color: 'var(--neutral-500, #6b6860)' }}>
+              {building ? `${building} · pricing by floor-plan layout` : 'All properties · pricing by floor-plan layout'}
+            </p>
+          </div>
+          {!manager && (
+            <Link href="/rental-provider/dashboard/units/add"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2.5 rounded-lg shrink-0"
+              style={{ background: 'var(--primary,#2e9f82)', color: '#fff' }}>
+              <Plus size={15} /> Add units
+            </Link>
+          )}
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 mt-5">
+        {/* Row 1 — switch tab (left) + sort & layout view (right). */}
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: '#f1efe9' }}>
+            {([['type', 'By layout'], ['unit', 'By unit']] as const).map(([m, label]) => (
+              <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m}
+                className="px-3 h-8 rounded-md text-xs font-semibold transition-colors"
+                style={mode === m
+                  ? { background: 'var(--white,#fff)', color: 'var(--neutral-900,#1a1916)', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
+                  : { color: 'var(--neutral-500,#6b6860)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            <Select label="Sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+            <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: '#f1efe9' }}>
+              {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
+                <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={view === v}
+                  className="flex items-center justify-center w-9 h-8 rounded-md transition-colors"
+                  style={view === v
+                    ? { background: 'var(--white,#fff)', color: 'var(--neutral-900,#1a1916)', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
+                    : { color: 'var(--neutral-500,#6b6860)' }}>
+                  <Icon size={16} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2 — filters, left-aligned to line up with Row 1, separate row. */}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           {/* Search — matches the portfolio page filter style */}
-          <div className="relative flex-1 min-w-[200px] max-w-[340px]">
+          <div className="relative w-[240px] max-w-full">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--mute, #9b9890)' }} />
             <input
               type="text"
               value={query} onChange={e => setQuery(e.target.value)}
-              placeholder="Search layouts…" aria-label="Search layouts"
+              placeholder={mode === 'unit' ? 'Search units…' : 'Search layouts…'}
+              aria-label={mode === 'unit' ? 'Search units' : 'Search layouts'}
               className="w-full outline-none transition-all"
               style={{ padding: '10px 32px 10px 36px', fontSize: 13.5, border: '1px solid var(--line-2, #d8d6d0)', borderRadius: 10, background: '#fff', color: 'var(--ink, #1a1916)' }} />
             {query && (
@@ -469,22 +836,6 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           {typePlans.length > 1 && (
             <Select label="Plan" value={planFilter} onChange={setPlanFilter} options={planOptions} />
           )}
-
-          {/* Sort + view toggle, pinned right */}
-          <div className="ml-auto flex items-center gap-3">
-            <Select label="Sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
-            <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: '#f1efe9' }}>
-              {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
-                <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={view === v}
-                  className="flex items-center justify-center w-9 h-8 rounded-md transition-colors"
-                  style={view === v
-                    ? { background: 'var(--white,#fff)', color: 'var(--neutral-900,#1a1916)', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
-                    : { color: 'var(--neutral-500,#6b6860)' }}>
-                  <Icon size={16} />
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Total units by unit type */}
@@ -539,6 +890,64 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           <div className="flex items-center justify-center gap-2 py-24 text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
             <Loader2 size={16} className="animate-spin" /> Loading layouts…
           </div>
+        ) : mode === 'unit' ? (
+          // ── Per-unit (flat) view — units grouped under their unit type ──
+          scopedUnitRows.length === 0 ? (
+            perUnitLoading ? (
+              <div className="flex items-center justify-center gap-2 py-24 text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
+                <Loader2 size={16} className="animate-spin" /> Loading units…
+              </div>
+            ) : (
+              <div className="text-center py-24">
+                <Layers size={32} className="mx-auto mb-3" style={{ color: 'var(--neutral-300, #c5c3bc)' }} />
+                <p className="text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
+                  {q ? `No units match “${query.trim()}”.`
+                    : typeFilter !== 'all' ? `No ${typeLabel(typeFilter === 'other' ? null : typeFilter)} units in this scope.`
+                    : 'No units found for this scope.'}
+                </p>
+              </div>
+            )
+          ) : (
+            <div className="mt-6 flex flex-col gap-9">
+              {unitGroups.map(g => (
+                <section key={g.unitType}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <h2 className="font-semibold" style={{ fontSize: 17, color: 'var(--neutral-900,#1a1916)' }}>
+                      {typeLabel(g.unitType === 'other' ? null : g.unitType)}
+                    </h2>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: '#f1efe9', color: 'var(--neutral-600,#57544d)' }}>
+                      {g.items.length} {g.items.length === 1 ? 'unit' : 'units'}
+                    </span>
+                    {/* Add a unit to this group's property (single-property scope is
+                        unambiguous; in "all properties" it targets the first listed
+                        unit's property — the new unit's type is set in the form). */}
+                    {g.items[0]?.pl && (
+                      <button onClick={() => setUnitModal({ plan: g.items[0].pl })}
+                        className="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg"
+                        style={{ background: 'var(--primary,#2e9f82)', color: '#fff' }}>
+                        <Plus size={13} /> Add unit
+                      </button>
+                    )}
+                  </div>
+                  {view === 'grid' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                      {g.items.map(({ u, pl }) => unitCard(pl, u, propertyId == null))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {g.items.map(({ u, pl }) => unitRow(pl, u, propertyId == null))}
+                    </div>
+                  )}
+                </section>
+              ))}
+              {perUnitLoading && (
+                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--neutral-400,#9b9890)' }}>
+                  <Loader2 size={15} className="animate-spin" /> Loading more units…
+                </div>
+              )}
+            </div>
+          )
         ) : plans.length === 0 ? (
           <div className="text-center py-24">
             <Layers size={32} className="mx-auto mb-3" style={{ color: 'var(--neutral-300, #c5c3bc)' }} />
@@ -565,11 +974,11 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
                 {view === 'grid' ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {g.plans.map(gridCard)}
+                    {g.plans.map(p => gridCard(p))}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    {g.plans.map(rowCard)}
+                    {g.plans.map(p => rowCard(p))}
                   </div>
                 )}
               </section>
@@ -606,6 +1015,43 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
               : <img src={viewer.url} alt="Floor plan" className="w-full h-full object-contain" />}
           </div>
         </div>
+      )}
+
+      {/* Per-unit add / edit. The modal closes itself on save. */}
+      {unitModal && (
+        <UnitFormModal
+          open
+          propertyCategory={unitModal.plan.spaceCategory ?? ''}
+          title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
+          initial={unitModal.editingUnit ? unitToFormInitial(unitModal.editingUnit) : undefined}
+          existingFloorPlanUrl={unitModal.editingUnit?.floorPlanUrl ?? null}
+          propertyStandalone={false}
+          propertyId={unitModal.plan.propertyId}
+          editingUnitId={unitModal.editingUnit?.id}
+          onClose={() => setUnitModal(null)}
+          onSave={(data, floorPlan, titleDeed, addendums) =>
+            onSaveUnit(unitModal.plan, unitModal.editingUnit, data, floorPlan, titleDeed, addendums)}
+        />
+      )}
+
+      {/* Read-only unit preview. */}
+      {unitPreview && (
+        <UnitPreviewModal
+          propertyId={unitPreview.plan.propertyId}
+          propertyName={unitPreview.plan.buildingName}
+          fetchBase={manager ? '/manager/properties' : undefined}
+          fetchQuery={manager ? rpQ : undefined}
+          unit={unitPreview.unit}
+          contract={(() => {
+            // Prefer the active lease; else fall back to the most recent contract
+            // (the list is sorted createdAt DESC) so a now-vacant unit still shows
+            // its last tenancy.
+            const forUnit = contracts.filter(x => x.unit?.id === unitPreview.unit.id);
+            const c = forUnit.find(x => x.contractActive) ?? forUnit[0];
+            return c ? { id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive } : null;
+          })()}
+          onClose={() => setUnitPreview(null)}
+        />
       )}
     </div>
   );
