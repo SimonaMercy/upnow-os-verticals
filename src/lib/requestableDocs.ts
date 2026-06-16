@@ -27,6 +27,7 @@ export const REQUESTABLE_DOCS = [
   'Title Deed',
   'Cheque Copies (PDC)',
   'Security Deposit Cheque',
+  'Receipt',
   'NOC from Current Landlord',
   'Rental History',
   'Utility Bill',
