@@ -27,10 +27,11 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Search, Plus, X, FileText, ChevronLeft, ChevronRight,
-  Bell, Download, Clock, Shield, Coins, Calendar,
+  Bell, Download, Clock, Shield, Coins, Calendar, Pencil,
 } from 'lucide-react';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -198,8 +199,8 @@ function statusLabel(c: Contract): string {
 // ────────────────────────────────────────────────────────────────────────────
 
 function Row({
-  contract, now, soonBy,
-}: { contract: Contract; now: Date; soonBy: Date }) {
+  contract, now, soonBy, onEdit,
+}: { contract: Contract; now: Date; soonBy: Date; onEdit: (id: number) => void }) {
   const c = contract;
   const ds = displayStatusOf(c);
   const soon = isInForce(c) && endsSoon(c, soonBy);
@@ -246,6 +247,10 @@ function Row({
       </div>
 
       <div className="col-chev">
+        <button type="button" className="edit-btn" title="Edit contract" aria-label="Edit contract"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(c.id); }}>
+          <Pencil size={14} />
+        </button>
         <span className="cv">
           <ChevronRight size={14} />
         </span>
@@ -266,6 +271,7 @@ export default function OrdersPage() {
   const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [page, setPage] = useState(1);
+  const router = useRouter();
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
@@ -521,7 +527,8 @@ export default function OrdersPage() {
             </div>
             <div className="rows">
               {rows.map(c => (
-                <Row key={c.id} contract={c} now={now} soonBy={soonBy} />
+                <Row key={c.id} contract={c} now={now} soonBy={soonBy}
+                  onEdit={(cid) => router.push(`/rental-provider/dashboard/contracts/${cid}/edit`)} />
               ))}
             </div>
             {totalPages > 1 && (
@@ -969,6 +976,24 @@ function GlobalStyle() {
       }
       .orders-page .col-chev .cv { transition: transform .2s; display: grid; place-items: center; }
       .orders-page .row.expanded .col-chev .cv { transform: rotate(90deg); color: var(--green-d); }
+
+      /* Edit-contract action — quiet by default, brand-green on hover. */
+      .orders-page .col-chev .edit-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 30px; height: 30px; border-radius: 8px;
+        border: 1px solid var(--line); background: #fff; color: var(--ink-3);
+        margin-right: 8px; cursor: pointer; flex: none;
+        transition: background .15s, border-color .15s, color .15s, box-shadow .15s, transform .08s;
+      }
+      .orders-page .row:hover .col-chev .edit-btn { border-color: var(--paper-2); }
+      .orders-page .col-chev .edit-btn:hover {
+        background: var(--green-t2); border-color: var(--green); color: var(--green-d);
+        box-shadow: 0 2px 8px -2px rgba(46, 159, 130, .35);
+      }
+      .orders-page .col-chev .edit-btn:active { transform: scale(.92); }
+      .orders-page .col-chev .edit-btn:focus-visible {
+        outline: 2px solid var(--green); outline-offset: 2px;
+      }
 
       .orders-page .row-body {
         grid-column: 1 / -1;

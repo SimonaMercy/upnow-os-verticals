@@ -172,6 +172,8 @@ export default function CustomerDetailPage() {
   const c = data.customer;
   const fin = data.financials;
   const isCompany = c.entityType === 'company';
+  // Company customers are identified by their company name, individuals by person name.
+  const displayName = isCompany && c.companyName ? c.companyName : (c.name ?? '—');
   const kycDocs = data.documents.filter(isKycDoc);
   // KYC checklist (RP view): the identity docs this customer should have on
   // file. Missing ones get an inline upload affordance. Mirrors the customer
@@ -369,11 +371,11 @@ export default function CustomerDetailPage() {
             {isCompany ? <Building2 size={20} /> : initials}
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold text-[#1a1916]">{c.name ?? '—'}</h1>
+            <h1 className="text-xl font-bold text-[#1a1916]">{displayName}</h1>
             <p className="text-xs text-[#6b6860] mt-1 flex items-center gap-1.5 flex-wrap">
               <Link href={listHref} className="hover:underline">Customers</Link>
               <span className="text-[#c4c1b8]">›</span>
-              <span className="truncate max-w-[160px]">{c.name ?? '—'}</span>
+              <span className="truncate max-w-[160px]">{displayName}</span>
             </p>
           </div>
           {!editing && (
