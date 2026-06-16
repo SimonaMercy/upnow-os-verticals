@@ -1,20 +1,23 @@
 /**
  * Rental Provider — Property Portfolio.
  *
- * Lists all of the RP's properties (accordion) with their units and listing
- * workflow status. Click a property card to expand and manage its units.
+ * Lists all of the RP's properties in three views (Row · Grid · Map). Every
+ * card shows PROPERTY details only (cover photo · annual rent · occupied/vacant ·
+ * location) and opens the details popup (PropertyDetailsModal) — where the units
+ * and documents live. No inline unit expansion.
+ *   • Row  — image-left cards.
+ *   • Grid — cover-image tiles.
+ *   • Map  — Airbnb-style: property list on the left, map on the right.
  *
- * Data: GET /properties (returns properties with unit counts).
- * Units: GET /properties/:id/units (loaded on expand).
- * Contracts: GET /contracts (used to surface tenant + lease end on unit rows).
+ * Data: GET /properties (returns properties with unit counts + coverPhotoUrl).
  */
 'use client';
 
-import { useState, useCallback, useEffect, useRef, type CSSProperties } from 'react';
+import { useState, useCallback, useEffect, type CSSProperties } from 'react';
 import {
   Building2, MapPin, Plus, Pencil, Trash2, Search,
-  ChevronDown, Loader2, AlertCircle, X, Eye, Check, ArrowRight,
-  Map as MapIcon, LayoutGrid, Rows3,
+  Loader2, AlertCircle, X,
+  Map as MapIcon, LayoutGrid, Rows3, Image as ImageIcon,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
@@ -25,11 +28,6 @@ import {
   type PropertyFormData,
   SPACE_CATEGORIES,
 } from '@/components/upnow/PropertyFormModal';
-import {
-  RESIDENTIAL_UNIT_TYPES,
-  COMMERCIAL_UNIT_TYPES,
-  INDUSTRIAL_UNIT_TYPES,
-} from '@/components/upnow/UnitFormModal';
 import s from './portfolio.module.css';
 import { PropertyDetailsModal } from './PropertyDetailsModal';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
@@ -67,6 +65,7 @@ interface Property {
   listedCount?: number;
   occupiedCount?: number;
   rentTotal?: number;
+  coverPhotoUrl?: string | null;
 }
 
 interface Unit {
@@ -99,95 +98,6 @@ interface Unit {
   listingStatus: 'draft' | 'pending' | 'in_review' | 'published' | 'expired' | 'rejected';
   planLabel?: string | null;
   floorPlanUrl?: string | null;
-}
-
-interface ContractSummary {
-  id: number;
-  status: string;
-  contractActive: boolean;
-  endDate: string | null;
-  tenant: { id: number | null; name: string | null } | null;
-  unit: { id: number | null } | null;
-}
-
-// ─── View options ─────────────────────────────────────────
-const VIEW_OPTIONS = [
-  'Sea View', 'Burj Khalifa View', 'City View', 'Marina View',
-  'Canal View', 'Creek View', 'Garden View', 'Pool View',
-  'Park View', 'Golf View', 'Community View', 'Desert View',
-  'Mountain View', 'Skyline View', 'Partial Sea View', 'Lake View',
-];
-
-// ─── View multiselect (kept from original; lightly tweaked styles to fit) ─
-function ViewMultiSelect({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const toggle = (v: string) =>
-    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
-
-  const label = selected.length === 0
-    ? 'Filter by view'
-    : selected.length === 1
-    ? selected[0]
-    : `${selected.length} views selected`;
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={s.sel}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
-      >
-        <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-        {selected.length > 0 && (
-          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 99, background: 'var(--green-t)', color: 'var(--green-d)' }}>
-            {selected.length}
-          </span>
-        )}
-        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-      </button>
-
-      {open && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30, background: '#fff', border: '1px solid var(--line)', borderRadius: 12, boxShadow: '0 8px 30px -10px rgba(0,0,0,.18)', overflow: 'hidden', width: 224 }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--line-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--mute)' }}>Views</span>
-            {selected.length > 0 && (
-              <button onClick={() => onChange([])} style={{ background: 'transparent', border: 0, fontSize: 11, color: 'var(--green-d)', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>Clear</button>
-            )}
-          </div>
-          <ul style={{ maxHeight: 220, overflowY: 'auto', margin: 0, padding: 4, listStyle: 'none' }}>
-            {VIEW_OPTIONS.map((v) => {
-              const sel = selected.includes(v);
-              return (
-                <li key={v}>
-                  <button
-                    type="button"
-                    onClick={() => toggle(v)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 10px', background: 'transparent', border: 0, textAlign: 'left', fontSize: 13, borderRadius: 8, cursor: 'pointer', color: sel ? 'var(--ink)' : 'var(--ink-2)' }}
-                  >
-                    <span style={{ width: 14, height: 14, borderRadius: 4, border: sel ? 'none' : '1.5px solid var(--mute-2)', background: sel ? 'var(--green)' : '#fff', display: 'grid', placeItems: 'center', flexShrink: 0, color: '#fff' }}>
-                      {sel && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                    </span>
-                    {v}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -240,275 +150,139 @@ function propertyStats(property: Property, units: Unit[]) {
   return { totalRent, occupied, available, maintenance, totalUnits };
 }
 
-// Read-only expanded body — unit names + footer stats. Shared by the Row-view
-// accordion (nested) and the Grid-view breakout panel.
-function PropertyUnitsBody({ property, units }: { property: Property; units: Unit[] }) {
-  const { totalRent, occupied, available, maintenance, totalUnits } = propertyStats(property, units);
+// Property-level summary shown on every card: occupied · vacant dots + the
+// location pin (green when the property is pinned on the map). Annual rent and
+// unit details otherwise live inside the popup.
+function OccupancyVacancy({ occupied, vacant }: { occupied: number; vacant: number }) {
   return (
-    <div className={s.propBody}>
-      <div className={s.unitH}>
-        <div className={s.unitHTtl}>Units ({units.length})</div>
-        {!property.isStandaloneUnit && (
-          <Link
-            href={`/rental-provider/dashboard/units?propertyId=${property.id}`}
-            className={cn(s.btn, s.btnPrimary, s.btnSm)}>
-            Manage units
-          </Link>
-        )}
-      </div>
-
-      {units.length === 0 ? (
-        <div className={s.empty}>
-          <div className={s.emptyIc}><Building2 size={20} /></div>
-          <h3 className={s.emptyTtl}>
-            {property.isStandaloneUnit ? 'Standalone property' : 'No units yet'}
-          </h3>
-          <p className={s.emptyDesc}>
-            {property.isStandaloneUnit
-              ? 'This is a standalone property — the property itself is the unit.'
-              : 'No units yet. Add and manage units from the Units page.'}
-          </p>
-          {!property.isStandaloneUnit && (
-            <Link href={`/rental-provider/dashboard/units?propertyId=${property.id}`} className={cn(s.btn, s.btnPrimary)}>
-              Go to Units
-            </Link>
-          )}
-        </div>
-      ) : (
-        <div className={s.units}>
-          {units.map((u) => {
-            // Read-only status pill — availability dominates over listing status.
-            const pillInfo = (() => {
-              if (u.availability === 'occupied')   return { cls: s.pillOcc, label: 'Occupied' };
-              if (u.availability === 'maintenance') return { cls: s.pillMaint, label: 'Maintenance' };
-              switch (u.listingStatus) {
-                case 'published': return { cls: s.pillPublished, label: 'Published' };
-                case 'pending':   return { cls: s.pillPending,   label: 'Pending' };
-                case 'in_review': return { cls: s.pillReview,    label: 'In review' };
-                case 'expired':   return { cls: s.pillPending,   label: 'Expired' };
-                case 'rejected':  return { cls: s.pillRejected,  label: 'Rejected' };
-                default:          return { cls: s.pillDraft,     label: 'Draft' };
-              }
-            })();
-
-            const sizeStr = u.unitSizeSqft
-              ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
-              : u.unitSizeSqm
-              ? `${Number(u.unitSizeSqm).toLocaleString()} sqm`
-              : null;
-
-            return (
-              <div key={u.id} className={s.unit}>
-                <span className={s.unitNum}>{u.unitNumber}</span>
-
-                <div className={s.unitMeta}>
-                  <div className={s.unitTop}>
-                    {u.unitName && (<><span className={s.unitSpec}>{u.unitName}</span><span className={s.unitDot} /></>)}
-                    <span className={s.unitType}>{u.unitType.replace(/_/g, ' ')}</span>
-                    {u.bedrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bedrooms} BR</span></>)}
-                    {u.bathrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bathrooms} BA</span></>)}
-                    {sizeStr && (<><span className={s.unitDot} /><span className={s.unitSpec}>{sizeStr}</span></>)}
-                    {u.view && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.view}</span></>)}
-                    {u.planLabel && (
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: '#2e9f82', background: '#f0faf6', borderRadius: 6, padding: '1px 7px' }}>{u.planLabel}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className={s.unitRight}>
-                  <span className={cn(s.pill, pillInfo.cls)}>
-                    <span className={s.pdot} /> {pillInfo.label}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Footer mini-stats */}
-      <div className={s.propFooter}>
-        <div className={s.statMini}>
-          <div className={s.statMiniL}>Total</div>
-          <div className={s.statMiniV}>{totalUnits}</div>
-        </div>
-        <div className={s.statMini}>
-          <div className={s.statMiniL}>Available</div>
-          <div className={s.statMiniV}>{available}</div>
-        </div>
-        <div className={s.statMini}>
-          <div className={s.statMiniL}>Occupied</div>
-          <div className={s.statMiniV}>{occupied}</div>
-        </div>
-        <div className={s.statMini}>
-          <div className={s.statMiniL}>{maintenance > 0 ? 'Maintenance' : 'Annual revenue'}</div>
-          <div className={s.statMiniV}>
-            {maintenance > 0 ? maintenance : `AED ${Math.round(totalRent).toLocaleString('en-AE')}`}
-          </div>
-        </div>
-      </div>
+    <div className="flex items-center gap-3 text-xs" style={{ color: '#57544d' }}>
+      <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ background: '#2e9f82' }} />{occupied} occupied</span>
+      <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ background: '#d97706' }} />{vacant} vacant</span>
     </div>
   );
 }
 
-// ─── Property card (Row view) ─────────────────────────────
+function AddressPin({ property }: { property: Property }) {
+  const hasPin = property.latitude != null && property.longitude != null;
+  if (!property.fullAddress && !hasPin) return null;
+  return (
+    <p className="text-xs truncate flex items-center gap-1" style={{ color: '#6b6860' }}>
+      <MapPin size={12} className="shrink-0" style={{ color: hasPin ? '#2e9f82' : '#c5c3bc' }} />
+      {property.fullAddress ?? 'Pinned on map'}
+    </p>
+  );
+}
+
+function AnnualRent({ amount }: { amount: number }) {
+  if (amount <= 0) return <span className="text-xs" style={{ color: '#9b9890' }}>No rent set</span>;
+  return (
+    <div className="whitespace-nowrap">
+      <span className="font-bold text-lg" style={{ color: '#2e9f82' }}>AED {Math.round(amount).toLocaleString('en-AE')}</span>
+      <span className="text-xs ml-0.5" style={{ color: '#6b6860' }}>/yr</span>
+    </div>
+  );
+}
+
+function PropertyCover({ url, size }: { url?: string | null; size: 'row' | 'grid' }) {
+  const cls = size === 'row' ? 'rounded-xl' : 'rounded-t-2xl';
+  if (url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt="" className={`w-full h-full object-cover ${cls}`} />;
+  }
+  return (
+    <div className={`w-full h-full flex flex-col items-center justify-center bg-[#fafaf8] ${cls}`} style={{ color: '#c5c3bc' }}>
+      <ImageIcon size={size === 'row' ? 22 : 28} />
+      <span className="text-[10px] mt-1">No photo</span>
+    </div>
+  );
+}
+
+// ─── Property card (Row view + Map list) ──────────────────
+// Image-left card showing PROPERTY details only (annual rent · occupied · vacant
+// · location). The whole row opens the details popup, where the units live.
 function PropertyCard({
-  property, units, expanded, onToggle, onEdit, onDelete, onShowDetails,
+  property, onEdit, onDelete, onShowDetails,
 }: {
-  property: Property; units: Unit[]; expanded: boolean;
-  onToggle: () => void; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
-}) {
-  const { totalRent, occupied, totalUnits } = propertyStats(property, units);
-
-  return (
-    <div className={cn(s.prop, expanded && s.expanded)}>
-      {/* Header row */}
-      <div className={s.propH} onClick={onToggle} role="button">
-        <div className={s.propInfo}>
-          <div className={s.propName}>
-            <span
-              role="button"
-              onClick={e => { e.stopPropagation(); onShowDetails(); }}
-              title="View property details"
-              style={{ cursor: 'pointer' }}
-              onMouseEnter={e => { (e.target as HTMLElement).style.textDecoration = 'underline'; }}
-              onMouseLeave={e => { (e.target as HTMLElement).style.textDecoration = 'none'; }}>
-              {property.buildingName}
-            </span>
-            <span className={s.propCat}>{categoryLabel(property.spaceCategory)}</span>
-          </div>
-          <div className={s.propAddr}>
-            <MapPin size={12} />
-            <span>{property.fullAddress ?? '—'}</span>
-            {/* Makani shown in the property details popup, not on the list card. */}
-          </div>
-        </div>
-
-        <div className={s.propAgg}>
-          <div className={s.aggItem}>
-            <div className={s.aggV}>{totalUnits}</div>
-            <div className={s.aggL}>Units</div>
-          </div>
-          {totalUnits > 0 && (
-            <div className={s.aggItem}>
-              <div className={s.aggV}>{occupied}/{totalUnits}</div>
-              <div className={s.aggL}>Occupied</div>
-            </div>
-          )}
-          {totalRent > 0 && (
-            <div className={s.aggItem}>
-              <div className={s.aggV}>AED {Math.round(totalRent).toLocaleString('en-AE')}</div>
-              <div className={s.aggL}>per year</div>
-            </div>
-          )}
-          <div className={s.propActions}>
-            <button
-              type="button"
-              className={s.actsBtn}
-              onClick={(e) => { e.stopPropagation(); onShowDetails(); }}
-              title="View property details"
-              aria-label="View property details"
-            >
-              <Eye size={14} />
-            </button>
-            <button
-              type="button"
-              className={s.actsBtn}
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
-              title="Edit property"
-              aria-label="Edit property"
-            >
-              <Pencil size={14} />
-            </button>
-            <button
-              type="button"
-              className={cn(s.actsBtn, s.danger)}
-              onClick={(e) => { e.stopPropagation(); if (confirm('Delete this property and all its units?')) onDelete(); }}
-              title="Delete property"
-              aria-label="Delete property"
-            >
-              <Trash2 size={14} />
-            </button>
-            <ChevronDown size={16} className={s.chev} />
-          </div>
-        </div>
-      </div>
-
-      {/* Expanded body — read-only. Unit management lives on the Units page. */}
-      {expanded && <PropertyUnitsBody property={property} units={units} />}
-    </div>
-  );
-}
-
-// ─── Property grid card (Grid view, master–detail) ────────
-// Clickable tile; selecting it shows the property's unit listings in the side
-// detail panel (handled by the parent). Highlights when selected.
-function PropertyGridCard({
-  property, selected, onSelect, onEdit, onDelete, onShowDetails,
-}: {
-  property: Property; selected: boolean;
-  onSelect: () => void; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
+  property: Property; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
 }) {
   const { totalRent, occupied, totalUnits } = propertyStats(property, []);
+  const vacant = Math.max(0, totalUnits - occupied);
+
+  return (
+    <div onClick={onShowDetails} role="button" title="View property details"
+      className="flex items-stretch gap-4 p-3 sm:p-4 cursor-pointer"
+      style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+      <div className="relative shrink-0 overflow-hidden rounded-xl" style={{ width: 132, height: 92 }}>
+        <PropertyCover url={property.coverPhotoUrl} size="row" />
+      </div>
+
+      <div className="flex flex-col justify-center min-w-0 flex-1 gap-1">
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-base truncate" style={{ color: '#1a1916' }}>{property.buildingName}</h3>
+          <span className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#f1efe9', color: '#57544d' }}>
+            {categoryLabel(property.spaceCategory)}
+          </span>
+        </div>
+        <AddressPin property={property} />
+        <OccupancyVacancy occupied={occupied} vacant={vacant} />
+      </div>
+
+      <div className="flex flex-col items-end justify-center gap-2 shrink-0">
+        <AnnualRent amount={totalRent} />
+        <div className="flex items-center gap-1">
+          <button type="button" className={s.actsBtn} onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit property" aria-label="Edit property">
+            <Pencil size={14} />
+          </button>
+          <button type="button" className={cn(s.actsBtn, s.danger)} onClick={(e) => { e.stopPropagation(); if (confirm('Delete this property and all its units?')) onDelete(); }} title="Delete property" aria-label="Delete property">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Property grid card (Grid view) ───────────────────────
+// Cover-image tile showing property details (annual rent · occupied · vacant);
+// the whole tile opens the details popup, where the units live.
+function PropertyGridCard({
+  property, onEdit, onDelete, onShowDetails,
+}: {
+  property: Property; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
+}) {
+  const { totalRent, occupied, totalUnits } = propertyStats(property, []);
+  const vacant = Math.max(0, totalUnits - occupied);
   const iconBtn: CSSProperties = {
     width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center',
-    justifyContent: 'center', background: '#fff', border: '1px solid #e8e6e0', cursor: 'pointer',
+    justifyContent: 'center', background: 'rgba(255,255,255,0.95)', border: '1px solid #e8e6e0', cursor: 'pointer',
   };
   return (
-    <div onClick={onSelect} role="button" aria-pressed={selected}
-      className="flex flex-col overflow-hidden cursor-pointer transition-shadow"
-      style={{
-        background: '#fff', borderRadius: 16,
-        boxShadow: selected
-          ? '0 0 0 2px #2e9f82, 0 2px 12px -2px rgba(0,0,0,0.10)'
-          : '0 2px 12px -2px rgba(0,0,0,0.06)',
-      }}>
-      <div className="p-5 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="font-semibold text-base truncate" style={{ color: '#1a1916' }}>{property.buildingName}</div>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1.5 inline-block"
-              style={{ background: '#f1efe9', color: '#57544d' }}>
-              {categoryLabel(property.spaceCategory)}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button type="button" onClick={(e) => { e.stopPropagation(); onShowDetails(); }} title="View property details" style={iconBtn}><Eye size={14} color="#6b6860" /></button>
-            <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit property" style={iconBtn}><Pencil size={14} color="#6b6860" /></button>
-            <button type="button" onClick={(e) => { e.stopPropagation(); if (confirm('Delete this property and all its units?')) onDelete(); }} title="Delete property"
-              style={{ ...iconBtn, borderColor: '#f1d5d5' }}><Trash2 size={14} color="#b91c1c" /></button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 mt-2.5 text-xs" style={{ color: '#6b6860' }}>
-          <MapPin size={12} className="shrink-0" /><span className="truncate">{property.fullAddress ?? '—'}</span>
-        </div>
-
-        <div className="flex items-end gap-5 mt-4">
-          <div>
-            <div className="text-lg font-bold" style={{ color: '#1a1916' }}>{totalUnits}</div>
-            <div className="text-[11px]" style={{ color: '#9b9890' }}>Units</div>
-          </div>
-          {totalUnits > 0 && (
-            <div>
-              <div className="text-lg font-bold" style={{ color: '#1a1916' }}>{occupied}/{totalUnits}</div>
-              <div className="text-[11px]" style={{ color: '#9b9890' }}>Occupied</div>
-            </div>
-          )}
-          {totalRent > 0 && (
-            <div className="ml-auto text-right">
-              <div className="text-sm font-bold" style={{ color: '#2e9f82' }}>AED {Math.round(totalRent).toLocaleString('en-AE')}</div>
-              <div className="text-[11px]" style={{ color: '#9b9890' }}>per year</div>
-            </div>
-          )}
+    <div onClick={onShowDetails} role="button" title="View property details"
+      className="flex flex-col overflow-hidden cursor-pointer"
+      style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+      {/* Cover photo with overlaid actions */}
+      <div className="relative overflow-hidden" style={{ height: 150 }}>
+        <PropertyCover url={property.coverPhotoUrl} size="grid" />
+        <div className="absolute top-2.5 right-2.5 flex items-center gap-1">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit property" style={iconBtn}><Pencil size={14} color="#6b6860" /></button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); if (confirm('Delete this property and all its units?')) onDelete(); }} title="Delete property"
+            style={{ ...iconBtn, borderColor: '#f1d5d5' }}><Trash2 size={14} color="#b91c1c" /></button>
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold"
-        style={{ borderTop: '1px solid #f0ede8', color: selected ? '#2e9f82' : '#6b6860' }}>
-        {selected
-          ? <>Showing units <Check size={13} /></>
-          : <>View units <ArrowRight size={13} /></>}
+      {/* Body */}
+      <div className="p-4 flex-1 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="font-semibold text-base truncate" style={{ color: '#1a1916' }}>{property.buildingName}</h3>
+          <span className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#f1efe9', color: '#57544d' }}>
+            {categoryLabel(property.spaceCategory)}
+          </span>
+        </div>
+        <AddressPin property={property} />
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <OccupancyVacancy occupied={occupied} vacant={vacant} />
+          <AnnualRent amount={totalRent} />
+        </div>
       </div>
     </div>
   );
@@ -518,15 +292,14 @@ function PropertyGridCard({
 export default function PortfolioPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'residential' | 'commercial' | 'industrial'>('all');
   const [search, setSearch] = useState('');
-  const [unitTypeFilter, setUnitTypeFilter] = useState('');
-  const [selectedViews, setSelectedViews] = useState<string[]>([]);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  // Property-type filter (spaceCategory), chosen from a dropdown.
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: Property }>({ open: false });
-  // Read-only preview popups
+  // Read-only preview popup (shows the property's units + documents inside).
   const [detailsProperty, setDetailsProperty] = useState<Property | null>(null);
-  // Main content view: Row (accordion) · Grid (tiles) · Map (inline).
+  // Main content view: Row (list) · Grid (tiles) · Map (Airbnb list + map). All
+  // cards open the details popup — no inline expansion.
   const [view, setView] = useState<'row' | 'grid' | 'map'>('row');
 
   // Deep-link ?add=1 (from the dashboard / contract "List Property" CTAs) opens
@@ -545,6 +318,9 @@ export default function PortfolioPage() {
     queryFn: () => apiGet<Property[]>('/properties'),
   });
 
+  // Distinct property types present, for the dropdown.
+  const categoryOptions = Array.from(new Set(properties.map((p) => p.spaceCategory).filter(Boolean))).sort();
+
   const filteredProperties = properties.filter((p) => {
     if (categoryFilter !== 'all' && p.spaceCategory !== categoryFilter) return false;
     if (search.trim()) {
@@ -559,20 +335,9 @@ export default function PortfolioPage() {
     return true;
   });
 
-  const { data: expandedUnits = [] } = useQuery<Unit[]>({
-    queryKey: ['units', expandedId],
-    queryFn: () => apiGet<Unit[]>(`/properties/${expandedId}/units`),
-    enabled: expandedId != null,
-  });
-
-  const { data: allContracts = [] } = useQuery<ContractSummary[]>({
-    queryKey: ['contracts'],
-    queryFn: () => apiGet<ContractSummary[]>('/contracts'),
-  });
-
   const createProperty = useMutation({
     mutationFn: (dto: ReturnType<typeof formToCreateDto>) => apiPost<Property>('/properties', dto),
-    onSuccess: (created) => { qc.invalidateQueries({ queryKey: ['properties'] }); setExpandedId(created.id); },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['properties'] }),
   });
   const updateProperty = useMutation({
     mutationFn: ({ id, dto }: { id: number; dto: object }) => apiPatch<Property>(`/properties/${id}`, dto),
@@ -580,7 +345,7 @@ export default function PortfolioPage() {
   });
   const deleteProperty = useMutation({
     mutationFn: (id: number) => apiDelete<void>(`/properties/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['properties'] }); setExpandedId(null); },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['properties'] }),
   });
   const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) => {
     const dto = formToCreateDto(data);
@@ -627,34 +392,11 @@ export default function PortfolioPage() {
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
 
-  // ── Aggregated KPIs (from the loaded properties list) ──
+  // ── Property-level KPIs (from the loaded properties list) ──
   const totalProperties = properties.length;
   const totalUnits     = properties.reduce((sum, p) => sum + (p.unitCount ?? 0), 0);
-  const totalListed    = properties.reduce((sum, p) => sum + (p.listedCount ?? 0), 0);
-  // Active leases = distinct units that hold an in-force lease. After an import
-  // a unit and its renewal can BOTH be contract_active, so counting contract
-  // rows double-counts (2 leases on 1 unit → the old 200% occupancy). Dedupe by
-  // unit so the figure matches reality.
-  const activeLeases = new Set(
-    allContracts.filter((c) => c.contractActive && c.unit?.id != null).map((c) => c.unit!.id),
-  ).size;
 
-  const filtersDirty = !!search || !!unitTypeFilter || selectedViews.length > 0;
-
-  // Units shown under the one expanded property (lazy-loaded), after the
-  // unit-type / view filters. Empty for collapsed properties. Used by both views.
-  const visibleUnitsFor = (p: Property): Unit[] =>
-    expandedId === p.id
-      ? expandedUnits.filter((u) => {
-          if (unitTypeFilter && u.unitType !== unitTypeFilter) return false;
-          if (selectedViews.length > 0 && !selectedViews.some((v) => (u.view ?? '').toLowerCase().includes(v.toLowerCase()))) return false;
-          return true;
-        })
-      : [];
-
-  // Grid view is master–detail: expandedId = the property whose listings show in
-  // the side panel. Null (or filtered-out) → the panel shows a prompt.
-  const selectedGridProperty = filteredProperties.find((p) => p.id === expandedId) ?? null;
+  const filtersDirty = !!search || categoryFilter !== 'all';
 
   return (
     <div className={s.app}>
@@ -705,40 +447,9 @@ export default function PortfolioPage() {
               <div className={s.kpiVal}>{totalUnits}</div>
               <div className={s.kpiSub}>Across all properties</div>
             </div>
-            <div className={s.kpi}>
-              <div className={s.kpiLbl}>Active leases</div>
-              <div className={s.kpiVal}>{activeLeases}</div>
-              <div className={s.kpiSub}>Units currently rented</div>
-            </div>
-            <div className={s.kpi}>
-              <div className={s.kpiLbl}>Live listings</div>
-              <div className={s.kpiVal}>{totalListed}</div>
-              <div className={s.kpiSub}>Published & searchable</div>
-            </div>
           </div>
         )}
 
-        {/* Range tabs */}
-        <div className={s.rangetabs}>
-          <div className={s.rangetabsTabs}>
-            {(['all', 'residential', 'commercial', 'industrial'] as const).map((key) => {
-              const label = key === 'all' ? 'All' : key.charAt(0).toUpperCase() + key.slice(1);
-              const count = key === 'all' ? properties.length : properties.filter((p) => p.spaceCategory === key).length;
-              const active = categoryFilter === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => { setCategoryFilter(key); setUnitTypeFilter(''); }}
-                  className={cn(s.rangetabBtn, active && s.active)}
-                >
-                  {label}
-                  <span className={s.rangetabCount}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
         {/* Filters */}
         {totalProperties > 0 && (
@@ -756,43 +467,23 @@ export default function PortfolioPage() {
               )}
             </div>
 
-            <div className={s.selWrap}>
-              <select
-                value={unitTypeFilter}
-                onChange={(e) => setUnitTypeFilter(e.target.value)}
-                className={s.sel}
-              >
-                {/* Scope sub-types to the selected category — only show that
-                    category's types; "All" keeps the grouped full list. */}
-                <option value="">{categoryFilter === 'all' ? 'All unit types' : `All ${categoryFilter} types`}</option>
-                {categoryFilter === 'all' ? (
-                  <>
-                    <optgroup label="Residential">
-                      {RESIDENTIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                    </optgroup>
-                    <optgroup label="Commercial">
-                      {COMMERCIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                    </optgroup>
-                    <optgroup label="Industrial">
-                      {INDUSTRIAL_UNIT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                    </optgroup>
-                  </>
-                ) : (
-                  (categoryFilter === 'residential' ? RESIDENTIAL_UNIT_TYPES
-                    : categoryFilter === 'commercial' ? COMMERCIAL_UNIT_TYPES
-                    : INDUSTRIAL_UNIT_TYPES
-                  ).map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)
-                )}
-              </select>
-            </div>
-
-            <ViewMultiSelect selected={selectedViews} onChange={setSelectedViews} />
+            {/* Property-type dropdown */}
+            {categoryOptions.length > 0 && (
+              <div className={s.selWrap}>
+                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={s.sel}>
+                  <option value="all">All property types</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c} value={c}>{categoryLabel(c)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {filtersDirty && (
               <button
                 type="button"
                 className={s.filtersClear}
-                onClick={() => { setSearch(''); setUnitTypeFilter(''); setSelectedViews([]); }}
+                onClick={() => { setSearch(''); setCategoryFilter('all'); }}
               >
                 Clear all
               </button>
@@ -840,22 +531,13 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* ── Main content (Row · Grid · Map) ── */}
-        {!isLoading && filteredProperties.length > 0 && view === 'map' && (
-          <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-            <PortfolioMapView properties={filteredProperties} heightClass="h-[68vh]" />
-          </div>
-        )}
-
+        {/* ── Main content (Row · Grid · Map). Every card opens the popup. ── */}
         {!isLoading && filteredProperties.length > 0 && view === 'row' && (
           <div className={s.props}>
             {filteredProperties.map((p) => (
               <PropertyCard
                 key={p.id}
                 property={p}
-                units={visibleUnitsFor(p)}
-                expanded={expandedId === p.id}
-                onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
                 onEdit={() => setPropertyModal({ open: true, editing: p })}
                 onDelete={() => deleteProperty.mutate(p.id)}
                 onShowDetails={() => setDetailsProperty(p)}
@@ -865,43 +547,35 @@ export default function PortfolioPage() {
         )}
 
         {!isLoading && filteredProperties.length > 0 && view === 'grid' && (
-          // Master–detail: property tiles on the left, the selected property's
-          // unit listings pinned in a panel on the right.
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
-            {/* Left — property tiles */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredProperties.map((p) => (
+              <PropertyGridCard
+                key={p.id}
+                property={p}
+                onEdit={() => setPropertyModal({ open: true, editing: p })}
+                onDelete={() => deleteProperty.mutate(p.id)}
+                onShowDetails={() => setDetailsProperty(p)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Map — Airbnb-style: property list on the left, map pinned on the right. */}
+        {!isLoading && filteredProperties.length > 0 && view === 'map' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            <div className="flex flex-col gap-3 lg:max-h-[78vh] lg:overflow-auto lg:pr-1">
               {filteredProperties.map((p) => (
-                <PropertyGridCard
+                <PropertyCard
                   key={p.id}
                   property={p}
-                  selected={expandedId === p.id}
-                  onSelect={() => setExpandedId(expandedId === p.id ? null : p.id)}
                   onEdit={() => setPropertyModal({ open: true, editing: p })}
                   onDelete={() => deleteProperty.mutate(p.id)}
                   onShowDetails={() => setDetailsProperty(p)}
                 />
               ))}
             </div>
-
-            {/* Right — selected property's unit listings. The `.prop.expanded`
-                wrapper supplies the card surface AND reveals `.propBody`. */}
-            <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-auto">
-              {selectedGridProperty ? (
-                <div className={cn(s.prop, s.expanded)}>
-                  <div style={{ padding: '16px 18px 0' }}>
-                    <div className="font-semibold text-base" style={{ color: '#1a1916' }}>{selectedGridProperty.buildingName}</div>
-                    <div className="flex items-center gap-1.5 text-xs mt-1" style={{ color: '#6b6860' }}>
-                      <MapPin size={12} className="shrink-0" /><span className="truncate">{selectedGridProperty.fullAddress ?? '—'}</span>
-                    </div>
-                  </div>
-                  <PropertyUnitsBody property={selectedGridProperty} units={visibleUnitsFor(selectedGridProperty)} />
-                </div>
-              ) : (
-                <div className="rounded-2xl bg-white p-10 text-center" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-                  <Building2 size={22} className="mx-auto mb-2" style={{ color: '#c5c3bc' }} />
-                  <p className="text-sm" style={{ color: '#9b9890' }}>Select a property to see its unit listings.</p>
-                </div>
-              )}
+            <div className="lg:sticky lg:top-4" style={{ background: '#fff', borderRadius: 16, padding: 8, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+              <PortfolioMapView properties={filteredProperties} heightClass="h-[78vh]" />
             </div>
           </div>
         )}
@@ -911,9 +585,8 @@ export default function PortfolioPage() {
           <div className={s.empty}>
             <div className={s.emptyIc}><Search size={20} /></div>
             <h3 className={s.emptyTtl}>No matches</h3>
-            <p className={s.emptyDesc}>No properties match your search or filters.</p>
-            <button type="button" className={cn(s.btn)}
-              onClick={() => { setSearch(''); setUnitTypeFilter(''); setSelectedViews([]); setCategoryFilter('all'); }}>
+            <p className={s.emptyDesc}>No properties match your search or filter.</p>
+            <button type="button" className={cn(s.btn)} onClick={() => { setSearch(''); setCategoryFilter('all'); }}>
               Clear filters
             </button>
           </div>
@@ -953,6 +626,7 @@ export default function PortfolioPage() {
         {detailsProperty && (
           <PropertyDetailsModal
             property={detailsProperty}
+            editable
             stats={{
               units: detailsProperty.unitCount ?? 0,
               occupied: detailsProperty.occupiedCount ?? 0,

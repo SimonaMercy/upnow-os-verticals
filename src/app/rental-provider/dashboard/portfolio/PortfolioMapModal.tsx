@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, MapPin, X } from 'lucide-react';
+import { Loader2, MapPin } from 'lucide-react';
 
 const DEFAULT_LAT = 25.2048;
 const DEFAULT_LNG = 55.2708;
@@ -46,11 +46,6 @@ interface PortfolioMapProperty {
   fullAddress?: string | null;
   unitCount?: number;
   occupiedCount?: number;
-}
-
-interface PortfolioMapModalProps {
-  properties: PortfolioMapProperty[];
-  onClose: () => void;
 }
 
 /**
@@ -254,40 +249,6 @@ export function PortfolioMapView({
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#d97706] border-2 border-white shadow" /> Has vacancies</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#9b9890] border-2 border-white shadow" /> No unit data</span>
         <span className="text-[#9b9890]">· number on the pin = units</span>
-      </div>
-    </div>
-  );
-}
-
-export function PortfolioMapModal({ properties, onClose }: PortfolioMapModalProps) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-3">
-          <h2 className="text-lg font-bold text-[#1a1916] flex items-center gap-2">
-            <MapPin size={18} className="text-[#2e9f82]" />
-            Portfolio map
-          </h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg hover:bg-[#f4f3ef] flex items-center justify-center text-[#6b6860]"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="overflow-auto px-6 pb-6">
-          <PortfolioMapView properties={properties} />
-        </div>
       </div>
     </div>
   );

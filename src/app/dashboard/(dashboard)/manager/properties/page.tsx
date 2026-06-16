@@ -38,6 +38,7 @@ interface ManagedProperty {
   rpName?:         string;
   unitCount?:      number;
   listedCount?:    number;
+  coverPhotoUrl?:  string | null;
   emirate?:        { nameEn: string } | null;
   community?:      { nameEn: string } | null;
   // Location FK ids + editable fields (the full Property entity is returned by
@@ -432,6 +433,8 @@ export default function ManagerPropertiesPage() {
       {/* Read-only preview popups + map (shared components, manager-scoped data) */}
       {detailsProperty && (
         <PropertyDetailsModal
+          fetchBase="/manager/properties"
+          editable={can('canManageDocuments')}
           property={{
             id: detailsProperty.id,
             buildingName: detailsProperty.buildingName,

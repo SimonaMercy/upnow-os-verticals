@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import {
   X,
@@ -12,9 +12,25 @@ import {
   FileText,
   Loader2,
   AlignLeft,
-  ChevronDown,
   Image as ImageIcon,
+  Building2,
+  Trash2,
 } from 'lucide-react';
+import { apiDelete } from '@/lib/api';
+import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { DocSlotCard, type PropertyDoc } from '@/components/upnow/PropertyFormModal';
+import { DocPreviewModal } from '@/components/upnow/DocPreviewModal';
+import { PROPERTY_DOC_SLOTS, docBelongsToSlot } from '@/lib/propertyDocs';
+
+/** Minimal unit shape for the in-popup units list. */
+interface UnitLite {
+  id: number;
+  unitNumber: string;
+  unitName: string | null;
+  unitType: string;
+  availability: string;
+  listingStatus: string;
+}
 
 interface Property {
   id: number;
@@ -93,43 +109,86 @@ function formatDate(value: string | null): string | null {
 export function PropertyDetailsModal({
   property,
   stats,
+  fetchBase = '/properties',
+  fetchQuery = '',
+  editable = false,
   onClose,
 }: {
   property: Property;
   stats?: { units: number; occupied: number; rentTotal: number } | null;
+  /** Units base — RP uses '/properties'; the manager passes '/manager/properties' + 'rp=N'. */
+  fetchBase?: string;
+  fetchQuery?: string;
+  /** When true, the documents section allows direct upload / delete (the property exists). */
+  editable?: boolean;
   onClose: () => void;
 }) {
   const [docs, setDocs] = useState<DocRecord[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState(false);
+  const [docsBusy, setDocsBusy] = useState(false);
+  const [units, setUnits] = useState<UnitLite[]>([]);
+  const [unitsLoading, setUnitsLoading] = useState(true);
   // Full property detail (the list object lacks the structured location names);
   // fetched on open and merged over the passed-in property.
   const [detail, setDetail] = useState<Partial<Property> | null>(null);
-  // Documents is a collapsible tab (collapsed by default).
-  const [docsOpen, setDocsOpen] = useState(false);
   // Building photos (read-only gallery) + click-to-enlarge lightbox.
   const [photos, setPhotos] = useState<{ id: number; url: string }[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  // In-app document preview ("View") — same component as the property form.
+  const [viewerDoc, setViewerDoc] = useState<{ url: string; mime?: string | null; name: string } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/documents?ownerType=property&ownerId=${property.id}`,
-          { credentials: 'include' },
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (!cancelled) setDocs(Array.isArray(data) ? data : []);
-      } catch {
-        if (!cancelled) setDocsError(true);
-      } finally {
-        if (!cancelled) setDocsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadDocs = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/documents?ownerType=property&ownerId=${property.id}`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDocs(Array.isArray(data) ? data : []);
+      setDocsError(false);
+    } catch {
+      setDocsError(true);
+    } finally {
+      setDocsLoading(false);
+    }
   }, [property.id]);
+  // loadDocs only sets state after an await (async), but the rule can't see that.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadDocs(); }, [loadDocs]);
+
+  // Direct upload to a document slot (the property already exists), then refresh.
+  const uploadToSlot = async (
+    slot: { key: string; label: string; category: string; multiple: boolean },
+    files: FileList | null,
+  ) => {
+    const arr = files ? Array.from(files) : [];
+    if (!arr.length) return;
+    setDocsBusy(true);
+    try {
+      for (let i = 0; i < arr.length; i++) {
+        const f = arr[i];
+        const documentKey = slot.multiple ? `${slot.key}_${Date.now()}_${i}` : slot.key;
+        await uploadOwnedDocument({
+          ownerType: 'property', ownerId: property.id,
+          documentKey, category: slot.category,
+          displayName: f.name || slot.label, file: f,
+        });
+      }
+      await loadDocs();
+    } catch (e) {
+      alert(`Upload failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    } finally {
+      setDocsBusy(false);
+    }
+  };
+
+  const removeDoc = async (id: number) => {
+    try {
+      await apiDelete(`/documents/${id}`);
+      await loadDocs();
+    } catch (e) {
+      alert(`Could not remove the document: ${e instanceof Error ? e.message : 'unknown error'}`);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -157,8 +216,45 @@ export function PropertyDetailsModal({
     return () => { cancelled = true; };
   }, [property.id]);
 
+  // Units shown inside this popup (names + status). Base is configurable so the
+  // manager portal can read them via its own scoped endpoint.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api${fetchBase}/${property.id}/units${fetchQuery ? `?${fetchQuery}` : ''}`, { credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setUnits(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setUnits([]);
+      } finally {
+        if (!cancelled) setUnitsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [property.id, fetchBase, fetchQuery]);
+
   // Merge: prefer freshly-fetched detail (full location names) over the list row.
   const p: Property = { ...property, ...(detail ?? {}) };
+
+  // Normalised docs for the editable slot cards (id/key/displayName/fileUrl).
+  // Drop id-less records so a delete can never hit /documents/0.
+  const propertyDocs: PropertyDoc[] = docs
+    .filter((d) => d.id != null)
+    .map((d) => ({
+      id: d.id as number,
+      documentKey: docKey(d),
+      displayName: d.displayName ?? d.display_name ?? prettifyKey(docKey(d), d),
+      fileUrl: docUrl(d) ?? '',
+    }));
+  // Docs not matched by any editable slot (legacy keys, or a title_deed on a
+  // non-standalone property) — surfaced so the "full list" never hides a doc.
+  const unmatchedDocs: PropertyDoc[] = propertyDocs.filter((d) => {
+    if (d.documentKey === 'title_deed') return !p.isStandaloneUnit;
+    if (d.documentKey.startsWith('building_drawing')) return false;
+    return !PROPERTY_DOC_SLOTS.some((s) => docBelongsToSlot(d.documentKey, s));
+  });
 
   // Address shows as a prominent line; the rest as tidy label/value cells.
   const addressLine = p.fullAddress?.trim() || null;
@@ -190,7 +286,7 @@ export function PropertyDetailsModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -218,37 +314,52 @@ export function PropertyDetailsModal({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="overflow-auto p-5 sm:p-6 space-y-4">
-          {/* Photos — read-only gallery; click to enlarge. Cover (first) is larger. */}
-          {photos.length > 0 && (
-            <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0eeea] bg-[#faf9f7]">
-                <ImageIcon className="w-4 h-4 text-[#2e9f82]" />
-                <h3 className="text-sm font-bold text-[#1a1916]">Photos</h3>
-                <span className="text-xs font-semibold text-[#9b9890]">{photos.length}</span>
-              </div>
-              <div className="p-4 grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {photos.map((ph, i) => (
+        {/* Body — photos on the left, details on the right */}
+        <div className="overflow-auto p-5 sm:p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,340px)_1fr] gap-5 items-start">
+
+            {/* LEFT — photos (cover + thumbnails); click to enlarge. */}
+            <div className="lg:sticky lg:top-0 self-start">
+              {photos.length > 0 ? (
+                <>
                   <button
-                    key={ph.id}
                     type="button"
-                    onClick={() => setLightbox(ph.url)}
-                    className={`relative aspect-square rounded-lg overflow-hidden border group cursor-zoom-in
-                      ${i === 0 ? 'border-[#2e9f82]' : 'border-[#e8e6e0]'}`}
+                    onClick={() => setLightbox(photos[0].url)}
+                    className="relative block w-full aspect-[4/3] rounded-xl overflow-hidden border border-[#e8e6e0] group cursor-zoom-in"
                   >
-                    {i === 0 && (
-                      <span className="absolute bottom-0 left-0 right-0 bg-[#2e9f82] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
-                        COVER
-                      </span>
-                    )}
+                    <span className="absolute bottom-2 left-2 z-10 rounded-md bg-[#2e9f82] text-white text-[10px] font-bold px-1.5 py-0.5">COVER</span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={ph.url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    <img src={photos[0].url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                   </button>
-                ))}
-              </div>
+                  {photos.length > 1 && (
+                    <div className="grid grid-cols-4 gap-2 mt-2">
+                      {photos.slice(1).map((ph) => (
+                        <button
+                          key={ph.id}
+                          type="button"
+                          onClick={() => setLightbox(ph.url)}
+                          className="relative aspect-square rounded-lg overflow-hidden border border-[#e8e6e0] group cursor-zoom-in"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={ph.url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-[#9b9890]">
+                    <ImageIcon className="w-3.5 h-3.5" /> {photos.length} photo{photos.length === 1 ? '' : 's'}
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center w-full aspect-[4/3] rounded-xl border border-dashed border-[#e8e6e0] bg-[#faf9f7] text-[#c5c3bc]">
+                  <ImageIcon className="w-7 h-7" />
+                  <span className="text-xs mt-1.5">No photos yet</span>
+                </div>
+              )}
             </div>
-          )}
+
+            {/* RIGHT — details */}
+            <div className="space-y-4 min-w-0">
 
           {/* KPI row */}
           {stats && (
@@ -287,6 +398,40 @@ export function PropertyDetailsModal({
               </div>
             </div>
           )}
+
+          {/* Units — names + status, in the same popup. */}
+          <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0eeea] bg-[#faf9f7]">
+              <Building2 className="w-4 h-4 text-[#2e9f82]" />
+              <h3 className="text-sm font-bold text-[#1a1916]">Units</h3>
+              {!unitsLoading && <span className="text-xs font-semibold text-[#9b9890]">{units.length}</span>}
+            </div>
+            {unitsLoading ? (
+              <div className="flex items-center gap-2 px-4 py-3 text-sm text-[#9b9890]">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading units…
+              </div>
+            ) : units.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-[#9b9890]">No units yet.</p>
+            ) : (
+              <ul className="divide-y divide-[#f4f3ef] max-h-72 overflow-auto">
+                {units.map((u) => {
+                  const occ = u.availability === 'occupied';
+                  const maint = u.availability === 'maintenance';
+                  const pubd = u.listingStatus === 'published';
+                  const pillCls = occ || pubd ? 'bg-[#dcfce7] text-[#166534]' : maint ? 'bg-[#fef3c7] text-[#854d0e]' : 'bg-[#f4f3ef] text-[#6b6860]';
+                  const pillLabel = occ ? 'Occupied' : maint ? 'Maintenance' : pubd ? 'Published' : 'Available';
+                  return (
+                    <li key={u.id} className="flex items-center gap-2.5 px-4 py-2.5">
+                      <span className="font-mono text-xs font-semibold rounded bg-[#f4f3ef] text-[#1a1916] px-1.5 py-0.5 shrink-0">{u.unitNumber}</span>
+                      {u.unitName && <span className="text-sm font-medium text-[#1a1916] truncate">{u.unitName}</span>}
+                      <span className="text-xs text-[#6b6860] truncate capitalize">{u.unitType.replace(/_/g, ' ')}</span>
+                      <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${pillCls}`}>{pillLabel}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
 
           {/* Location */}
           {hasLocation && (
@@ -360,83 +505,136 @@ export function PropertyDetailsModal({
             </div>
           )}
 
-          {/* Documents — collapsible tab */}
+          {/* Property Documents — full list. Editable = upload / replace / delete
+              directly (the property exists); otherwise a read-only list. */}
           <div className="border border-[#e8e6e0] rounded-xl overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0eeea] bg-[#faf9f7]">
-              <button
-                type="button"
-                onClick={() => setDocsOpen((o) => !o)}
-                className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer"
-                aria-expanded={docsOpen}
-              >
-                <FileText className="w-4 h-4 text-[#2e9f82] shrink-0" />
-                <h3 className="text-sm font-bold text-[#1a1916]">Property Documents</h3>
-                {!docsLoading && !docsError && docs.length > 0 && (
-                  <span className="text-xs font-semibold text-[#9b9890]">{docs.length}</span>
-                )}
-                <ChevronDown
-                  className={`w-4 h-4 text-[#9b9890] ml-auto transition-transform ${docsOpen ? 'rotate-180' : ''}`}
-                />
-              </button>
-              {!docsLoading && !docsError && docs.some((d) => docUrl(d)) && (
+              <FileText className="w-4 h-4 text-[#2e9f82] shrink-0" />
+              <h3 className="text-sm font-bold text-[#1a1916]">Property Documents</h3>
+              {!docsLoading && !docsError && docs.length > 0 && (
+                <span className="text-xs font-semibold text-[#9b9890]">{docs.length}</span>
+              )}
+              {docsBusy ? (
+                <span className="ml-auto inline-flex items-center gap-1 text-xs text-[#9b9890]">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…
+                </span>
+              ) : (!docsLoading && !docsError && docs.some((d) => docUrl(d)) && (
                 <button
                   type="button"
                   onClick={() => openDocsTogether(docs.map((d) => ({ fileUrl: docUrl(d) })))}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#2e9f82] hover:underline shrink-0 cursor-pointer"
+                  className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#2e9f82] hover:underline shrink-0 cursor-pointer"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" /> View all
+                  <ExternalLink className="w-3.5 h-3.5" /> Open all
                 </button>
+              ))}
+            </div>
+
+            <div className="p-4">
+              {docsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-[#9b9890] py-1">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading documents…
+                </div>
+              ) : editable ? (
+                /* Upload-capable slots — same DocSlotCard UI as the add/edit form. */
+                <div className="space-y-4">
+                  <div className="space-y-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Single file</p>
+                    {p.isStandaloneUnit && (
+                      <DocSlotCard
+                        label="Title Deed" multiple={false}
+                        existing={propertyDocs.filter((d) => d.documentKey === 'title_deed')}
+                        queued={[]}
+                        onAdd={(files) => uploadToSlot({ key: 'title_deed', label: 'Title Deed', category: 'legal', multiple: false }, files)}
+                        onRemoveQueued={() => {}}
+                        onRemoveExisting={removeDoc}
+                        onView={setViewerDoc}
+                      />
+                    )}
+                    {PROPERTY_DOC_SLOTS.filter((slot) => !slot.multiple).map((slot) => (
+                      <DocSlotCard
+                        key={slot.key}
+                        label={slot.label} multiple={false}
+                        existing={propertyDocs.filter((d) => docBelongsToSlot(d.documentKey, slot))}
+                        queued={[]}
+                        onAdd={(files) => uploadToSlot(slot, files)}
+                        onRemoveQueued={() => {}}
+                        onRemoveExisting={removeDoc}
+                        onView={setViewerDoc}
+                      />
+                    ))}
+                  </div>
+                  <div className="space-y-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Multiple files</p>
+                    <DocSlotCard
+                      label="Building Floor Plans" multiple
+                      existing={propertyDocs.filter((d) => d.documentKey.startsWith('building_drawing'))}
+                      queued={[]}
+                      onAdd={(files) => uploadToSlot({ key: 'building_drawing', label: 'Building Floor Plans', category: 'property', multiple: true }, files)}
+                      onRemoveQueued={() => {}}
+                      onRemoveExisting={removeDoc}
+                      onView={setViewerDoc}
+                    />
+                    {PROPERTY_DOC_SLOTS.filter((slot) => slot.multiple).map((slot) => (
+                      <DocSlotCard
+                        key={slot.key}
+                        label={slot.label} multiple
+                        existing={propertyDocs.filter((d) => docBelongsToSlot(d.documentKey, slot))}
+                        queued={[]}
+                        onAdd={(files) => uploadToSlot(slot, files)}
+                        onRemoveQueued={() => {}}
+                        onRemoveExisting={removeDoc}
+                        onView={setViewerDoc}
+                      />
+                    ))}
+                  </div>
+
+                  {unmatchedDocs.length > 0 && (
+                    <div className="space-y-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Other documents on file</p>
+                      <div className="rounded-lg border border-[#e8e6e0] divide-y divide-[#f4f3ef]">
+                        {unmatchedDocs.map((d) => (
+                          <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            <FileText size={13} className="text-[#2e9f82] shrink-0" />
+                            <span className="truncate flex-1 text-[#44423c]">{d.displayName || 'Document'}</span>
+                            {d.fileUrl && (
+                              <button type="button" onClick={() => setViewerDoc({ url: d.fileUrl, name: d.displayName || 'Document' })}
+                                className="text-[#2e9f82] font-medium hover:underline shrink-0">View</button>
+                            )}
+                            <button type="button" onClick={() => removeDoc(d.id)} title="Remove"
+                              className="w-5 h-5 rounded-full bg-[#f4f3ef] grid place-items-center text-[#9b9890] hover:text-[#b91c1c] shrink-0"><Trash2 size={11} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : docsError ? (
+                <p className="text-sm text-[#9b9890] py-1">Could not load documents.</p>
+              ) : docs.length === 0 ? (
+                <p className="text-sm text-[#9b9890] py-1">No documents uploaded yet.</p>
+              ) : (
+                <ul className="divide-y divide-[#f4f3ef]">
+                  {docs.map((d, i) => {
+                    const url = docUrl(d);
+                    return (
+                      <li key={d.id ?? `${docKey(d)}-${i}`} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                        <FileText className="w-4 h-4 text-[#9b9890] shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-[#1a1916] truncate">{prettifyKey(docKey(d), d)}</div>
+                        </div>
+                        {url && (
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-semibold text-[#2e9f82] hover:underline shrink-0">
+                            Open <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </div>
-            {docsOpen && (
-              <div className="p-4">
-                {docsLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-[#9b9890] py-1">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Loading documents…
-                  </div>
-                ) : docsError ? (
-                  <p className="text-sm text-[#9b9890] py-1">
-                    Could not load documents.
-                  </p>
-                ) : docs.length === 0 ? (
-                  <p className="text-sm text-[#9b9890] py-1">
-                    No documents uploaded — add the title deed from the property
-                    edit form.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-[#f4f3ef]">
-                    {docs.map((d, i) => {
-                      const url = docUrl(d);
-                      return (
-                        <li
-                          key={d.id ?? `${docKey(d)}-${i}`}
-                          className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
-                        >
-                          <FileText className="w-4 h-4 text-[#9b9890] shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium text-[#1a1916] truncate">
-                              {prettifyKey(docKey(d), d)}
-                            </div>
-                          </div>
-                          {url && (
-                            <a
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-sm font-semibold text-[#2e9f82] hover:underline shrink-0"
-                            >
-                              Open
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </a>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            )}
+          </div>
+            </div>
           </div>
         </div>
 
@@ -466,6 +664,15 @@ export function PropertyDetailsModal({
           <X className="w-5 h-5" />
         </button>
       </div>
+    )}
+
+    {/* In-app document preview ("View") */}
+    {viewerDoc && (
+      <DocPreviewModal
+        title={viewerDoc.name}
+        docs={[{ id: 1, fileUrl: viewerDoc.url, mimeType: viewerDoc.mime ?? null, caption: viewerDoc.name }]}
+        onClose={() => setViewerDoc(null)}
+      />
     )}
     </>
   );
