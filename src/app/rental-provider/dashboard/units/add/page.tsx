@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Upload, Download, CheckCircle2,
   AlertCircle, Loader2, FileSpreadsheet, ChevronDown, ChevronUp,
@@ -215,10 +216,14 @@ export default function AddListingPage() {
     ? (new URLSearchParams(window.location.search).get('rp') ?? null)
     : null;
   // Where "back" / "done" returns to: a manager acting on behalf goes to their
-  // own portal; an RP owner goes to their portfolio.
+  // own portal; an RP owner returns to the Units page (the home for units).
   const backHref = actingRpId
     ? `/dashboard/manager/properties?rp=${actingRpId}`
-    : '/rental-provider/dashboard/portfolio';
+    : '/rental-provider/dashboard/units';
+  // Units-only mode: the RP /units/add flow ADDS UNITS to an existing property
+  // (property creation lives on the Portfolio page). The manager "Add property"
+  // re-export (?rp present) keeps the full property + units wizard.
+  const unitsOnly = !actingRpId;
   type Mode = 'new' | 'import';
   const [mode, setMode] = useState<Mode>('new');
 
@@ -378,7 +383,12 @@ export default function AddListingPage() {
   /* ── validate ── */
   function validate(): boolean {
     let ok = true;
-    if (mode === 'new' && !selectedPropId) {
+    // Units-only flow never creates a property — a selection is mandatory.
+    if (unitsOnly && !selectedPropId) {
+      setError('Select a property to add units to.');
+      return false;
+    }
+    if (!unitsOnly && mode === 'new' && !selectedPropId) {
       const errs: typeof pe = {};
       if (!pf.spaceCategory) { errs.spaceCategory = 'Required'; ok = false; }
       if (!pf.emirateId)     { errs.emirateId = 'Required'; ok = false; }
@@ -743,12 +753,12 @@ export default function AddListingPage() {
           onClick={() => router.push(backHref)}
           className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] cursor-pointer"
         >
-          <ArrowLeft size={16} /> Portfolio
+          <ArrowLeft size={16} /> {unitsOnly ? 'Units' : 'Portfolio'}
         </button>
         <div className="w-px h-4 bg-[#e8e6e0]" />
         <div>
-          <h1 className="font-semibold text-[#1a1916] text-sm leading-tight">Add Listing</h1>
-          <p className="text-xs text-[#9b9890]">Property + units in one go</p>
+          <h1 className="font-semibold text-[#1a1916] text-sm leading-tight">{unitsOnly ? 'Add Units' : 'Add Listing'}</h1>
+          <p className="text-xs text-[#9b9890]">{unitsOnly ? 'Add units to one of your properties' : 'Property + units in one go'}</p>
         </div>
 
         {/* Manager acting-on-behalf banner */}
@@ -760,8 +770,9 @@ export default function AddListingPage() {
           </div>
         )}
 
-        {/* Mode tabs */}
-        {!done && (
+        {/* Mode tabs — CSV import creates properties, so it's hidden in the
+            units-only (RP) flow; only the manager property+units wizard shows it. */}
+        {!done && !unitsOnly && (
           <div className="ml-auto flex rounded-xl border border-[#e8e6e0] overflow-hidden bg-[#f4f3ef]">
             {([
               { key: 'new',    label: 'Manual Entry' },
@@ -807,36 +818,42 @@ export default function AddListingPage() {
                 }}
                 className="px-5 py-2.5 rounded-lg border border-[#2e9f82] text-[#2e9f82] text-sm font-medium hover:bg-[#f0fdf8] cursor-pointer"
               >
-                Add Another Listing
+                {unitsOnly ? 'Add More Units' : 'Add Another Listing'}
               </button>
               <button
                 onClick={() => router.push(backHref)}
                 className="px-5 py-2.5 rounded-lg text-white text-sm font-semibold cursor-pointer"
                 style={{ background: '#1a1916' }}
               >
-                Go to Portfolio
+                {unitsOnly ? 'Go to Units' : 'Go to Portfolio'}
               </button>
             </div>
           </div>
         )}
 
-        {/* ══ PROPERTY DETAILS ══ */}
+        {/* ══ PROPERTY ══ Units-only (RP) = pick an existing property; full mode
+            (manager) = pick existing OR create a new property. */}
         {!done && mode === 'new' && (
-          <Section title="Property Details">
+          <Section title={unitsOnly ? 'Select Property' : 'Property Details'}>
             <div className="space-y-4">
 
-              {/* Existing properties dropdown */}
+              {/* Existing property selector (both modes, when ≥1 exists) */}
               {existingProps.length > 0 && (
                 <div>
-                  <Label t="Select Existing Property" />
+                  <Label t={unitsOnly ? 'Property' : 'Select Existing Property'} req={unitsOnly} />
                   <select
                     className={SELECT}
                     value={selectedPropId ?? ''}
                     onChange={e => {
                       const id = e.target.value ? Number(e.target.value) : null;
                       const cat = existingProps.find(p => p.id === id)?.spaceCategory ?? '';
+                      // Switching to a different category invalidates the chosen
+                      // unit type + amenities, so clear them (keeps the POST clean).
+                      const catChanged = cat !== selectedPropCat;
                       setSelectedPropId(id); setSelectedPropCat(cat); setError(null);
-                      setRows(prev => prev.map(r => ({ ...r, amenities: [] })));
+                      setRows(prev => prev.map(r => ({
+                        ...r, amenities: [], ...(catChanged ? { unitType: '' } : {}),
+                      })));
                     }}
                   >
                     <option value="">— Select a property —</option>
@@ -846,11 +863,34 @@ export default function AddListingPage() {
                       </option>
                     ))}
                   </select>
+                  {unitsOnly && (
+                    <p className="text-[11px] text-[#9b9890] mt-1.5">
+                      Need a new building?{' '}
+                      <Link href="/rental-provider/dashboard/portfolio?add=1" className="font-medium text-[#2e9f82] hover:underline">Add a property</Link>{' '}
+                      on the Portfolio page.
+                    </p>
+                  )}
                 </div>
               )}
 
-              {/* Divider */}
-              {existingProps.length > 0 && (
+              {/* Units-only with NO properties yet → create one on Portfolio first. */}
+              {unitsOnly && existingProps.length === 0 && (
+                <div className="text-center py-6">
+                  <Building2 size={22} className="mx-auto mb-2 text-[#c5c3bc]" />
+                  <p className="text-sm text-[#6b6860] mb-3">
+                    You don’t have any properties yet. Create a property first, then come back to add its units.
+                  </p>
+                  <Link href="/rental-provider/dashboard/portfolio?add=1"
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2.5 rounded-lg"
+                    style={{ background: '#2e9f82', color: '#fff' }}>
+                    <Building2 size={15} /> Add a property
+                  </Link>
+                </div>
+              )}
+
+              {/* Full mode (manager) only: divider + the new-property form via the
+                  shared <PropertyFields> (byte-identical to the Edit modal). */}
+              {!unitsOnly && existingProps.length > 0 && (
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e8e6e0]" /></div>
                   <div className="relative flex justify-center">
@@ -858,13 +898,7 @@ export default function AddListingPage() {
                   </div>
                 </div>
               )}
-
-              {/* New property form — hidden when an existing property is
-                  selected. Shared <PropertyFields> = byte-identical to the Edit
-                  modal (RP + manager): Category, Country→Emirate→City→Community
-                  →Sub, Building Name / Street / Plot, Standalone + Title Deed,
-                  and Building drawings. */}
-              {!selectedPropId && (
+              {!unitsOnly && !selectedPropId && (
                 <>
                   <PropertyFields
                     value={pf} setValue={setPf}
@@ -1027,8 +1061,15 @@ export default function AddListingPage() {
           </Section>
         )}
 
+        {/* Units-only: prompt to pick a property before the unit rows appear. */}
+        {!done && unitsOnly && !selectedPropId && existingProps.length > 0 && (
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-6 text-center text-sm text-[#9b9890]">
+            Select a property above to start adding its units.
+          </div>
+        )}
+
         {/* ══ UNITS section (new + existing modes) ══ */}
-        {!done && mode !== 'import' && (
+        {!done && mode !== 'import' && (!unitsOnly || selectedPropId) && (
           <Section title={`Units  ·  ${rows.length} added`}>
             <div className="space-y-3">
               {rows.map((r, i) => (
@@ -1100,7 +1141,7 @@ export default function AddListingPage() {
                 style={{ background: '#2e9f82' }}
               >
                 {saving && <Loader2 size={14} className="animate-spin" />}
-                Save{!selectedPropId ? ' Property +' : ''} {rows.length} Unit{rows.length !== 1 ? 's' : ''}
+                Save{!unitsOnly && !selectedPropId ? ' Property +' : ''} {rows.length} Unit{rows.length !== 1 ? 's' : ''}
               </button>
             )}
 

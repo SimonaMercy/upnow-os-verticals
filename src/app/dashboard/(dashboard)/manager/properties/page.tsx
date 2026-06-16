@@ -17,7 +17,7 @@ import { apiGet, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
-import { UnitPreviewModal } from '@/app/rental-provider/dashboard/portfolio/UnitPreviewModal';
+import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { PortfolioMapModal } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { PropertyFormModal, type PropertyFormData } from '@/components/upnow/PropertyFormModal';

@@ -625,7 +625,7 @@ export function UnitPreviewModal({
             </Link>
           )}
           <Link
-            href={`/rental-provider/dashboard/portfolio/${propertyId}/units/${unit.id}`}
+            href={`/rental-provider/dashboard/units/${unit.id}`}
             className="inline-flex items-center gap-1.5 rounded-lg bg-[#2e9f82] px-4 py-2 text-sm font-semibold text-white hover:bg-[#27876f]"
           >
             Open full page

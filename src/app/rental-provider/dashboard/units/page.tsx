@@ -16,15 +16,18 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
+  BedDouble, Bath, Maximize2, ChevronDown, ChevronUp, Loader2, Layers, Image as ImageIcon,
   ArrowRight, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
-  LayoutGrid, Rows3, Search,
+  LayoutGrid, Rows3, Search, Plus, Eye, Trash2,
 } from 'lucide-react';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiGet, apiPatch, apiDelete } from '@/lib/api';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
+import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
+import { saveUnit, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 
 interface Plan {
   displayName: string;
@@ -75,6 +78,15 @@ interface Resp {
   plans: Plan[];
   // RP's configured fee rules per category — used to default the per-layout fees
   feeRules: Record<string, FeeRuleLite[]> | null;
+}
+// Tenant + lease-end surfaced on each unit row (RP only).
+interface ContractSummary {
+  id: number;
+  status: string;
+  contractActive: boolean;
+  endDate: string | null;
+  tenant: { id: number | null; name: string | null } | null;
+  unit: { id: number | null } | null;
 }
 
 // Plans are unique per (property, plan_label) — labels can repeat across
@@ -174,12 +186,104 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rpQ]);
-  useEffect(() => { load(); }, [load]);
+  // Preselect a property when arriving via the portfolio "Manage units" link
+  // (?propertyId=). Read from the URL directly to avoid a Suspense boundary.
+  useEffect(() => {
+    const pid = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('propertyId') : null;
+    load(pid ? Number(pid) : undefined);
+  }, [load]);
 
   const reload = () => load(propertyId);
   const onProperty = (v: string) => { setTypeFilter('all'); setPlanFilter('all'); load(v === 'all' ? null : Number(v), 'all'); };
   // Changing the unit-type scope can hide the selected plan, so reset it.
   const onType = (v: string) => { setTypeFilter(v); setPlanFilter('all'); };
+
+  // ── Per-unit management (RP only; the manager portal stays pricing-only) ──
+  // A plan card expands to manage its individual units. Units load lazily per
+  // property and are cached; any change re-fetches them AND reloads the plan
+  // aggregates so price ranges / flags stay in sync.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [unitsByProperty, setUnitsByProperty] = useState<Record<number, UnitRecord[]>>({});
+  const [loadingUnits, setLoadingUnits] = useState<Set<number>>(new Set());
+  const [contracts, setContracts] = useState<ContractSummary[]>([]);
+  const [unitModal, setUnitModal] = useState<{ plan: Plan; editingUnit?: UnitRecord } | null>(null);
+  const [unitPreview, setUnitPreview] = useState<{ plan: Plan; unit: UnitRecord } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [busyUnit, setBusyUnit] = useState<number | null>(null);
+
+  // Contracts power the tenant / lease-end line on each unit row.
+  useEffect(() => {
+    if (manager) return;
+    apiGet<ContractSummary[]>('/contracts').then(setContracts).catch(() => {});
+  }, [manager]);
+
+  const loadUnitsForProperty = useCallback(async (pid: number) => {
+    setLoadingUnits(s => new Set(s).add(pid));
+    try {
+      const rows = await apiGet<UnitRecord[]>(`/properties/${pid}/units`);
+      setUnitsByProperty(m => ({ ...m, [pid]: rows }));
+    } catch {
+      setUnitsByProperty(m => ({ ...m, [pid]: m[pid] ?? [] }));
+    } finally {
+      setLoadingUnits(s => { const n = new Set(s); n.delete(pid); return n; });
+    }
+  }, []);
+
+  const togglePlan = (p: Plan) => {
+    const k = planKey(p);
+    setExpanded(s => {
+      const n = new Set(s);
+      if (n.has(k)) n.delete(k);
+      else { n.add(k); if (unitsByProperty[p.propertyId] == null) void loadUnitsForProperty(p.propertyId); }
+      return n;
+    });
+  };
+
+  const unitsForPlan = (p: Plan): UnitRecord[] =>
+    (unitsByProperty[p.propertyId] ?? []).filter(u => (u.planLabel ?? '') === p.planLabel);
+
+  // After any unit change, refresh that property's units AND the plan aggregates.
+  const refreshProperty = async (pid: number) => { await loadUnitsForProperty(pid); reload(); };
+
+  const onSaveUnit = async (
+    plan: Plan, editingUnit: UnitRecord | undefined,
+    data: Parameters<typeof saveUnit>[0]['data'],
+    floorPlan?: File | null, titleDeed?: File | null, addendums?: File[],
+  ) => {
+    await saveUnit({
+      propertyId: plan.propertyId, editingUnitId: editingUnit?.id, data,
+      floorPlan, titleDeed, addendums, propertyStandalone: false,
+    });
+    await refreshProperty(plan.propertyId);
+  };
+
+  const onDeleteUnit = async (pid: number, unitId: number) => {
+    setBusyUnit(unitId);
+    try { await apiDelete(`/properties/${pid}/units/${unitId}`); await refreshProperty(pid); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not delete unit'); }
+    finally { setBusyUnit(null); setConfirmDelete(null); }
+  };
+
+  const onListingAction = async (pid: number, unitId: number, action: 'submit-listing' | 'withdraw-listing') => {
+    setBusyUnit(unitId);
+    try { await apiPatch(`/properties/${pid}/units/${unitId}/${action}`, {}); await refreshProperty(pid); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Listing action failed'); }
+    finally { setBusyUnit(null); }
+  };
+
+  const statusPill = (u: UnitRecord): { label: string; bg: string; fg: string } => {
+    if (u.availability === 'occupied')    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
+    if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
+    switch (u.listingStatus) {
+      case 'published': return { label: 'Published', bg: '#d8f2e8', fg: '#1a7a5a' };
+      case 'pending':   return { label: 'Pending',   bg: '#fef3c7', fg: '#92400e' };
+      case 'in_review': return { label: 'In review', bg: '#dbeafe', fg: '#1e40af' };
+      case 'expired':   return { label: 'Expired',   bg: '#fef3c7', fg: '#92400e' };
+      case 'rejected':  return { label: 'Rejected',  bg: '#fee2e2', fg: '#b91c1c' };
+      default:          return { label: 'Draft',     bg: '#f1efe9', fg: '#6b6860' };
+    }
+  };
 
   const pickImage = (p: Plan) => { targetPlan.current = { planLabel: p.planLabel, propertyId: p.propertyId }; fileRef.current?.click(); };
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -368,10 +472,13 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
           <div className="mt-auto pt-4">
             {priceBlock(p)}
-            <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
-              className="mt-3 inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-              View a unit <ArrowRight size={12} />
-            </Link>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
+                className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+                View a unit <ArrowRight size={12} />
+              </Link>
+              {!manager && manageToggle(p)}
+            </div>
           </div>
         </div>
       </div>
@@ -413,11 +520,153 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         {/* Pricing */}
         <div className="flex flex-col justify-center items-end gap-1.5 shrink-0 w-[300px] max-w-[44%]">
           <div className="w-full">{priceBlock(p)}</div>
-          <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
-            className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-            View a unit <ArrowRight size={12} />
-          </Link>
+          {manager
+            ? (
+              <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
+                className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+                View a unit <ArrowRight size={12} />
+              </Link>
+            )
+            : manageToggle(p)}
         </div>
+      </div>
+    );
+  };
+
+  // "Manage units" expand/collapse toggle (RP only).
+  const manageToggle = (p: Plan) => {
+    const open = expanded.has(planKey(p));
+    return (
+      <button onClick={() => togglePlan(p)}
+        className="inline-flex items-center gap-1 text-xs font-semibold"
+        style={{ color: 'var(--primary, #2e9f82)' }}>
+        {open
+          ? <>Hide units <ChevronUp size={13} /></>
+          : <>Manage {p.unitCount} unit{p.unitCount === 1 ? '' : 's'} <ChevronDown size={13} /></>}
+      </button>
+    );
+  };
+
+  // One unit row inside an expanded layout panel.
+  const unitRow = (p: Plan, u: UnitRecord) => {
+    const contract = contracts.find(c => c.unit?.id === u.id && c.contractActive) ?? null;
+    const tenant = contract?.tenant?.name ?? null;
+    const end = contract?.endDate
+      ? new Date(contract.endDate).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' })
+      : null;
+    const pill = statusPill(u);
+    const size = u.unitSizeSqft ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
+      : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
+    const busy = busyUnit === u.id;
+    const price = u.rentalPrice ?? u.marketPrice;
+    return (
+      <div key={u.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+        style={{ background: '#fafaf8', border: '1px solid #eef0ee' }}>
+        <button onClick={() => setUnitPreview({ plan: p, unit: u })} title="Preview unit"
+          className="font-semibold text-sm shrink-0 hover:underline"
+          style={{ color: 'var(--neutral-900,#1a1916)', minWidth: 52, textAlign: 'left' }}>
+          {u.unitNumber}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap text-xs" style={{ color: 'var(--neutral-600,#57544d)' }}>
+            {u.unitName && <span className="font-medium" style={{ color: 'var(--neutral-800,#2d2b26)' }}>{u.unitName}</span>}
+            <span>{u.unitType.replace(/_/g, ' ')}</span>
+            {u.bedrooms != null && <span>· {u.bedrooms} BR</span>}
+            {u.bathrooms != null && <span>· {u.bathrooms} BA</span>}
+            {size && <span>· {size}</span>}
+            {u.view && <span>· {u.view}</span>}
+          </div>
+          {tenant && (
+            <div className="text-[11px] mt-0.5" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+              {tenant}{end ? ` · until ${end}` : ''}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {price != null && (
+            <div className="text-sm font-bold whitespace-nowrap" style={{ color: 'var(--primary,#2e9f82)' }}>
+              AED {aed(Number(price))}
+            </div>
+          )}
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: pill.bg, color: pill.fg }}>
+            {pill.label}
+          </span>
+          {u.availability === 'available' && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
+            <button disabled={busy} onClick={() => onListingAction(p.propertyId, u.id, 'submit-listing')}
+              className="text-[11px] font-semibold px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: '#e6f7f1', color: 'var(--primary,#2e9f82)' }}>
+              {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
+            </button>
+          )}
+          {u.availability === 'available' && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
+            <button disabled={busy} onClick={() => onListingAction(p.propertyId, u.id, 'withdraw-listing')}
+              className="text-[11px] font-semibold px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: '#f1efe9', color: 'var(--neutral-600,#57544d)' }}>
+              Withdraw
+            </button>
+          )}
+          <button onClick={() => setUnitPreview({ plan: p, unit: u })} title="Preview unit"
+            className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: 'var(--neutral-500,#6b6860)', background: '#fff', border: '1px solid #e8e6e0' }}>
+            <Eye size={14} />
+          </button>
+          <button onClick={() => setUnitModal({ plan: p, editingUnit: u })} title="Edit unit"
+            className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: 'var(--neutral-500,#6b6860)', background: '#fff', border: '1px solid #e8e6e0' }}>
+            <Pencil size={14} />
+          </button>
+          {confirmDelete === u.id ? (
+            <span className="flex items-center gap-1">
+              <button disabled={busy} onClick={() => onDeleteUnit(p.propertyId, u.id)}
+                className="text-[11px] font-semibold px-2 py-1 rounded-lg disabled:opacity-50" style={{ background: '#fee2e2', color: '#b91c1c' }}>
+                {busy ? '…' : 'Delete'}
+              </button>
+              <button onClick={() => setConfirmDelete(null)}
+                className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ background: '#f1efe9', color: '#6b6860' }}>No</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmDelete(u.id)} title="Delete unit"
+              className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: '#b91c1c', background: '#fff', border: '1px solid #f1d5d5' }}>
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // The expanded panel for one layout — its individual units + Add unit.
+  const unitsPanel = (p: Plan) => {
+    const loading = loadingUnits.has(p.propertyId);
+    const list = unitsForPlan(p);
+    return (
+      <div className="rounded-2xl p-4 sm:p-5"
+        style={{ background: 'var(--white,#fff)', boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)', border: '1px solid #eef0ee' }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold" style={{ color: 'var(--neutral-900,#1a1916)' }}>
+            {p.buildingName} · {p.displayName}
+            {!loading && (
+              <span className="ml-2 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
+                {list.length} {list.length === 1 ? 'unit' : 'units'}
+              </span>
+            )}
+          </div>
+          <button onClick={() => setUnitModal({ plan: p })}
+            className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg"
+            style={{ background: 'var(--primary,#2e9f82)', color: '#fff' }}>
+            <Plus size={13} /> Add unit
+          </button>
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 py-6 text-sm" style={{ color: 'var(--neutral-400,#9b9890)' }}>
+            <Loader2 size={15} className="animate-spin" /> Loading units…
+          </div>
+        ) : list.length === 0 ? (
+          <div className="py-6 text-sm text-center" style={{ color: 'var(--neutral-400,#9b9890)' }}>
+            No units on this layout yet.{' '}
+            <button onClick={() => setUnitModal({ plan: p })} className="font-semibold underline" style={{ color: 'var(--primary,#2e9f82)' }}>
+              Add the first unit
+            </button>.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">{list.map(u => unitRow(p, u))}</div>
+        )}
       </div>
     );
   };
@@ -428,13 +677,22 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
       <div className="max-w-6xl mx-auto px-5 py-8">
         {/* Header */}
-        <div>
-          <h1 className="font-bold" style={{ fontSize: 28, color: 'var(--neutral-900, #1a1916)', letterSpacing: '-0.02em' }}>
-            Units &amp; pricing
-          </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--neutral-500, #6b6860)' }}>
-            {building ? `${building} · pricing by floor-plan layout` : 'All properties · pricing by floor-plan layout'}
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="font-bold" style={{ fontSize: 28, color: 'var(--neutral-900, #1a1916)', letterSpacing: '-0.02em' }}>
+              Units &amp; pricing
+            </h1>
+            <p className="mt-1 text-sm" style={{ color: 'var(--neutral-500, #6b6860)' }}>
+              {building ? `${building} · pricing by floor-plan layout` : 'All properties · pricing by floor-plan layout'}
+            </p>
+          </div>
+          {!manager && (
+            <Link href="/rental-provider/dashboard/units/add"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2.5 rounded-lg shrink-0"
+              style={{ background: 'var(--primary,#2e9f82)', color: '#fff' }}>
+              <Plus size={15} /> Add units
+            </Link>
+          )}
         </div>
 
         {/* Filters */}
@@ -565,11 +823,24 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
                 {view === 'grid' ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {g.plans.map(gridCard)}
+                    {g.plans.map(p => (
+                      <Fragment key={planKey(p)}>
+                        {gridCard(p)}
+                        {/* Full-width panel breaks out below the card's row. */}
+                        {!manager && expanded.has(planKey(p)) && (
+                          <div style={{ gridColumn: '1 / -1' }}>{unitsPanel(p)}</div>
+                        )}
+                      </Fragment>
+                    ))}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    {g.plans.map(rowCard)}
+                    {g.plans.map(p => (
+                      <Fragment key={planKey(p)}>
+                        {rowCard(p)}
+                        {!manager && expanded.has(planKey(p)) && unitsPanel(p)}
+                      </Fragment>
+                    ))}
                   </div>
                 )}
               </section>
@@ -606,6 +877,37 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
               : <img src={viewer.url} alt="Floor plan" className="w-full h-full object-contain" />}
           </div>
         </div>
+      )}
+
+      {/* Per-unit add / edit (RP only). The modal closes itself on save. */}
+      {unitModal && (
+        <UnitFormModal
+          open
+          propertyCategory={unitModal.plan.spaceCategory ?? ''}
+          title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
+          initial={unitModal.editingUnit ? unitToFormInitial(unitModal.editingUnit) : undefined}
+          existingFloorPlanUrl={unitModal.editingUnit?.floorPlanUrl ?? null}
+          propertyStandalone={false}
+          propertyId={unitModal.plan.propertyId}
+          editingUnitId={unitModal.editingUnit?.id}
+          onClose={() => setUnitModal(null)}
+          onSave={(data, floorPlan, titleDeed, addendums) =>
+            onSaveUnit(unitModal.plan, unitModal.editingUnit, data, floorPlan, titleDeed, addendums)}
+        />
+      )}
+
+      {/* Read-only unit preview (RP only). */}
+      {unitPreview && (
+        <UnitPreviewModal
+          propertyId={unitPreview.plan.propertyId}
+          propertyName={unitPreview.plan.buildingName}
+          unit={unitPreview.unit}
+          contract={(() => {
+            const c = contracts.find(x => x.unit?.id === unitPreview.unit.id && x.contractActive);
+            return c ? { id: c.id, tenantName: c.tenant?.name ?? null, endDate: c.endDate, status: c.status } : null;
+          })()}
+          onClose={() => setUnitPreview(null)}
+        />
       )}
     </div>
   );

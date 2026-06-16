@@ -598,7 +598,7 @@ export default function NewContractPage() {
               You need to list a property and add at least one unit before you can create a tenancy contract.
             </p>
             <Link
-              href="/rental-provider/dashboard/portfolio/add"
+              href="/rental-provider/dashboard/portfolio?add=1"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
               style={{ background: '#2e9f82' }}
             >
@@ -645,7 +645,7 @@ export default function NewContractPage() {
                     <PlusCircle size={12} /> Add Unit
                   </Link>
                 ) : (
-                  <Link href="/rental-provider/dashboard/portfolio/add" target="_blank"
+                  <Link href="/rental-provider/dashboard/portfolio?add=1" target="_blank"
                     className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
                     <PlusCircle size={12} /> List Property First
                   </Link>
