@@ -47,9 +47,13 @@ export default function TenantsPage() {
         const byTenant = new Map<number, { c: Customer; leases: Raw[] }>();
         for (const c of data) {
           const tid = c.tenant?.id;
-          if (!tid || !c.tenant?.name) continue;
+          // Company customers display by company name; individuals by person name.
+          const displayName = c.tenant?.entityType === 'company' && c.tenant?.companyName
+            ? c.tenant.companyName
+            : c.tenant?.name;
+          if (!tid || !displayName) continue;
           const e = byTenant.get(tid) ?? {
-            c: { id: tid, name: c.tenant.name, email: c.tenant.email ?? '', phone: c.tenant.phone ?? null, nationality: c.tenant.nationality ?? null, leaseCount: 0, activeLeaseCount: 0, totalActiveRent: 0, latestActiveEnd: null } as Customer,
+            c: { id: tid, name: displayName, email: c.tenant.email ?? '', phone: c.tenant.phone ?? null, nationality: c.tenant.nationality ?? null, leaseCount: 0, activeLeaseCount: 0, totalActiveRent: 0, latestActiveEnd: null } as Customer,
             leases: [] as Raw[],
           };
           e.leases.push({ unitId: c.unit?.id ?? null, startDate: c.startDate ?? null, endDate: c.endDate ?? null, annualRent: c.annualRent ?? 0, status: c.status ?? null });
