@@ -1737,16 +1737,16 @@ function DetailsDrawer({
                                 )}
                                 {editable && !sd.amount && (
                                   <span className="note" style={{ display: 'block', fontSize: 11, color: '#b45309' }}>
-                                    amount not recorded — tap Edit to set it
+                                    amount not recorded yet
                                   </span>
                                 )}
                               </td>
-                              <td className="amt">{fmtAed(sd.amount)}</td>
+                              <td className="amt">{sd.amount ? fmtAed(sd.amount) : <span style={{ color: '#9b9890' }}>—</span>}</td>
                               <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{sd.chequeNumber ?? '—'}</td>
                               <td>{sd.paymentMethod ? fmtMethod(sd.paymentMethod) : '—'}</td>
                               <td>{fmtDate(sd.dueDate ?? sd.recordedDate)}</td>
                               <td>
-                                {editable ? (
+                                {editable && sd.amount ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                       <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
@@ -1775,6 +1775,10 @@ function DetailsDrawer({
                                       <span className="note" style={{ color: 'var(--brick)', fontSize: 11, textAlign: 'right' }}>{depStatusErr}</span>
                                     )}
                                   </div>
+                                ) : editable ? (
+                                  <button type="button" className="btn btn-jade btn-sm" onClick={() => startDepEdit()}>
+                                    <Pencil size={12} /> Set deposit
+                                  </button>
                                 ) : (
                                   <span className={'cstat ' + (sd.status ?? 'held')} style={{ textTransform: 'capitalize' }}>
                                     {(sd.status ?? 'held').replace('_', ' ')}
@@ -1925,7 +1929,7 @@ function DetailsDrawer({
                       {(depositRow || contract.securityDeposit) && (
                         <tr style={{ opacity: 0.75 }}>
                           <td colSpan={2}>Security deposit held (refundable, not in rent total)</td>
-                          <td className="amt">{fmtAed(depositRow?.amount ?? contract.securityDeposit?.amount ?? 0)}</td>
+                          <td className="amt">{(depositRow?.amount ?? contract.securityDeposit?.amount) ? fmtAed(depositRow?.amount ?? contract.securityDeposit?.amount ?? 0) : <span style={{ color: '#9b9890', fontWeight: 400 }}>Not set</span>}</td>
                           <td colSpan={4} />
                         </tr>
                       )}
