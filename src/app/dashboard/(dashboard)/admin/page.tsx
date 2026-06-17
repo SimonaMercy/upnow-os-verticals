@@ -38,7 +38,24 @@ interface LeaderRow {
   rpId: number; name: string; userId: number | null; complianceStatus: string; userStatus: string;
   trapCount: number; trapExposureAed: number; maxTrapDays: number;
   renewalHikeCount: number; directTerminationCount: number; payingEvictionCount: number;
+  leadStale: number; leadGhosted: number; leadFrt: number; leadPoaching: number;
+  mgrPoa: number; mgrDormantMoney: number; mgrEscalation: boolean;
+  depositScore: number; fairnessScore: number; leadScore: number; managerScore: number;
   compositeScore: number; tier: Tier;
+}
+function rpReasons(r: LeaderRow): string {
+  const parts = [
+    r.trapCount ? `${r.trapCount} trapped` : '',
+    r.payingEvictionCount ? `${r.payingEvictionCount} paying eviction${r.payingEvictionCount === 1 ? '' : 's'}` : '',
+    r.renewalHikeCount ? `${r.renewalHikeCount} hike${r.renewalHikeCount === 1 ? '' : 's'}` : '',
+    r.mgrDormantMoney ? 'dormant manager w/ money' : '',
+    r.mgrEscalation ? 'manager escalation' : '',
+    r.mgrPoa ? 'manager holds POA' : '',
+    r.leadPoaching ? 'lead poaching' : '',
+    r.leadFrt ? `${r.leadFrt} slow lead${r.leadFrt === 1 ? '' : 's'}` : '',
+    r.leadStale ? `${r.leadStale} stale lead${r.leadStale === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'flagged';
 }
 interface Overview { generatedAt: string; kpis: OverviewKpis; leaderboard: LeaderRow[]; }
 interface Flag {
@@ -300,9 +317,7 @@ export default function AdminDecisionDashboard() {
                       <tr key={r.rpId} className="border-t border-[#f0ede8] first:border-t-0">
                         <td className="px-4 py-2.5">
                           <div className="font-semibold text-[#1a1916]">{r.name}</div>
-                          <div className="text-[11px] text-[#9b9890]">
-                            {[r.trapCount ? `${r.trapCount} trapped` : '', r.payingEvictionCount ? `${r.payingEvictionCount} paying eviction${r.payingEvictionCount === 1 ? '' : 's'}` : '', r.renewalHikeCount ? `${r.renewalHikeCount} hike${r.renewalHikeCount === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') || 'flagged'}
-                          </div>
+                          <div className="text-[11px] text-[#9b9890]">{rpReasons(r)}</div>
                         </td>
                         <td className="px-3 py-2.5 text-right text-[#9b9890]">{r.trapExposureAed ? fmtAED(r.trapExposureAed) : ''}</td>
                         <td className="px-3 py-2.5 text-center w-20"><TierBadge tier={r.tier} /></td>
