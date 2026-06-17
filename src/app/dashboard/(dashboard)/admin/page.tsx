@@ -16,12 +16,12 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Wallet, ShieldAlert, UserMinus, AlertTriangle, Users, ShieldCheck, Banknote,
-  TrendingUp, Scissors, ChevronRight, Loader2, ArrowUpRight,
+  TrendingUp, Loader2, ArrowUpRight, Pause, Play, Ban,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPatch } from '@/lib/api';
 
 /* ── Types ── */
 type Tier = 'ok' | 'monitor' | 'review' | 'critical';
@@ -35,12 +35,16 @@ interface OverviewKpis {
   rpsOnWatchlist: number; openCriticalAlerts: number;
 }
 interface LeaderRow {
-  rpId: number; name: string; complianceStatus: string;
+  rpId: number; name: string; userId: number | null; complianceStatus: string; userStatus: string;
   trapCount: number; trapExposureAed: number; maxTrapDays: number;
   renewalHikeCount: number; directTerminationCount: number; payingEvictionCount: number;
   compositeScore: number; tier: Tier;
 }
 interface Overview { generatedAt: string; kpis: OverviewKpis; leaderboard: LeaderRow[]; }
+interface Flag {
+  id: number; actorName: string; ruleKey: string; severity: 'high' | 'medium' | 'low';
+  dimension: string; exposureAed: number; detail: Record<string, unknown>; status: string;
+}
 interface TrapRow { contractId: number; rpName: string; amountAed: number; endDate: string; daysOverdue: number; }
 interface DeductionRow { contractId: number; rpName: string; deductionAed: number; deductionRatio: number; }
 interface DepositAlerts { trap: TrapRow[]; excessiveDeduction: DeductionRow[]; }
@@ -95,7 +99,23 @@ function TierBadge({ tier }: { tier: Tier }) {
   return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: s.bg, color: s.fg }}>{s.label}</span>;
 }
 
-interface HarmEvent { kind: string; rpName: string; detail: string; value: string; color: string; sev: number; }
+const RULE_LABEL: Record<string, string> = {
+  'deposit.trap': 'Deposit withheld',
+  'deposit.slow_refund': 'Stalled refund',
+  'deposit.excessive_deduction': 'Excessive deduction',
+  'deposit.double_charge': 'Possible double-charge',
+  'fairness.renewal_hike': 'Renewal hike',
+  'fairness.direct_eviction': 'Direct eviction',
+};
+const sevColor = (s: string) => (s === 'high' ? RED : s === 'medium' ? AMBER : '#9b9890');
+function flagDetailText(f: Flag): string {
+  const d = (f.detail || {}) as Record<string, unknown>;
+  if (f.ruleKey === 'deposit.trap') return `Contract #${d.contractId ?? '—'} · ${d.daysOverdue ?? '?'}d overdue`;
+  if (f.ruleKey === 'fairness.direct_eviction') return d.payingTenant ? 'paying tenant' : 'no payments';
+  if (f.ruleKey === 'fairness.renewal_hike') return `+${d.hikePct ?? '?'}%`;
+  if (f.ruleKey === 'deposit.excessive_deduction') return `${d.ratio ?? '?'}% of deposit`;
+  return f.dimension;
+}
 
 export default function AdminDecisionDashboard() {
   const { user } = useAuth();
@@ -104,20 +124,47 @@ export default function AdminDecisionDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [deposits, setDeposits] = useState<DepositAlerts | null>(null);
-  const [fairness, setFairness] = useState<FairnessAlerts | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [flags, setFlags] = useState<Flag[]>([]);
+  const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const loadOverview = () => apiGet<Overview>('/admin/risk/overview').then(setOverview).catch(() => null);
+  const loadFlags = () => apiGet<{ flags: Flag[] }>('/admin/risk/flags').then((r) => setFlags(r.flags)).catch(() => null);
 
   useEffect(() => {
     apiGet<AdminStats>('/admin/stats').then(setStats).catch(() => null);
     setLoading(true);
     Promise.all([
-      apiGet<Overview>('/admin/risk/overview').then(setOverview).catch(() => null),
+      loadOverview(),
       apiGet<DepositAlerts>('/admin/risk/deposits').then(setDeposits).catch(() => null),
-      apiGet<FairnessAlerts>('/admin/risk/fairness').then(setFairness).catch(() => null),
       apiGet<{ points: TrendPoint[] }>('/admin/risk/trend').then((t) => setTrend(t.points)).catch(() => null),
+      loadFlags(),
     ]).finally(() => setLoading(false));
   }, []);
+
+  async function resolveFlag(id: number, status: 'acknowledged' | 'resolved') {
+    setFlags((fs) => fs.filter((f) => f.id !== id)); // optimistic
+    try { await apiPatch(`/admin/risk/flags/${id}`, { status }); }
+    catch { loadFlags(); }
+  }
+  async function pauseRp(r: LeaderRow) {
+    const target = r.complianceStatus === 'paused' ? 'compliant' : 'paused';
+    if (!window.confirm(`${target === 'paused' ? 'Pause listings for' : 'Resume'} ${r.name}?`)) return;
+    setBusy(r.rpId);
+    try { await apiPatch(`/admin/kyc/rental-providers/${r.rpId}/compliance`, { complianceStatus: target, complianceNotes: 'Risk dashboard action' }); await loadOverview(); }
+    catch (e) { window.alert(`Action failed: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  }
+  async function suspendRp(r: LeaderRow) {
+    if (!r.userId) return;
+    const target = r.userStatus === 'suspended' ? 'active' : 'suspended';
+    if (!window.confirm(`${target === 'suspended' ? 'Suspend' : 'Reactivate'} ${r.name}'s account?`)) return;
+    setBusy(r.rpId);
+    try { await apiPatch(`/admin/users/${r.userId}/status`, { status: target }); await loadOverview(); }
+    catch (e) { window.alert(`Action failed: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  }
 
   const k = overview?.kpis;
 
@@ -142,19 +189,6 @@ export default function AdminDecisionDashboard() {
       { name: 'Double-chg', value: k.doubleChargeCount, fill: PURPLE },
     ];
   }, [k]);
-
-  const harmEvents = useMemo<HarmEvent[]>(() => {
-    const ev: HarmEvent[] = [];
-    for (const e of fairness?.directEvictions ?? []) if (e.payingTenant)
-      ev.push({ kind: 'Paying-tenant eviction', rpName: e.rpName, detail: `Contract #${e.contractId}`, value: `${fmtAED(e.paidAed)} paid`, color: RED, sev: 3 });
-    for (const d of deposits?.excessiveDeduction ?? [])
-      ev.push({ kind: 'Excessive deduction', rpName: d.rpName, detail: `Contract #${d.contractId}`, value: `${d.deductionRatio}% of deposit`, color: RED, sev: 3 });
-    for (const h of fairness?.renewalHikes ?? [])
-      ev.push({ kind: 'Above-market renewal hike', rpName: h.rpName, detail: `Contract #${h.contractId} · ${fmtAED(h.priorRent)}→${fmtAED(h.newRent)}`, value: `+${h.hikePct}%`, color: AMBER, sev: 2 });
-    for (const t of deposits?.trap ?? []) if (t.daysOverdue >= 90)
-      ev.push({ kind: 'Deposit withheld', rpName: t.rpName, detail: `Contract #${t.contractId}`, value: `${fmtAED(t.amountAed)} · ${t.daysOverdue}d`, color: RED, sev: 3 });
-    return ev.sort((a, b) => b.sev - a.sev).slice(0, 10);
-  }, [deposits, fairness]);
 
   const topRps = (overview?.leaderboard ?? []).slice(0, 6);
 
@@ -254,6 +288,20 @@ export default function AdminDecisionDashboard() {
                         <td className="px-3 py-2.5 text-right text-[#9b9890]">{r.trapExposureAed ? fmtAED(r.trapExposureAed) : ''}</td>
                         <td className="px-3 py-2.5 text-center w-20"><TierBadge tier={r.tier} /></td>
                         <td className="px-3 py-2.5 text-right font-bold text-[#1a1916] w-10">{r.compositeScore}</td>
+                        {isSuperAdmin && (
+                          <td className="px-3 py-2.5 text-right whitespace-nowrap w-24">
+                            <div className="inline-flex gap-1">
+                              <button title={r.complianceStatus === 'paused' ? 'Resume listings' : 'Pause listings'} onClick={() => pauseRp(r)} disabled={busy === r.rpId}
+                                className="p-1.5 rounded-lg border border-[#e8e6e0] hover:bg-[#fffbeb] disabled:opacity-40">
+                                {r.complianceStatus === 'paused' ? <Play size={13} className="text-[#1a7a5a]" /> : <Pause size={13} className="text-[#b45309]" />}
+                              </button>
+                              <button title={r.userStatus === 'suspended' ? 'Reactivate account' : 'Suspend account'} onClick={() => suspendRp(r)} disabled={busy === r.rpId || !r.userId}
+                                className="p-1.5 rounded-lg border border-[#e8e6e0] hover:bg-[#fef2f2] disabled:opacity-40">
+                                <Ban size={13} className={r.userStatus === 'suspended' ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'} />
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -262,18 +310,25 @@ export default function AdminDecisionDashboard() {
             </div>
 
             <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-[#f0ede8]"><h2 className="text-[13px] font-bold text-[#1a1916]">Customer-harm events</h2></div>
-              {harmEvents.length === 0 ? (
-                <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No customer-harm events detected.</p>
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8]">
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Customer-harm events</h2>
+                <span className="text-[11px] text-[#9b9890]">{flags.length} open</span>
+              </div>
+              {flags.length === 0 ? (
+                <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No open risk flags. 🎉</p>
               ) : (
                 <ul className="divide-y divide-[#f0ede8] max-h-96 overflow-y-auto">
-                  {harmEvents.map((e, i) => (
-                    <li key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 text-[12px]">
+                  {flags.map((f) => (
+                    <li key={f.id} className="px-4 py-2.5 flex items-center justify-between gap-3 text-[12px]">
                       <div className="min-w-0">
-                        <div className="font-semibold truncate" style={{ color: e.color }}>{e.kind}</div>
-                        <div className="text-[11px] text-[#9b9890] truncate">{e.rpName} · {e.detail}</div>
+                        <div className="font-semibold truncate" style={{ color: sevColor(f.severity) }}>{RULE_LABEL[f.ruleKey] ?? f.ruleKey}</div>
+                        <div className="text-[11px] text-[#9b9890] truncate">{f.actorName} · {flagDetailText(f)}</div>
                       </div>
-                      <div className="text-[11px] font-semibold text-[#3f3d39] flex-shrink-0 text-right">{e.value}</div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {f.exposureAed > 0 && <span className="text-[11px] font-semibold text-[#3f3d39] mr-1">{fmtAED(f.exposureAed)}</span>}
+                        <button title="Acknowledge" onClick={() => resolveFlag(f.id, 'acknowledged')} className="px-2 py-1 rounded-md border border-[#e8e6e0] text-[10px] font-semibold text-[#6b6860] hover:bg-[#f5f4f0]">Ack</button>
+                        <button title="Resolve" onClick={() => resolveFlag(f.id, 'resolved')} className="px-2 py-1 rounded-md text-[10px] font-semibold text-white hover:opacity-90" style={{ backgroundColor: '#2e9f82' }}>Resolve</button>
+                      </div>
                     </li>
                   ))}
                 </ul>
