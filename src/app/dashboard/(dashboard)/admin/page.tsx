@@ -51,6 +51,12 @@ interface ManagerRow {
   moneyPower: boolean; dormant: boolean; tier: Tier;
 }
 interface ManagerData { summary: Record<string, number>; managers: ManagerRow[] }
+interface LeadData {
+  totalLeads: number;
+  summary: { stale: number; ghosted: number; frtBreaches: number; poaching: number };
+  frtBreaches: { leadId: number; rpName: string; customerName: string | null; ageHours: number }[];
+  stale: { leadId: number; rpName: string; stage: string; customerName: string | null; staleDays: number }[];
+}
 interface TrapRow { contractId: number; rpName: string; amountAed: number; endDate: string; daysOverdue: number; }
 interface DeductionRow { contractId: number; rpName: string; deductionAed: number; deductionRatio: number; }
 interface DepositAlerts { trap: TrapRow[]; excessiveDeduction: DeductionRow[]; }
@@ -136,6 +142,7 @@ export default function AdminDecisionDashboard() {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [mgr, setMgr] = useState<ManagerData | null>(null);
+  const [leadData, setLeadData] = useState<LeadData | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -151,6 +158,7 @@ export default function AdminDecisionDashboard() {
       apiGet<{ points: TrendPoint[] }>('/admin/risk/trend').then((t) => setTrend(t.points)).catch(() => null),
       loadFlags(),
       apiGet<ManagerData>('/admin/risk/managers').then(setMgr).catch(() => null),
+      apiGet<LeadData>('/admin/risk/leads').then(setLeadData).catch(() => null),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -398,7 +406,44 @@ export default function AdminDecisionDashboard() {
             )}
           </div>
 
-          {overview && <p className="text-[11px] mt-4 text-[#9b9890]">Risk last scanned {new Date(overview.generatedAt).toLocaleString('en-AE')} · deposit + contract-fairness + manager-oversight dimensions live. <Link href="/dashboard/admin/risk" className="text-[#2e9f82] font-semibold">Open the full risk board →</Link></p>}
+          {/* Lead responsiveness */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8]">
+              <h2 className="text-[13px] font-bold text-[#1a1916]">Lead responsiveness</h2>
+              {leadData && <span className="text-[11px] text-[#9b9890]">{leadData.totalLeads} leads tracked</span>}
+            </div>
+            {!leadData || leadData.totalLeads === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No leads in the system yet — slow first-response, stale-lead, ghosting and lead-poaching detectors activate automatically once leads start flowing.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4">
+                  {[
+                    { label: 'Slow first response', value: leadData.summary.frtBreaches, tone: 'bad' as const },
+                    { label: 'Stale leads', value: leadData.summary.stale, tone: 'warn' as const },
+                    { label: 'Ghosted warm leads', value: leadData.summary.ghosted, tone: 'warn' as const },
+                    { label: 'Possible poaching', value: leadData.summary.poaching, tone: 'bad' as const },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border border-[#e8e6e0] px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{s.label}</div>
+                      <div className="text-lg font-bold mt-1" style={{ color: s.value > 0 ? (s.tone === 'bad' ? '#b91c1c' : '#b45309') : '#1a7a5a' }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {leadData.frtBreaches.length > 0 && (
+                  <ul className="divide-y divide-[#f0ede8] border-t border-[#f0ede8] max-h-60 overflow-y-auto">
+                    {leadData.frtBreaches.slice(0, 8).map((l) => (
+                      <li key={l.leadId} className="px-4 py-2 flex items-center justify-between text-[12px]">
+                        <span className="truncate"><span className="font-semibold text-[#1a1916]">{l.customerName || `Lead #${l.leadId}`}</span> <span className="text-[#9b9890]">· {l.rpName}</span></span>
+                        <span className="text-[11px] font-semibold text-[#b91c1c] flex-shrink-0">no response · {Math.round(l.ageHours)}h</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+
+          {overview && <p className="text-[11px] mt-4 text-[#9b9890]">Risk last scanned {new Date(overview.generatedAt).toLocaleString('en-AE')} · deposit + contract-fairness + manager-oversight + lead-responsiveness dimensions live. <Link href="/dashboard/admin/risk" className="text-[#2e9f82] font-semibold">Open the full risk board →</Link></p>}
         </>
       )}
     </div>
