@@ -127,7 +127,12 @@ export default function DepositsPage() {
     setPendingStatus(status);
     setSettleDate(d.settledOn ?? new Date().toISOString().slice(0, 10));
     const amt = d.amount ?? 0;
-    const ded = d.settledDeductionAmount, ref = d.settledRefundAmount;
+    // Only reuse the saved split when re-opening the SAME outcome; switching outcome
+    // resets to that outcome's canonical default (else picking Returned after a Partial
+    // would keep the old deduction).
+    const same = d.status === status;
+    const ded = same ? d.settledDeductionAmount : null;
+    const ref = same ? d.settledRefundAmount : null;
     if (status === 'returned') {
       setSettleDeduction(ded != null ? String(ded) : '0');
       setSettleRefund(ref != null ? String(ref) : String(amt));
@@ -140,10 +145,18 @@ export default function DepositsPage() {
     }
   }
 
+  // Deducted and Refunded mirror each other (they sum to the deposit), so editing
+  // either re-derives the other.
   function onDeductionChange(d: Deposit, v: string) {
     setSettleDeduction(v);
     const ded = Number(v);
     if (v.trim() !== '' && Number.isFinite(ded)) setSettleRefund(String(Math.max(0, (d.amount ?? 0) - ded)));
+  }
+
+  function onRefundChange(d: Deposit, v: string) {
+    setSettleRefund(v);
+    const ref = Number(v);
+    if (v.trim() !== '' && Number.isFinite(ref)) setSettleDeduction(String(Math.max(0, (d.amount ?? 0) - ref)));
   }
 
   async function saveSettlement(d: Deposit) {
@@ -152,6 +165,9 @@ export default function DepositsPage() {
     const deduction = settleDeduction.trim() === '' ? null : Number(settleDeduction);
     if (refund != null && (!Number.isFinite(refund) || refund < 0)) { setSettleErr('Enter a valid refund amount'); return; }
     if (deduction != null && (!Number.isFinite(deduction) || deduction < 0)) { setSettleErr('Enter a valid deduction amount'); return; }
+    if (pendingStatus === 'partial_return' && refund == null && deduction == null) {
+      setSettleErr('Enter the refunded or deducted amount for a partial return'); return;
+    }
     setSettling(true); setSettleErr(null);
     try {
       const res = await fetch(`/api/contracts/${d.contractId}/deposits/${d.id.replace(/^sd_/, '')}`, {
@@ -399,7 +415,7 @@ export default function DepositsPage() {
                         </label>
                         <label className="block">
                           <span className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">Refunded</span>
-                          <input type="number" min="0" step="0.01" value={settleRefund} onChange={e => setSettleRefund(e.target.value)}
+                          <input type="number" min="0" step="0.01" value={settleRefund} onChange={e => onRefundChange(detail, e.target.value)}
                             className="w-full border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#2e9f82] mt-1" />
                         </label>
                       </div>
