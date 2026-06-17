@@ -5,15 +5,25 @@ import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
-  Wallet, BadgeCheck, Banknote,
+  Wallet, BadgeCheck, Banknote, Coins,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type SettlementStatus = 'draft' | 'sent' | 'agreed' | 'paid';
 type LineType = 'deduction' | 'due';
+type PayMethod = 'cash' | 'bank_transfer' | 'cheque' | 'card' | 'online';
+
+const METHOD_LABELS: Record<PayMethod, string> = {
+  cash: 'Cash',
+  bank_transfer: 'Bank transfer',
+  cheque: 'Cheque',
+  card: 'Card',
+  online: 'Online',
+};
 
 interface ApiLine { id?: number; label: string; amount: number; type: LineType }
+interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null }
 interface ApiSettlement {
   exists: boolean;
   id?: number;
@@ -24,6 +34,10 @@ interface ApiSettlement {
   tenantSignature: string | null;
   refundAmount: number | null;
   lines: ApiLine[];
+  payments: ApiPayment[];
+  chargesTotal: number;
+  paymentsReceivedTotal: number;
+  balance: number;
   sentAt: string | null;
   agreedAt: string | null;
   paidAt: string | null;
@@ -37,6 +51,7 @@ interface ContractMeta {
 }
 
 interface Row { key: string; label: string; amount: string; type: LineType }
+interface PayRow { key: string; amount: string; method: PayMethod; reference: string; receivedOn: string }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function aed(n: number) { return 'AED ' + new Intl.NumberFormat('en-AE', { maximumFractionDigits: 2 }).format(n); }
@@ -66,25 +81,32 @@ export default function SettlementPage() {
   const [deposit, setDeposit] = useState('0');
   const [notes, setNotes] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
+  const [payRows, setPayRows] = useState<PayRow[]>([]);
   const [stamps, setStamps] = useState<{ sentAt: string | null; agreedAt: string | null; paidAt: string | null }>({ sentAt: null, agreedAt: null, paidAt: null });
 
   const [isDirect, setIsDirect] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingPayments, setSavingPayments] = useState(false);
   const [acting, setActing] = useState<null | 'send' | 'paid'>(null);
   const [savedTick, setSavedTick] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Editable only as a draft. Once it's been sent to the customer the figures are
-  // shared/agreed and must not change — locked through sent → agreed → paid.
+  // Deposit/deduction figures are editable only as a draft. Once sent to the
+  // customer they're shared/agreed and must not change — locked through sent →
+  // agreed → paid.
   const locked = status !== 'draft';
+  // Payments collected from the tenant happen AFTER agreement, so they stay
+  // editable right up until the settlement is closed (marked paid).
+  const payLocked = status === 'paid';
 
   const apply = useCallback((s: ApiSettlement) => {
     setStatus(s.status);
     setDeposit(String(s.depositHeld ?? 0));
     setNotes(s.notes ?? '');
     setRows((s.lines ?? []).map(l => ({ key: uid(), label: l.label, amount: String(l.amount), type: l.type })));
+    setPayRows((s.payments ?? []).map(p => ({ key: uid(), amount: String(p.amount), method: p.method, reference: p.reference ?? '', receivedOn: p.receivedOn ?? '' })));
     setStamps({ sentAt: s.sentAt, agreedAt: s.agreedAt, paidAt: s.paidAt });
   }, []);
 
@@ -118,11 +140,18 @@ export default function SettlementPage() {
 
   const depositNum = Math.max(0, Number(deposit) || 0);
   const sumLines = rows.reduce((a, r) => a + (Math.max(0, Number(r.amount) || 0)), 0);
-  const refund = Math.round((depositNum - sumLines) * 100) / 100;
+  const sumPayments = payRows.reduce((a, r) => a + (Math.max(0, Number(r.amount) || 0)), 0);
+  // What's still owed/refundable once deposit, charges AND money collected from
+  // the tenant are netted. > 0 refund due, < 0 tenant still owes, 0 settled.
+  const balance = Math.round((depositNum - sumLines + sumPayments) * 100) / 100;
 
   function addRow(type: LineType) { setRows(r => [...r, { key: uid(), label: '', amount: '', type }]); }
   function updateRow(key: string, patch: Partial<Row>) { setRows(r => r.map(x => x.key === key ? { ...x, ...patch } : x)); }
   function removeRow(key: string) { setRows(r => r.filter(x => x.key !== key)); }
+
+  function addPayRow() { setPayRows(r => [...r, { key: uid(), amount: '', method: 'cash', reference: '', receivedOn: '' }]); }
+  function updatePayRow(key: string, patch: Partial<PayRow>) { setPayRows(r => r.map(x => x.key === key ? { ...x, ...patch } : x)); }
+  function removePayRow(key: string) { setPayRows(r => r.filter(x => x.key !== key)); }
 
   async function save(): Promise<boolean> {
     if (!contractId) return false;
@@ -147,6 +176,27 @@ export default function SettlementPage() {
     finally { setSaving(false); }
   }
 
+  async function savePayments(opts?: { silent?: boolean }): Promise<boolean> {
+    if (!contractId) return false;
+    setSavingPayments(true); setError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/settlement/payments`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payments: payRows
+            .filter(r => Number(r.amount) > 0)
+            .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
+        }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to save payments'); return false; }
+      const s = await res.json() as ApiSettlement;
+      apply(s);
+      if (!opts?.silent) { setSavedTick(true); setTimeout(() => setSavedTick(false), 2500); }
+      return true;
+    } catch { setError('Unexpected error. Please try again.'); return false; }
+    finally { setSavingPayments(false); }
+  }
+
   async function sendToCustomer() {
     setActing('send'); setError(null);
     const ok = await save();
@@ -168,6 +218,10 @@ export default function SettlementPage() {
       const ok = await save();
       if (!ok) { setActing(null); return; }
     }
+    // Flush any in-progress payments-received edits so the close balance check
+    // (backend rejects closing while the tenant still owes) sees the latest.
+    const okPay = await savePayments({ silent: true });
+    if (!okPay) { setActing(null); return; }
     try {
       const res = await fetch(`/api/contracts/${contractId}/settlement/paid`, { method: 'POST', credentials: 'include' });
       if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to mark paid'); return; }
@@ -276,15 +330,71 @@ export default function SettlementPage() {
         {rows.length === 0 && locked && <p className="text-xs text-[#9b9890]">No deductions — full deposit refunded.</p>}
       </div>
 
-      {/* Refund summary */}
+      {/* Payments received from the customer (e.g. when charges exceed the deposit) */}
+      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5"><Coins size={15} className="text-[#2e9f82]" /> Payments received</h2>
+          <span className="text-xs text-[#9b9890]">collected from the customer</span>
+        </div>
+        <p className="text-xs text-[#9b9890]">Money the customer pays you — e.g. when an overstay penalty or damages exceed the held deposit.</p>
+
+        {payRows.length > 0 && (
+          <div className="space-y-2">
+            {payRows.map(r => (
+              <div key={r.key} className="rounded-xl border border-[#eceae4] p-2.5 space-y-2">
+                <div className="grid grid-cols-[1fr_140px_150px_auto] gap-2 items-center">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-[#9b9890]">AED</span>
+                    <input type="number" min={0} step="0.01" value={r.amount} disabled={payLocked} placeholder="0"
+                      onChange={e => updatePayRow(r.key, { amount: e.target.value })}
+                      className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
+                  </div>
+                  <select value={r.method} disabled={payLocked} onChange={e => updatePayRow(r.key, { method: e.target.value as PayMethod })}
+                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] bg-white">
+                    {(Object.keys(METHOD_LABELS) as PayMethod[]).map(m => <option key={m} value={m}>{METHOD_LABELS[m]}</option>)}
+                  </select>
+                  <input type="date" value={r.receivedOn} disabled={payLocked}
+                    onChange={e => updatePayRow(r.key, { receivedOn: e.target.value })}
+                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] bg-white" />
+                  {!payLocked
+                    ? <button type="button" onClick={() => removePayRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={15} /></button>
+                    : <span className="w-[15px]" />}
+                </div>
+                <input type="text" value={r.reference} disabled={payLocked} placeholder="Reference (cheque no, transfer ref) — optional"
+                  onChange={e => updatePayRow(r.key, { reference: e.target.value })}
+                  className="w-full text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6]" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!payLocked && (
+          <div className="flex items-center justify-between pt-1">
+            <button type="button" onClick={addPayRow} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75"><Plus size={13} /> Add payment</button>
+            <button type="button" onClick={() => void savePayments()} disabled={savingPayments || acting !== null}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#1a1916] border border-[#e8e6e0] rounded-full px-3 py-1.5 hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
+              {savingPayments ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save payments
+            </button>
+          </div>
+        )}
+        {payRows.length === 0 && payLocked && <p className="text-xs text-[#9b9890]">No payments recorded.</p>}
+      </div>
+
+      {/* Settlement summary */}
       <div className="bg-[#f0faf6] rounded-2xl border border-[#c5e8df] p-5 space-y-2">
         <div className="flex items-center justify-between text-sm"><span className="text-[#6b6860]">Deposit held</span><span className="font-semibold text-[#1a1916] tabular-nums">{aed(depositNum)}</span></div>
         <div className="flex items-center justify-between text-sm"><span className="text-[#6b6860]">Less deductions &amp; dues</span><span className="font-semibold text-[#b91c1c] tabular-nums">− {aed(sumLines)}</span></div>
+        {sumPayments > 0 && (
+          <div className="flex items-center justify-between text-sm"><span className="text-[#6b6860]">Plus payments received</span><span className="font-semibold text-[#1a7a5a] tabular-nums">+ {aed(sumPayments)}</span></div>
+        )}
         <div className="flex items-center justify-between border-t border-[#c5e8df] pt-2 mt-1">
-          <span className="text-sm font-bold text-[#1a7a5a]">Net refund to customer</span>
-          <span className={`text-xl font-bold tabular-nums ${refund < 0 ? 'text-[#b91c1c]' : 'text-[#1a7a5a]'}`}>{aed(refund)}</span>
+          <span className="text-sm font-bold text-[#1a7a5a]">
+            {balance > 0 ? 'Refund due to customer' : balance < 0 ? 'Customer still owes' : 'Settled in full'}
+          </span>
+          <span className={`text-xl font-bold tabular-nums ${balance < 0 ? 'text-[#b91c1c]' : 'text-[#1a7a5a]'}`}>{aed(Math.abs(balance))}</span>
         </div>
-        {refund < 0 && <p className="text-xs text-[#b91c1c]">Deductions exceed the deposit — the customer owes the difference.</p>}
+        {balance < 0 && <p className="text-xs text-[#b91c1c]">Charges exceed the deposit — record the {aed(Math.abs(balance))} the customer still owes under “Payments received” before closing.</p>}
+        {balance === 0 && sumLines > 0 && <p className="text-xs text-[#1a7a5a]">Fully settled — nothing outstanding either way.</p>}
       </div>
 
       {/* Notes */}
@@ -313,10 +423,14 @@ export default function SettlementPage() {
           </>
         )}
         {(status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
-          <button onClick={() => void markPaid()} disabled={acting !== null}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 transition-colors">
-            {acting === 'paid' ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />} Mark refund paid
-          </button>
+          <div className="flex flex-col gap-1">
+            <button onClick={() => void markPaid()} disabled={acting !== null || balance < -0.005}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+              {acting === 'paid' ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />}
+              {balance > 0 ? 'Mark refund paid' : 'Mark settled & close'}
+            </button>
+            {balance < -0.005 && <span className="text-xs text-[#b91c1c]">Record the {aed(Math.abs(balance))} still owed before closing.</span>}
+          </div>
         )}
         {status === 'paid' && (
           <div className="flex items-center gap-2 text-sm font-semibold text-[#1a7a5a]"><BadgeCheck size={16} /> Settlement complete</div>

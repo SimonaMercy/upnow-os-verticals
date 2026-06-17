@@ -165,6 +165,8 @@ interface ApiSettlement {
   notes: string | null;
   refundAmount: number | null;
   lines: ApiSettlementLine[];
+  paymentsReceivedTotal?: number;
+  balance?: number;
   sentAt: string | null;
   agreedAt: string | null;
   paidAt: string | null;
@@ -3655,7 +3657,12 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
   const aedF = (n: number) => 'AED ' + new Intl.NumberFormat('en-AE', { maximumFractionDigits: 2 }).format(n);
   const fmtDT = (d: string | null) => d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const sumLines = (settlement.lines ?? []).reduce((a, l) => a + Number(l.amount || 0), 0);
-  const refund = settlement.refundAmount != null ? settlement.refundAmount : settlement.depositHeld - sumLines;
+  const paid = Number(settlement.paymentsReceivedTotal ?? 0);
+  // Final position after deposit, charges AND any money you've paid back are netted.
+  // > 0 refund due to you, < 0 you still owe, 0 settled in full.
+  const balance = settlement.balance != null
+    ? settlement.balance
+    : Math.round((settlement.depositHeld - sumLines + paid) * 100) / 100;
 
   async function agree() {
     setBusy(true); setErr(null);
@@ -3695,9 +3702,17 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
             <span style={{ fontWeight: 600, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>− {aedF(sumLines)}</span>
           </div>
         )}
+        {paid > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+            <span style={{ color: 'var(--mute)' }}>+ Payments you made</span>
+            <span style={{ fontWeight: 600, color: 'var(--jade-deep)', fontVariantNumeric: 'tabular-nums' }}>+ {aedF(paid)}</span>
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--mist-strong)', paddingTop: 8, marginTop: 2 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>Net refund to you</span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: refund < 0 ? '#b91c1c' : 'var(--jade-deep)', fontVariantNumeric: 'tabular-nums' }}>{aedF(refund)}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>
+            {balance > 0 ? 'Net refund to you' : balance < 0 ? 'You still owe' : 'Settled in full'}
+          </span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: balance < 0 ? '#b91c1c' : 'var(--jade-deep)', fontVariantNumeric: 'tabular-nums' }}>{aedF(Math.abs(balance))}</span>
         </div>
       </div>
 
@@ -3713,14 +3728,18 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
           }}>
             {busy ? 'Submitting…' : 'Agree to settlement'}
           </button>
-          <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0 }}>By agreeing you accept the deductions above. Your refund will be processed afterwards.</p>
+          <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0 }}>
+            By agreeing you accept the charges above.{balance > 0 ? ' Your refund will be processed afterwards.' : balance < 0 ? ' Please settle the balance with your landlord.' : ''}
+          </p>
         </>
       )}
       {settlement.status === 'agreed' && (
-        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>You agreed{settlement.agreedAt ? ` on ${fmtDT(settlement.agreedAt)}` : ''} — your refund is being processed.</p>
+        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>
+          You agreed{settlement.agreedAt ? ` on ${fmtDT(settlement.agreedAt)}` : ''}{balance < 0 ? ' — please settle the balance with your landlord.' : ' — your refund is being processed.'}
+        </p>
       )}
       {settlement.status === 'paid' && (
-        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>Refund processed{settlement.paidAt ? ` on ${fmtDT(settlement.paidAt)}` : ''}.</p>
+        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>{balance > 0 ? 'Refund processed' : 'Settlement completed'}{settlement.paidAt ? ` on ${fmtDT(settlement.paidAt)}` : ''}.</p>
       )}
     </div>
   );
