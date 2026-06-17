@@ -1,85 +1,41 @@
 /**
  * Super-Admin Risk Dashboard (dashboard/admin/risk)
  *
- * Platform-wide rental-provider oversight: "which RPs are exploiting customers
- * (or about to), and how much customer money is exposed right now?"
- *
- * Live dimensions: DEPOSIT (trapped deposits, stalled refunds, excessive
- * deductions, double-charges) + FAIRNESS (abusive renewal hikes, direct
- * termination of paying tenants). Per-RP composite watchlist blends both.
- *
- * Data: GET /admin/risk/overview, /deposits, /fairness, /rp/:id.
- * Amounts are WHOLE AED.
+ * "Which RPs are exploiting customers (or about to), and how much customer
+ * money is exposed right now?" Live dimensions: DEPOSIT + FAIRNESS, with a
+ * per-RP composite watchlist, exposure/alert charts, and drill-down.
+ * Amounts are WHOLE AED. Chart style matches reports/ExecutiveOverview.
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  DashboardPage,
-  StatCard,
-  SectionHeader,
-  DashboardEmpty,
-} from '@/components/dashboard/DashboardWidgets';
-import {
-  Wallet,
-  AlertTriangle,
-  Clock,
-  Scissors,
-  Copy,
-  ShieldAlert,
-  ChevronRight,
-  ArrowLeft,
-  RefreshCw,
-  Banknote,
-  TrendingUp,
-  UserMinus,
+  Wallet, AlertTriangle, Clock, Scissors, Copy, ShieldAlert, ChevronRight,
+  ArrowLeft, RefreshCw, Banknote, TrendingUp, UserMinus, Loader2,
 } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+} from 'recharts';
 import { apiGet, apiPost } from '@/lib/api';
 
 /* ── Types ── */
 type Tier = 'ok' | 'monitor' | 'review' | 'critical';
-
 interface OverviewKpis {
-  totalDepositLiabilityAed: number;
-  totalDepositCount: number;
-  depositsAtRiskAed: number;
-  depositsAtRiskCount: number;
-  criticalTrapCount: number;
-  slowRefundCount: number;
-  excessiveDeductionCount: number;
-  doubleChargeCount: number;
-  renewalHikeCount: number;
-  severeHikeCount: number;
-  directTerminationCount: number;
-  payingEvictionCount: number;
-  rpsOnWatchlist: number;
-  openCriticalAlerts: number;
+  totalDepositLiabilityAed: number; totalDepositCount: number;
+  depositsAtRiskAed: number; depositsAtRiskCount: number; criticalTrapCount: number;
+  slowRefundCount: number; excessiveDeductionCount: number; doubleChargeCount: number;
+  renewalHikeCount: number; severeHikeCount: number;
+  directTerminationCount: number; payingEvictionCount: number;
+  rpsOnWatchlist: number; openCriticalAlerts: number;
 }
 interface LeaderRow {
-  rpId: number;
-  name: string;
-  complianceStatus: string;
-  trapCount: number;
-  trapExposureAed: number;
-  maxTrapDays: number;
-  slowRefundCount: number;
-  excessiveDeductionCount: number;
-  doubleChargeCount: number;
-  renewalHikeCount: number;
-  maxHikePct: number;
-  directTerminationCount: number;
-  payingEvictionCount: number;
-  depositScore: number;
-  fairnessScore: number;
-  compositeScore: number;
-  tier: Tier;
+  rpId: number; name: string; complianceStatus: string;
+  trapCount: number; trapExposureAed: number; maxTrapDays: number;
+  renewalHikeCount: number; directTerminationCount: number; payingEvictionCount: number;
+  depositScore: number; fairnessScore: number; compositeScore: number; tier: Tier;
 }
-interface Overview {
-  generatedAt: string;
-  kpis: OverviewKpis;
-  leaderboard: LeaderRow[];
-}
+interface Overview { generatedAt: string; kpis: OverviewKpis; leaderboard: LeaderRow[]; }
 interface TrapRow { depositId: number; contractId: number; rpName: string; amountAed: number; endDate: string; daysOverdue: number; }
 interface SlowRefundRow { settlementId: number; contractId: number; rpName: string; refundAed: number; status: string; daysStalled: number; }
 interface DeductionRow { settlementId: number; contractId: number; rpName: string; depositHeldAed: number; deductionAed: number; deductionRatio: number; }
@@ -89,50 +45,73 @@ interface HikeRow { contractId: number; rpName: string; priorRent: number; newRe
 interface EvictionRow { contractId: number; rpName: string; status: string; payingTenant: boolean; paidAed: number; terminationRequestedAt: string | null; }
 interface FairnessAlerts { renewalHikes: HikeRow[]; directEvictions: EvictionRow[]; }
 
-/* ── Helpers ── */
-function formatAED(aed: number | null | undefined): string {
+/* ── Style constants (match ExecutiveOverview) ── */
+const RED = '#dc2626', AMBER = '#d97706', PURPLE = '#7c3aed', GRAY = '#d4d2cc';
+const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
+
+function fmtAED(aed: number | null | undefined): string {
   if (aed == null) return '—';
-  if (aed >= 1_000_000) return `AED ${(aed / 1_000_000).toFixed(1)}M`;
-  if (aed >= 1000) return `AED ${(aed / 1000).toFixed(aed % 1000 === 0 ? 0 : 1)}k`;
-  return `AED ${aed.toLocaleString('en-AE')}`;
+  const a = Math.abs(aed);
+  if (a >= 1_000_000) return `AED ${(aed / 1_000_000).toFixed(2)}M`;
+  if (a >= 1_000) return `AED ${Math.round(aed / 1_000)}K`;
+  return `AED ${Math.round(aed).toLocaleString('en-AE')}`;
 }
+const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}K` : String(v));
 
 const TIER_STYLE: Record<Tier, { bg: string; fg: string; label: string }> = {
-  critical: { bg: '#fef2f2', fg: 'var(--color-error)', label: 'Critical' },
-  review: { bg: '#fef9eb', fg: 'var(--color-gold)', label: 'Review' },
-  monitor: { bg: 'var(--color-base-100)', fg: 'var(--color-neutral-600)', label: 'Monitor' },
-  ok: { bg: '#ecfdf5', fg: '#047857', label: 'OK' },
+  critical: { bg: '#fef2f2', fg: '#b91c1c', label: 'Critical' },
+  review: { bg: '#fffbeb', fg: '#b45309', label: 'Review' },
+  monitor: { bg: '#f5f4f0', fg: '#6b6860', label: 'Monitor' },
+  ok: { bg: '#f0faf6', fg: '#1a7a5a', label: 'OK' },
 };
 
-function TierBadge({ tier }: { tier: Tier }) {
-  const s = TIER_STYLE[tier] ?? TIER_STYLE.ok;
+function KpiTile({ icon: Icon, label, value, sub, tone = 'neutral' }: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  label: string; value: string; sub?: string; tone?: 'neutral' | 'good' | 'bad' | 'warn';
+}) {
+  const valueCls = tone === 'bad' ? 'text-[#b91c1c]' : tone === 'warn' ? 'text-[#b45309]' : tone === 'good' ? 'text-[#1a7a5a]' : 'text-[#1a1916]';
   return (
-    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: s.bg, color: s.fg }}>
-      {s.label}
-    </span>
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">
+        <Icon size={12} /> {label}
+      </div>
+      <p className={`text-xl font-bold mt-1.5 leading-none ${valueCls}`}>{value}</p>
+      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
+    </div>
   );
 }
 
-function AlertList<T>({
-  title, icon: Icon, count, rows, emptyText, render, accent,
-}: {
+function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
+      <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
+      {sub && <p className="text-[11px] text-[#9b9890] mt-0.5 mb-1">{sub}</p>}
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function TierBadge({ tier }: { tier: Tier }) {
+  const s = TIER_STYLE[tier] ?? TIER_STYLE.ok;
+  return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: s.bg, color: s.fg }}>{s.label}</span>;
+}
+
+function AlertList<T>({ title, icon: Icon, count, rows, emptyText, render, accent }: {
   title: string; icon: typeof Wallet; count: number; rows: T[];
   emptyText: string; render: (row: T, i: number) => React.ReactNode; accent: string;
 }) {
   return (
-    <div className="rounded-2xl bg-white overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: 'var(--color-base-200)' }}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${accent}1a` }}>
-          <Icon size={16} style={{ color: accent }} />
-        </div>
-        <h3 className="font-semibold text-sm flex-1" style={{ color: 'var(--color-neutral-900)' }}>{title}</h3>
-        <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: count ? `${accent}1a` : 'var(--color-base-100)', color: count ? accent : 'var(--color-neutral-400)' }}>{count}</span>
+    <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#f0ede8]">
+        <Icon size={14} style={{ color: accent }} />
+        <h3 className="font-semibold text-[13px] flex-1 text-[#1a1916]">{title}</h3>
+        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: count ? `${accent}1a` : '#f5f4f0', color: count ? accent : '#9b9890' }}>{count}</span>
       </div>
       {rows.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-center" style={{ color: 'var(--color-neutral-400)' }}>{emptyText}</p>
+        <p className="px-4 py-5 text-[12px] text-center text-[#9b9890]">{emptyText}</p>
       ) : (
-        <ul className="divide-y" style={{ borderColor: 'var(--color-base-200)' }}>
-          {rows.map((r, i) => (<li key={i} className="px-4 py-3 text-sm">{render(r, i)}</li>))}
+        <ul className="divide-y divide-[#f0ede8] max-h-80 overflow-y-auto">
+          {rows.map((r, i) => (<li key={i} className="px-4 py-2.5 text-[12px]">{render(r, i)}</li>))}
         </ul>
       )}
     </div>
@@ -170,220 +149,212 @@ export default function AdminRiskPage() {
   const selectRp = useCallback((rpId: number, name: string) => {
     setSelected({ id: rpId, name });
     apiGet<{ deposits: DepositAlerts; fairness: FairnessAlerts }>(`/admin/risk/rp/${rpId}`)
-      .then((r) => { setDeposits(r.deposits); setFairness(r.fairness); })
-      .catch(() => null);
+      .then((r) => { setDeposits(r.deposits); setFairness(r.fairness); }).catch(() => null);
   }, []);
-
   const clearRp = useCallback(() => { setSelected(null); loadAllAlerts(); }, [loadAllAlerts]);
-
   const recompute = useCallback(async () => {
     setRecomputing(true);
-    try {
-      await apiPost('/admin/risk/recompute');
-      loadOverview();
-      if (!selected) loadAllAlerts();
-    } catch { /* non-blocking */ } finally { setRecomputing(false); }
+    try { await apiPost('/admin/risk/recompute'); loadOverview(); if (!selected) loadAllAlerts(); }
+    catch { /* non-blocking */ } finally { setRecomputing(false); }
   }, [loadOverview, loadAllAlerts, selected]);
 
+  // ── chart data (computed from what we already fetched) ──
+  const agingData = useMemo(() => {
+    const b = [{ bucket: '31–60d', aed: 0 }, { bucket: '61–90d', aed: 0 }, { bucket: '90d+', aed: 0 }];
+    for (const t of deposits?.trap ?? []) {
+      if (t.daysOverdue > 90) b[2].aed += t.amountAed;
+      else if (t.daysOverdue > 60) b[1].aed += t.amountAed;
+      else b[0].aed += t.amountAed;
+    }
+    return b;
+  }, [deposits]);
+
+  const alertMix = useMemo(() => {
+    const k = overview?.kpis;
+    if (!k) return [];
+    return [
+      { name: 'Trapped', value: k.depositsAtRiskCount, fill: RED },
+      { name: 'Paying evict.', value: k.payingEvictionCount, fill: RED },
+      { name: 'Excess ded.', value: k.excessiveDeductionCount, fill: AMBER },
+      { name: 'Stalled', value: k.slowRefundCount, fill: AMBER },
+      { name: 'Renewal hike', value: k.renewalHikeCount, fill: AMBER },
+      { name: 'Double-chg', value: k.doubleChargeCount, fill: PURPLE },
+    ];
+  }, [overview]);
+
   if (!allowed) {
-    return (
-      <DashboardPage title="Risk Dashboard" subtitle="Platform-wide rental-provider oversight.">
-        <DashboardEmpty message="This dashboard is restricted to platform admins." />
-      </DashboardPage>
-    );
+    return <div className="p-6 max-w-7xl mx-auto"><div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 text-center text-sm text-[#9b9890]">This dashboard is restricted to platform admins.</div></div>;
   }
 
   const k = overview?.kpis;
 
   return (
-    <DashboardPage
-      title="Risk Dashboard"
-      subtitle="Are rental providers supporting customers — or exploiting them? Deposit & contract-fairness watchlist."
-      actions={isSuperAdmin ? (
-        <button onClick={recompute} disabled={recomputing}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
-          style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>
-          <RefreshCw size={15} className={recomputing ? 'animate-spin' : ''} />
-          {recomputing ? 'Recomputing…' : 'Recompute snapshot'}
-        </button>
-      ) : undefined}
-    >
-      {/* Headline scorecards (deposit + fairness) */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
-        <StatCard label="Deposits at risk" value={k ? formatAED(k.depositsAtRiskAed) : '—'} icon={Wallet}
-          trend={k ? `${k.depositsAtRiskCount} trapped` : 'Loading…'} color="error" />
-        <StatCard label="Paying-tenant evictions" value={k ? String(k.payingEvictionCount) : '—'} icon={UserMinus}
-          trend={k ? `${k.directTerminationCount} direct terms` : 'Loading…'} color="error" />
-        <StatCard label="Renewal hikes (above mkt)" value={k ? String(k.renewalHikeCount) : '—'} icon={TrendingUp}
-          trend={k ? `${k.severeHikeCount} severe` : 'Loading…'} color="gold" />
-        <StatCard label="RPs on watchlist" value={k ? String(k.rpsOnWatchlist) : '—'} icon={ShieldAlert}
-          trend="Composite ≥ 60" color="gold" />
-        <StatCard label="Open critical alerts" value={k ? String(k.openCriticalAlerts) : '—'} icon={AlertTriangle}
-          trend={k ? `${k.criticalTrapCount} trapped > 90d` : 'Loading…'} color="error" />
-        <StatCard label="Total deposit liability" value={k ? formatAED(k.totalDepositLiabilityAed) : '—'} icon={Banknote}
-          trend={k ? `${k.totalDepositCount} held/partial` : 'Loading…'} />
-      </div>
-
-      {/* Composite watchlist */}
-      <SectionHeader title="Rental-provider risk watchlist"
-        action={overview ? <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Updated {new Date(overview.generatedAt).toLocaleString('en-AE')}</span> : undefined} />
-      <div className="rounded-2xl bg-white overflow-hidden mb-8" style={{ boxShadow: 'var(--shadow-sm)' }}>
-        {loading ? (
-          <p className="px-4 py-6 text-sm text-center" style={{ color: 'var(--color-neutral-400)' }}>Loading…</p>
-        ) : !overview || overview.leaderboard.length === 0 ? (
-          <p className="px-4 py-8 text-sm text-center" style={{ color: 'var(--color-neutral-400)' }}>No risk signals across any rental provider. 🎉</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ color: 'var(--color-neutral-500)', backgroundColor: 'var(--color-base-100)' }}>
-                  <th className="text-left font-medium px-4 py-2">Rental provider</th>
-                  <th className="text-center font-medium px-3 py-2">Tier</th>
-                  <th className="text-right font-medium px-3 py-2">Score</th>
-                  <th className="text-right font-medium px-3 py-2">Trapped</th>
-                  <th className="text-right font-medium px-3 py-2">At risk</th>
-                  <th className="text-right font-medium px-3 py-2">Hikes</th>
-                  <th className="text-right font-medium px-3 py-2">Evictions</th>
-                  <th className="px-3 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {overview.leaderboard.map((r) => (
-                  <tr key={r.rpId} onClick={() => selectRp(r.rpId, r.name)}
-                    className="cursor-pointer transition-colors hover:bg-[var(--color-base-100)] border-t" style={{ borderColor: 'var(--color-base-200)' }}>
-                    <td className="px-4 py-3">
-                      <div className="font-medium" style={{ color: 'var(--color-neutral-900)' }}>{r.name}</div>
-                      <div className="text-xs capitalize" style={{ color: 'var(--color-neutral-400)' }}>{r.complianceStatus.replace(/_/g, ' ')}</div>
-                    </td>
-                    <td className="px-3 py-3 text-center"><TierBadge tier={r.tier} /></td>
-                    <td className="px-3 py-3 text-right font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{r.compositeScore}</td>
-                    <td className="px-3 py-3 text-right" style={{ color: 'var(--color-neutral-700)' }}>{r.trapCount > 0 ? `${r.trapCount}${r.maxTrapDays >= 90 ? ' ⚠' : ''}` : '—'}</td>
-                    <td className="px-3 py-3 text-right" style={{ color: 'var(--color-neutral-700)' }}>{r.trapExposureAed ? formatAED(r.trapExposureAed) : '—'}</td>
-                    <td className="px-3 py-3 text-right" style={{ color: 'var(--color-neutral-700)' }}>{r.renewalHikeCount || '—'}</td>
-                    <td className="px-3 py-3 text-right" style={{ color: r.payingEvictionCount ? 'var(--color-error)' : 'var(--color-neutral-700)' }}>{r.payingEvictionCount || (r.directTerminationCount ? `0/${r.directTerminationCount}` : '—')}</td>
-                    <td className="px-3 py-3 text-right"><ChevronRight size={16} style={{ color: 'var(--color-neutral-300)' }} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div>
+          <h1 className="text-lg font-bold text-[#1a1916]">Risk Dashboard</h1>
+          <p className="text-[12px] text-[#9b9890] mt-0.5">Are rental providers supporting customers — or exploiting them? Deposit &amp; contract-fairness oversight.</p>
+        </div>
+        {isSuperAdmin && (
+          <button onClick={recompute} disabled={recomputing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold transition-colors disabled:opacity-50 bg-[#f0faf6] text-[#1a7a5a] border border-[#bbe5d6]">
+            <RefreshCw size={13} className={recomputing ? 'animate-spin' : ''} />
+            {recomputing ? 'Recomputing…' : 'Recompute'}
+          </button>
         )}
       </div>
 
-      {/* Alerts (filtered to a selected RP, or all) */}
-      <SectionHeader title={selected ? `Alerts — ${selected.name}` : 'Risk alerts'}
-        action={selected ? (
-          <button onClick={clearRp} className="flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--color-primary)' }}>
-            <ArrowLeft size={13} /> All providers
-          </button>
-        ) : undefined} />
+      {loading && !overview ? (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 flex items-center justify-center">
+          <Loader2 size={18} className="animate-spin text-[#2e9f82]" /><span className="ml-2 text-sm text-[#6b6860]">Loading risk overview…</span>
+        </div>
+      ) : (
+        <>
+          {/* KPI tiles (compact) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+            <KpiTile icon={Wallet} label="Deposits at risk" value={k ? fmtAED(k.depositsAtRiskAed) : '—'} sub={k ? `${k.depositsAtRiskCount} trapped · ${k.criticalTrapCount} over 90d` : ''} tone="bad" />
+            <KpiTile icon={UserMinus} label="Paying-tenant evictions" value={k ? String(k.payingEvictionCount) : '—'} sub={k ? `${k.directTerminationCount} direct terminations` : ''} tone={k && k.payingEvictionCount > 0 ? 'bad' : 'neutral'} />
+            <KpiTile icon={TrendingUp} label="Renewal hikes" value={k ? String(k.renewalHikeCount) : '—'} sub={k ? `${k.severeHikeCount} severe · above market` : ''} tone={k && k.renewalHikeCount > 0 ? 'warn' : 'neutral'} />
+            <KpiTile icon={ShieldAlert} label="RPs on watchlist" value={k ? String(k.rpsOnWatchlist) : '—'} sub="composite score ≥ 60" tone={k && k.rpsOnWatchlist > 0 ? 'warn' : 'neutral'} />
+            <KpiTile icon={AlertTriangle} label="Open critical alerts" value={k ? String(k.openCriticalAlerts) : '—'} sub="high-severity, last scan" tone={k && k.openCriticalAlerts > 0 ? 'bad' : 'good'} />
+            <KpiTile icon={Banknote} label="Deposit liability" value={k ? fmtAED(k.totalDepositLiabilityAed) : '—'} sub={k ? `${k.totalDepositCount} held / partial` : ''} />
+          </div>
 
-      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-neutral-400)' }}>Deposits</p>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <AlertList title="Trapped deposits" icon={Wallet} accent="#dc2626"
-          count={deposits?.trap.length ?? 0} rows={deposits?.trap ?? []}
-          emptyText="No deposits held past a closed lease."
-          render={(r: TrapRow) => (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate" style={{ color: 'var(--color-neutral-900)' }}>{r.rpName}</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Contract #{r.contractId} · ended {new Date(r.endDate).toLocaleDateString('en-AE')}</div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div className="font-semibold" style={{ color: 'var(--color-error)' }}>{formatAED(r.amountAed)}</div>
-                <div className="text-xs" style={{ color: r.daysOverdue >= 90 ? 'var(--color-error)' : 'var(--color-neutral-400)' }}>{r.daysOverdue}d overdue</div>
-              </div>
-            </div>
-          )} />
-        <AlertList title="Stalled refunds" icon={Clock} accent="#d97706"
-          count={deposits?.slowRefund.length ?? 0} rows={deposits?.slowRefund ?? []}
-          emptyText="No settlements stalled past SLA."
-          render={(r: SlowRefundRow) => (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate" style={{ color: 'var(--color-neutral-900)' }}>{r.rpName}</div>
-                <div className="text-xs capitalize" style={{ color: 'var(--color-neutral-400)' }}>Contract #{r.contractId} · {r.status}</div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div className="font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{formatAED(r.refundAed)}</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>{r.daysStalled}d stalled</div>
-              </div>
-            </div>
-          )} />
-        <AlertList title="Excessive deductions" icon={Scissors} accent="#dc2626"
-          count={deposits?.excessiveDeduction.length ?? 0} rows={deposits?.excessiveDeduction ?? []}
-          emptyText="No settlements with outsized damage deductions."
-          render={(r: DeductionRow) => (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate" style={{ color: 'var(--color-neutral-900)' }}>{r.rpName}</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Contract #{r.contractId} · {formatAED(r.deductionAed)} of {formatAED(r.depositHeldAed)}</div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div className="font-semibold" style={{ color: 'var(--color-error)' }}>{r.deductionRatio}%</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>deducted</div>
-              </div>
-            </div>
-          )} />
-        <AlertList title="Possible double-charges" icon={Copy} accent="#7c3aed"
-          count={deposits?.doubleCharge.length ?? 0} rows={deposits?.doubleCharge ?? []}
-          emptyText="No contracts with duplicate live deposits."
-          render={(r: DoubleChargeRow) => (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate" style={{ color: 'var(--color-neutral-900)' }}>{r.rpName}</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Contract #{r.contractId} · {r.depositCount} deposits on file</div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div className="font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{formatAED(r.totalAed)}</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>total held</div>
-              </div>
-            </div>
-          )} />
-      </div>
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+            <ChartCard title="Customer deposits at risk by age" sub="AED held past a closed lease, bucketed by how overdue the refund is">
+              <ResponsiveContainer width="100%" height={210}>
+                <BarChart data={agingData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={aedAxis} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={44} />
+                  <Tooltip formatter={(v: unknown) => [fmtAED(Number(v)), 'At risk'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                  <Bar dataKey="aed" radius={[4, 4, 0, 0]}>
+                    {agingData.map((d, i) => (<Cell key={i} fill={d.bucket === '90d+' ? RED : AMBER} />))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Risk alerts by type" sub="Open findings across the deposit & fairness dimensions">
+              <ResponsiveContainer width="100%" height={210}>
+                <BarChart data={alertMix} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={28} />
+                  <Tooltip formatter={(v: unknown) => [String(v), 'Alerts'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {alertMix.map((d, i) => (<Cell key={i} fill={d.fill} />))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
 
-      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--color-neutral-400)' }}>Contract fairness</p>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <AlertList title="Direct termination of paying tenants" icon={UserMinus} accent="#dc2626"
-          count={fairness?.directEvictions.length ?? 0} rows={fairness?.directEvictions ?? []}
-          emptyText="No direct (no-consent) terminations."
-          render={(r: EvictionRow) => (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate" style={{ color: 'var(--color-neutral-900)' }}>{r.rpName}</div>
-                <div className="text-xs capitalize" style={{ color: 'var(--color-neutral-400)' }}>Contract #{r.contractId} · {r.status}{r.terminationRequestedAt ? ` · ${new Date(r.terminationRequestedAt).toLocaleDateString('en-AE')}` : ''}</div>
+          {/* Watchlist */}
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-bold text-[#1a1916]">Rental-provider risk watchlist</h2>
+            {overview && <span className="text-[11px] text-[#9b9890]">Updated {new Date(overview.generatedAt).toLocaleString('en-AE')}</span>}
+          </div>
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mb-6">
+            {!overview || overview.leaderboard.length === 0 ? (
+              <p className="px-4 py-8 text-[13px] text-center text-[#9b9890]">No risk signals across any rental provider. 🎉</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                      <th className="text-left font-semibold px-4 py-2">Rental provider</th>
+                      <th className="text-center font-semibold px-3 py-2">Tier</th>
+                      <th className="text-right font-semibold px-3 py-2">Score</th>
+                      <th className="text-right font-semibold px-3 py-2">Trapped</th>
+                      <th className="text-right font-semibold px-3 py-2">At risk</th>
+                      <th className="text-right font-semibold px-3 py-2">Hikes</th>
+                      <th className="text-right font-semibold px-3 py-2">Evictions</th>
+                      <th className="px-3 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.leaderboard.map((r) => (
+                      <tr key={r.rpId} onClick={() => selectRp(r.rpId, r.name)} className="cursor-pointer transition-colors hover:bg-[#faf9f7] border-t border-[#f0ede8]">
+                        <td className="px-4 py-2.5">
+                          <div className="font-semibold text-[#1a1916]">{r.name}</div>
+                          <div className="text-[11px] capitalize text-[#9b9890]">{r.complianceStatus.replace(/_/g, ' ')}</div>
+                        </td>
+                        <td className="px-3 py-2.5 text-center"><TierBadge tier={r.tier} /></td>
+                        <td className="px-3 py-2.5 text-right font-bold text-[#1a1916]">{r.compositeScore}</td>
+                        <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.trapCount > 0 ? `${r.trapCount}${r.maxTrapDays >= 90 ? ' ⚠' : ''}` : '—'}</td>
+                        <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.trapExposureAed ? fmtAED(r.trapExposureAed) : '—'}</td>
+                        <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.renewalHikeCount || '—'}</td>
+                        <td className="px-3 py-2.5 text-right font-medium" style={{ color: r.payingEvictionCount ? RED : '#3f3d39' }}>{r.payingEvictionCount || (r.directTerminationCount ? `0/${r.directTerminationCount}` : '—')}</td>
+                        <td className="px-3 py-2.5 text-right"><ChevronRight size={15} className="text-[#d4d2cc]" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="text-right flex-shrink-0">
-                {r.payingTenant ? (
-                  <>
-                    <div className="font-semibold" style={{ color: 'var(--color-error)' }}>Paying</div>
-                    <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>{formatAED(r.paidAed)} paid</div>
-                  </>
-                ) : (
-                  <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>no payments</div>
-                )}
-              </div>
-            </div>
-          )} />
-        <AlertList title="Abusive renewal hikes" icon={TrendingUp} accent="#d97706"
-          count={fairness?.renewalHikes.length ?? 0} rows={fairness?.renewalHikes ?? []}
-          emptyText="No above-market renewal hikes."
-          render={(r: HikeRow) => (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium truncate" style={{ color: 'var(--color-neutral-900)' }}>{r.rpName}</div>
-                <div className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Contract #{r.contractId} · {formatAED(r.priorRent)} → {formatAED(r.newRent)}{r.marketPrice ? ` · mkt ${formatAED(r.marketPrice)}` : ''}</div>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <div className="font-semibold" style={{ color: 'var(--color-gold)' }}>+{r.hikePct}%</div>
-              </div>
-            </div>
-          )} />
-      </div>
+            )}
+          </div>
 
-      <p className="text-xs mt-6" style={{ color: 'var(--color-neutral-400)' }}>
-        Live dimensions: deposit + contract fairness. Manager-oversight and lead-responsiveness dimensions land next.
-      </p>
-    </DashboardPage>
+          {/* Alerts */}
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-bold text-[#1a1916]">{selected ? `Alerts — ${selected.name}` : 'Risk alerts'}</h2>
+            {selected && <button onClick={clearRp} className="flex items-center gap-1 text-[12px] font-semibold text-[#2e9f82]"><ArrowLeft size={13} /> All providers</button>}
+          </div>
+
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 text-[#9b9890]">Deposits</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
+            <AlertList title="Trapped deposits" icon={Wallet} accent={RED} count={deposits?.trap.length ?? 0} rows={deposits?.trap ?? []} emptyText="No deposits held past a closed lease."
+              render={(r: TrapRow) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · ended {new Date(r.endDate).toLocaleDateString('en-AE')}</div></div>
+                  <div className="text-right flex-shrink-0"><div className="font-bold text-[#b91c1c]">{fmtAED(r.amountAed)}</div><div className="text-[11px]" style={{ color: r.daysOverdue >= 90 ? RED : '#9b9890' }}>{r.daysOverdue}d overdue</div></div>
+                </div>
+              )} />
+            <AlertList title="Stalled refunds" icon={Clock} accent={AMBER} count={deposits?.slowRefund.length ?? 0} rows={deposits?.slowRefund ?? []} emptyText="No settlements stalled past SLA."
+              render={(r: SlowRefundRow) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] capitalize text-[#9b9890]">Contract #{r.contractId} · {r.status}</div></div>
+                  <div className="text-right flex-shrink-0"><div className="font-bold text-[#1a1916]">{fmtAED(r.refundAed)}</div><div className="text-[11px] text-[#9b9890]">{r.daysStalled}d stalled</div></div>
+                </div>
+              )} />
+            <AlertList title="Excessive deductions" icon={Scissors} accent={RED} count={deposits?.excessiveDeduction.length ?? 0} rows={deposits?.excessiveDeduction ?? []} emptyText="No settlements with outsized damage deductions."
+              render={(r: DeductionRow) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · {fmtAED(r.deductionAed)} of {fmtAED(r.depositHeldAed)}</div></div>
+                  <div className="text-right flex-shrink-0"><div className="font-bold text-[#b91c1c]">{r.deductionRatio}%</div><div className="text-[11px] text-[#9b9890]">deducted</div></div>
+                </div>
+              )} />
+            <AlertList title="Possible double-charges" icon={Copy} accent={PURPLE} count={deposits?.doubleCharge.length ?? 0} rows={deposits?.doubleCharge ?? []} emptyText="No contracts with duplicate live deposits."
+              render={(r: DoubleChargeRow) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · {r.depositCount} deposits on file</div></div>
+                  <div className="text-right flex-shrink-0"><div className="font-bold text-[#1a1916]">{fmtAED(r.totalAed)}</div><div className="text-[11px] text-[#9b9890]">total held</div></div>
+                </div>
+              )} />
+          </div>
+
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 text-[#9b9890]">Contract fairness</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <AlertList title="Direct termination of paying tenants" icon={UserMinus} accent={RED} count={fairness?.directEvictions.length ?? 0} rows={fairness?.directEvictions ?? []} emptyText="No direct (no-consent) terminations."
+              render={(r: EvictionRow) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] capitalize text-[#9b9890]">Contract #{r.contractId} · {r.status}{r.terminationRequestedAt ? ` · ${new Date(r.terminationRequestedAt).toLocaleDateString('en-AE')}` : ''}</div></div>
+                  <div className="text-right flex-shrink-0">{r.payingTenant ? (<><div className="font-bold text-[#b91c1c]">Paying</div><div className="text-[11px] text-[#9b9890]">{fmtAED(r.paidAed)} paid</div></>) : (<div className="text-[11px] text-[#9b9890]">no payments</div>)}</div>
+                </div>
+              )} />
+            <AlertList title="Abusive renewal hikes" icon={TrendingUp} accent={AMBER} count={fairness?.renewalHikes.length ?? 0} rows={fairness?.renewalHikes ?? []} emptyText="No above-market renewal hikes."
+              render={(r: HikeRow) => (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · {fmtAED(r.priorRent)} → {fmtAED(r.newRent)}{r.marketPrice ? ` · mkt ${fmtAED(r.marketPrice)}` : ''}</div></div>
+                  <div className="text-right flex-shrink-0"><div className="font-bold text-[#b45309]">+{r.hikePct}%</div></div>
+                </div>
+              )} />
+          </div>
+
+          <p className="text-[11px] mt-5 text-[#9b9890]">Live dimensions: deposit + contract fairness. Manager-oversight and lead-responsiveness land next.</p>
+        </>
+      )}
+    </div>
   );
 }
