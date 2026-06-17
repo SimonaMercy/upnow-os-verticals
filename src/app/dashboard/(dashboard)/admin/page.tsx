@@ -40,7 +40,8 @@ interface LeaderRow {
   renewalHikeCount: number; directTerminationCount: number; payingEvictionCount: number;
   leadStale: number; leadGhosted: number; leadFrt: number; leadPoaching: number;
   mgrPoa: number; mgrDormantMoney: number; mgrEscalation: boolean;
-  depositScore: number; fairnessScore: number; leadScore: number; managerScore: number;
+  arrearsCount: number; maxArrearsDays: number; vatOvercharge: number;
+  depositScore: number; fairnessScore: number; leadScore: number; managerScore: number; paymentScore: number;
   compositeScore: number; tier: Tier;
 }
 function rpReasons(r: LeaderRow): string {
@@ -48,6 +49,8 @@ function rpReasons(r: LeaderRow): string {
     r.trapCount ? `${r.trapCount} trapped` : '',
     r.payingEvictionCount ? `${r.payingEvictionCount} paying eviction${r.payingEvictionCount === 1 ? '' : 's'}` : '',
     r.renewalHikeCount ? `${r.renewalHikeCount} hike${r.renewalHikeCount === 1 ? '' : 's'}` : '',
+    r.arrearsCount ? `${r.arrearsCount} in arrears (${r.maxArrearsDays}d)` : '',
+    r.vatOvercharge ? 'VAT overcharge' : '',
     r.mgrDormantMoney ? 'dormant manager w/ money' : '',
     r.mgrEscalation ? 'manager escalation' : '',
     r.mgrPoa ? 'manager holds POA' : '',
@@ -73,6 +76,16 @@ interface LeadData {
   summary: { stale: number; ghosted: number; frtBreaches: number; poaching: number };
   frtBreaches: { leadId: number; rpName: string; customerName: string | null; ageHours: number }[];
   stale: { leadId: number; rpName: string; stage: string; customerName: string | null; staleDays: number }[];
+}
+interface PaymentData {
+  summary: { arrears: number; vatOvercharge: number; bounceClusters: number; orphanPayments: number };
+  arrears: { contractId: number; rpName: string; overdueCheques: number; overdueAed: number; oldestDays: number }[];
+}
+interface JourneyData {
+  funnel: { stage: string; count: number }[];
+  activeContracts: number;
+  stalls: { stuckPending: number; kycIncomplete: number; moveInMissing: number; noPortalLink: number };
+  byRp: { rpId: number; name: string; stuckPending: number; kycIncomplete: number; moveInMissing: number; noPortalLink: number; total: number }[];
 }
 interface TrapRow { contractId: number; rpName: string; amountAed: number; endDate: string; daysOverdue: number; }
 interface DeductionRow { contractId: number; rpName: string; deductionAed: number; deductionRatio: number; }
@@ -160,6 +173,8 @@ export default function AdminDecisionDashboard() {
   const [flags, setFlags] = useState<Flag[]>([]);
   const [mgr, setMgr] = useState<ManagerData | null>(null);
   const [leadData, setLeadData] = useState<LeadData | null>(null);
+  const [payData, setPayData] = useState<PaymentData | null>(null);
+  const [journey, setJourney] = useState<JourneyData | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -176,6 +191,8 @@ export default function AdminDecisionDashboard() {
       loadFlags(),
       apiGet<ManagerData>('/admin/risk/managers').then(setMgr).catch(() => null),
       apiGet<LeadData>('/admin/risk/leads').then(setLeadData).catch(() => null),
+      apiGet<PaymentData>('/admin/risk/payments').then(setPayData).catch(() => null),
+      apiGet<JourneyData>('/admin/risk/customer-journey').then(setJourney).catch(() => null),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -472,7 +489,111 @@ export default function AdminDecisionDashboard() {
             )}
           </div>
 
-          {overview && <p className="text-[11px] mt-4 text-[#9b9890]">Risk last scanned {new Date(overview.generatedAt).toLocaleString('en-AE')} · deposit + contract-fairness + manager-oversight + lead-responsiveness dimensions live. <Link href="/dashboard/admin/risk" className="text-[#2e9f82] font-semibold">Open the full risk board →</Link></p>}
+          {/* Payment & financial integrity */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Payment &amp; financial integrity</h2>
+                <p className="text-[11px] text-[#9b9890]">Rent arrears on active leases, residential VAT overcharge, bounced-cheque clustering, orphan payments — feeds each RP&apos;s score.</p>
+              </div>
+              {payData && (
+                <span className="text-[11px] text-[#9b9890] text-right flex-shrink-0 mt-0.5">
+                  {payData.summary.arrears} in arrears · {payData.summary.vatOvercharge} VAT · {payData.summary.bounceClusters} bounce · {payData.summary.orphanPayments} orphan
+                </span>
+              )}
+            </div>
+            {!payData || payData.arrears.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No payment-integrity issues detected (no arrears, VAT overcharge, bounce clusters or orphan payments).</p>
+            ) : (
+              <ul className="divide-y divide-[#f0ede8] max-h-72 overflow-y-auto">
+                {payData.arrears.map((a) => (
+                  <li key={a.contractId} className="px-4 py-2.5 flex items-center justify-between gap-3 text-[12px]">
+                    <div className="min-w-0">
+                      <div className="font-semibold truncate text-[#b91c1c]">Rent arrears (lease still active)</div>
+                      <div className="text-[11px] text-[#9b9890] truncate">{a.rpName} · Contract #{a.contractId} · {a.overdueCheques} overdue cheque{a.overdueCheques === 1 ? '' : 's'}</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-bold text-[#b91c1c]">{fmtAED(a.overdueAed)}</div>
+                      <div className="text-[11px] text-[#9b9890]">{a.oldestDays}d overdue</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Customer journey — the support side */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Customer journey — are customers being supported through the process?</h2>
+                <p className="text-[11px] text-[#9b9890]">Where customers get stuck: contract issued but never sent, KYC unverified, no portal link, move-in not done. Platform-wide (not in the RP score).</p>
+              </div>
+            </div>
+            {!journey ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">Loading…</p>
+            ) : (
+              <div className="p-4">
+                {/* Funnel */}
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {journey.funnel.map((f, i) => {
+                    const max = journey.funnel[0]?.count || 1;
+                    const pct = max ? Math.round((f.count / max) * 100) : 0;
+                    return (
+                      <div key={f.stage} className="rounded-xl border border-[#e8e6e0] px-3 py-2.5">
+                        <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{f.stage}</div>
+                        <div className="text-lg font-bold mt-1" style={{ color: i > 0 && f.count === 0 ? '#b91c1c' : '#1a1916' }}>{f.count}</div>
+                        <div className="h-1.5 rounded-full mt-1.5 bg-[#f0ede8] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: i > 0 && f.count === 0 ? RED : GREEN }} /></div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Stall stats */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: 'Contract not issued/sent', value: journey.stalls.stuckPending },
+                    { label: 'No portal link sent', value: journey.stalls.noPortalLink },
+                    { label: 'KYC incomplete', value: journey.stalls.kycIncomplete },
+                    { label: 'Move-in not done', value: journey.stalls.moveInMissing },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border border-[#e8e6e0] px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{s.label}</div>
+                      <div className="text-lg font-bold mt-1" style={{ color: s.value > 0 ? '#b45309' : '#1a7a5a' }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Per-RP stalls */}
+                {journey.byRp.length > 0 && (
+                  <table className="w-full text-[12px]">
+                    <thead>
+                      <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                        <th className="text-left font-semibold px-3 py-2">Provider</th>
+                        <th className="text-right font-semibold px-3 py-2">Not issued</th>
+                        <th className="text-right font-semibold px-3 py-2">No link</th>
+                        <th className="text-right font-semibold px-3 py-2">KYC</th>
+                        <th className="text-right font-semibold px-3 py-2">Move-in</th>
+                        <th className="text-right font-semibold px-3 py-2">Stuck</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {journey.byRp.map((r) => (
+                        <tr key={r.rpId} className="border-t border-[#f0ede8]">
+                          <td className="px-3 py-2 font-medium text-[#1a1916]">{r.name}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.stuckPending || '—'}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.noPortalLink || '—'}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.kycIncomplete || '—'}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.moveInMissing || '—'}</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#b45309]">{r.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+
+          {overview && <p className="text-[11px] mt-4 text-[#9b9890]">Risk last scanned {new Date(overview.generatedAt).toLocaleString('en-AE')} · deposit + fairness + manager + lead + payment dimensions in the composite, plus the customer-journey view. <Link href="/dashboard/admin/risk" className="text-[#2e9f82] font-semibold">Open the full risk board →</Link></p>}
         </>
       )}
     </div>
