@@ -311,7 +311,7 @@ export default function DepositsPage() {
                 </div>
               ) : (
                 <div className="bg-[#f4f3ef] rounded-xl p-3">
-                  <p className="text-xs text-[#6b6860]">This deposit is recorded as a payment — settle it from its contract page.</p>
+                  <p className="text-xs text-[#6b6860]">This deposit is recorded as a payment — its status follows the cheque (cleared / bounced) and isn’t settled separately.</p>
                 </div>
               )}
 

@@ -1374,16 +1374,21 @@ function DetailsDrawer({
       setDepErr(e instanceof Error ? e.message : 'Failed to save deposit');
     } finally { setDepBusy(false); }
   };
+  // Surfaced when an inline status change (cheque or settlement) fails — otherwise
+  // onUpdateDeposit rejects, reload() never runs, and the <select> silently snaps back.
+  const [depStatusErr, setDepStatusErr] = useState<string | null>(null);
   const changeDepStatus = async (depositId: number, status: string) => {
-    setDepStatusBusy(true);
+    setDepStatusBusy(true); setDepStatusErr(null);
     try { await onUpdateDeposit(depositId, { chequeStatus: status }); }
+    catch { setDepStatusErr('Could not update the cheque status. Please try again.'); }
     finally { setDepStatusBusy(false); }
   };
   // Settlement outcome (held → returned / partial_return / forfeited) — drives the
   // held vs. settled deposit reports. Distinct from the cheque/banking status above.
   const changeDepSettlement = async (depositId: number, depositStatus: string) => {
-    setDepStatusBusy(true);
+    setDepStatusBusy(true); setDepStatusErr(null);
     try { await onUpdateDeposit(depositId, { depositStatus }); }
+    catch { setDepStatusErr('Could not update the settlement status. Please try again.'); }
     finally { setDepStatusBusy(false); }
   };
   // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
@@ -1734,6 +1739,9 @@ function DetailsDrawer({
                                       <option value="partial_return">Partial return</option>
                                       <option value="forfeited">Forfeited</option>
                                     </select>
+                                    {depStatusErr && (
+                                      <span className="note" style={{ color: 'var(--brick)', fontSize: 11, textAlign: 'right' }}>{depStatusErr}</span>
+                                    )}
                                   </div>
                                 ) : (
                                   <span className={'cstat ' + (sd.status ?? 'held')} style={{ textTransform: 'capitalize' }}>

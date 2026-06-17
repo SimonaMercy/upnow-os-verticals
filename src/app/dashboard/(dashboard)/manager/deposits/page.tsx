@@ -28,7 +28,7 @@ type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
 const STATUS_LABELS: Record<DepositStatus, string> = {
   held:               'Held',
   returned:           'Returned',
-  partial_return:  'Partial Deduction',
+  partial_return:  'Partial Return',
   forfeited:          'Forfeited',
 };
 
