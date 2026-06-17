@@ -45,6 +45,12 @@ interface Flag {
   id: number; actorName: string; ruleKey: string; severity: 'high' | 'medium' | 'low';
   dimension: string; exposureAed: number; detail: Record<string, unknown>; status: string;
 }
+interface ManagerRow {
+  userId: number; name: string; email: string; lastLoginAt: string | null; landlordCount: number;
+  flags: { deposits: boolean; collections: boolean; financials: boolean; signDocs: boolean; poa: boolean; createContracts: boolean; inviteManager: boolean };
+  moneyPower: boolean; dormant: boolean; tier: Tier;
+}
+interface ManagerData { summary: Record<string, number>; managers: ManagerRow[] }
 interface TrapRow { contractId: number; rpName: string; amountAed: number; endDate: string; daysOverdue: number; }
 interface DeductionRow { contractId: number; rpName: string; deductionAed: number; deductionRatio: number; }
 interface DepositAlerts { trap: TrapRow[]; excessiveDeduction: DeductionRow[]; }
@@ -98,6 +104,9 @@ function TierBadge({ tier }: { tier: Tier }) {
   const s = TIER[tier] ?? TIER.ok;
   return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: s.bg, color: s.fg }}>{s.label}</span>;
 }
+function Chip({ c, children }: { c: string; children: React.ReactNode }) {
+  return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `${c}1a`, color: c }}>{children}</span>;
+}
 
 const RULE_LABEL: Record<string, string> = {
   'deposit.trap': 'Deposit withheld',
@@ -126,6 +135,7 @@ export default function AdminDecisionDashboard() {
   const [deposits, setDeposits] = useState<DepositAlerts | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
+  const [mgr, setMgr] = useState<ManagerData | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -140,6 +150,7 @@ export default function AdminDecisionDashboard() {
       apiGet<DepositAlerts>('/admin/risk/deposits').then(setDeposits).catch(() => null),
       apiGet<{ points: TrendPoint[] }>('/admin/risk/trend').then((t) => setTrend(t.points)).catch(() => null),
       loadFlags(),
+      apiGet<ManagerData>('/admin/risk/managers').then(setMgr).catch(() => null),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -336,7 +347,58 @@ export default function AdminDecisionDashboard() {
             </div>
           </div>
 
-          {overview && <p className="text-[11px] mt-4 text-[#9b9890]">Risk last scanned {new Date(overview.generatedAt).toLocaleString('en-AE')} · deposit + contract-fairness dimensions live. <Link href="/dashboard/admin/risk" className="text-[#2e9f82] font-semibold">Open the full risk board →</Link></p>}
+          {/* Manager oversight */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <h2 className="text-[13px] font-bold text-[#1a1916]">Manager oversight</h2>
+              {mgr && (
+                <span className="text-[11px] text-[#9b9890] text-right">
+                  {mgr.summary.total} managers · {mgr.summary.withMoneyPower} hold money/signature power · {mgr.summary.dormantWithMoney} dormant-with-power · {mgr.summary.escalations} escalations
+                </span>
+              )}
+            </div>
+            {!mgr || mgr.managers.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No delegated managers.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                      <th className="text-left font-semibold px-4 py-2">Manager</th>
+                      <th className="text-center font-semibold px-3 py-2">RPs</th>
+                      <th className="text-left font-semibold px-3 py-2">Powers held</th>
+                      <th className="text-right font-semibold px-3 py-2">Last login</th>
+                      <th className="text-center font-semibold px-3 py-2">Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mgr.managers.map((m) => (
+                      <tr key={m.userId} className="border-t border-[#f0ede8]">
+                        <td className="px-4 py-2.5"><div className="font-semibold text-[#1a1916]">{m.name}</div><div className="text-[11px] text-[#9b9890]">{m.email}</div></td>
+                        <td className="px-3 py-2.5 text-center text-[#3f3d39]">{m.landlordCount}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            {m.flags.poa && <Chip c={RED}>POA</Chip>}
+                            {m.flags.signDocs && <Chip c={RED}>Sign</Chip>}
+                            {m.flags.deposits && <Chip c={AMBER}>Deposits</Chip>}
+                            {m.flags.collections && <Chip c={AMBER}>Collections</Chip>}
+                            {m.flags.financials && <Chip c="#6b6860">Financials</Chip>}
+                            {m.flags.createContracts && <Chip c="#6b6860">Contracts</Chip>}
+                            {m.flags.inviteManager && <Chip c={PURPLE}>Invite</Chip>}
+                            {!m.moneyPower && <span className="text-[11px] text-[#9b9890]">view-only</span>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-[11px]" style={{ color: m.dormant ? RED : '#9b9890' }}>{m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString('en-AE') : 'never'}</td>
+                        <td className="px-3 py-2.5 text-center"><TierBadge tier={m.tier} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {overview && <p className="text-[11px] mt-4 text-[#9b9890]">Risk last scanned {new Date(overview.generatedAt).toLocaleString('en-AE')} · deposit + contract-fairness + manager-oversight dimensions live. <Link href="/dashboard/admin/risk" className="text-[#2e9f82] font-semibold">Open the full risk board →</Link></p>}
         </>
       )}
     </div>
