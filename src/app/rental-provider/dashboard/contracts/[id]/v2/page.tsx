@@ -100,6 +100,15 @@ interface ContractDetail {
   rentVatRate?: number;
   contractValue: number | null;
   securityDepositAmount: number | null;
+  /** Effective held deposit (contract field → deposit rows → payment → tenancy-carried). */
+  securityDepositHeld?: number | null;
+  /** Unified deposit record for the payments table; isCarried = read-only on renewals. */
+  securityDeposit?: {
+    depositId: number | null;
+    amount: number; chequeNumber: string | null; recordedDate: string | null;
+    dueDate: string | null; paymentMethod: string | null; chequeStatus: string | null;
+    status: string | null; isCarried: boolean; sourceContractId: number | null;
+  } | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
   adminFeeFils: number;
@@ -972,7 +981,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
         <div className="stats">
           <div className="stat">
             <div className="sl">Deposit held</div>
-            <div className="sv jade">{fmtAed(h.contract.securityDepositAmount)}</div>
+            <div className="sv jade">{fmtAed(h.contract.securityDepositHeld ?? h.contract.securityDepositAmount)}</div>
           </div>
         </div>
       ),
@@ -1031,7 +1040,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             </div>
             <div className="stat">
               <div className="sl">Deposit held</div>
-              <div className="sv jade">{fmtAed(h.contract.securityDepositAmount)}</div>
+              <div className="sv jade">{fmtAed(h.contract.securityDepositHeld ?? h.contract.securityDepositAmount)}</div>
             </div>
             <div className="stat">
               <div className="sl">Collected</div>
@@ -1227,7 +1236,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
-  onRecordPayment, onUpdatePayment, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
+  onRecordPayment, onUpdatePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
@@ -1247,6 +1256,11 @@ function DetailsDrawer({
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string;
+  }) => Promise<void>;
+  /** PATCH /api/contracts/:id/deposits/:depositId — edit a held security deposit. */
+  onUpdateDeposit: (depositId: number, patch: {
+    chequeStatus?: string; paymentMethod?: string | null; dueDate?: string | null;
+    chequeNumber?: string | null; amount?: number; depositStatus?: string;
   }) => Promise<void>;
   /** PATCH /api/contracts/:id/clauses — save edited custom clauses + notes. */
   onSaveClauses: (customClauses: string[], notes: string | null) => Promise<void>;
@@ -1324,6 +1338,46 @@ function DetailsDrawer({
     setStatusBusy(paymentId);
     try { await onUpdatePayment(paymentId, { chequeStatus: status }); }
     finally { setStatusBusy(null); }
+  };
+  // ── Deposit editor — only the home/oldest lease that OWNS the record; renewals carry it read-only ──
+  const [depEditing, setDepEditing] = useState(false);
+  const [depBusy, setDepBusy] = useState(false);
+  const [depStatusBusy, setDepStatusBusy] = useState(false);
+  const [depErr, setDepErr] = useState<string | null>(null);
+  const [depForm, setDepForm] = useState({ amount: '', chequeNumber: '', paymentMethod: 'cheque', dueDate: '', chequeStatus: 'pending' });
+  const startDepEdit = () => {
+    const sd = contract.securityDeposit;
+    if (!sd) return;
+    setDepEditing(true); setDepErr(null);
+    setDepForm({
+      amount: sd.amount != null ? String(sd.amount) : '',
+      chequeNumber: sd.chequeNumber ?? '',
+      paymentMethod: sd.paymentMethod ?? 'cheque',
+      dueDate: sd.dueDate ?? '',
+      chequeStatus: sd.chequeStatus ?? 'pending',
+    });
+  };
+  const saveDep = async (depositId: number) => {
+    const amt = Number(depForm.amount);
+    if (depForm.amount.trim() === '' || !Number.isFinite(amt) || amt < 0) { setDepErr('Enter a valid amount'); return; }
+    setDepBusy(true); setDepErr(null);
+    try {
+      await onUpdateDeposit(depositId, {
+        amount: amt,
+        chequeNumber: depForm.chequeNumber.trim() || null,
+        paymentMethod: depForm.paymentMethod || null,
+        dueDate: depForm.dueDate || null,
+        chequeStatus: depForm.chequeStatus,
+      });
+      setDepEditing(false);
+    } catch (e) {
+      setDepErr(e instanceof Error ? e.message : 'Failed to save deposit');
+    } finally { setDepBusy(false); }
+  };
+  const changeDepStatus = async (depositId: number, status: string) => {
+    setDepStatusBusy(true);
+    try { await onUpdateDeposit(depositId, { chequeStatus: status }); }
+    finally { setDepStatusBusy(false); }
   };
   // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
   const clausesEditable = contract.status === 'pending';
@@ -1541,10 +1595,11 @@ function DetailsDrawer({
                   <table className="ptable">
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
-                      {/* Security deposit folds in as the first payment row. A
-                          renewal doesn't re-collect the deposit — the original
-                          lease holds it — so the row is hidden there. */}
-                      {depositRow && contract.contractType !== 'renewal' && (
+                      {/* Security deposit folds in as the first payment row. When
+                          the deposit is THIS contract's own payment it's editable;
+                          a renewal that only carries the deposit gets a read-only
+                          row below (from contract.securityDeposit). */}
+                      {depositRow && (
                         <Fragment>
                           <tr>
                             <td><DollarSign size={13} /></td>
@@ -1616,6 +1671,107 @@ function DetailsDrawer({
                           )}
                         </Fragment>
                       )}
+                      {/* Held deposit, shown on every contract in the chain. The
+                          oldest lease holds the actual record; renewals show it
+                          read-only ("carried"). */}
+                      {!depositRow && contract.securityDeposit && (() => {
+                        const sd = contract.securityDeposit!;
+                        const editable = !sd.isCarried && sd.depositId != null;
+                        return (
+                          <Fragment>
+                            <tr style={sd.isCarried ? { opacity: 0.6 } : undefined}>
+                              <td><DollarSign size={13} /></td>
+                              <td>
+                                Security deposit
+                                {sd.isCarried && sd.sourceContractId != null && (
+                                  <span className="note" style={{ display: 'block', fontSize: 11 }}>
+                                    held — carried from{' '}
+                                    <Link href={`/rental-provider/dashboard/contracts/${sd.sourceContractId}/v2`} style={{ color: 'var(--jade)', fontWeight: 600, textDecoration: 'underline' }}>
+                                      CID-{sd.sourceContractId}
+                                    </Link>
+                                  </span>
+                                )}
+                                {editable && !sd.amount && (
+                                  <span className="note" style={{ display: 'block', fontSize: 11, color: '#b45309' }}>
+                                    amount not recorded — tap Edit to set it
+                                  </span>
+                                )}
+                              </td>
+                              <td className="amt">{fmtAed(sd.amount)}</td>
+                              <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{sd.chequeNumber ?? '—'}</td>
+                              <td>{sd.paymentMethod ? fmtMethod(sd.paymentMethod) : '—'}</td>
+                              <td>{fmtDate(sd.dueDate ?? sd.recordedDate)}</td>
+                              <td>
+                                {editable ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
+                                      value={sd.chequeStatus ?? 'pending'} disabled={depStatusBusy}
+                                      onChange={e => void changeDepStatus(sd.depositId!, e.target.value)}>
+                                      <option value="pending">Pending</option>
+                                      <option value="cleared">Cleared</option>
+                                      <option value="bounced">Bounced</option>
+                                      <option value="cancelled">Cancelled</option>
+                                    </select>
+                                    <button type="button" className="mini-btn view" title="Edit deposit — method, due date, amount"
+                                      onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
+                                      <Pencil size={12} /> Edit
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className={'cstat ' + (sd.chequeStatus ?? sd.status ?? 'held')} style={{ textTransform: 'capitalize' }}>
+                                    {sd.chequeStatus ?? sd.status ?? 'held'}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                            {editable && depEditing && (
+                              <tr>
+                                <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
+                                  <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                    <p className="subhead">Edit security deposit</p>
+                                    <div className="grid2">
+                                      <div className="field"><label>Amount (AED)</label>
+                                        <input type="number" min="0" step="0.01" className="input" value={depForm.amount}
+                                          onChange={e => setDepForm(v => ({ ...v, amount: e.target.value }))} />
+                                      </div>
+                                      <div className="field"><label>Payment method</label>
+                                        <select className="input" value={depForm.paymentMethod}
+                                          onChange={e => setDepForm(v => ({ ...v, paymentMethod: e.target.value }))}>
+                                          {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                        </select>
+                                      </div>
+                                      <div className="field"><label>Cheque / reference no.</label>
+                                        <input className="input" value={depForm.chequeNumber}
+                                          onChange={e => setDepForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                      </div>
+                                      <div className="field"><label>Due date</label>
+                                        <input type="date" className="input" value={depForm.dueDate}
+                                          onChange={e => setDepForm(v => ({ ...v, dueDate: e.target.value }))} />
+                                      </div>
+                                      <div className="field"><label>Cheque status</label>
+                                        <select className="input" value={depForm.chequeStatus}
+                                          onChange={e => setDepForm(v => ({ ...v, chequeStatus: e.target.value }))}>
+                                          <option value="pending">Pending</option>
+                                          <option value="cleared">Cleared</option>
+                                          <option value="bounced">Bounced</option>
+                                          <option value="cancelled">Cancelled</option>
+                                        </select>
+                                      </div>
+                                    </div>
+                                    {depErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{depErr}</p>}
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                      <button className="btn btn-jade btn-sm" disabled={depBusy} onClick={() => void saveDep(sd.depositId!)}>
+                                        <Check size={14} /> {depBusy ? 'Saving…' : 'Save changes'}
+                                      </button>
+                                      <button className="btn btn-ghost btn-sm" disabled={depBusy} onClick={() => { setDepEditing(false); setDepErr(null); }}>Cancel</button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })()}
                       {rentRows.map((p, i) => (
                         <Fragment key={p.id}>
                         <tr>
@@ -1707,7 +1863,14 @@ function DetailsDrawer({
                           <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td colSpan={4} /></tr>
                         </>
                       )}
-                      <tr><td colSpan={2}>{showVat ? 'Total (incl. VAT)' : 'Total'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={4} /></tr>
+                      <tr><td colSpan={2}>{showVat ? 'Total rent (incl. VAT)' : 'Total rent'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={4} /></tr>
+                      {(depositRow || contract.securityDeposit) && (
+                        <tr style={{ opacity: 0.75 }}>
+                          <td colSpan={2}>Security deposit held (refundable, not in rent total)</td>
+                          <td className="amt">{fmtAed(depositRow?.amount ?? contract.securityDeposit?.amount ?? 0)}</td>
+                          <td colSpan={4} />
+                        </tr>
+                      )}
                     </tfoot>
                   </table>
 
@@ -3100,6 +3263,22 @@ export default function ContractV2Page() {
     void reload();
   };
 
+  // Edit a held security deposit — PATCH /api/contracts/:id/deposits/:depositId
+  const onUpdateDeposit = async (depositId: number, patch: {
+    chequeStatus?: string; paymentMethod?: string | null; dueDate?: string | null;
+    chequeNumber?: string | null; amount?: number; depositStatus?: string;
+  }) => {
+    const res = await fetch(`/api/contracts/${contract.id}/deposits/${depositId}`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
+    void reload();
+  };
+
   // ── Flow 2: edit clauses ──  PATCH /api/contracts/:id/clauses
   const onSaveClauses = async (customClauses: string[], notes: string | null) => {
     const res = await fetch(`/api/contracts/${contract.id}/clauses`, {
@@ -3691,6 +3870,7 @@ export default function ContractV2Page() {
             onRejectDoc={onRejectDoc}
             onRecordPayment={onRecordPayment}
             onUpdatePayment={onUpdatePayment}
+            onUpdateDeposit={onUpdateDeposit}
             onSaveClauses={onSaveClauses}
             onConfirmPdc={onConfirmPdc}
             onUploadDoc={onUploadDoc}

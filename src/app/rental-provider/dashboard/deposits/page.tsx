@@ -4,19 +4,19 @@ import { useEffect, useState } from 'react';
 import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, FileText } from 'lucide-react';
 import Link from 'next/link';
 
-type DepositStatus = 'held' | 'returned' | 'partial_deduction' | 'forfeited';
+type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
 
 const STATUS_LABELS: Record<DepositStatus, string> = {
   held:               'Held',
   returned:           'Returned',
-  partial_deduction:  'Partial Deduction',
+  partial_return:  'Partial Deduction',
   forfeited:          'Forfeited',
 };
 
 const STATUS_STYLE: Record<DepositStatus, string> = {
   held:               'bg-[#d8f2e8] text-[#1a7a5a]',
   returned:           'bg-[#dbeafe] text-[#1e40af]',
-  partial_deduction:  'bg-[#fef3c7] text-[#92400e]',
+  partial_return:  'bg-[#fef3c7] text-[#92400e]',
   forfeited:          'bg-[#fee2e2] text-[#b91c1c]',
 };
 
@@ -105,7 +105,7 @@ export default function DepositsPage() {
   const totalHeld      = deposits.filter(d => d.status === 'held').reduce((s, d) => s + d.amount, 0);
   const heldCount      = deposits.filter(d => d.status === 'held').length;
   const returnedCount  = deposits.filter(d => d.status === 'returned').length;
-  const dedCount       = deposits.filter(d => d.status === 'partial_deduction').length;
+  const dedCount       = deposits.filter(d => d.status === 'partial_return').length;
   const totalAmount    = deposits.reduce((s, d) => s + d.amount, 0);
 
   const detail = detailId !== null ? deposits.find(d => d.id === detailId) ?? null : null;
