@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Wallet, ShieldAlert, UserMinus, AlertTriangle, Users, ShieldCheck, Banknote,
-  TrendingUp, Loader2, ArrowUpRight, Pause, Play, Ban, Download,
+  TrendingUp, Loader2, ArrowUpRight, Pause, Play, Ban, Download, Building2, Trophy,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -110,6 +110,21 @@ interface HikeRow { contractId: number; rpName: string; priorRent: number; newRe
 interface EvictionRow { contractId: number; rpName: string; payingTenant: boolean; paidAed: number; }
 interface FairnessAlerts { renewalHikes: HikeRow[]; directEvictions: EvictionRow[]; }
 interface TrendPoint { date: string; watchlist: number; atRiskAed: number; payingEvictions: number; avgScore: number; }
+interface ContribRow {
+  rpId: number; name: string; userId: number | null;
+  properties: number; units: number; activeLeases: number; contractsTotal: number;
+  rentRollAed: number; tenants: number; occupancyPct: number | null;
+  rentRollSharePct: number; unitsSharePct: number; leaseSharePct: number;
+}
+interface Contribution {
+  generatedAt: string;
+  totals: { rps: number; properties: number; units: number; activeLeases: number; contractsTotal: number; rentRollAed: number; tenants: number; occupancyPct: number | null };
+  rows: ContribRow[];
+}
+function shortName(n: string): string {
+  const parts = n.trim().split(/\s+/);
+  return parts.length <= 2 ? n : `${parts[0]} ${parts[1]}`;
+}
 
 /* ── Style ── */
 const RED = '#dc2626', AMBER = '#d97706', PURPLE = '#7c3aed', GREEN = '#2e9f82';
@@ -197,6 +212,7 @@ export default function AdminDecisionDashboard() {
   const [leadData, setLeadData] = useState<LeadData | null>(null);
   const [payData, setPayData] = useState<PaymentData | null>(null);
   const [journey, setJourney] = useState<JourneyData | null>(null);
+  const [contrib, setContrib] = useState<Contribution | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -215,6 +231,7 @@ export default function AdminDecisionDashboard() {
       apiGet<LeadData>('/admin/risk/leads').then(setLeadData).catch(() => null),
       apiGet<PaymentData>('/admin/risk/payments').then(setPayData).catch(() => null),
       apiGet<JourneyData>('/admin/risk/customer-journey').then(setJourney).catch(() => null),
+      apiGet<Contribution>('/admin/risk/contribution').then(setContrib).catch(() => null),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -266,6 +283,11 @@ export default function AdminDecisionDashboard() {
   }, [k]);
 
   const topRps = (overview?.leaderboard ?? []).slice(0, 6);
+
+  const contribChart = useMemo(
+    () => (contrib?.rows ?? []).slice(0, 8).map((r) => ({ name: shortName(r.name), aed: r.rentRollAed })),
+    [contrib],
+  );
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -340,6 +362,79 @@ export default function AdminDecisionDashboard() {
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
+          </div>
+
+          {/* Rental-provider contribution — who brings the most volume to the platform */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mb-5">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916] flex items-center gap-1.5"><Trophy size={14} className="text-[#2e9f82]" /> Rental-provider contribution</h2>
+                <p className="text-[11px] text-[#9b9890]">Who brings the most volume to the platform — properties, units, active leases, rent roll, tenants. Leads/viewings aren&apos;t tracked yet, so this ranks on signed footprint.</p>
+              </div>
+              {contrib && (
+                <span className="text-[11px] text-[#9b9890] text-right flex-shrink-0 mt-0.5">
+                  {contrib.totals.rps} active providers · {contrib.totals.units} units · {fmtAED(contrib.totals.rentRollAed)} rent roll · {contrib.totals.occupancyPct ?? '—'}% occupied
+                </span>
+              )}
+            </div>
+            {!contrib || contrib.rows.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No rental providers with a footprint yet.</p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
+                {/* Rent-roll distribution chart */}
+                <div className="lg:col-span-1">
+                  <p className="text-[11px] font-semibold text-[#6b6860] mb-1">Rent roll by provider</p>
+                  <ResponsiveContainer width="100%" height={Math.max(150, contribChart.length * 34)}>
+                    <BarChart layout="vertical" data={contribChart} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" horizontal={false} />
+                      <XAxis type="number" tickFormatter={aedAxis} tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={92} tick={{ fontSize: 10, fill: '#6b6860' }} axisLine={false} tickLine={false} />
+                      <Tooltip formatter={(v: unknown) => [fmtAED(Number(v)), 'Rent roll'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                      <Bar dataKey="aed" radius={[0, 4, 4, 0]} fill={GREEN} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Ranked table */}
+                <div className="lg:col-span-2 overflow-x-auto">
+                  <table className="w-full text-[12px]">
+                    <thead>
+                      <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                        <th className="text-left font-semibold px-3 py-2">#</th>
+                        <th className="text-left font-semibold px-3 py-2">Provider</th>
+                        <th className="text-right font-semibold px-3 py-2">Units</th>
+                        <th className="text-right font-semibold px-3 py-2">Active</th>
+                        <th className="text-right font-semibold px-3 py-2">Occ.</th>
+                        <th className="text-right font-semibold px-3 py-2">Tenants</th>
+                        <th className="text-right font-semibold px-3 py-2">Rent roll</th>
+                        <th className="text-left font-semibold px-3 py-2 w-28">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contrib.rows.map((r, i) => (
+                        <tr key={r.rpId} className="border-t border-[#f0ede8]">
+                          <td className="px-3 py-2.5 text-[#9b9890] font-semibold">{i + 1}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-semibold text-[#1a1916]">{r.name}</div>
+                            <div className="text-[11px] text-[#9b9890] flex items-center gap-1"><Building2 size={10} /> {r.properties} {r.properties === 1 ? 'property' : 'properties'}</div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.units}</td>
+                          <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.activeLeases}</td>
+                          <td className="px-3 py-2.5 text-right" style={{ color: r.occupancyPct != null && r.occupancyPct < 60 ? '#b45309' : '#3f3d39' }}>{r.occupancyPct == null ? '—' : `${r.occupancyPct}%`}</td>
+                          <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.tenants}</td>
+                          <td className="px-3 py-2.5 text-right font-bold text-[#1a1916]">{fmtAED(r.rentRollAed)}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <div className="flex-1 h-1.5 rounded-full bg-[#f0ede8] overflow-hidden min-w-[40px]"><div className="h-full rounded-full" style={{ width: `${r.rentRollSharePct}%`, backgroundColor: GREEN }} /></div>
+                              <span className="text-[11px] font-semibold text-[#6b6860] tabular-nums w-9 text-right">{r.rentRollSharePct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* RPs to act on + Customer-harm events */}
