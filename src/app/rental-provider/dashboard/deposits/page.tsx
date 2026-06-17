@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, FileText } from 'lucide-react';
+import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, FileText, Check } from 'lucide-react';
 import Link from 'next/link';
 
 type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
@@ -9,7 +9,7 @@ type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
 const STATUS_LABELS: Record<DepositStatus, string> = {
   held:               'Held',
   returned:           'Returned',
-  partial_return:  'Partial Deduction',
+  partial_return:  'Partial Return',
   forfeited:          'Forfeited',
 };
 
@@ -65,6 +65,8 @@ export default function DepositsPage() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterBuilding, setFilterBuilding] = useState('all');
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [settling, setSettling]   = useState(false);
+  const [settleErr, setSettleErr] = useState<string | null>(null);
 
   async function load() {
     setLoading(true); setError(null);
@@ -80,6 +82,31 @@ export default function DepositsPage() {
   }
 
   useEffect(() => { load(); }, []);
+  useEffect(() => { setSettleErr(null); }, [detailId]);
+
+  // Mark how a deposit was settled (held → returned / partial_return / forfeited).
+  // Only security_deposits records (id `sd_…`) are editable — payment-backed ones
+  // (`pm_…`) derive their status from the cheque and are settled on the contract.
+  async function setStatus(d: Deposit, newStatus: DepositStatus) {
+    if (d.contractId == null || !d.id.startsWith('sd_')) return;
+    const numericId = d.id.replace(/^sd_/, '');
+    setSettling(true); setSettleErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${d.contractId}/deposits/${numericId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ depositStatus: newStatus }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setDeposits(prev => prev.map(x => x.id === d.id ? { ...x, status: newStatus } : x));
+      await load();
+    } catch {
+      setSettleErr('Could not update the status. Please try again.');
+    } finally {
+      setSettling(false);
+    }
+  }
 
   const buildings = [...new Set(deposits.map(d => d.building).filter(b => b !== '—'))];
 
@@ -259,6 +286,35 @@ export default function DepositsPage() {
                   {STATUS_LABELS[detail.status] ?? detail.status}
                 </span>
               </div>
+
+              {/* Settlement outcome — drives the held vs. settled deposit reports */}
+              {detail.id.startsWith('sd_') && detail.contractId != null ? (
+                <div className="border border-[#e8e6e0] rounded-xl p-3">
+                  <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">Settlement status</p>
+                  <p className="text-xs text-[#6b6860] mb-2.5">Mark how this deposit was settled — keeps the held vs. settled reports correct.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['held', 'returned', 'partial_return', 'forfeited'] as DepositStatus[]).map(s => {
+                      const active = detail.status === s;
+                      return (
+                        <button key={s} disabled={settling || active}
+                          onClick={() => setStatus(detail, s)}
+                          className={`text-xs font-medium px-3 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-default ${active
+                            ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]'
+                            : 'border-[#e8e6e0] text-[#3d3b35] hover:border-[#2e9f82] disabled:opacity-60'}`}>
+                          {active && <Check size={12} className="inline mr-1 -mt-0.5" />}{STATUS_LABELS[s]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {settling && <p className="text-xs text-[#9b9890] mt-2 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Saving…</p>}
+                  {settleErr && <p className="text-xs text-red-600 mt-2">{settleErr}</p>}
+                </div>
+              ) : (
+                <div className="bg-[#f4f3ef] rounded-xl p-3">
+                  <p className="text-xs text-[#6b6860]">This deposit is recorded as a payment — its status follows the cheque (cleared / bounced) and isn’t settled separately.</p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { label: 'Contract',    value: detail.contractRef },

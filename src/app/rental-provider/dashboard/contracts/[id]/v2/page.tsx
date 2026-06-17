@@ -1389,9 +1389,21 @@ function DetailsDrawer({
       setDepErr(e instanceof Error ? e.message : 'Failed to save deposit');
     } finally { setDepBusy(false); }
   };
+  // Surfaced when an inline status change (cheque or settlement) fails — otherwise
+  // onUpdateDeposit rejects, reload() never runs, and the <select> silently snaps back.
+  const [depStatusErr, setDepStatusErr] = useState<string | null>(null);
   const changeDepStatus = async (depositId: number, status: string) => {
-    setDepStatusBusy(true);
+    setDepStatusBusy(true); setDepStatusErr(null);
     try { await onUpdateDeposit(depositId, { chequeStatus: status }); }
+    catch { setDepStatusErr('Could not update the cheque status. Please try again.'); }
+    finally { setDepStatusBusy(false); }
+  };
+  // Settlement outcome (held → returned / partial_return / forfeited) — drives the
+  // held vs. settled deposit reports. Distinct from the cheque/banking status above.
+  const changeDepSettlement = async (depositId: number, depositStatus: string) => {
+    setDepStatusBusy(true); setDepStatusErr(null);
+    try { await onUpdateDeposit(depositId, { depositStatus }); }
+    catch { setDepStatusErr('Could not update the settlement status. Please try again.'); }
     finally { setDepStatusBusy(false); }
   };
   // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
@@ -1735,23 +1747,37 @@ function DetailsDrawer({
                               <td>{fmtDate(sd.dueDate ?? sd.recordedDate)}</td>
                               <td>
                                 {editable ? (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
-                                      value={sd.chequeStatus ?? 'pending'} disabled={depStatusBusy}
-                                      onChange={e => void changeDepStatus(sd.depositId!, e.target.value)}>
-                                      <option value="pending">Pending</option>
-                                      <option value="cleared">Cleared</option>
-                                      <option value="bounced">Bounced</option>
-                                      <option value="cancelled">Cancelled</option>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
+                                        title="Cheque / banking status" value={sd.chequeStatus ?? 'pending'} disabled={depStatusBusy}
+                                        onChange={e => void changeDepStatus(sd.depositId!, e.target.value)}>
+                                        <option value="pending">Pending</option>
+                                        <option value="cleared">Cleared</option>
+                                        <option value="bounced">Bounced</option>
+                                        <option value="cancelled">Cancelled</option>
+                                      </select>
+                                      <button type="button" className="mini-btn view" title="Edit deposit — method, due date, amount"
+                                        onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
+                                        <Pencil size={12} /> Edit
+                                      </button>
+                                    </div>
+                                    <select className={'cstat ' + (sd.status ?? 'held')} style={{ cursor: 'pointer' }}
+                                      title="Settlement — held vs. returned / partial / forfeited (updates deposit reports)"
+                                      value={sd.status ?? 'held'} disabled={depStatusBusy}
+                                      onChange={e => void changeDepSettlement(sd.depositId!, e.target.value)}>
+                                      <option value="held">Held</option>
+                                      <option value="returned">Returned</option>
+                                      <option value="partial_return">Partial return</option>
+                                      <option value="forfeited">Forfeited</option>
                                     </select>
-                                    <button type="button" className="mini-btn view" title="Edit deposit — method, due date, amount"
-                                      onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
-                                      <Pencil size={12} /> Edit
-                                    </button>
+                                    {depStatusErr && (
+                                      <span className="note" style={{ color: 'var(--brick)', fontSize: 11, textAlign: 'right' }}>{depStatusErr}</span>
+                                    )}
                                   </div>
                                 ) : (
-                                  <span className={'cstat ' + (sd.chequeStatus ?? sd.status ?? 'held')} style={{ textTransform: 'capitalize' }}>
-                                    {sd.chequeStatus ?? sd.status ?? 'held'}
+                                  <span className={'cstat ' + (sd.status ?? 'held')} style={{ textTransform: 'capitalize' }}>
+                                    {(sd.status ?? 'held').replace('_', ' ')}
                                   </span>
                                 )}
                               </td>
@@ -4210,6 +4236,11 @@ function GlobalStyle() {
       .quest-page .cstat.pending { background: var(--saffron-soft); color: var(--saffron-deep); }
       .quest-page .cstat.bounced { background: var(--brick-soft); color: var(--brick); }
       .quest-page .cstat.cancelled { background: var(--mist); color: var(--ink-3); }
+      /* deposit settlement (deposit_status) — distinct palette from cheque status */
+      .quest-page .cstat.held { background: var(--jade-soft); color: var(--jade-deep); }
+      .quest-page .cstat.returned { background: var(--mist); color: var(--ink-3); }
+      .quest-page .cstat.partial_return { background: var(--saffron-soft); color: var(--saffron-deep); }
+      .quest-page .cstat.forfeited { background: var(--brick-soft); color: var(--brick); }
       .quest-page .doclist { display: flex; flex-direction: column; gap: 5px; }
       .quest-page .docitem { display: flex; align-items: center; gap: 9px; border: 1px solid; border-radius: 9px; padding: 5px 10px; min-height: 32px; }
       .quest-page .docitem > svg { flex-shrink: 0; }
