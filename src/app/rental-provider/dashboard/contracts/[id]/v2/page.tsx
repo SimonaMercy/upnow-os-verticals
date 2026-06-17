@@ -100,6 +100,8 @@ interface ContractDetail {
   rentVatRate?: number;
   contractValue: number | null;
   securityDepositAmount: number | null;
+  /** Effective held deposit (contract field → deposit rows → payment → tenancy-carried). */
+  securityDepositHeld?: number | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
   adminFeeFils: number;
@@ -972,7 +974,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
         <div className="stats">
           <div className="stat">
             <div className="sl">Deposit held</div>
-            <div className="sv jade">{fmtAed(h.contract.securityDepositAmount)}</div>
+            <div className="sv jade">{fmtAed(h.contract.securityDepositHeld ?? h.contract.securityDepositAmount)}</div>
           </div>
         </div>
       ),
@@ -1031,7 +1033,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             </div>
             <div className="stat">
               <div className="sl">Deposit held</div>
-              <div className="sv jade">{fmtAed(h.contract.securityDepositAmount)}</div>
+              <div className="sv jade">{fmtAed(h.contract.securityDepositHeld ?? h.contract.securityDepositAmount)}</div>
             </div>
             <div className="stat">
               <div className="sl">Collected</div>
