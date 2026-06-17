@@ -119,8 +119,11 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
   put('location', prop.fullAddress || prop.community || prop.emirate);
   put('dewa_no', unit.dewaPremiseNumber || prop.premisesNumber);
   put('period_from', fmtDate(data.startDate)); put('period_to', fmtDate(data.endDate));
+  // Contract Value = the net the contract is actually for (drives cheques/VAT).
+  // Annual Rent = the LISTED (pre-discount) rent; the gap between the two boxes
+  // is the rent discount (the official DLD form has no separate discount field).
   put('contract_value', aedWords(data.contractValue != null ? data.contractValue : data.annualRent));
-  put('annual_rent', aedWords(data.annualRent));
+  put('annual_rent', aedWords(data.listedRent != null ? data.listedRent : data.annualRent));
   put('security_deposit', fmtAed(data.securityDepositAmount));
   put('mode_of_payment', data.modeOfPayment);
 
