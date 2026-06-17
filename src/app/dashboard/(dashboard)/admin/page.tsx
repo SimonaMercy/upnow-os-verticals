@@ -248,6 +248,7 @@ export default function AdminDecisionDashboard() {
       ) : (
         <>
           {/* Decision KPIs */}
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 text-[#9b9890]">Customer-protection risk — act on these</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
             <KpiTile icon={Wallet} label="Customer deposits at risk" value={k ? fmtAED(k.depositsAtRiskAed) : '—'} sub={k ? `${k.depositsAtRiskCount} trapped · ${k.criticalTrapCount} over 90d` : ''} tone="bad" href="/dashboard/admin/risk" />
             <KpiTile icon={ShieldAlert} label="RPs to act on" value={k ? String(k.rpsOnWatchlist) : '—'} sub="composite risk score ≥ 60" tone={k && k.rpsOnWatchlist > 0 ? 'warn' : 'good'} href="/dashboard/admin/risk" />
@@ -256,6 +257,7 @@ export default function AdminDecisionDashboard() {
           </div>
 
           {/* Platform stats (secondary) */}
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 text-[#9b9890]">Platform health</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <KpiTile icon={Banknote} label="Deposit liability" value={k ? fmtAED(k.totalDepositLiabilityAed) : '—'} sub={k ? `${k.totalDepositCount} held / partial` : ''} />
             <KpiTile icon={Users} label="Total users" value={stats ? String(stats.totalUsers) : '—'} sub={stats ? `${stats.activeUsers} active` : ''} />
@@ -304,9 +306,12 @@ export default function AdminDecisionDashboard() {
           {/* RPs to act on + Customer-harm events */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8]">
-                <h2 className="text-[13px] font-bold text-[#1a1916]">Rental providers to act on</h2>
-                <Link href="/dashboard/admin/risk" className="text-[11px] font-semibold text-[#2e9f82]">View all</Link>
+              <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+                <div>
+                  <h2 className="text-[13px] font-bold text-[#1a1916]">Rental providers to act on</h2>
+                  <p className="text-[11px] text-[#9b9890]">One composite score per RP — deposits · fairness · manager · leads. Highest first.</p>
+                </div>
+                <Link href="/dashboard/admin/risk" className="text-[11px] font-semibold text-[#2e9f82] flex-shrink-0 mt-0.5">View all</Link>
               </div>
               {topRps.length === 0 ? (
                 <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No rental providers on the watchlist. 🎉</p>
@@ -344,9 +349,12 @@ export default function AdminDecisionDashboard() {
             </div>
 
             <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8]">
-                <h2 className="text-[13px] font-bold text-[#1a1916]">Customer-harm events</h2>
-                <span className="text-[11px] text-[#9b9890]">{flags.length} open</span>
+              <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+                <div>
+                  <h2 className="text-[13px] font-bold text-[#1a1916]">Customer-harm events</h2>
+                  <p className="text-[11px] text-[#9b9890]">The specific deposit &amp; fairness incidents behind the scores — Ack when reviewed, Resolve when handled.</p>
+                </div>
+                <span className="text-[11px] text-[#9b9890] flex-shrink-0 mt-0.5">{flags.length} open</span>
               </div>
               {flags.length === 0 ? (
                 <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No open risk flags. 🎉</p>
@@ -372,10 +380,13 @@ export default function AdminDecisionDashboard() {
 
           {/* Manager oversight */}
           <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
-              <h2 className="text-[13px] font-bold text-[#1a1916]">Manager oversight</h2>
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Manager oversight</h2>
+                <p className="text-[11px] text-[#9b9890]">Money/signature power each delegated manager holds — a dormant, escalating or POA manager raises that RP&apos;s score above.</p>
+              </div>
               {mgr && (
-                <span className="text-[11px] text-[#9b9890] text-right">
+                <span className="text-[11px] text-[#9b9890] text-right flex-shrink-0 mt-0.5">
                   {mgr.summary.total} managers · {mgr.summary.withMoneyPower} hold money/signature power · {mgr.summary.dormantWithMoney} dormant-with-power · {mgr.summary.escalations} escalations
                 </span>
               )}
@@ -423,9 +434,12 @@ export default function AdminDecisionDashboard() {
 
           {/* Lead responsiveness */}
           <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#f0ede8]">
-              <h2 className="text-[13px] font-bold text-[#1a1916]">Lead responsiveness</h2>
-              {leadData && <span className="text-[11px] text-[#9b9890]">{leadData.totalLeads} leads tracked</span>}
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Lead responsiveness</h2>
+                <p className="text-[11px] text-[#9b9890]">How quickly leads are attended &amp; followed up — slow/ghosted leads and poaching raise that RP&apos;s score above.</p>
+              </div>
+              {leadData && <span className="text-[11px] text-[#9b9890] flex-shrink-0 mt-0.5">{leadData.totalLeads} leads tracked</span>}
             </div>
             {!leadData || leadData.totalLeads === 0 ? (
               <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No leads in the system yet — slow first-response, stale-lead, ghosting and lead-poaching detectors activate automatically once leads start flowing.</p>
