@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Wallet, ShieldAlert, UserMinus, AlertTriangle, Users, ShieldCheck, Banknote,
-  TrendingUp, Loader2, ArrowUpRight, Pause, Play, Ban,
+  TrendingUp, Loader2, ArrowUpRight, Pause, Play, Ban, Download,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -59,6 +59,21 @@ function rpReasons(r: LeaderRow): string {
     r.leadStale ? `${r.leadStale} stale lead${r.leadStale === 1 ? '' : 's'}` : '',
   ].filter(Boolean);
   return parts.join(' · ') || 'flagged';
+}
+function exportWatchlistCsv(rows: LeaderRow[]) {
+  const headers = ['Rental provider', 'Compliance', 'Tier', 'Composite', 'Deposit', 'Fairness', 'Lead', 'Manager', 'Payment', 'Trapped deposits', 'At-risk AED', 'Arrears (days)', 'Reasons'];
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push([r.name, r.complianceStatus, r.tier, r.compositeScore, r.depositScore, r.fairnessScore, r.leadScore, r.managerScore, r.paymentScore, r.trapCount, r.trapExposureAed, r.maxArrearsDays, rpReasons(r)].map(esc).join(','));
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rp-risk-watchlist-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 interface Overview { generatedAt: string; kpis: OverviewKpis; leaderboard: LeaderRow[]; }
 interface Flag {
@@ -326,9 +341,16 @@ export default function AdminDecisionDashboard() {
               <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
                 <div>
                   <h2 className="text-[13px] font-bold text-[#1a1916]">Rental providers to act on</h2>
-                  <p className="text-[11px] text-[#9b9890]">One composite score per RP — deposits · fairness · manager · leads. Highest first.</p>
+                  <p className="text-[11px] text-[#9b9890]">One composite score per RP — deposits · fairness · manager · leads · payments. Highest first.</p>
                 </div>
-                <Link href="/dashboard/admin/risk" className="text-[11px] font-semibold text-[#2e9f82] flex-shrink-0 mt-0.5">View all</Link>
+                <div className="flex items-center gap-3 flex-shrink-0 mt-0.5">
+                  {topRps.length > 0 && (
+                    <button onClick={() => exportWatchlistCsv(overview?.leaderboard ?? [])} className="flex items-center gap-1 text-[11px] font-semibold text-[#6b6860] hover:text-[#1a1916]">
+                      <Download size={12} /> Export CSV
+                    </button>
+                  )}
+                  <Link href="/dashboard/admin/risk" className="text-[11px] font-semibold text-[#2e9f82]">View all</Link>
+                </div>
               </div>
               {topRps.length === 0 ? (
                 <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No rental providers on the watchlist. 🎉</p>

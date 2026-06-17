@@ -12,12 +12,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Wallet, AlertTriangle, Clock, Scissors, Copy, ShieldAlert, ChevronRight,
-  ArrowLeft, RefreshCw, Banknote, TrendingUp, UserMinus, Loader2,
+  ArrowLeft, RefreshCw, Banknote, TrendingUp, UserMinus, Loader2, Pause, Play, Ban,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiPatch } from '@/lib/api';
 
 /* ── Types ── */
 type Tier = 'ok' | 'monitor' | 'review' | 'critical';
@@ -30,7 +30,7 @@ interface OverviewKpis {
   rpsOnWatchlist: number; openCriticalAlerts: number;
 }
 interface LeaderRow {
-  rpId: number; name: string; complianceStatus: string;
+  rpId: number; name: string; userId: number | null; complianceStatus: string; userStatus: string;
   trapCount: number; trapExposureAed: number; maxTrapDays: number;
   renewalHikeCount: number; directTerminationCount: number; payingEvictionCount: number;
   depositScore: number; fairnessScore: number; compositeScore: number; tier: Tier;
@@ -157,6 +157,24 @@ export default function AdminRiskPage() {
     try { await apiPost('/admin/risk/recompute'); loadOverview(); if (!selected) loadAllAlerts(); }
     catch { /* non-blocking */ } finally { setRecomputing(false); }
   }, [loadOverview, loadAllAlerts, selected]);
+  const [busy, setBusy] = useState<number | null>(null);
+  const pauseRp = useCallback(async (r: LeaderRow) => {
+    const target = r.complianceStatus === 'paused' ? 'compliant' : 'paused';
+    if (!window.confirm(`${target === 'paused' ? 'Pause listings for' : 'Resume'} ${r.name}?`)) return;
+    setBusy(r.rpId);
+    try { await apiPatch(`/admin/kyc/rental-providers/${r.rpId}/compliance`, { complianceStatus: target, complianceNotes: 'Risk dashboard action' }); loadOverview(); }
+    catch (e) { window.alert(`Action failed: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  }, [loadOverview]);
+  const suspendRp = useCallback(async (r: LeaderRow) => {
+    if (!r.userId) return;
+    const target = r.userStatus === 'suspended' ? 'active' : 'suspended';
+    if (!window.confirm(`${target === 'suspended' ? 'Suspend' : 'Reactivate'} ${r.name}'s account?`)) return;
+    setBusy(r.rpId);
+    try { await apiPatch(`/admin/users/${r.userId}/status`, { status: target }); loadOverview(); }
+    catch (e) { window.alert(`Action failed: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  }, [loadOverview]);
 
   // ── chart data (computed from what we already fetched) ──
   const agingData = useMemo(() => {
@@ -287,7 +305,23 @@ export default function AdminRiskPage() {
                         <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.trapExposureAed ? fmtAED(r.trapExposureAed) : '—'}</td>
                         <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.renewalHikeCount || '—'}</td>
                         <td className="px-3 py-2.5 text-right font-medium" style={{ color: r.payingEvictionCount ? RED : '#3f3d39' }}>{r.payingEvictionCount || (r.directTerminationCount ? `0/${r.directTerminationCount}` : '—')}</td>
-                        <td className="px-3 py-2.5 text-right"><ChevronRight size={15} className="text-[#d4d2cc]" /></td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
+                            {isSuperAdmin && (
+                              <>
+                                <button title={r.complianceStatus === 'paused' ? 'Resume listings' : 'Pause listings'} onClick={(e) => { e.stopPropagation(); void pauseRp(r); }} disabled={busy === r.rpId}
+                                  className="p-1.5 rounded-lg border border-[#e8e6e0] hover:bg-[#fffbeb] disabled:opacity-40">
+                                  {r.complianceStatus === 'paused' ? <Play size={13} className="text-[#1a7a5a]" /> : <Pause size={13} className="text-[#b45309]" />}
+                                </button>
+                                <button title={r.userStatus === 'suspended' ? 'Reactivate account' : 'Suspend account'} onClick={(e) => { e.stopPropagation(); void suspendRp(r); }} disabled={busy === r.rpId || !r.userId}
+                                  className="p-1.5 rounded-lg border border-[#e8e6e0] hover:bg-[#fef2f2] disabled:opacity-40">
+                                  <Ban size={13} className={r.userStatus === 'suspended' ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'} />
+                                </button>
+                              </>
+                            )}
+                            <ChevronRight size={15} className="text-[#d4d2cc]" />
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
