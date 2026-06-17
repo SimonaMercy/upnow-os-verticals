@@ -1691,6 +1691,11 @@ function DetailsDrawer({
                                     </Link>
                                   </span>
                                 )}
+                                {editable && !sd.amount && (
+                                  <span className="note" style={{ display: 'block', fontSize: 11, color: '#b45309' }}>
+                                    amount not recorded — tap Edit to set it
+                                  </span>
+                                )}
                               </td>
                               <td className="amt">{fmtAed(sd.amount)}</td>
                               <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{sd.chequeNumber ?? '—'}</td>
