@@ -43,6 +43,7 @@ interface LeaderRow {
   arrearsCount: number; maxArrearsDays: number; vatOvercharge: number;
   depositScore: number; fairnessScore: number; leadScore: number; managerScore: number; paymentScore: number;
   compositeScore: number; tier: Tier;
+  priorComposite?: number | null; delta?: number | null;
 }
 function rpReasons(r: LeaderRow): string {
   const parts = [
@@ -157,6 +158,12 @@ function TierBadge({ tier }: { tier: Tier }) {
 }
 function Chip({ c, children }: { c: string; children: React.ReactNode }) {
   return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `${c}1a`, color: c }}>{children}</span>;
+}
+function Movement({ delta }: { delta?: number | null }) {
+  if (delta == null) return <span className="text-[10px] text-[#9b9890]" title="No prior snapshot">new</span>;
+  if (delta === 0) return <span className="text-[10px] text-[#9b9890]" title="No change vs last scan">•</span>;
+  const up = delta > 0;
+  return <span className="text-[10px] font-semibold" title="Change vs last snapshot" style={{ color: up ? '#b91c1c' : '#1a7a5a' }}>{up ? '▲' : '▼'}{Math.abs(delta)}</span>;
 }
 
 const RULE_LABEL: Record<string, string> = {
@@ -365,7 +372,10 @@ export default function AdminDecisionDashboard() {
                         </td>
                         <td className="px-3 py-2.5 text-right text-[#9b9890]">{r.trapExposureAed ? fmtAED(r.trapExposureAed) : ''}</td>
                         <td className="px-3 py-2.5 text-center w-20"><TierBadge tier={r.tier} /></td>
-                        <td className="px-3 py-2.5 text-right font-bold text-[#1a1916] w-10">{r.compositeScore}</td>
+                        <td className="px-3 py-2.5 text-right w-12">
+                          <div className="font-bold text-[#1a1916] leading-none">{r.compositeScore}</div>
+                          <div className="mt-0.5"><Movement delta={r.delta} /></div>
+                        </td>
                         {isSuperAdmin && (
                           <td className="px-3 py-2.5 text-right whitespace-nowrap w-24">
                             <div className="inline-flex gap-1">

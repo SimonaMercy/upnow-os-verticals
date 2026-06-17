@@ -15,7 +15,7 @@ import {
   ArrowLeft, RefreshCw, Banknote, TrendingUp, UserMinus, Loader2, Pause, Play, Ban,
 } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+  ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
 
@@ -34,6 +34,12 @@ interface LeaderRow {
   trapCount: number; trapExposureAed: number; maxTrapDays: number;
   renewalHikeCount: number; directTerminationCount: number; payingEvictionCount: number;
   depositScore: number; fairnessScore: number; compositeScore: number; tier: Tier;
+  priorComposite?: number | null; delta?: number | null;
+}
+interface RpHistory {
+  name: string;
+  scoreHistory: { date: string; composite: number; deposit: number; fairness: number; lead: number; manager: number; payment: number }[];
+  flags: { ruleKey: string; severity: string; dimension: string; exposureAed: number; status: string; firstSeen: string; lastSeen: string; openDays: number }[];
 }
 interface Overview { generatedAt: string; kpis: OverviewKpis; leaderboard: LeaderRow[]; }
 interface TrapRow { depositId: number; contractId: number; rpName: string; amountAed: number; endDate: string; daysOverdue: number; }
@@ -95,6 +101,17 @@ function TierBadge({ tier }: { tier: Tier }) {
   const s = TIER_STYLE[tier] ?? TIER_STYLE.ok;
   return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: s.bg, color: s.fg }}>{s.label}</span>;
 }
+function Movement({ delta }: { delta?: number | null }) {
+  if (delta == null) return <span className="text-[10px] text-[#9b9890]" title="No prior snapshot">new</span>;
+  if (delta === 0) return <span className="text-[10px] text-[#9b9890]">•</span>;
+  const up = delta > 0;
+  return <span className="text-[10px] font-semibold" title="Change vs last snapshot" style={{ color: up ? '#b91c1c' : '#1a7a5a' }}>{up ? '▲' : '▼'}{Math.abs(delta)}</span>;
+}
+const RULE_LABEL: Record<string, string> = {
+  'deposit.trap': 'Deposit withheld', 'deposit.slow_refund': 'Stalled refund', 'deposit.excessive_deduction': 'Excessive deduction',
+  'deposit.double_charge': 'Double-charge', 'fairness.renewal_hike': 'Renewal hike', 'fairness.direct_eviction': 'Direct eviction',
+};
+const sevColor = (s: string) => (s === 'high' ? RED : s === 'medium' ? AMBER : '#9b9890');
 
 function AlertList<T>({ title, icon: Icon, count, rows, emptyText, render, accent }: {
   title: string; icon: typeof Wallet; count: number; rows: T[];
@@ -127,6 +144,7 @@ export default function AdminRiskPage() {
   const [deposits, setDeposits] = useState<DepositAlerts | null>(null);
   const [fairness, setFairness] = useState<FairnessAlerts | null>(null);
   const [selected, setSelected] = useState<{ id: number; name: string } | null>(null);
+  const [history, setHistory] = useState<RpHistory | null>(null);
   const [loading, setLoading] = useState(true);
   const [recomputing, setRecomputing] = useState(false);
 
@@ -150,8 +168,10 @@ export default function AdminRiskPage() {
     setSelected({ id: rpId, name });
     apiGet<{ deposits: DepositAlerts; fairness: FairnessAlerts }>(`/admin/risk/rp/${rpId}`)
       .then((r) => { setDeposits(r.deposits); setFairness(r.fairness); }).catch(() => null);
+    setHistory(null);
+    apiGet<RpHistory>(`/admin/risk/rp/${rpId}/history`).then(setHistory).catch(() => null);
   }, []);
-  const clearRp = useCallback(() => { setSelected(null); loadAllAlerts(); }, [loadAllAlerts]);
+  const clearRp = useCallback(() => { setSelected(null); setHistory(null); loadAllAlerts(); }, [loadAllAlerts]);
   const recompute = useCallback(async () => {
     setRecomputing(true);
     try { await apiPost('/admin/risk/recompute'); loadOverview(); if (!selected) loadAllAlerts(); }
@@ -300,7 +320,10 @@ export default function AdminRiskPage() {
                           <div className="text-[11px] capitalize text-[#9b9890]">{r.complianceStatus.replace(/_/g, ' ')}</div>
                         </td>
                         <td className="px-3 py-2.5 text-center"><TierBadge tier={r.tier} /></td>
-                        <td className="px-3 py-2.5 text-right font-bold text-[#1a1916]">{r.compositeScore}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          <div className="font-bold text-[#1a1916] leading-none">{r.compositeScore}</div>
+                          <div className="mt-0.5"><Movement delta={r.delta} /></div>
+                        </td>
                         <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.trapCount > 0 ? `${r.trapCount}${r.maxTrapDays >= 90 ? ' ⚠' : ''}` : '—'}</td>
                         <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.trapExposureAed ? fmtAED(r.trapExposureAed) : '—'}</td>
                         <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.renewalHikeCount || '—'}</td>
@@ -335,6 +358,44 @@ export default function AdminRiskPage() {
             <h2 className="text-sm font-bold text-[#1a1916]">{selected ? `Alerts — ${selected.name}` : 'Risk alerts'}</h2>
             {selected && <button onClick={clearRp} className="flex items-center gap-1 text-[12px] font-semibold text-[#2e9f82]"><ArrowLeft size={13} /> All providers</button>}
           </div>
+
+          {/* Per-RP risk intelligence: score history + flag timeline */}
+          {selected && history && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
+              <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
+                <h3 className="text-sm font-bold text-[#1a1916]">Risk score over time</h3>
+                <p className="text-[11px] text-[#9b9890] mt-0.5 mb-1">{history.scoreHistory.length <= 1 ? 'one snapshot so far — builds daily' : 'composite, by daily snapshot'}</p>
+                <ResponsiveContainer width="100%" height={180}>
+                  <AreaChart data={history.scoreHistory} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <defs><linearGradient id="compHist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={RED} stopOpacity={0.25} /><stop offset="100%" stopColor={RED} stopOpacity={0} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={28} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => [String(v), 'Composite'] as [string, string]} />
+                    <Area type="monotone" dataKey="composite" stroke={RED} strokeWidth={2} fill="url(#compHist)" dot={{ r: 3, fill: RED }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-[#f0ede8]"><h3 className="text-sm font-bold text-[#1a1916]">Flag timeline</h3></div>
+                {history.flags.length === 0 ? (
+                  <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No flags on record.</p>
+                ) : (
+                  <ul className="divide-y divide-[#f0ede8] max-h-48 overflow-y-auto">
+                    {history.flags.map((f, i) => (
+                      <li key={i} className="px-4 py-2 flex items-center justify-between gap-3 text-[12px]">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate" style={{ color: sevColor(f.severity) }}>{RULE_LABEL[f.ruleKey] ?? f.ruleKey}</div>
+                          <div className="text-[11px] text-[#9b9890]">first seen {new Date(f.firstSeen).toLocaleDateString('en-AE')} · open {f.openDays}d</div>
+                        </div>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize flex-shrink-0" style={{ backgroundColor: f.status === 'resolved' ? '#ecfdf5' : f.status === 'acknowledged' ? '#f5f4f0' : `${sevColor(f.severity)}1a`, color: f.status === 'resolved' ? '#047857' : f.status === 'acknowledged' ? '#6b6860' : sevColor(f.severity) }}>{f.status}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
 
           <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 text-[#9b9890]">Deposits</p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
