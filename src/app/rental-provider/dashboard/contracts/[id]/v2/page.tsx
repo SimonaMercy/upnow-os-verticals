@@ -37,7 +37,7 @@ import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
   User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
-  ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check,
+  ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
@@ -1156,7 +1156,16 @@ function MissingStrip({
 // Detail cards row
 // ────────────────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses';
+type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses' | 'notes';
+
+/** One entry in the tenancy's running notes log (newest first). */
+type ContractNote = {
+  id: number;
+  body: string;
+  authorName: string | null;
+  authorRole: 'rental_provider' | 'manager' | null;
+  createdAt: string;
+};
 
 /** Generates + emails the tenant a secure magic link, deep-linked to the section
  *  relevant to where it's shown (documents vs the contract review/sign page),
@@ -1232,11 +1241,13 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'payments',  label: 'Payments',  icon: CreditCard },
   { key: 'documents', label: 'Documents', icon: Paperclip },
   { key: 'clauses',   label: 'Clauses',   icon: ClipboardList },
+  { key: 'notes',     label: 'Notes',     icon: StickyNote },
 ];
 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
+  notes, onAddNote,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
@@ -1270,6 +1281,10 @@ function DetailsDrawer({
   onUploadDoc: (file: File, meta: { key: string; label: string; category: string }, visibleToTenant: boolean, expiryDate: string) => Promise<void>;
   /** POST /api/documents/request — request a document from the tenant. */
   onRequestDoc: (label: string, notes: string) => Promise<void>;
+  /** Running tenancy notes log (newest first). */
+  notes: ContractNote[];
+  /** POST /api/contracts/:id/notes — append a note to the tenancy log. */
+  onAddNote: (body: string) => Promise<void>;
 }) {
   const depositRow = payments.find(p => p.paymentType === 'security_deposit');
   // ── Record-payment form state (Flow 1) ──
@@ -1406,6 +1421,23 @@ function DetailsDrawer({
       setClauseErr(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setClauseBusy(false);
+    }
+  };
+  // ── Tenancy notes log (running hand-off journal) ──
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteErr, setNoteErr] = useState<string | null>(null);
+  const submitNote = async () => {
+    const t = noteDraft.trim();
+    if (!t) return;
+    setNoteBusy(true); setNoteErr(null);
+    try {
+      await onAddNote(t);
+      setNoteDraft('');
+    } catch (e) {
+      setNoteErr(e instanceof Error ? e.message : 'Failed to save note');
+    } finally {
+      setNoteBusy(false);
     }
   };
   // ── Confirm PDC state (Flow 3) ──
@@ -2372,6 +2404,56 @@ function DetailsDrawer({
               </div>
             </div>
           )}
+
+          {/* ── Tenancy notes log ──────────────────────────────────────────────
+              A running, append-only journal staff keep about this tenancy so
+              whoever picks it up next sees the full history. Shared across the
+              whole renewal chain, and never locks (unlike the clauses note). */}
+          {(inline || tab === 'notes') && (
+            <div className="sec" id="sec-notes">
+              <div className="sech"><span className="si"><StickyNote size={16} /></span><span className="st">Notes</span></div>
+              <div className="secb">
+                <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
+                  An internal log for your team — record what is going on with this tenant so the next person to handle it is up to speed. Shared across this lease and its renewals. Not visible to the customer.
+                </p>
+                <div className="field" style={{ marginBottom: 6 }}>
+                  <textarea
+                    className="input"
+                    value={noteDraft}
+                    placeholder="Add a note about this tenancy…"
+                    rows={2}
+                    onChange={e => setNoteDraft(e.target.value)}
+                    onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNote(); } }}
+                  />
+                </div>
+                {noteErr && <p className="note" style={{ color: 'var(--brick)' }}>{noteErr}</p>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                  <button className="btn btn-jade btn-sm" disabled={noteBusy || !noteDraft.trim()} onClick={() => void submitNote()}>
+                    <Check size={14} /> {noteBusy ? 'Saving…' : 'Add note'}
+                  </button>
+                </div>
+
+                {notes.length === 0 ? (
+                  <p className="note">No notes yet. Add the first one above.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {notes.map(n => (
+                      <div key={n.id} style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12, color: 'var(--ink-3)' }}>
+                          <strong style={{ color: 'var(--ink-2)' }}>{n.authorName ?? 'Staff'}</strong>
+                          {n.authorRole === 'manager' && <span className="pill" style={{ fontSize: 10 }}>Manager</span>}
+                          <span style={{ marginLeft: 'auto' }}>
+                            {new Date(n.createdAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--ink-1)', whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -2926,6 +3008,7 @@ export default function ContractV2Page() {
     : '/rental-provider/dashboard/contracts';
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
+  const [notes, setNotes] = useState<ContractNote[]>([]);
   const [moveInInsp, setMoveInInsp] = useState<MoveInInsp | null>(null);
   const [moveOutInsp, setMoveOutInsp] = useState<MoveInInsp | null>(null);
   const [settlementStatus, setSettlementStatus] = useState<DerivedState['settlementStatus']>(null);
@@ -3002,6 +3085,29 @@ export default function ContractV2Page() {
   }, [params?.id]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // Tenancy notes log — loaded independently of the main contract fetch so the
+  // journal renders even if a sub-fetch hiccups.
+  const loadNotes = useCallback(() => {
+    if (!params?.id) return;
+    fetch(`/api/contracts/${params.id}/notes`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: ContractNote[]) => setNotes(Array.isArray(rows) ? rows : []))
+      .catch(() => undefined);
+  }, [params?.id]);
+  useEffect(() => { loadNotes(); }, [loadNotes]);
+
+  const onAddNote = async (body: string) => {
+    const res = await fetch(`/api/contracts/${params.id}/notes`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? 'Failed to save note');
+    const created = await res.json() as ContractNote;
+    setNotes(prev => [created, ...prev]);
+  };
 
   const derived = useMemo(
     () => contract ? deriveState(contract, signatures, moveInInsp, moveOutInsp, settlementStatus) : null,
@@ -3875,6 +3981,8 @@ export default function ContractV2Page() {
             onConfirmPdc={onConfirmPdc}
             onUploadDoc={onUploadDoc}
             onRequestDoc={onRequestDoc}
+            notes={notes}
+            onAddNote={onAddNote}
           />
         </div>
       </div>
