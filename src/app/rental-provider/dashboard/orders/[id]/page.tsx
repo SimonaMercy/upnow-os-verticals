@@ -55,6 +55,10 @@ interface ContractDetail {
   durationYears: number | null;
   annualRent: number;
   contractValue: number | null;
+  listedRent: number | null;
+  discountType: 'percent' | 'fixed' | null;
+  discountValue: number | null;
+  discountAmount: number | null;
   securityDepositAmount: number | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
@@ -267,7 +271,18 @@ export default function ContractDetailPage() {
         <Row label="Contract Type" value={humanize(contract.contractType)} />
         <Row label="Payment Method" value={humanize(contract.modeOfPayment)} />
         <Row label="No. of Installments" value={contract.numberOfInstallments ?? null} />
-        <Row label="Annual Rent" value={fmtAed(contract.annualRent)} />
+        {!!contract.discountAmount && contract.discountAmount > 0 && (
+          <>
+            <Row label="Listed Rent" value={fmtAed(contract.listedRent)} />
+            <Row label="Discount" value={
+              <span className="text-[#b91c1c] font-medium">
+                − {fmtAed(contract.discountAmount)}
+                {contract.discountType === 'percent' && contract.discountValue ? ` (${contract.discountValue}%)` : ''}
+              </span>
+            } />
+          </>
+        )}
+        <Row label={contract.discountAmount && contract.discountAmount > 0 ? 'Annual Rent (net)' : 'Annual Rent'} value={fmtAed(contract.annualRent)} />
         <Row label="Contract Value" value={fmtAed(contract.contractValue)} />
         <Row label="Security Deposit" value={fmtAed(contract.securityDepositAmount)} />
         {contract.refundRules && <Row label="Refund Rules" value={contract.refundRules} />}

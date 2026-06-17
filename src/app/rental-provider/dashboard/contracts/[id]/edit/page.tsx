@@ -60,6 +60,10 @@ interface ContractDetail {
   startDate: string | null;
   endDate: string | null;
   annualRent: number | null;
+  listedRent: number | null;
+  discountType: 'percent' | 'fixed' | null;
+  discountValue: number | null;
+  discountAmount: number | null;
   securityDepositAmount: number | null;
   adminFeeFils: number | null;
   ejariFeeFils: number | null;
@@ -91,7 +95,9 @@ export default function EditContractPage() {
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [annualRent, setAnnualRent] = useState('');
+  const [listedRent, setListedRent] = useState('');
+  const [discountType, setDiscountType] = useState<'none' | 'percent' | 'fixed'>('none');
+  const [discountValue, setDiscountValue] = useState('');
   const [securityDeposit, setSecurityDeposit] = useState('');
   const [adminFee, setAdminFee] = useState('');
   const [ejariFee, setEjariFee] = useState('');
@@ -109,7 +115,9 @@ export default function EditContractPage() {
         if (cancelled) return;
         setStartDate(toDateInput(c.startDate));
         setEndDate(toDateInput(c.endDate));
-        setAnnualRent(numStr(c.annualRent));
+        setListedRent(numStr(c.listedRent ?? c.annualRent));
+        setDiscountType(c.discountType ?? 'none');
+        setDiscountValue(c.discountValue != null ? String(c.discountValue) : '');
         setSecurityDeposit(numStr(c.securityDepositAmount));
         setAdminFee(numStr(c.adminFeeFils));
         setEjariFee(numStr(c.ejariFeeFils));
@@ -144,7 +152,14 @@ export default function EditContractPage() {
     setClauseInput('');
   };
 
-  const rentNum = Number(annualRent) || 0;
+  // listedRent − discount = rentNum (the NET rent = contract value). The cheque
+  // split and contract value both key off the net, never the listed price.
+  const listedNum = Number(listedRent) || 0;
+  const discRaw = Number(discountValue) || 0;
+  const discountAmt = discountType === 'percent' ? Math.round(listedNum * discRaw) / 100
+                    : discountType === 'fixed'   ? Math.min(discRaw, listedNum)
+                    : 0;
+  const rentNum = Math.max(0, listedNum - discountAmt);
   const inst = Number(installments) || 1;
   const chequeAmount = inst > 0 ? rentNum / inst : 0;
   const durationLabel = calcDurationLabel(startDate, endDate);
@@ -153,14 +168,19 @@ export default function EditContractPage() {
     setError(null);
     if (!startDate || !endDate) { setError('Start and end dates are required.'); return; }
     if (new Date(startDate) >= new Date(endDate)) { setError('End date must be after the start date.'); return; }
-    if (rentNum <= 0) { setError('Annual rent must be greater than zero.'); return; }
+    if (listedNum <= 0) { setError('Listed rent must be greater than zero.'); return; }
+    if (rentNum <= 0) { setError('The discount cannot be equal to or greater than the rent.'); return; }
     setSaving(true);
     try {
       const opt = (v: string) => (v.trim() === '' ? undefined : Number(v));
       await apiPatch(`/contracts/${id}`, {
         contractStartDate: startDate,
         contractEndDate: endDate,
-        annualRent: rentNum,
+        // Send listed rent + discount; the backend recomputes net annual rent =
+        // contract value = listed − discount. discountType:null clears a discount.
+        listedRent: listedNum,
+        discountType: discountType === 'none' ? null : discountType,
+        discountValue: discountType === 'none' ? 0 : discRaw,
         securityDepositAmount: opt(securityDeposit),
         adminFee: opt(adminFee),
         ejariFee: opt(ejariFee),
@@ -263,8 +283,8 @@ export default function EditContractPage() {
                 <h2 className="font-semibold text-sm text-[#1a1916]">Financial Terms</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelCls}>Annual Rent (AED) *</label>
-                    <input type="number" min={0} value={annualRent} onChange={(e) => setAnnualRent(e.target.value)} className={inputCls} />
+                    <label className={labelCls}>Listed Rent (AED) *</label>
+                    <input type="number" min={0} value={listedRent} onChange={(e) => setListedRent(e.target.value)} className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Security Deposit (AED)</label>
@@ -299,6 +319,51 @@ export default function EditContractPage() {
                         <option value="12">12 — Monthly</option>
                       </select>
                       <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Discount (rent line only) → live Listed → Discount → Net breakdown */}
+                <div className="rounded-xl border border-[#e8e6e0] bg-[#fbfaf7] px-4 py-3">
+                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                    <label className="text-xs font-medium text-[#6b6860]">Discount (optional)</label>
+                    <div className="flex gap-1.5">
+                      {(['none', 'percent', 'fixed'] as const).map((t) => (
+                        <button key={t} type="button"
+                          onClick={() => { setDiscountType(t); if (t === 'none') setDiscountValue(''); }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                            discountType === t
+                              ? 'border-[#2e9f82] bg-[#f0faf6] text-[#2e9f82]'
+                              : 'border-[#e8e6e0] bg-white text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'
+                          }`}>
+                          {t === 'none' ? 'None' : t === 'percent' ? '% Off' : 'Fixed AED'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {discountType !== 'none' && (
+                    <div className="flex items-center gap-2">
+                      <input type="number" min={0} step={discountType === 'percent' ? 0.1 : 1}
+                        value={discountValue} onChange={(e) => setDiscountValue(e.target.value)}
+                        placeholder={discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'}
+                        className={inputCls} />
+                      <span className="text-xs font-semibold text-[#6b6860]">{discountType === 'percent' ? '%' : 'AED'}</span>
+                    </div>
+                  )}
+                  <div className="mt-3 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-[#6b6860]">Listed rent</span>
+                      <span className={discountAmt > 0 ? 'text-[#9b9890] line-through' : 'text-[#1a1916] font-semibold'}>{listedNum > 0 ? fmtAed(listedNum) : '—'}</span>
+                    </div>
+                    {discountAmt > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-[#6b6860]">Discount</span>
+                        <span className="text-[#b91c1c] font-medium">− {fmtAed(discountAmt)} ({listedNum > 0 ? ((discountAmt / listedNum) * 100).toFixed(1) : '0'}%)</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm font-bold pt-1 border-t border-[#e8e6e0]">
+                      <span className="text-[#1a1916]">Annual rent / Contract value</span>
+                      <span className="text-[#2e9f82]">{rentNum > 0 ? fmtAed(rentNum) : '—'}</span>
                     </div>
                   </div>
                 </div>
@@ -375,7 +440,10 @@ export default function EditContractPage() {
             <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3 lg:sticky lg:top-6">
               <h2 className="font-semibold text-sm text-[#1a1916]">Summary</h2>
               {([
-                ['Annual rent', rentNum > 0 ? fmtAed(rentNum) : '—'],
+                ...(discountAmt > 0
+                  ? ([['Listed rent', fmtAed(listedNum)], ['Discount', `− ${fmtAed(discountAmt)}`]] as [string, string][])
+                  : []),
+                [discountAmt > 0 ? 'Annual rent (net)' : 'Annual rent', rentNum > 0 ? fmtAed(rentNum) : '—'],
                 ['Security deposit', securityDeposit ? fmtAed(Number(securityDeposit)) : '—'],
                 ['Admin fee', adminFee ? fmtAed(Number(adminFee)) : '—'],
                 ['Ejari fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],

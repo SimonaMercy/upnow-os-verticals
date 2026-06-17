@@ -54,7 +54,8 @@ interface FormState {
   tenantName: string;
   contractStartDate: string;
   contractEndDate: string;
-  discount: string;
+  discountType: 'none' | 'percent' | 'fixed';
+  discountValue: string;
   numberOfInstallments: string;
   modeOfPayment: string;
   notes: string;
@@ -293,7 +294,8 @@ export default function NewContractPage() {
     tenantName: qTenantName,
     contractStartDate: qStartDate,
     contractEndDate: qStartDate ? addMonths(qStartDate, 12) : '',
-    discount: '',
+    discountType: 'none',
+    discountValue: '',
     numberOfInstallments: qChequeCount && Number(qChequeCount) > 0 ? String(Math.max(1, Number(qChequeCount) - 1)) : '4',
     modeOfPayment: 'cheque',
     notes: '',
@@ -384,10 +386,10 @@ export default function NewContractPage() {
           items: p.items,
           notes: p.notes ?? null,
         });
-        const discountAed = p.originalRentFils && p.rentFils != null ? (p.originalRentFils - p.rentFils) / 100 : (p.discountFils ?? 0) / 100;
+        // The plan's discount is read-only here (shown from planFromLead); the
+        // form's own discount controls stay untouched for the no-lead path.
         setForm(f => ({
           ...f,
-          discount: discountAed > 0 ? String(discountAed) : f.discount,
           numberOfInstallments: String(p.installmentCount),
         }));
       })
@@ -481,10 +483,13 @@ export default function NewContractPage() {
       // If the lead has an issued plan, use those amounts so the contract matches.
       // Otherwise compute from the unit defaults.
       const rentFromUnit = Number(su?.rentalPrice ?? su?.marketPrice ?? 0);
-      const discountAmt  = Number(form.discount) || 0;
+      const discRaw = Number(form.discountValue) || 0;
+      const discAmt = form.discountType === 'percent' ? Math.round(rentFromUnit * discRaw) / 100
+                    : form.discountType === 'fixed'   ? Math.min(discRaw, rentFromUnit)
+                    : 0;
       const effectiveRent = planFromLead
         ? planFromLead.rentFils / 100
-        : Math.max(0, rentFromUnit - discountAmt);
+        : Math.max(0, rentFromUnit - discAmt);
 
       const body = {
         unitId: Number(form.unitId),
@@ -492,6 +497,22 @@ export default function NewContractPage() {
         contractStartDate: form.contractStartDate,
         contractEndDate: form.contractEndDate,
         annualRent: effectiveRent,
+        // Send listed rent + discount so the contract stores the full breakdown
+        // (backend recomputes net = listed − discount). Carry it from the lead
+        // plan when present, else from the form's own discount controls.
+        ...(planFromLead
+          ? (planFromLead.discountFils
+              ? {
+                  listedRent: (planFromLead.originalRentFils ?? (planFromLead.rentFils + planFromLead.discountFils)) / 100,
+                  discountType: planFromLead.discountType ?? 'fixed',
+                  discountValue: planFromLead.discountType === 'percent'
+                    ? planFromLead.discountPercent
+                    : planFromLead.discountFils / 100,
+                }
+              : {})
+          : (form.discountType !== 'none' && discRaw > 0
+              ? { listedRent: rentFromUnit, discountType: form.discountType, discountValue: discRaw }
+              : {})),
         // The units API serializes numerics as strings ("5600.00") — coerce,
         // or the contracts DTO rejects the whole POST with a 400.
         securityDepositAmount: planFromLead
@@ -543,8 +564,17 @@ export default function NewContractPage() {
   // the RP shared with the tenant). Fall back to the unit defaults when no plan is supplied.
   const listedRent    = planFromLead ? (planFromLead.rentFils + (planFromLead.discountFils ?? 0)) / 100
                                      : Number(selectedUnit?.rentalPrice ?? selectedUnit?.marketPrice ?? 0);
-  const discountAmt   = Number(form.discount) || 0;
-  const annualRent    = Math.max(0, listedRent - discountAmt);
+  // Discount comes from the lead's issued plan when present (read-only), else
+  // from the form controls. annualRent is always the NET (post-discount) rent.
+  const discRaw       = Number(form.discountValue) || 0;
+  const discountAmt   = planFromLead
+                          ? (planFromLead.originalRentFils
+                              ? (planFromLead.originalRentFils - planFromLead.rentFils) / 100
+                              : (planFromLead.discountFils ?? 0) / 100)
+                          : form.discountType === 'percent' ? Math.round(listedRent * discRaw) / 100
+                          : form.discountType === 'fixed'   ? Math.min(discRaw, listedRent)
+                          : 0;
+  const annualRent    = planFromLead ? planFromLead.rentFils / 100 : Math.max(0, listedRent - discountAmt);
   const secDeposit    = planFromLead ? planFromLead.securityDepositFils / 100 : Number(selectedUnit?.securityDeposit) || 0;
   const adminFee      = planFromLead ? planFromLead.adminFeeFils / 100      : Number(selectedUnit?.adminFee)      || 0;
   const ejariFee      = planFromLead ? planFromLead.ejariFils / 100         : Number(selectedUnit?.ejariFeeFils)  || 0;
@@ -958,21 +988,45 @@ export default function NewContractPage() {
                       When the lead's payment plan is in play, its discount is final and read-only. */}
                   {!planFromLead && (
                     <div>
-                      <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Discount (AED)</label>
-                      <input
-                        type="number" min="0" step="1" placeholder="0 — leave empty for no discount"
-                        value={form.discount} onChange={set('discount')}
-                        className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                      />
+                      <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Discount (optional)</label>
+                      <div className="flex gap-2 mb-2">
+                        {(['none', 'percent', 'fixed'] as const).map(t => (
+                          <button key={t} type="button"
+                            onClick={() => setForm(f => ({ ...f, discountType: t, discountValue: t === 'none' ? '' : f.discountValue }))}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                              form.discountType === t
+                                ? 'border-[#2e9f82] bg-[#f0faf6] text-[#2e9f82]'
+                                : 'border-[#e8e6e0] bg-[#f7f6f2] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'
+                            }`}>
+                            {t === 'none' ? 'No Discount' : t === 'percent' ? '% Off' : 'Fixed AED'}
+                          </button>
+                        ))}
+                      </div>
+                      {form.discountType !== 'none' && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number" min="0" step={form.discountType === 'percent' ? '0.1' : '1'}
+                            value={form.discountValue} onChange={set('discountValue')}
+                            placeholder={form.discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'}
+                            className="flex-1 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
+                          />
+                          <span className="text-xs font-semibold text-[#6b6860]">{form.discountType === 'percent' ? '%' : 'AED'}</span>
+                        </div>
+                      )}
                       {discountAmt > 0 && listedRent > 0 && (
-                        <div className="mt-2 flex items-center justify-between bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-2.5">
-                          <span className="text-xs text-[#6b6860]">Effective Rent</span>
-                          <span className="text-sm font-bold text-[#2e9f82]">
-                            {fmtAed(annualRent)}
-                            <span className="ml-1.5 text-[10px] font-normal text-[#4aaa8a]">
-                              ({((discountAmt / listedRent) * 100).toFixed(1)}% off)
-                            </span>
-                          </span>
+                        <div className="mt-2 rounded-xl bg-[#f0faf6] border border-[#c5e8df] px-4 py-2.5 space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-[#6b6860]">Listed rent</span>
+                            <span className="text-[#9b9890] line-through">{fmtAed(listedRent)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-[#6b6860]">Discount</span>
+                            <span className="text-[#b91c1c] font-medium">− {fmtAed(discountAmt)} ({((discountAmt / listedRent) * 100).toFixed(1)}%)</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-bold pt-1 border-t border-[#c5e8df]">
+                            <span className="text-[#1a1916]">Contract value</span>
+                            <span className="text-[#2e9f82]">{fmtAed(annualRent)}</span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1190,13 +1244,26 @@ export default function NewContractPage() {
                   </div>
                 )}
 
-                {/* Annual rent */}
+                {/* Annual rent — strike the listed price when a discount applies */}
                 <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
                   <span className="text-xs text-[#9b9890]">Annual Rent</span>
                   <span className="text-sm font-bold text-[#1a1916]">
-                    {annualRent > 0 ? fmtAed(annualRent) : '—'}
+                    {annualRent > 0 ? (
+                      <>
+                        {discountAmt > 0 && (
+                          <span className="text-xs font-normal text-[#9b9890] line-through mr-1.5">{fmtAed(listedRent)}</span>
+                        )}
+                        {fmtAed(annualRent)}
+                      </>
+                    ) : '—'}
                   </span>
                 </div>
+                {discountAmt > 0 && (
+                  <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
+                    <span className="text-xs text-[#9b9890]">Discount</span>
+                    <span className="text-xs font-semibold text-[#b91c1c]">− {fmtAed(discountAmt)}</span>
+                  </div>
+                )}
 
                 {/* Per cheque */}
                 {annualRent > 0 && (

@@ -19,6 +19,9 @@ type ContractSummary = {
   startDate: string;
   endDate: string;
   annualRent: number;
+  listedRent: number | null;
+  discountType: 'percent' | 'fixed' | null;
+  discountAmount: number | null;
   status: string;
   ejariStatus: string | null;
   contractSent: boolean;
@@ -189,7 +192,11 @@ export default function TenantContractsPage() {
                     <span className="flex items-center gap-1"><Calendar size={11} /> {fmtDate(c.startDate)} – {fmtDate(c.endDate)}</span>
                   </div>
                   <p className="text-xs text-[#b0ada8] mt-0.5">
+                    {(c.discountAmount ?? 0) > 0 && c.listedRent != null && (
+                      <span className="line-through mr-1.5">{fmtAed(c.listedRent)}</span>
+                    )}
                     {fmtAed(c.annualRent)} / year
+                    {(c.discountAmount ?? 0) > 0 ? ` · saved ${fmtAed(c.discountAmount!)}` : ''}
                     {c.landlord?.name ? ` · Landlord: ${c.landlord.name}` : ''}
                   </p>
                 </div>

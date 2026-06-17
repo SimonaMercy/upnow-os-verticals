@@ -50,6 +50,8 @@ export interface EjariContractData {
   ref: string;
   startDate: string; endDate: string; createdAt: string;
   annualRent: number; contractValue: number | null; securityDepositAmount: number | null;
+  // Rent discount (rent line only). listedRent − discountAmount = annualRent.
+  listedRent?: number | null; discountType?: 'percent' | 'fixed' | null; discountAmount?: number | null;
   modeOfPayment: string | null; customClauses?: string[]; notes?: string | null;
   landlord: EjariParty;
   tenant: EjariParty;
@@ -274,6 +276,9 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   const rent = Number(data.annualRent) || 0;
   const cval = data.contractValue != null ? Number(data.contractValue) : rent;
   const dep = data.securityDepositAmount != null ? Number(data.securityDepositAmount) : 0;
+  // Rent discount — listed price + reduction, shown only when one was applied.
+  const listed = data.listedRent != null ? Number(data.listedRent) : rent;
+  const discount = data.discountAmount != null ? Number(data.discountAmount) : Math.max(0, listed - rent);
   const landlordName = data.landlord.companyName || data.landlord.name || '';
   // Usage comes from the property's space category (residential/commercial/
   // industrial); fall back to matching the unit type string if it's absent.
@@ -358,10 +363,18 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4 }}>
             <Text style={{ fontSize: 7.5 }}>Annual Rent <Text style={{ fontFamily: AR }}>الإيجار السنوي</Text></Text>
-            <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{rent > 0 ? `${fmtAed(rent)} (${numWords(rent)})` : ''}</Text>
+            <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{listed > 0 ? `${fmtAed(listed)} (${numWords(listed)})` : ''}</Text>
             <Text style={{ fontSize: 7.5, marginLeft: 8 }}>Security Deposit <Text style={{ fontFamily: AR }}>مبلغ التأمين</Text></Text>
             <Text style={{ width: 90, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{dep > 0 ? fmtAed(dep) : ''}</Text>
           </View>
+          {discount > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4 }}>
+              {/* Annual Rent above shows the listed figure; Contract Value shows the
+                  net. This line states the reduction so the gap is explicit. */}
+              <Text style={{ fontSize: 7.5 }}>Rent Discount <Text style={{ fontFamily: AR }}>خصم الإيجار</Text></Text>
+              <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>− {fmtAed(discount)}{data.discountType === 'percent' && listed > 0 ? ` (${((discount / listed) * 100).toFixed(1)}%)` : ''} → Contract Value {fmtAed(cval)}</Text>
+            </View>
+          )}
           <Field label="Mode of Payment" ar="طريقة الدفع" value={data.modeOfPayment || ''} />
         </Section>
         <View style={{ flexGrow: 1 }} />

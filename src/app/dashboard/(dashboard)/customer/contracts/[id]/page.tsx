@@ -76,6 +76,9 @@ interface ContractDetail {
   durationYears: number | null;
   annualRent: number;
   contractValue: number | null;
+  listedRent: number | null;
+  discountType: 'percent' | 'fixed' | null;
+  discountAmount: number | null;
   securityDepositAmount: number | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
@@ -545,7 +548,15 @@ export default function TenantContractDetailPage() {
           <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
           <div>
             <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Annual Rent</p>
-            <p className="text-sm font-bold" style={{ color: '#2e9f82' }}>{fmtAed(contract.annualRent)}</p>
+            <p className="text-sm font-bold" style={{ color: '#2e9f82' }}>
+              {(contract.discountAmount ?? 0) > 0 && contract.listedRent != null && (
+                <span className="text-xs font-normal text-[#9b9890] line-through mr-1.5">{fmtAed(contract.listedRent)}</span>
+              )}
+              {fmtAed(contract.annualRent)}
+            </p>
+            {(contract.discountAmount ?? 0) > 0 && (
+              <p className="text-[9px] font-semibold mt-0.5" style={{ color: '#b91c1c' }}>− {fmtAed(contract.discountAmount!)} discount</p>
+            )}
           </div>
           <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
           <div>

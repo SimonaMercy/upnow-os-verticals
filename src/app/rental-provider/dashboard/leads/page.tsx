@@ -503,7 +503,11 @@ function LeadRow({
   const _startDateInit = _existingPlan?.items?.find(it => it.type === 'first_bundle')?.dueDate
     ?? _existingPlan?.items?.[0]?.dueDate
     ?? _latestViewing?.desiredMoveIn?.slice(0, 10) ?? '';
-  const [planRentAed,         setPlanRentAed]         = useState<string>(_existingPlan ? String(_existingPlan.rentFils / 100) : _unitRentAed);
+  // Prefill the LISTED (pre-discount) rent when editing an existing plan — the
+  // discount fields below re-apply the reduction, so prefilling the net rent
+  // (rentFils) would double-discount on every re-save. originalRentFils is only
+  // set when a discount was applied; otherwise rentFils already IS the listed rent.
+  const [planRentAed,         setPlanRentAed]         = useState<string>(_existingPlan ? String((_existingPlan.originalRentFils ?? _existingPlan.rentFils) / 100) : _unitRentAed);
   const [planInstallmentCount, setPlanInstallmentCount] = useState<number>(_defaultInstallments);
   const [planStartDate,       setPlanStartDate]       = useState<string>(_startDateInit);
   const [planAdminFeeAed,     setPlanAdminFeeAed]     = useState<string>(_existingPlan ? String(_existingPlan.adminFeeFils / 100) : '');
@@ -816,7 +820,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           extraItems: extraItemsPayload.length ? extraItemsPayload : undefined,
           rentalIndexReportUrl: rentalIndexUrl || undefined,
           chequesPayableTo: planChequesPayableTo.trim() || undefined,
-          ...(planInstallmentCount === 1 && planDiscountType !== 'none' && planDiscountValue && parseFloat(planDiscountValue) > 0 && {
+          ...(planDiscountType !== 'none' && planDiscountValue && parseFloat(planDiscountValue) > 0 && {
             discountType: planDiscountType,
             ...(planDiscountType === 'percent' ? { discountPercent: parseFloat(planDiscountValue) } : { discountFils: Math.round(parseFloat(planDiscountValue) * 100) }),
           }),
@@ -1760,8 +1764,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const _ejariFils   = Math.round((parseFloat(planEjariAed)      || 0) * 100);
         const _commFils    = Math.round((parseFloat(planCommissionAed) || 0) * 100);
         const _depositFils = Math.round((parseFloat(planDepositAed)    || 0) * 100);
-        // Apply discount preview for single-payment plans
-        const _discountFils = planInstallmentCount === 1 && planDiscountType !== 'none' && parseFloat(planDiscountValue) > 0
+        // Apply discount preview — the discounted net rent is split across all installments
+        const _discountFils = planDiscountType !== 'none' && parseFloat(planDiscountValue) > 0
           ? planDiscountType === 'percent'
             ? Math.round(_rentFils * parseFloat(planDiscountValue) / 100)
             : Math.round(parseFloat(planDiscountValue) * 100)
@@ -1902,10 +1906,9 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </div>
             </div>
 
-            {/* Single-payment discount */}
-            {planInstallmentCount === 1 && (
-              <div className="mb-3 bg-[#fffbeb] border border-[#fde68a] rounded-xl px-3 py-2.5">
-                <p className="text-[10px] font-semibold text-[#92400e] uppercase tracking-wide mb-2">Annual Discount (Optional)</p>
+            {/* Rent discount — applies to the rent line, split across all installments */}
+            <div className="mb-3 bg-[#fffbeb] border border-[#fde68a] rounded-xl px-3 py-2.5">
+                <p className="text-[10px] font-semibold text-[#92400e] uppercase tracking-wide mb-2">Rent Discount (Optional)</p>
                 <div className="flex gap-1.5 mb-2">
                   {(['none', 'percent', 'fixed'] as const).map(t => (
                     <button key={t} type="button"
@@ -1941,7 +1944,6 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                   );
                 })()}
               </div>
-            )}
 
             {/* Auto-generated cheque schedule */}
             {chequeRows.length > 0 && (

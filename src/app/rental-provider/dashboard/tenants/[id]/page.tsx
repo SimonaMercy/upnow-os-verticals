@@ -24,6 +24,7 @@ type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
   contractActive: boolean; ejariStatus: string | null;
   startDate: string | null; endDate: string | null; annualRent: number;
+  listedRent: number | null; discountType: 'percent' | 'fixed' | null; discountValue: number | null; discountAmount: number | null;
   securityDeposit: number; collected: number; outstanding: number;
   isCurrent: boolean;
   unit: { id: number | null; number: string | null; name: string | null };
@@ -331,7 +332,15 @@ export default function CustomerDetailPage() {
         <td className="px-4 py-3.5">{l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}</td>
         <td className="px-4 py-3.5 text-[#6b6860]">{l.property.buildingName ?? '—'}</td>
         <td className="px-4 py-3.5 text-[#6b6860]">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
-        <td className="px-4 py-3.5 font-medium">{fmtAed(l.annualRent)}</td>
+        <td className="px-4 py-3.5 font-medium">
+          {(l.discountAmount ?? 0) > 0 && l.listedRent != null && (
+            <span className="text-xs font-normal text-[#9b9890] line-through mr-1.5">{fmtAed(l.listedRent)}</span>
+          )}
+          {fmtAed(l.annualRent)}
+          {(l.discountAmount ?? 0) > 0 && (
+            <span className="block text-[10px] font-normal text-[#b91c1c]">− {fmtAed(l.discountAmount!)} discount</span>
+          )}
+        </td>
         <td className="px-4 py-3.5">
           {!l.isCurrent ? <span className="text-[#9b9890]">—</span>
             : d === null ? <span className="text-[#9b9890]">—</span>
@@ -623,6 +632,9 @@ export default function CustomerDetailPage() {
                             )}
                             {prev != null && delta === 0 && <span className="text-[11px] text-[#9b9890]">no change</span>}
                           </div>
+                          {(l.discountAmount ?? 0) > 0 && l.listedRent != null && (
+                            <div className="text-[10px] text-[#b91c1c] mt-0.5">listed {fmtAed(l.listedRent)} · −{fmtAed(l.discountAmount!)} off</div>
+                          )}
                         </div>
                         {i < g.leases.length - 1 && <span className="text-[#c4c1b8] text-center text-xs py-0.5">↓</span>}
                       </div>

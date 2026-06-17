@@ -99,6 +99,9 @@ interface ContractDetail {
   annualRent: number;
   rentVatRate?: number;
   contractValue: number | null;
+  listedRent?: number | null;
+  discountType?: 'percent' | 'fixed' | null;
+  discountAmount?: number | null;
   securityDepositAmount: number | null;
   /** Effective held deposit (contract field → deposit rows → payment → tenancy-carried). */
   securityDepositHeld?: number | null;
@@ -1031,8 +1034,16 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               tiles; the next instalment, if any, surfaces as a flag below. */}
           <div className="stats">
             <div className="stat">
-              <div className="sl">Annual rent</div>
-              <div className="sv">{fmtAed(h.contract.annualRent)}</div>
+              <div className="sl">Annual rent{(h.contract.discountAmount ?? 0) > 0 ? ' (after discount)' : ''}</div>
+              <div className="sv">
+                {(h.contract.discountAmount ?? 0) > 0 && h.contract.listedRent != null && (
+                  <span style={{ fontSize: 12, fontWeight: 400, color: '#9b9890', textDecoration: 'line-through', marginRight: 6 }}>{fmtAed(h.contract.listedRent)}</span>
+                )}
+                {fmtAed(h.contract.annualRent)}
+              </div>
+              {(h.contract.discountAmount ?? 0) > 0 && (
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', marginTop: 2 }}>− {fmtAed(h.contract.discountAmount!)} discount</div>
+              )}
             </div>
             <div className="stat">
               <div className="sl">{mode === 'renewal' ? 'Renewal term' : 'Term'}</div>
