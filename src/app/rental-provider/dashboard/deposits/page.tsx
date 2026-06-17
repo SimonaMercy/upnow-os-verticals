@@ -35,6 +35,10 @@ interface Deposit {
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;
+  settledRefundAmount: number | null;
+  settledDeductionAmount: number | null;
+  settledOn: string | null;
+  settledViaSettlementId: number | null;
   proofs?: DepositProof[];
 }
 
@@ -67,6 +71,11 @@ export default function DepositsPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [settling, setSettling]   = useState(false);
   const [settleErr, setSettleErr] = useState<string | null>(null);
+  // Settlement-amount capture: which outcome is being recorded + the money split.
+  const [pendingStatus, setPendingStatus] = useState<DepositStatus | null>(null);
+  const [settleDate, setSettleDate]       = useState('');
+  const [settleDeduction, setSettleDeduction] = useState('');
+  const [settleRefund, setSettleRefund]   = useState('');
 
   async function load() {
     setLoading(true); setError(null);
@@ -82,7 +91,7 @@ export default function DepositsPage() {
   }
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { setSettleErr(null); }, [detailId]);
+  useEffect(() => { setSettleErr(null); setPendingStatus(null); }, [detailId]);
 
   // Mark how a deposit was settled (held → returned / partial_return / forfeited).
   // Only security_deposits records (id `sd_…`) are editable — payment-backed ones
@@ -106,6 +115,57 @@ export default function DepositsPage() {
     } finally {
       setSettling(false);
     }
+  }
+
+  // Pick a settlement outcome. 'held' un-settles immediately; the others open the
+  // money form pre-filled by outcome (returned = full refund, forfeited = full
+  // deduction, partial = you enter it). Deducted drives Refunded (= deposit − deducted).
+  function pickOutcome(d: Deposit, status: DepositStatus) {
+    if (d.contractId == null || !d.id.startsWith('sd_')) return;
+    if (status === 'held') { void setStatus(d, 'held'); setPendingStatus(null); return; }
+    setSettleErr(null);
+    setPendingStatus(status);
+    setSettleDate(d.settledOn ?? new Date().toISOString().slice(0, 10));
+    const amt = d.amount ?? 0;
+    const ded = d.settledDeductionAmount, ref = d.settledRefundAmount;
+    if (status === 'returned') {
+      setSettleDeduction(ded != null ? String(ded) : '0');
+      setSettleRefund(ref != null ? String(ref) : String(amt));
+    } else if (status === 'forfeited') {
+      setSettleDeduction(ded != null ? String(ded) : String(amt));
+      setSettleRefund(ref != null ? String(ref) : '0');
+    } else { // partial_return — operator enters the split
+      setSettleDeduction(ded != null ? String(ded) : '');
+      setSettleRefund(ref != null ? String(ref) : '');
+    }
+  }
+
+  function onDeductionChange(d: Deposit, v: string) {
+    setSettleDeduction(v);
+    const ded = Number(v);
+    if (v.trim() !== '' && Number.isFinite(ded)) setSettleRefund(String(Math.max(0, (d.amount ?? 0) - ded)));
+  }
+
+  async function saveSettlement(d: Deposit) {
+    if (!pendingStatus || d.contractId == null) return;
+    const refund = settleRefund.trim() === '' ? null : Number(settleRefund);
+    const deduction = settleDeduction.trim() === '' ? null : Number(settleDeduction);
+    if (refund != null && (!Number.isFinite(refund) || refund < 0)) { setSettleErr('Enter a valid refund amount'); return; }
+    if (deduction != null && (!Number.isFinite(deduction) || deduction < 0)) { setSettleErr('Enter a valid deduction amount'); return; }
+    setSettling(true); setSettleErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${d.contractId}/deposits/${d.id.replace(/^sd_/, '')}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ depositStatus: pendingStatus, settledRefundAmount: refund, settledDeductionAmount: deduction, settledOn: settleDate || null }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setPendingStatus(null);
+      await load();
+    } catch {
+      setSettleErr('Could not save the settlement. Please try again.');
+    } finally { setSettling(false); }
   }
 
   const buildings = [...new Set(deposits.map(d => d.building).filter(b => b !== '—'))];
@@ -287,17 +347,32 @@ export default function DepositsPage() {
                 </span>
               </div>
 
-              {/* Settlement outcome — drives the held vs. settled deposit reports */}
-              {detail.id.startsWith('sd_') && detail.contractId != null ? (
+              {/* Settlement — drives the held vs. settled deposit reports */}
+              {detail.settledViaSettlementId != null ? (
+                // Settled through the formal move-out flow → read-only here (one source of truth).
+                <div className="border border-[#cfe9df] bg-[#f0faf6] rounded-xl p-3">
+                  <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">Settlement · via move-out</p>
+                  <p className="text-sm font-semibold text-[#1a7a5a]">{STATUS_LABELS[detail.status] ?? detail.status}</p>
+                  <p className="text-xs text-[#6b6860] mt-0.5">
+                    Refunded {fmtAed(detail.settledRefundAmount ?? 0)} · deducted {fmtAed(detail.settledDeductionAmount ?? 0)}{detail.settledOn ? ` · ${detail.settledOn}` : ''}
+                  </p>
+                  {detail.contractId && (
+                    <Link href={`/rental-provider/dashboard/contracts/${detail.contractId}/v2`}
+                      className="text-xs text-[#2e9f82] font-medium hover:underline mt-1 inline-flex items-center gap-1">
+                      <ExternalLink size={11} /> View on contract
+                    </Link>
+                  )}
+                </div>
+              ) : detail.id.startsWith('sd_') && detail.contractId != null ? (
                 <div className="border border-[#e8e6e0] rounded-xl p-3">
                   <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">Settlement status</p>
-                  <p className="text-xs text-[#6b6860] mb-2.5">Mark how this deposit was settled — keeps the held vs. settled reports correct.</p>
+                  <p className="text-xs text-[#6b6860] mb-2.5">Mark how this deposit was settled — capture the refund vs. deduction so reports show what was returned vs. kept.</p>
                   <div className="grid grid-cols-2 gap-2">
                     {(['held', 'returned', 'partial_return', 'forfeited'] as DepositStatus[]).map(s => {
-                      const active = detail.status === s;
+                      const active = (pendingStatus ?? detail.status) === s;
                       return (
-                        <button key={s} disabled={settling || active}
-                          onClick={() => setStatus(detail, s)}
+                        <button key={s} disabled={settling}
+                          onClick={() => pickOutcome(detail, s)}
                           className={`text-xs font-medium px-3 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-default ${active
                             ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]'
                             : 'border-[#e8e6e0] text-[#3d3b35] hover:border-[#2e9f82] disabled:opacity-60'}`}>
@@ -306,7 +381,48 @@ export default function DepositsPage() {
                       );
                     })}
                   </div>
-                  {settling && <p className="text-xs text-[#9b9890] mt-2 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Saving…</p>}
+
+                  {/* Money form for a chosen outcome (returned / partial / forfeited) */}
+                  {pendingStatus && pendingStatus !== 'held' && (
+                    <div className="mt-3 border-t border-[#f0ede8] pt-3 space-y-2.5">
+                      <p className="text-xs text-[#6b6860]">Deposit on record: <strong className="text-[#1a1916]">{fmtAed(detail.amount)}</strong></p>
+                      <label className="block">
+                        <span className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">Settled on</span>
+                        <input type="date" value={settleDate} onChange={e => setSettleDate(e.target.value)}
+                          className="w-full border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#2e9f82] mt-1" />
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="block">
+                          <span className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">Deducted (kept)</span>
+                          <input type="number" min="0" step="0.01" value={settleDeduction} onChange={e => onDeductionChange(detail, e.target.value)}
+                            className="w-full border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#2e9f82] mt-1" />
+                        </label>
+                        <label className="block">
+                          <span className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">Refunded</span>
+                          <input type="number" min="0" step="0.01" value={settleRefund} onChange={e => setSettleRefund(e.target.value)}
+                            className="w-full border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#2e9f82] mt-1" />
+                        </label>
+                      </div>
+                      <div className="flex gap-2 pt-0.5">
+                        <button onClick={() => saveSettlement(detail)} disabled={settling}
+                          className="flex-1 bg-[#2e9f82] text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-[#28886f] disabled:opacity-60 cursor-pointer">
+                          {settling ? 'Saving…' : 'Save settlement'}
+                        </button>
+                        <button onClick={() => { setPendingStatus(null); setSettleErr(null); }} disabled={settling}
+                          className="text-xs font-medium px-3 py-2 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] cursor-pointer">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Already-settled summary (not currently editing) */}
+                  {!pendingStatus && detail.status !== 'held' && (
+                    <p className="text-xs text-[#6b6860] mt-2">
+                      Refunded {fmtAed(detail.settledRefundAmount ?? 0)} · deducted {fmtAed(detail.settledDeductionAmount ?? 0)}{detail.settledOn ? ` · ${detail.settledOn}` : ''}
+                    </p>
+                  )}
+                  {settling && !pendingStatus && <p className="text-xs text-[#9b9890] mt-2 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Saving…</p>}
                   {settleErr && <p className="text-xs text-red-600 mt-2">{settleErr}</p>}
                 </div>
               ) : (

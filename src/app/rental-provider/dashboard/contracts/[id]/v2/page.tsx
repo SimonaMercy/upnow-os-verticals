@@ -111,6 +111,8 @@ interface ContractDetail {
     amount: number; chequeNumber: string | null; recordedDate: string | null;
     dueDate: string | null; paymentMethod: string | null; chequeStatus: string | null;
     status: string | null; isCarried: boolean; sourceContractId: number | null;
+    settledRefundAmount: number | null; settledDeductionAmount: number | null;
+    settledOn: string | null; settledViaSettlementId: number | null;
   } | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
@@ -1409,14 +1411,6 @@ function DetailsDrawer({
     catch { setDepStatusErr('Could not update the cheque status. Please try again.'); }
     finally { setDepStatusBusy(false); }
   };
-  // Settlement outcome (held → returned / partial_return / forfeited) — drives the
-  // held vs. settled deposit reports. Distinct from the cheque/banking status above.
-  const changeDepSettlement = async (depositId: number, depositStatus: string) => {
-    setDepStatusBusy(true); setDepStatusErr(null);
-    try { await onUpdateDeposit(depositId, { depositStatus }); }
-    catch { setDepStatusErr('Could not update the settlement status. Please try again.'); }
-    finally { setDepStatusBusy(false); }
-  };
   // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
   const clausesEditable = contract.status === 'pending';
   const [clauseList, setClauseList] = useState<string[]>(contract.customClauses ?? []);
@@ -1773,15 +1767,21 @@ function DetailsDrawer({
                                         <Pencil size={12} /> Edit
                                       </button>
                                     </div>
-                                    <select className={'cstat ' + (sd.status ?? 'held')} style={{ cursor: 'pointer' }}
-                                      title="Settlement — held vs. returned / partial / forfeited (updates deposit reports)"
-                                      value={sd.status ?? 'held'} disabled={depStatusBusy}
-                                      onChange={e => void changeDepSettlement(sd.depositId!, e.target.value)}>
-                                      <option value="held">Held</option>
-                                      <option value="returned">Returned</option>
-                                      <option value="partial_return">Partial return</option>
-                                      <option value="forfeited">Forfeited</option>
-                                    </select>
+                                    {/* Settlement (with refund/deduction amounts) is captured on the Deposits page — read-only here */}
+                                    {sd.status && sd.status !== 'held' ? (
+                                      <div style={{ textAlign: 'right' }}>
+                                        <span className={'cstat ' + sd.status} style={{ textTransform: 'capitalize' }}>{sd.status.replace('_', ' ')}</span>
+                                        {(sd.settledRefundAmount != null || sd.settledDeductionAmount != null) && (
+                                          <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>
+                                            refunded {fmtAed(sd.settledRefundAmount ?? 0)} · kept {fmtAed(sd.settledDeductionAmount ?? 0)}{sd.settledViaSettlementId != null ? ' · via move-out' : ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <Link href="/rental-provider/dashboard/deposits" className="note" style={{ fontSize: 11, color: 'var(--jade)', textDecoration: 'underline' }}>
+                                        Settle on Deposits ↗
+                                      </Link>
+                                    )}
                                     {depStatusErr && (
                                       <span className="note" style={{ color: 'var(--brick)', fontSize: 11, textAlign: 'right' }}>{depStatusErr}</span>
                                     )}
