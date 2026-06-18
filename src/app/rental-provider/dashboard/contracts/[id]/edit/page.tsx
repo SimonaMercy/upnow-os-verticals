@@ -11,11 +11,73 @@
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
+
+interface Tenant {
+  id: number;
+  user: { name: string; email: string };
+}
+
+/** Inline "create a new customer" form — mirrors the new-contract wizard. */
+function NewCustomerForm({ onCreated, onCancel }: {
+  onCreated: (t: { id: number; name: string }) => void; onCancel: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [entityType, setEntityType] = useState<'individual' | 'company'>('individual');
+  const [companyName, setCompanyName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
+  const submit = async () => {
+    if (!name.trim()) { setErr('Name is required'); return; }
+    if (!email.trim()) { setErr('Email is required'); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch('/api/contracts/tenants', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(), email: email.trim(), phone: phone.trim() || undefined,
+          entityType, companyName: entityType === 'company' ? (companyName.trim() || undefined) : undefined,
+        }),
+      });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? 'Could not create customer'); }
+      const d = await res.json();
+      onCreated({ id: d.tenantId, name: d.name ?? name.trim() });
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to create customer'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#fafaf8] p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-[#1a1916]">New customer</p>
+        <button type="button" onClick={onCancel} className="text-xs text-[#9b9890] hover:text-[#1a1916]">Cancel</button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" className={field} />
+        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" className={field} />
+        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone (optional)" className={field} />
+        <select value={entityType} onChange={e => setEntityType(e.target.value as 'individual' | 'company')} className={field}>
+          <option value="individual">Individual</option>
+          <option value="company">Company</option>
+        </select>
+        {entityType === 'company' && (
+          <input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Company name" className={`${field} col-span-2`} />
+        )}
+      </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <button type="button" onClick={submit} disabled={busy}
+        className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-[#2e9f82] text-white disabled:opacity-60">
+        {busy ? 'Creating…' : 'Create customer'}
+      </button>
+    </div>
+  );
+}
 
 const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'cheque', label: 'Post-Dated Cheques' },
@@ -71,7 +133,7 @@ interface ContractDetail {
   modeOfPayment: string | null;
   customClauses?: string[] | null;
   notes?: string | null;
-  tenant?: { name?: string | null } | null;
+  tenant?: { id?: number | null; name?: string | null } | null;
   unit?: { number?: string | null; name?: string | null } | null;
   property?: { buildingName?: string | null } | null;
 }
@@ -107,12 +169,36 @@ export default function EditContractPage() {
   const [clauseInput, setClauseInput] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Customer (tenant) — editable only before the contract is signed.
+  const [tenantId, setTenantId] = useState('');
+  const [originalTenantId, setOriginalTenantId] = useState('');
+  const [tenantName, setTenantName] = useState('');
+  const [customerEditable, setCustomerEditable] = useState(false);
+  const [changingCustomer, setChangingCustomer] = useState(false);
+  const [tenantSearch, setTenantSearch] = useState('');
+  const [tenantResults, setTenantResults] = useState<Tenant[]>([]);
+  const [tenantDropdownOpen, setTenantDropdownOpen] = useState(false);
+  const [activeTenants, setActiveTenants] = useState<Tenant[]>([]);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    // The customer can be reassigned only before signing — gate on whether any
+    // signature exists (mirrors the backend rule).
+    apiGet<{ role: string }[]>(`/contracts/${id}/signatures`)
+      .then((sigs) => { if (!cancelled) setCustomerEditable(Array.isArray(sigs) && sigs.length === 0); })
+      .catch(() => { if (!cancelled) setCustomerEditable(false); });
+    apiGet<Tenant[]>(`/contracts/tenants/list`)
+      .then((rows) => { if (!cancelled) setActiveTenants(Array.isArray(rows) ? rows : []); })
+      .catch(() => undefined);
     apiGet<ContractDetail>(`/contracts/${id}`)
       .then((c) => {
         if (cancelled) return;
+        setTenantId(c.tenant?.id != null ? String(c.tenant.id) : '');
+        setOriginalTenantId(c.tenant?.id != null ? String(c.tenant.id) : '');
+        setTenantName(c.tenant?.name ?? '');
         setStartDate(toDateInput(c.startDate));
         setEndDate(toDateInput(c.endDate));
         setListedRent(numStr(c.listedRent ?? c.annualRent));
@@ -152,6 +238,29 @@ export default function EditContractPage() {
     setClauseInput('');
   };
 
+  // Customer search (debounced) + select, mirroring the new-contract wizard.
+  const handleTenantInput = (val: string) => {
+    setTenantSearch(val);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!val.trim()) { setTenantResults([]); setTenantDropdownOpen(false); return; }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const rows = await apiGet<Tenant[]>(`/contracts/tenants/search?q=${encodeURIComponent(val)}`);
+        setTenantResults(Array.isArray(rows) ? rows : []);
+        setTenantDropdownOpen(true);
+      } catch { setTenantResults([]); }
+    }, 300);
+  };
+  const selectTenant = (t: Tenant) => {
+    setTenantId(String(t.id));
+    setTenantName(t.user.name);
+    setTenantSearch('');
+    setTenantResults([]);
+    setTenantDropdownOpen(false);
+    setShowNewCustomer(false);
+    setChangingCustomer(false);
+  };
+
   // listedRent − discount = rentNum (the NET rent = contract value). The cheque
   // split and contract value both key off the net, never the listed price.
   const listedNum = Number(listedRent) || 0;
@@ -174,6 +283,8 @@ export default function EditContractPage() {
     try {
       const opt = (v: string) => (v.trim() === '' ? undefined : Number(v));
       await apiPatch(`/contracts/${id}`, {
+        // Reassign the customer only when it's editable (unsigned) and set.
+        tenantId: customerEditable && tenantId ? Number(tenantId) : undefined,
         contractStartDate: startDate,
         contractEndDate: endDate,
         // Send listed rent + discount; the backend recomputes net annual rent =
@@ -234,16 +345,109 @@ export default function EditContractPage() {
                 </div>
               </div>
 
-              {/* Customer (read-only) */}
+              {/* Customer — editable only before the contract is signed */}
               <div className={cardCls}>
-                <h2 className="font-semibold text-sm text-[#1a1916]">Customer</h2>
-                <div className="flex items-center gap-3 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-3">
-                  <div className="w-9 h-9 rounded-full bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
-                    <User size={18} />
-                  </div>
-                  <p className="text-sm font-semibold text-[#1a1916] truncate">{meta.tenant ?? '—'}</p>
-                  <span className="ml-auto text-[10px] font-medium text-[#9b9890] uppercase tracking-wide">Fixed</span>
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-sm text-[#1a1916]">Customer</h2>
+                  {customerEditable && !changingCustomer && (
+                    <button type="button" onClick={() => setChangingCustomer(true)}
+                      className="text-xs text-[#2e9f82] font-medium hover:underline">Change</button>
+                  )}
                 </div>
+
+                {!customerEditable ? (
+                  <>
+                    <div className="flex items-center gap-3 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-3">
+                      <div className="w-9 h-9 rounded-full bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
+                        <User size={18} />
+                      </div>
+                      <p className="text-sm font-semibold text-[#1a1916] truncate">{tenantName || meta.tenant || '—'}</p>
+                      <span className="ml-auto text-[10px] font-medium text-[#9b9890] uppercase tracking-wide">Fixed</span>
+                    </div>
+                    <p className="text-[11px] text-[#9b9890] mt-1.5">The customer can only be changed before the contract is signed.</p>
+                  </>
+                ) : !changingCustomer ? (
+                  // Neutral until the customer is actually changed; green confirms a switch.
+                  tenantId !== originalTenantId ? (
+                    <div className="flex items-center gap-3 rounded-xl border border-[#c5e8df] bg-[#f0faf6] px-4 py-3">
+                      <div className="w-9 h-9 rounded-full bg-[#2e9f82] flex items-center justify-center text-white shrink-0">
+                        <Check size={18} />
+                      </div>
+                      <p className="text-sm font-semibold text-[#1a1916] truncate">{tenantName || meta.tenant || '—'}</p>
+                      <span className="ml-auto text-[10px] font-medium text-[#2e9f82] uppercase tracking-wide">Changed</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-3">
+                      <div className="w-9 h-9 rounded-full bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
+                        <User size={18} />
+                      </div>
+                      <p className="text-sm font-semibold text-[#1a1916] truncate">{tenantName || meta.tenant || '—'}</p>
+                    </div>
+                  )
+                ) : (
+                  <>
+                    <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Search by name or email</label>
+                    <div className="relative">
+                      <div className="relative flex items-center">
+                        <Search size={14} className="absolute left-3 text-[#9b9890]" />
+                        <input type="text" placeholder="Type name or email…" value={tenantSearch}
+                          onChange={e => handleTenantInput(e.target.value)}
+                          onFocus={() => { if (tenantResults.length > 0) setTenantDropdownOpen(true); }}
+                          className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] pl-9 pr-9 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
+                          autoComplete="off" />
+                        {tenantSearch && (
+                          <button type="button" onClick={() => { setTenantSearch(''); setTenantResults([]); setTenantDropdownOpen(false); }}
+                            className="absolute right-3 text-[#9b9890] hover:text-[#1a1916]"><X size={14} /></button>
+                        )}
+                      </div>
+                      {tenantDropdownOpen && tenantResults.length > 0 && (
+                        <div className="absolute z-20 mt-1 w-full bg-white border border-[#e8e6e0] rounded-xl shadow-lg overflow-hidden">
+                          {tenantResults.map(t => (
+                            <button key={t.id} type="button" onClick={() => selectTenant(t)}
+                              className="w-full text-left px-4 py-2.5 hover:bg-[#f4f3ef] transition-colors">
+                              <span className="block text-sm font-medium text-[#1a1916]">{t.user.name}</span>
+                              <span className="block text-xs text-[#6b6860]">{t.user.email}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="mt-2 text-xs text-[#2e9f82] font-medium">✓ {tenantName || '—'}</p>
+
+                    {showNewCustomer ? (
+                      <NewCustomerForm onCancel={() => setShowNewCustomer(false)}
+                        onCreated={(t) => selectTenant({ id: t.id, user: { name: t.name, email: '' } })} />
+                    ) : (
+                      <button type="button" onClick={() => setShowNewCustomer(true)}
+                        className="mt-2 inline-flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
+                        <PlusCircle size={13} /> Customer not listed? Create a new customer
+                      </button>
+                    )}
+
+                    {activeTenants.length > 0 && !(tenantDropdownOpen && tenantResults.length > 0) && (
+                      <div className="mt-4">
+                        <p className="text-[11px] font-medium text-[#9b9890] mb-2">Active customers — click to select</p>
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                          {activeTenants
+                            .filter(t => !tenantSearch || t.user.name.toLowerCase().includes(tenantSearch.toLowerCase()) || t.user.email.toLowerCase().includes(tenantSearch.toLowerCase()))
+                            .map(t => (
+                              <button key={t.id} type="button" onClick={() => selectTenant(t)}
+                                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl bg-[#f7f6f2] border border-[#e8e6e0] hover:border-[#2e9f82] hover:bg-[#f0faf6] transition-all text-left">
+                                <div className="w-7 h-7 rounded-full bg-[#d8f2e8] flex items-center justify-center text-xs font-bold text-[#2e9f82] shrink-0">{t.user.name.charAt(0).toUpperCase()}</div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-[#1a1916] truncate">{t.user.name}</p>
+                                  <p className="text-[10px] text-[#9b9890] truncate">{t.user.email}</p>
+                                </div>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                    <button type="button" onClick={() => setChangingCustomer(false)}
+                      className="mt-3 text-xs text-[#6b6860] hover:underline">Done</button>
+                  </>
+                )}
               </div>
 
               {/* Rental Period */}
