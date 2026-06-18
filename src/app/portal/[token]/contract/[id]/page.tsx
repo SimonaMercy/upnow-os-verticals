@@ -11,6 +11,7 @@ import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
+import { openDocViewer } from '@/lib/docViewer';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
@@ -148,10 +149,11 @@ export default function ContractReviewPage() {
         {d.documents.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
             {d.documents.map(x => (
-              <a key={x.documentKey} href={x.fileUrl} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-[#e8e6e0] text-[#2e9f82]">
+              <button key={x.documentKey} type="button"
+                onClick={() => openDocViewer({ fileUrl: x.fileUrl, caption: (x.displayName ?? x.documentKey).replace(/_/g, ' ') })}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-[#e8e6e0] text-[#2e9f82] cursor-pointer">
                 <FileText size={13} /> {(x.displayName ?? x.documentKey).replace(/_/g, ' ')}
-              </a>
+              </button>
             ))}
           </div>
         )}
@@ -331,10 +333,10 @@ function PhotoGrid({ photos }: { photos: InspPhoto[] }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
       {photos.map(p => (
-        <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden border border-[#e8e6e0]">
+        <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })} className="block w-full rounded-lg overflow-hidden border border-[#e8e6e0] cursor-pointer">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={p.url} alt={p.caption || 'photo'} className="w-full h-20 object-cover" />
-        </a>
+        </button>
       ))}
     </div>
   );

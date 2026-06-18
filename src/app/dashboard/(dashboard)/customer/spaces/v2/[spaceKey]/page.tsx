@@ -36,6 +36,7 @@ import {
   Sparkles, ArrowRight, Camera, Trash2, ClipboardCheck,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { openDocViewer } from '@/lib/docViewer';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
@@ -1700,8 +1701,8 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
         {previewUrl && (
           <div style={{ marginTop: 6 }}>
             {isImg
-              ? <a href={previewUrl} target="_blank" rel="noopener noreferrer"><img src={previewUrl} alt={req.label} style={{ width: 80, height: 54, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--mist-strong)' }} /></a>
-              : <a href={previewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--jade-deep)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={12} /> View PDF</a>}
+              ? <button type="button" onClick={() => openDocViewer({ fileUrl: previewUrl, caption: req.label, mimeType: mime })} style={{ display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><img src={previewUrl} alt={req.label} style={{ width: 80, height: 54, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--mist-strong)' }} /></button>
+              : <button type="button" onClick={() => openDocViewer({ fileUrl: previewUrl, caption: req.label, mimeType: mime })} style={{ fontSize: 11, color: 'var(--jade-deep)', display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><FileText size={12} /> View PDF</button>}
           </div>
         )}
       </div>
@@ -2676,7 +2677,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
             {uploads.map((c, i) => (
               <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
                 {c.imageUrl ? (
-                  <a href={c.imageUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                  <button type="button" onClick={() => openDocViewer({ fileUrl: c.imageUrl, caption: c.notes || `Payment ${i + 1}` })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
                     {c.imageUrl.split('?')[0].toLowerCase().endsWith('.pdf') ? (
                       <span style={{ width: 44, height: 30, borderRadius: 4, background: 'var(--mist)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--jade-deep)' }}>
                         <FileText size={16} />
@@ -2685,21 +2686,20 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img src={c.imageUrl} alt="cheque" style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
                     )}
-                  </a>
+                  </button>
                 ) : null}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Payment ${i + 1}`}</p>
                   {c.bankName && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{c.bankName}{c.amountFils ? ` · AED ${(c.amountFils / 100).toLocaleString('en-AE')}` : ''}</p>}
                 </div>
                 {c.imageUrl && (
-                  <a
-                    href={c.imageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none' }}
+                  <button
+                    type="button"
+                    onClick={() => openDocViewer({ fileUrl: c.imageUrl, caption: c.notes || `Payment ${i + 1}` })}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                   >
                     <ExternalLink size={12} /> View
-                  </a>
+                  </button>
                 )}
                 <button
                   type="button"
@@ -3192,7 +3192,7 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
           {cheques.map((c, i) => (
             <div key={c.id} style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '10px 14px', background: 'var(--paper)', display: 'flex', gap: 12, alignItems: 'center' }}>
               {c.imageUrl && (
-                <a href={c.imageUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                <button type="button" onClick={() => openDocViewer({ fileUrl: c.imageUrl, caption: c.notes || `Cheque ${i + 1}` })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
                   {c.imageUrl.split('?')[0].toLowerCase().endsWith('.pdf') ? (
                     <span style={{ width: 56, height: 36, borderRadius: 6, background: 'var(--mist)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--jade-deep)' }}>
                       <FileText size={18} />
@@ -3201,7 +3201,7 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={c.imageUrl} alt="cheque" style={{ width: 56, height: 36, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
                   )}
-                </a>
+                </button>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{c.notes || `Cheque ${i + 1}`}</p>
@@ -3563,7 +3563,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
                           fontFamily: 'inherit',
                         };
                         return d.fileUrl
-                          ? <a key={i} href={d.fileUrl} target="_blank" rel="noopener noreferrer" style={tileStyle}>{inner}</a>
+                          ? <button key={i} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} style={{ ...tileStyle, textAlign: 'left', width: '100%' }}>{inner}</button>
                           : <div key={i} style={tileStyle}>{inner}</div>;
                       })}
                     </div>
@@ -4165,10 +4165,10 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
                 return (
                   <div key={d.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
                     {d.fileUrl && !isPdf ? (
-                      <a href={d.fileUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                      <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Payment ${i + 1}`, mimeType: d.mimeType })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={d.fileUrl} alt={d.displayName ?? ''} style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
-                      </a>
+                      </button>
                     ) : d.fileUrl ? (
                       <span style={{ width: 44, height: 30, display: 'grid', placeItems: 'center', background: 'var(--mist)', borderRadius: 4, flexShrink: 0 }}>
                         <FileText size={14} color="var(--ink-2)" />
@@ -4178,14 +4178,13 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
                       <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.displayName ?? `Payment ${i + 1}`}</p>
                     </div>
                     {d.fileUrl && (
-                      <a
-                        href={d.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none' }}
+                      <button
+                        type="button"
+                        onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Payment ${i + 1}`, mimeType: d.mimeType })}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                       >
                         <ExternalLink size={12} /> View
-                      </a>
+                      </button>
                     )}
                     <button
                       type="button"

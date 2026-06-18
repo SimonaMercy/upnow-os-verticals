@@ -25,6 +25,7 @@ import {
   Camera, FileText, ChevronRight, X, Loader2,
 } from 'lucide-react';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
+import { openDocViewer } from '@/lib/docViewer';
 import { RESIDENTIAL_RENTAL_DOCS } from '@/lib/docRequirements';
 import s from './profile.module.css';
 
@@ -737,8 +738,8 @@ function AdditionalDocumentsSection({ tenantProfileId }: { tenantProfileId: numb
                     {previewUrl && (
                       <div style={{ marginTop: 8 }}>
                         {isImg
-                          ? <a href={previewUrl} target="_blank" rel="noopener noreferrer"><img src={previewUrl} alt={doc.label} style={{ width: 100, height: 68, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb' }} /></a>
-                          : <a href={previewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={13} /> View PDF</a>}
+                          ? <button type="button" onClick={() => openDocViewer({ fileUrl: previewUrl, caption: doc.label, mimeType: mime })} style={{ display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><img src={previewUrl} alt={doc.label} style={{ width: 100, height: 68, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb' }} /></button>
+                          : <button type="button" onClick={() => openDocViewer({ fileUrl: previewUrl, caption: doc.label, mimeType: mime })} style={{ fontSize: 12, color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><FileText size={13} /> View PDF</button>}
                       </div>
                     )}
                   </div>

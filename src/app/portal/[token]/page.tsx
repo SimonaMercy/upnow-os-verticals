@@ -11,6 +11,7 @@ import {
   UploadCloud, CheckCircle2, ExternalLink, Loader2, FileText,
   ShieldCheck, AlertTriangle,
 } from 'lucide-react';
+import { openDocViewer } from '@/lib/docViewer';
 
 interface DocItem { key: string; displayName: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null; category?: string | null; hint?: string | null }
 interface Portal {
@@ -135,7 +136,7 @@ function DocSection({ title, subtitle, docs, uploading, onUpload }: {
                 <p className="text-sm font-semibold text-[#1a1916]">{doc.displayName}</p>
                 <p className="text-xs text-[#9b9890]">{ok ? 'Uploaded' : doc.required ? 'Required' : 'Optional'}{doc.hint ? ` — ${doc.hint}` : ''}</p>
               </div>
-              {ok && doc.fileUrl && <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="text-xs text-[#2e9f82] flex items-center gap-1"><ExternalLink size={12} /> View</a>}
+              {ok && doc.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName })} className="text-xs text-[#2e9f82] flex items-center gap-1 cursor-pointer"><ExternalLink size={12} /> View</button>}
               <label className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white ${busy ? 'opacity-50 pointer-events-none' : ''} ${ok ? 'bg-[#9b9890]' : 'bg-[#2e9f82]'}`}>
                 {busy ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
                 {ok ? 'Replace' : 'Upload'}

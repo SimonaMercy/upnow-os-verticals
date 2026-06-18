@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { openDocsTogether } from "@/lib/openDocsTogether";
+import { openDocViewer } from "@/lib/docViewer";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -543,9 +544,9 @@ export default function RpKycDetailPage() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {docStatusBadge(item.status)}
                     {item.uploaded && item.fileUrl && (
-                      <a href={item.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                      <button type="button" onClick={() => openDocViewer({ fileUrl: item.fileUrl, caption: item.displayName })} className="text-blue-600 hover:text-blue-800 cursor-pointer">
                         <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
+                      </button>
                     )}
                     {item.uploaded && item.documentId && String(item.status).toLowerCase() === "attached" && (
                       <button
@@ -582,9 +583,9 @@ export default function RpKycDetailPage() {
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           {doc.fileUrl && (
-                            <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                            <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="text-blue-600 hover:text-blue-800 cursor-pointer">
                               <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
+                            </button>
                           )}
                           {level === "expired" && (
                             <button

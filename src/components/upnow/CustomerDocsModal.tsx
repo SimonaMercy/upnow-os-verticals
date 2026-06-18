@@ -7,8 +7,9 @@
  * both surfaces share ONE module instead of navigating away.
  */
 import { useEffect, useState } from 'react';
-import { Files, FileText, ExternalLink, X, Loader2, AlertTriangle } from 'lucide-react';
+import { Files, FileText, Eye, X, Loader2, AlertTriangle } from 'lucide-react';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import { openDocViewer } from '@/lib/docViewer';
 import { docLabel } from '@/lib/docLabel';
 
 export type CustomerDoc = {
@@ -135,7 +136,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                 onClick={() => openDocsTogether(openable)}
                 className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
               >
-                <ExternalLink size={12} /> View All
+                <Eye size={12} /> View All
               </button>
             )}
             <button type="button" onClick={onClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
@@ -169,7 +170,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                     ) : null}
                     {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
                     {d.fileUrl && (
-                      <a href={d.fileUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 shrink-0">View <ExternalLink size={11} /></a>
+                      <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 shrink-0 cursor-pointer">View <Eye size={12} /></button>
                     )}
                   </div>
                 ))}

@@ -23,6 +23,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
+import { openDocViewer } from '@/lib/docViewer';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -800,7 +801,6 @@ export default function TenantContractDetailPage() {
                           {docs.map(d => {
                             const label = d.displayName
                               ?? d.documentKey.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
-                            const isImg = /\.(png|jpe?g|webp|gif)$/i.test(d.fileUrl) || (d.fileUrl || '').includes('image');
                             return (
                               <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] bg-white">
                                 <div className="w-9 h-9 rounded-lg bg-[#f0faf6] flex items-center justify-center shrink-0">
@@ -814,14 +814,11 @@ export default function TenantContractDetailPage() {
                                 </div>
                                 {d.fileUrl && (
                                   <div className="flex items-center gap-1.5 shrink-0">
-                                    <a href={d.fileUrl} target="_blank" rel="noopener noreferrer"
-                                      className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] px-2.5 py-1.5 rounded-lg hover:bg-[#f0faf6]">
-                                      <Eye size={13} /> {isImg ? 'View' : 'Open'}
-                                    </a>
-                                    <a href={d.fileUrl} download
-                                      className="flex items-center gap-1 text-xs font-medium text-[#6b6860] px-2.5 py-1.5 rounded-lg hover:bg-[#f4f3ef]">
-                                      <Download size={13} /> Download
-                                    </a>
+                                    <button type="button"
+                                      onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey })}
+                                      className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] px-2.5 py-1.5 rounded-lg hover:bg-[#f0faf6] cursor-pointer">
+                                      <Eye size={13} /> View
+                                    </button>
                                   </div>
                                 )}
                               </div>

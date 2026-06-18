@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import { openDocViewer } from '@/lib/docViewer';
 
 const CATEGORIES = ['elevator','cleaning','security','insurance','waste','electricity_water','fire_safety','maintenance','renovation','landscaping','pest_control','government','other'];
 
@@ -197,10 +198,10 @@ function ContractCard({ base, rp, c, onTasksChanged }: { base: string; rp?: numb
         {c.documents.length > 0 && (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {c.documents.map(d => (
-              <a key={d.id} href={d.fileUrl} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-[#f7f6f2] text-[#2e9f82] hover:bg-[#eef0ec]">
+              <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey, documentKey: d.documentKey })}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-[#f7f6f2] text-[#2e9f82] hover:bg-[#eef0ec] cursor-pointer">
                 <FileText size={11} /> {cap(d.displayName ?? d.documentKey)}
-              </a>
+              </button>
             ))}
             {c.documents.length > 1 && (
               <button onClick={() => openDocsTogether(c.documents)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg text-[#6b6860] hover:bg-[#f7f6f2]">

@@ -23,6 +23,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FileText, UploadCloud, Trash2, Loader2, AlertCircle, Plus, X, ExternalLink, CheckCircle2, FileSignature, RotateCcw, Lock } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { openDocViewer } from '@/lib/docViewer';
 
 interface Addendum {
   id: number;
@@ -203,10 +204,10 @@ function AddendumRow({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <a href={a.fileUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#2e9f82] hover:bg-[#f0faf6] border border-[#c5e8df]">
+          <button type="button" onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name, mimeType: a.mimeType })}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#2e9f82] hover:bg-[#f0faf6] border border-[#c5e8df] cursor-pointer">
             <ExternalLink size={11} /> View
-          </a>
+          </button>
           {canDelete && (
             <button onClick={onDelete}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#dc2626] hover:bg-red-50 border border-red-200">
@@ -519,10 +520,10 @@ function SignAddendumModal({
           <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] p-1"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3">
-          <a href={a.fileUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#c5e8df] bg-[#f0faf6] text-xs font-semibold text-[#2e9f82] hover:bg-[#e0f4ec]">
+          <button type="button" onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name, mimeType: a.mimeType })}
+            className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#c5e8df] bg-[#f0faf6] text-xs font-semibold text-[#2e9f82] hover:bg-[#e0f4ec] cursor-pointer">
             <ExternalLink size={12} /> Open addendum to review
-          </a>
+          </button>
           <p className="text-xs text-[#6b6860]">Draw your signature in the box below.</p>
           <canvas ref={canvasRef}
             className="w-full h-32 rounded-xl border-2 border-dashed border-[#d8d6d0] bg-[#fafaf8] touch-none cursor-crosshair"

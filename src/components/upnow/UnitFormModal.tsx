@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Upload, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
+import { openDocViewer } from '@/lib/docViewer';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
 export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'villa_compound', 'townhouse', 'penthouse', 'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home'];
@@ -436,12 +437,12 @@ function AddendumsSection({ files, onAdd, onRemove, existing }: {
       <input ref={inputRef} type="file" multiple accept={ADDENDUM_ACCEPT} className="sr-only"
         onChange={e => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void onFiles(fs); }} />
       {(existing ?? []).map(d => (
-        <a key={d.id} href={d.url} target="_blank" rel="noreferrer"
-          className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5 text-[#1a1916] hover:bg-[#f4f3ef]">
+        <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.url, caption: d.name })}
+          className="w-full flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5 text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer">
           <Upload size={14} className="text-[#b45309] shrink-0" />
           <span className="text-sm truncate flex-1">{d.name}</span>
           <span className="text-[11px] text-[#9b9890]">attached</span>
-        </a>
+        </button>
       ))}
       {files.map((f, i) => (
         <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5">
@@ -978,9 +979,9 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               </button>
             )}
             {existingFloorPlanUrl && !floorPlan && (
-              <a href={existingFloorPlanUrl} target="_blank" rel="noreferrer" className="inline-block mt-1 text-[11px] text-[#2e9f82] hover:underline">
+              <button type="button" onClick={() => openDocViewer({ fileUrl: existingFloorPlanUrl, caption: 'Floor plan' })} className="inline-block mt-1 text-[11px] text-[#2e9f82] hover:underline cursor-pointer">
                 A floor plan is already attached — view current
-              </a>
+              </button>
             )}
           </div>
 

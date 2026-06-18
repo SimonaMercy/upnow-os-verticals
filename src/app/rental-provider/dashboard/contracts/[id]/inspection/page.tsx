@@ -8,6 +8,7 @@ import {
   AlertCircle, RotateCcw, UploadCloud, X, Camera, Paperclip, Images,
   FileSignature, Send,
 } from 'lucide-react';
+import { openDocViewer } from '@/lib/docViewer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,11 +242,11 @@ function ItemAttachmentButton({
     return attachments.length > 0 ? (
       <div className="flex gap-1 flex-wrap">
         {attachments.map(a => (
-          <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer"
-            className="w-8 h-8 rounded-md border border-[#e8e6e0] overflow-hidden shrink-0 hover:border-[#2e9f82]">
+          <button key={a.id} type="button" onClick={() => openDocViewer({ fileUrl: a.url, caption: 'Attachment' })}
+            className="block w-8 h-8 rounded-md border border-[#e8e6e0] overflow-hidden shrink-0 hover:border-[#2e9f82] cursor-pointer">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={a.url} alt="attachment" className="w-full h-full object-cover" />
-          </a>
+          </button>
         ))}
       </div>
     ) : null;
@@ -663,12 +664,12 @@ function PhotoGallery({ areas, globalPhotos }: { areas: InspectionArea[]; global
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {displayed.map(p => (
-            <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer"
-              className="block rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors">
+            <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })}
+              className="block w-full text-left rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors cursor-pointer">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.url} alt={p.caption || 'photo'} className="w-full h-32 object-cover" />
               {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
-            </a>
+            </button>
           ))}
         </div>
       )}
@@ -1152,12 +1153,12 @@ export default function InspectionPage() {
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {data.moveInPhotos!.map(p => (
-              <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer"
-                className="block rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors">
+              <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })}
+                className="block w-full text-left rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors cursor-pointer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.url} alt={p.caption || 'Move-in photo'} className="w-full h-32 object-cover" />
                 {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
-              </a>
+              </button>
             ))}
           </div>
         </div>

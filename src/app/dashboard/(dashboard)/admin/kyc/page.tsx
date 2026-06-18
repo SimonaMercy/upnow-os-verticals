@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { apiGet, apiPatch } from "@/lib/api";
+import { openDocViewer } from "@/lib/docViewer";
 import {
   Building2, Wrench, Users, Clock, CheckCircle2, XCircle,
   AlertCircle, RefreshCw, ShieldCheck, FileText, User,
@@ -563,9 +564,9 @@ function RpContentPanel({
                           {doc.status}
                         </span>
                         {doc.fileUrl && (
-                          <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer">
+                          <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="cursor-pointer">
                             <ExternalLink size={11} style={{ color: "var(--color-primary)" }} />
-                          </a>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -750,9 +751,9 @@ function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detai
                           {String(doc.status).toLowerCase()}
                         </span>
                         {doc.fileUrl && (
-                          <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-[11px]" style={{ color: "var(--color-primary)" }}>
+                          <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="flex items-center gap-0.5 text-[11px] cursor-pointer" style={{ color: "var(--color-primary)" }}>
                             <ExternalLink size={11} /> View
-                          </a>
+                          </button>
                         )}
                       </div>
                     </div>

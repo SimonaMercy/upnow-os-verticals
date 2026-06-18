@@ -41,6 +41,7 @@ import {
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
+import { openDocViewer } from '@/lib/docViewer';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -130,6 +131,10 @@ interface ContractDetail {
   /** Live renewal child of THIS contract (when viewing a parent) — the agreed
    *  or in-flight renewal lives in its own contract row. */
   renewalChild?: { id: number; status: string; startDate?: string | null; endDate?: string | null; annualRent?: number } | null;
+  /** The same customer signed a LATER lease for this unit (renewed/continued) —
+   *  link-independent, so it's true even for flat-imported chains with no
+   *  parent_contract_id. When true, this lease was not closed out. */
+  hasSuccessor?: boolean;
   successorProposal?: {
     id: number;
     status: 'pending' | 'issued' | 'active' | 'expired' | 'terminated';
@@ -456,7 +461,11 @@ function HeroIcon({ tone, icon }: { tone: Tone; icon: IconKey }) {
   return <div className={'heroicon ' + tone}><Ic size={26} /></div>;
 }
 
-function Completed({ title, sub, onUndo, undoLabel, viewUrl, viewLabel }: { title: string; sub?: string; onUndo?: () => void; undoLabel?: string; viewUrl?: string | null; viewLabel?: string }) {
+function Completed({ title, sub, onUndo, undoLabel, viewUrl, viewLabel, onView }: { title: string; sub?: string; onUndo?: () => void; undoLabel?: string; viewUrl?: string | null; viewLabel?: string; onView?: () => void }) {
+  // `onView` routes customer-uploaded documents through the in-app viewer; the
+  // `viewUrl` link is reserved for the generated Ejari PDF and in-app workspace
+  // routes (move-out inspection / settlement), which stay externally openable.
+  const hasView = !!onView || !!viewUrl;
   return (
     <div className="donepanel">
       <span className="dp-ic"><Check size={18} /></span>
@@ -464,8 +473,10 @@ function Completed({ title, sub, onUndo, undoLabel, viewUrl, viewLabel }: { titl
         <div className="dp-t">{title}</div>
         {sub && <div className="dp-s">{sub}</div>}
       </div>
-      {viewUrl && <a href={viewUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}><ExternalLink size={13} /> {viewLabel || 'View'}</a>}
-      {onUndo && <button className="btn btn-ghost btn-sm" style={{ marginLeft: viewUrl ? 8 : 'auto' }} onClick={onUndo}>{undoLabel || 'Update'}</button>}
+      {onView
+        ? <button type="button" onClick={onView} className="btn btn-ghost btn-sm cursor-pointer" style={{ marginLeft: 'auto' }}><ExternalLink size={13} /> {viewLabel || 'View'}</button>
+        : viewUrl && <a href={viewUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}><ExternalLink size={13} /> {viewLabel || 'View'}</a>}
+      {onUndo && <button className="btn btn-ghost btn-sm" style={{ marginLeft: hasView ? 8 : 'auto' }} onClick={onUndo}>{undoLabel || 'Update'}</button>}
     </div>
   );
 }
@@ -481,7 +492,7 @@ function UtilityReview({ proof, accountNumber, onConfirm, onUpload, lock }: {
           <span className="ufi"><FileText size={15} /></span>
           {proof.displayName ?? 'Utility proof'}{accountNumber ? ` · ${accountNumber}` : ''}
         </span>
-        <a href={proof.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view" style={{ marginLeft: 'auto' }}><ExternalLink size={12} /> View bill</a>
+        <button type="button" onClick={() => openDocViewer({ fileUrl: proof.fileUrl, caption: proof.displayName ?? 'Utility proof' })} className="mini-btn view cursor-pointer" style={{ marginLeft: 'auto' }}><ExternalLink size={12} /> View bill</button>
       </div>
       {!lock && (
         <button className="btn btn-jade btn-sm" style={{ justifySelf: 'start', marginTop: 6 }} onClick={onConfirm}>
@@ -733,7 +744,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           headline: 'Utility account confirmed.',
           body: proof ? `${TEN}'s utility proof is on file.` : 'Utility activation proof is on file.',
           timing: null,
-          node: <Completed title="Utility account confirmed" sub={accSub} viewUrl={proof?.fileUrl} viewLabel="View bill" />,
+          node: <Completed title="Utility account confirmed" sub={accSub} onView={proof?.fileUrl ? () => openDocViewer({ fileUrl: proof.fileUrl, caption: proof.displayName ?? 'Utility proof' }) : undefined} viewLabel="View bill" />,
         }
       : {
           tone: 'action', icon: 'bolt', sub: stopOf(4), label: 'Utility',
@@ -834,14 +845,14 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               <span className="cb">{st.closeout.clearance ? <Check size={12} /> : null}</span>
               <span className="ct">Utility clearance</span>
               {clearanceDoc
-                ? <a href={clearanceDoc.fileUrl} target="_blank" rel="noreferrer" className="ca"><ExternalLink size={12} /> View</a>
+                ? <button type="button" onClick={() => openDocViewer({ fileUrl: clearanceDoc.fileUrl, caption: clearanceDoc.displayName ?? 'Utility clearance' })} className="ca cursor-pointer"><ExternalLink size={12} /> View</button>
                 : <button className="ca" onClick={h.onUploadCloseoutClearance}>Upload</button>}
             </div>
             <div className={'chkrow ' + (st.closeout.finalBill ? 'on' : '')}>
               <span className="cb">{st.closeout.finalBill ? <Check size={12} /> : null}</span>
               <span className="ct">Utility final bill</span>
               {finalBillDoc
-                ? <a href={finalBillDoc.fileUrl} target="_blank" rel="noreferrer" className="ca"><ExternalLink size={12} /> View</a>
+                ? <button type="button" onClick={() => openDocViewer({ fileUrl: finalBillDoc.fileUrl, caption: finalBillDoc.displayName ?? 'Utility final bill' })} className="ca cursor-pointer"><ExternalLink size={12} /> View</button>
                 : <button className="ca" onClick={h.onUploadCloseoutFinalBill}>Upload</button>}
             </div>
           </div>
@@ -2128,7 +2139,7 @@ function DetailsDrawer({
                     <div className="ds">{lbl}{exp}</div>
                   </div>
                   <div className="dacts">
-                    <a href={d.fileUrl} target="_blank" rel="noreferrer" className="mini-btn view"><ExternalLink size={12} /> View</a>
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey.replace(/_/g, ' ') })} className="mini-btn view cursor-pointer"><ExternalLink size={12} /> View</button>
                     <button type="button" className="mini-btn view" title={`Upload a newer ${replaceWith.label}`} onClick={() => prefillUpload(replaceWith)}>
                       <UploadCloud size={12} /> Replace
                     </button>
@@ -3323,8 +3334,15 @@ export default function ContractV2Page() {
     try {
       const res = await fetch(`/api/contracts/${contract.id}/ejari/mark-registered`, { method: 'PATCH', credentials: 'include' });
       if (!res.ok) throw new Error(`Mark Ejari failed: ${res.status}`);
+      const data = await res.json().catch(() => ({ matched: true }));
+      if (data.matched === false) {
+        alert('No Ejari certificate is on file for this lease period yet. Please upload the certificate.');
+        return;
+      }
       void reload();
-    } catch { setLocalState({ ejariStatus: 'registered' }); }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not mark Ejari as on file.');
+    }
   };
   const onUploadUtility = () => utilityInputRef.current?.click();
   const onUtilityFilePicked = async (file: File) => {
@@ -3891,6 +3909,7 @@ export default function ContractV2Page() {
           && contract.termination?.method !== 'direct'
           && contract.termination?.response !== 'accepted'
           && !contract.vacateAtEnd
+          && !contract.hasSuccessor
           && !isSuperseded && !isDeclinedRenewal && (
           <div className="qbanner waiting" style={{ marginBottom: 4 }}>
             <span className="bic"><Key size={18} /></span>

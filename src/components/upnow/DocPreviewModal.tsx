@@ -6,7 +6,7 @@
  * iframe. Use for a focused "View" action instead of opening a new browser tab.
  */
 import { useEffect } from 'react';
-import { X, FileText, ExternalLink } from 'lucide-react';
+import { X, FileText } from 'lucide-react';
 
 export type PreviewDoc = { id: number; fileUrl: string | null; mimeType?: string | null; caption?: string | null };
 
@@ -35,9 +35,8 @@ export function DocPreviewModal({ title, docs, onClose }: { title: string; docs:
           {viewable.map(d => (
             <figure key={d.id} className="bg-white rounded-xl border border-[#e8e6e0] overflow-hidden">
               {d.caption && (
-                <figcaption className="px-4 py-2 text-xs font-semibold text-[#3d3b35] border-b border-[#efeee9] flex items-center justify-between">
+                <figcaption className="px-4 py-2 text-xs font-semibold text-[#3d3b35] border-b border-[#efeee9]">
                   {d.caption}
-                  <a href={d.fileUrl!} target="_blank" rel="noopener noreferrer" className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">Open <ExternalLink size={11} /></a>
                 </figcaption>
               )}
               {isImage(d) ? (

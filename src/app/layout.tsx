@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Manrope, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
+import { DocViewerHost } from "@/components/upnow/DocViewerHost";
 
 const manrope = Manrope({
   subsets: ["latin"],
@@ -31,6 +32,7 @@ export default function RootLayout({
     <html lang="en" className={`${manrope.className} ${instrumentSerif.variable}`}>
       <body className="antialiased">
         <Providers>{children}</Providers>
+        <DocViewerHost />
       </body>
     </html>
   );

@@ -17,6 +17,7 @@ import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { docLabel } from '@/lib/docLabel';
 import { DocPreviewModal } from '@/components/upnow/DocPreviewModal';
+import { openDocViewer } from '@/lib/docViewer';
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 
@@ -473,10 +474,10 @@ export default function CustomerDetailPage() {
                         {l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}{l.property.buildingName ? ` · ${l.property.buildingName}` : ''} · {l.ref} · {fmtDate(l.startDate)} → {fmtDate(l.endDate)}
                       </span>
                       {proofs.length > 0 ? proofs.map(d => (
-                        <a key={d.id} href={d.fileUrl!} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] bg-[#eef9f4] border border-[#cfe9df] rounded-full px-2 py-0.5 hover:underline">
+                        <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName || prettyKey(d.documentKey), mimeType: d.mimeType })}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] bg-[#eef9f4] border border-[#cfe9df] rounded-full px-2 py-0.5 hover:underline cursor-pointer">
                           <FileText size={11} /> {d.displayName || prettyKey(d.documentKey)}
-                        </a>
+                        </button>
                       )) : (
                         <span className="text-[11px] font-medium text-[#9a6b00]">No cheque / transfer receipt on file</span>
                       )}
@@ -599,7 +600,7 @@ export default function CustomerDetailPage() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                   {d.status === 'pending' && <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#fee2e2] text-[#b91c1c]">Pending review</span>}
                   {d.expiryDate && <span className="text-[11px] text-[#9b9890]">exp {fmtDate(d.expiryDate)}</span>}
-                  {d.fileUrl && <a href={d.fileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-0.5">View <ExternalLink size={10} /></a>}
+                  {d.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, data.documents), mimeType: d.mimeType })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-0.5 cursor-pointer">View <ExternalLink size={10} /></button>}
                 </div>
               </div>
             </div>

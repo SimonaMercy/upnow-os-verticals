@@ -28,6 +28,7 @@ import {
   UploadCloud, CheckCircle2, AlertTriangle, ExternalLink, Loader2,
   Clock, X, ShieldCheck, Home, Paperclip, ChevronRight, CheckCircle, Zap,
 } from 'lucide-react';
+import { openDocViewer } from '@/lib/docViewer';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   KYC_DOCS, KYC_DOC_KEYS, getRentalSectionDocs,
@@ -129,10 +130,11 @@ function DocRow({
       {/* Actions */}
       <div className="flex items-center gap-2 shrink-0 mt-0.5">
         {uploaded && docRecord?.fileUrl && !isRejected && (
-          <a href={docRecord.fileUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+          <button type="button"
+            onClick={() => openDocViewer({ fileUrl: docRecord.fileUrl, caption: req.label })}
+            className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer">
             <ExternalLink size={12} /> View
-          </a>
+          </button>
         )}
         <label className={[
           'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white transition-opacity',
@@ -641,10 +643,11 @@ export default function CustomerDocumentsPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0 mt-0.5">
             {utilityDocId && utilityDocUrl && (
-              <a href={utilityDocUrl} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+              <button type="button"
+                onClick={() => openDocViewer({ fileUrl: utilityDocUrl, caption: 'Proof of Payment' })}
+                className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer">
                 <ExternalLink size={12} /> View
-              </a>
+              </button>
             )}
             <label className={[
               'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white transition-opacity',
@@ -736,10 +739,11 @@ export default function CustomerDocumentsPage() {
               </div>
               <div className="flex items-center gap-2 shrink-0 mt-0.5">
                 {doc.fileUrl && !isRejected && (
-                  <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+                  <button type="button"
+                    onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label })}
+                    className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer">
                     <ExternalLink size={12} /> View
-                  </a>
+                  </button>
                 )}
                 <label className={[
                   'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white transition-opacity',

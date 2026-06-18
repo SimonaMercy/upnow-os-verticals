@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Search, X, Wallet, Loader2, RefreshCw, Lock, ExternalLink, FileText } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { openDocViewer } from '@/lib/docViewer';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
@@ -328,8 +329,9 @@ export default function ManagerDepositsPage() {
                     {detail.proofs!.map((pf, i) => {
                       const isImg = (pf.mimeType ?? '').startsWith('image/');
                       return (
-                        <a key={i} href={pf.fileUrl ?? '#'} target="_blank" rel="noreferrer"
-                          className="block rounded-xl border border-[#e8e6e0] overflow-hidden hover:border-[#2e9f82] transition-colors">
+                        <button key={i} type="button"
+                          onClick={() => openDocViewer({ fileUrl: pf.fileUrl, caption: proofLabel(pf.documentKey), mimeType: pf.mimeType })}
+                          className="block w-full text-left rounded-xl border border-[#e8e6e0] overflow-hidden hover:border-[#2e9f82] transition-colors cursor-pointer">
                           {isImg && pf.fileUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={pf.fileUrl} alt={proofLabel(pf.documentKey)} className="w-full h-28 object-cover bg-[#f4f3ef]" />
@@ -342,7 +344,7 @@ export default function ManagerDepositsPage() {
                             <p className="text-xs font-semibold text-[#1a1916]">{proofLabel(pf.documentKey)}</p>
                             <p className="text-[10px] text-[#2e9f82] flex items-center gap-1"><ExternalLink size={10} /> View</p>
                           </div>
-                        </a>
+                        </button>
                       );
                     })}
                   </div>

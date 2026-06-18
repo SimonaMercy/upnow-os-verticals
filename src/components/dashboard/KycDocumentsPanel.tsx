@@ -725,14 +725,16 @@ export function KycDocumentsPanel({
                     </p>
                   )}
 
-                  {/* Inline preview */}
+                  {/* Inline preview — opens the in-screen viewer, never a new tab. */}
                   {previewUrl && (
                     <div className="mt-3">
                       {isImage ? (
-                        <a
-                          href={previewUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                          }
+                          className="block cursor-pointer"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
@@ -745,18 +747,19 @@ export function KycDocumentsPanel({
                               borderColor: "var(--color-base-200)",
                             }}
                           />
-                        </a>
+                        </button>
                       ) : (
-                        <a
-                          href={previewUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs font-medium underline underline-offset-2"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                          }
+                          className="inline-flex items-center gap-1.5 text-xs font-medium underline underline-offset-2 cursor-pointer"
                           style={{ color: "var(--color-primary)" }}
                         >
                           <FileText className="w-3.5 h-3.5" />
                           View PDF
-                        </a>
+                        </button>
                       )}
                     </div>
                   )}
@@ -910,17 +913,6 @@ export function KycDocumentsPanel({
                         style={{ height: "70vh", borderColor: "var(--color-base-200)" }}
                       />
                     )}
-                    <div className="mt-1.5 text-right">
-                      <a
-                        href={d.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs font-medium hover:underline"
-                        style={{ color: "var(--color-primary)" }}
-                      >
-                        Open in new tab ↗
-                      </a>
-                    </div>
                   </div>
                 );
               })}

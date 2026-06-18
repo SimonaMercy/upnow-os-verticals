@@ -8,6 +8,7 @@
 import { useRef, useState } from 'react';
 import { X, Upload, Loader2, Check, ExternalLink, FileText } from 'lucide-react';
 import { putKycSlot } from '@/lib/kycSlotUpload';
+import { openDocViewer } from '@/lib/docViewer';
 
 export type UploadSlot = {
   label: string;                 // "Front side", "Back side", or the doc name
@@ -83,9 +84,9 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-[#1a1916]">{slot.label}</div>
                   {has ? (
-                    <a href={slot.existing!.fileUrl!} target="_blank" rel="noopener noreferrer" className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 mt-0.5">
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: slot.existing!.fileUrl, caption: slot.label, mimeType: slot.existing!.mimeType })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 mt-0.5 cursor-pointer">
                       <Check size={11} className="text-[#1a7a5a]" /> Uploaded · View <ExternalLink size={10} />
-                    </a>
+                    </button>
                   ) : (
                     <div className="text-xs text-[#9b9890] mt-0.5">Not uploaded</div>
                   )}

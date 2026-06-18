@@ -21,6 +21,7 @@ import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
 import { getRequiredDocs } from '@/lib/docRequirements';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import { openDocViewer } from '@/lib/docViewer';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
@@ -1424,10 +1425,10 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Uploaded'}
                     </p>
                   </div>
-                  <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline">
+                  <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
+                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline cursor-pointer">
                     View <ExternalLink size={10} />
-                  </a>
+                  </button>
                   {isPending && (
                     <>
                       <button disabled={!!isActioning} onClick={() => handleApproveDoc(doc.id)}
@@ -2782,10 +2783,10 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-[12px] font-semibold text-[#1a1916]">{label}</span>
                 <StatusChip status={doc.status} />
-                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0">
+                <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
+                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0 cursor-pointer">
                   Open <ExternalLink size={10} />
-                </a>
+                </button>
               </div>
               {isPdf ? (
                 <iframe src={doc.fileUrl} className="w-full h-[480px] rounded-xl border border-[#e8e6e0]" />
@@ -2801,10 +2802,10 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                   </div>
                 </button>
               ) : (
-                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline">
+                <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
+                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline cursor-pointer">
                   <FileText size={14} /> Open file
-                </a>
+                </button>
               )}
             </div>
           );
