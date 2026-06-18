@@ -573,6 +573,9 @@ interface StepHandlers {
   onMarkUtility: () => Promise<void>;
   onVerifyUtility: () => Promise<void>;
   onRevertToDraft: () => Promise<void>;
+  /** Undo a sent settlement — pulls it back to draft so the figures can be
+   *  corrected and re-sent (only while the customer hasn't agreed yet). */
+  onUnsendSettlement: () => Promise<void>;
   /** Wind-down uploads — work even while the lease is active. */
   onUploadMoveOutDoc: () => void;
   onUploadCloseoutClearance: () => void;
@@ -874,9 +877,16 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       node: (
         <>
           <div className="chklist">
-            <ChkRow on={ss === 'sent' || ss === 'agreed'} label="Settlement sent to customer" onToggle={() => {}} />
-            <ChkRow on={ss === 'agreed'} label={`${TEN} agreed`} onToggle={() => {}} />
-            <ChkRow on={false} label="Refund marked paid" onToggle={() => {}} />
+            {/* "Sent" can be undone (pull back to draft) until the customer
+               agrees; once agreed the figures are committed, so it locks.
+               This is live wind-down management (like recording a payment), so
+               it is NOT gated by readOnlyWorkflow — the lease stays active
+               through settlement, which would otherwise lock it permanently. */}
+            <ChkRow on={ss === 'sent' || ss === 'agreed'} label="Settlement sent to customer"
+              onToggle={h.onUnsendSettlement} locked={ss === 'agreed'} />
+            {/* The customer's agreement and the payout are not the RP's to undo here. */}
+            <ChkRow on={ss === 'agreed'} label={`${TEN} agreed`} onToggle={() => {}} locked />
+            <ChkRow on={false} label="Refund marked paid" onToggle={() => {}} locked />
           </div>
           <Link href={h.settlementUrl} className="btn btn-jade btn-block">
             <Wallet size={14} /> Open settlement workspace
@@ -3260,6 +3270,19 @@ export default function ContractV2Page() {
       else setLocalState({ status: 'pending' });
     } catch { setLocalState({ status: 'pending' }); }
   };
+  // Undo "settlement sent": pull the settlement back to draft so the figures can
+  // be corrected and re-sent. Backend rejects once the customer has agreed/paid.
+  const onUnsendSettlement = async () => {
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/settlement/unsend`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        alert(b?.message ?? 'Could not undo the settlement.');
+        return;
+      }
+      void reload();
+    } catch { alert('Unexpected error. Please try again.'); }
+  };
   // Upload a file to GCS/local via presigned URL, then record the document row.
   async function uploadContractDoc(file: File, displayName: string, keyPrefix: string) {
     if (!contract) return;
@@ -3548,6 +3571,7 @@ export default function ContractV2Page() {
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
+    onUnsendSettlement,
     onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
     signActionUrl: `${contractsBase}/${contract.id}`,
     inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,

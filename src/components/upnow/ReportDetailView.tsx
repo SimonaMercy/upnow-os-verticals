@@ -36,7 +36,7 @@ interface ReportDef {
   columns: Column[];
   totals: TotalSpec[];
   /** Optional control rendered above the table (e.g. window-days for lease expiry). */
-  controlKey?: 'leaseExpiryWindow' | 'dateRange' | 'year' | 'forecastMonths';
+  controlKey?: 'leaseExpiryWindow' | 'dateRange' | 'year' | 'yearRange' | 'forecastMonths';
   /** When set, table rows expand into a modal listing their child items. */
   drilldown?: DrilldownSpec;
   /**
@@ -225,9 +225,9 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'security-deposits': {
     title: 'Security Deposits Report',
-    description: 'Deposit register with full lifecycle — held, returned, partial-return and forfeited — with cheque/receipt reference and the net refund liability. A deposit is collected at lease start and refundable at lease end; the date range filters by when it was taken.',
+    description: 'Full deposit register and settlement ledger. A deposit is collected at lease start and refundable at lease end. Status shows where each one stands: Holding (live lease), Pending settlement (lease ended — needs to be refunded or deducted), or settled as Returned, Partial return or Forfeited. Refunded / Kept are the amounts that moved at settlement. The tiles up top answer how much you currently hold, how much is pending settlement, and what has been refunded to tenants vs kept. Pick a year to scope the register to deposits taken that year, or All years for the full register.',
     endpoint: '/api/reports/security-deposits',
-    controlKey: 'dateRange',
+    controlKey: 'yearRange',
     columns: [
       { key: 'contractRef', label: 'Contract' },
       { key: 'tenantName', label: 'Customer' },
@@ -235,17 +235,20 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'buildingName', label: 'Property' },
       { key: 'depositFils', label: 'Deposit', align: 'right', type: 'aed' },
       { key: 'reference', label: 'Cheque / Ref' },
-      { key: 'status', label: 'Status', type: 'stage' },
+      { key: 'state', label: 'Status', type: 'stage' },
+      { key: 'refundedFils', label: 'Refunded', align: 'right', type: 'aed' },
+      { key: 'deductedFils', label: 'Kept', align: 'right', type: 'aed' },
+      { key: 'settledOn', label: 'Settled on', type: 'date' },
       { key: 'takenOn', label: 'Taken on', type: 'date' },
       { key: 'leaseEnd', label: 'Refundable at', type: 'date' },
     ],
     totals: [
-      { key: 'held', label: 'Held (count)', type: 'number' },
-      { key: 'heldFils', label: 'Held', type: 'aed' },
-      { key: 'returnedFils', label: 'Returned', type: 'aed' },
-      { key: 'forfeitedFils', label: 'Forfeited', type: 'aed' },
-      { key: 'netHeldFils', label: 'Net liability (held)', type: 'aed' },
-      { key: 'totalFils', label: 'Total', type: 'aed' },
+      { key: 'heldFils', label: 'Held now (with us)', type: 'aed', keep: true },
+      { key: 'dueForSettlementFils', label: 'Pending settlement', type: 'aed', keep: true },
+      { key: 'refundedFils', label: 'Refunded to tenants', type: 'aed' },
+      { key: 'deductedFils', label: 'Kept / forfeited', type: 'aed' },
+      { key: 'totalFils', label: 'Total collected', type: 'aed', keep: true },
+      { key: 'held', label: 'Held (count)', type: 'number', keep: true },
     ],
   },
 
@@ -563,6 +566,12 @@ const STAGE_STYLE: Record<string, string> = {
   signed:      'bg-[#dbeafe] text-[#1e40af]',
   active:      'bg-[#d8f2e8] text-[#1a7a5a]',
   rejected:    'bg-[#fee2e2] text-[#b91c1c]',
+  // security-deposit lifecycle
+  holding:            'bg-[#dbeafe] text-[#1e40af]',  // held against a live lease
+  pending_settlement: 'bg-[#fef3c7] text-[#854d0e]',  // lease ended → refund/deduct it
+  returned:           'bg-[#dcfce7] text-[#166534]',
+  partial_return:     'bg-[#e0e7ff] text-[#3730a3]',
+  forfeited:          'bg-[#fee2e2] text-[#b91c1c]',
 };
 
 function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
@@ -586,7 +595,7 @@ function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
   }
   if (type === 'stage') {
     const cls = STAGE_STYLE[String(value)] ?? 'bg-[#f4f3ef] text-[#6b6860]';
-    return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{String(value).replace('_', ' ')}</span>;
+    return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{String(value).replace(/_/g, ' ')}</span>;
   }
   return <span>{String(value)}</span>;
 }
@@ -665,7 +674,10 @@ export function ReportDetailView({
       url = `${endpoint}?window=${leaseWindow}`;
     } else if (def.controlKey === 'forecastMonths') {
       url = `${endpoint}?months=${forecastMonths}`;
-    } else if (def.controlKey === 'dateRange') {
+    } else if (def.controlKey === 'dateRange' || def.controlKey === 'yearRange') {
+      // yearRange is a year dropdown that maps the picked year to from/to bounds
+      // (empty = All years), so it reuses the same from/to query the backend
+      // already honours — no separate ?year= param needed here.
       const qs = new URLSearchParams();
       if (from) qs.set('from', from);
       if (to) qs.set('to', to);
@@ -931,6 +943,27 @@ export function ReportDetailView({
           <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
           <span className="text-xs text-[#9b9890]">→</span>
           <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
+        </div>
+      )}
+
+      {/* Year dropdown (deposit register — "yearly document"): maps the picked
+          year to a Jan 1 – Dec 31 from/to range, or clears it for All years. */}
+      {def.controlKey === 'yearRange' && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Year:</span>
+          <select
+            value={/^\d{4}-01-01$/.test(from) && to === `${from.slice(0, 4)}-12-31` ? from.slice(0, 4) : 'all'}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === 'all') { setFrom(''); setTo(''); }
+              else { setFrom(`${v}-01-01`); setTo(`${v}-12-31`); }
+            }}
+            className="text-xs font-semibold border border-[#e8e6e0] rounded-lg px-3 py-1.5 bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+            <option value="all">All years</option>
+            {Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i).map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
         </div>
       )}
 
