@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, usePathname } from 'next/navigation';
@@ -78,7 +79,7 @@ interface ContractMeta {
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   const dt = new Date(d.length === 10 ? d + 'T00:00:00' : d);
-  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function InfoCell({ label, value }: { label: string; value: string }) {
@@ -1003,7 +1004,7 @@ export default function InspectionPage() {
             {data.inspectionDate && (
               <div>
                 <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Inspection Date</label>
-                <input type="text" value={new Date(data.inspectionDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })} disabled
+                <input type="text" value={new Date(data.inspectionDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} disabled
                   className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 bg-[#f9f8f6] text-[#6b6860]" />
               </div>
             )}

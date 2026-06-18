@@ -12,6 +12,7 @@
  *   3. POST /api/addendum-templates             → register the template
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef } from 'react';
 import { FileText, UploadCloud, Trash2, Loader2, AlertCircle, Plus, X, ExternalLink } from 'lucide-react';
@@ -126,7 +127,7 @@ export default function AddendumTemplatesPage() {
                   </td>
                   <td className="px-4 py-3 text-xs text-[#6b6860]">{mimeLabel(t.mimeType)}</td>
                   <td className="px-4 py-3 text-xs text-[#6b6860]">
-                    {new Date(t.createdAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    {new Date(t.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">

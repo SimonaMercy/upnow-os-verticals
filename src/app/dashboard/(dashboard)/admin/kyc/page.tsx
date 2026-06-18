@@ -1,4 +1,5 @@
 "use client";
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef } from "react";
 import { apiGet, apiPatch } from "@/lib/api";
@@ -226,7 +227,7 @@ function KycCard({
       )}
       <ScoreBar score={score} />
       <p className="text-xs mt-1.5" style={{ color: "var(--color-neutral-400)" }}>
-        {new Date(date).toLocaleDateString("en-AE")}
+        {new Date(date).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
       </p>
     </button>
   );
@@ -365,7 +366,7 @@ function TenantLeftPanel({ tenant }: { tenant: Tenant }) {
         {[
           { label: "Doc status",    value: tenant.documentStatus ?? "—" },
           { label: "Active status", value: tenant.activeStatus ?? "—" },
-          { label: "Registered",    value: new Date(tenant.createdAt).toLocaleDateString("en-AE") },
+          { label: "Registered",    value: new Date(tenant.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
         ].map(({ label, value }) => (
           <div key={label} className="flex items-center justify-between py-2 border-b"
             style={{ borderColor: "var(--color-base-100)" }}>
@@ -477,7 +478,7 @@ function RpContentPanel({
                   { label: "Passport",      value: profile.passportNumber },
                   { label: "Nationality",   value: profile.nationality },
                   { label: "Gender",        value: profile.gender },
-                  { label: "Date of birth", value: profile.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString("en-AE") : undefined },
+                  { label: "Date of birth", value: profile.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : undefined },
                   { label: "Address",       value: profile.contactAddress },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between py-1.5 border-b col-span-1"
@@ -551,7 +552,7 @@ function RpContentPanel({
                         </p>
                         {doc.expiryDate && (
                           <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
-                            Exp: {new Date(doc.expiryDate).toLocaleDateString("en-AE")}
+                            Exp: {new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
                           </p>
                         )}
                       </div>
@@ -679,7 +680,7 @@ function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detai
   const p = detail?.profile;
   const u = p?.user;
   const docs = detail?.uploadedDocs ?? null;
-  const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-AE") : "—");
+  const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : "—");
 
   const profileRows = [
     { label: "Email",            value: u?.email ?? tenant.user?.email },
@@ -759,9 +760,9 @@ function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detai
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-[18px]">
                       {doc.documentNumber && <span className="text-[11px]" style={{ color: "var(--color-neutral-500)" }}>No: <b style={{ color: "var(--color-neutral-700)" }}>{doc.documentNumber}</b></span>}
-                      {doc.issueDate && <span className="text-[11px]" style={{ color: "var(--color-neutral-500)" }}>Issued: {new Date(doc.issueDate).toLocaleDateString("en-AE")}</span>}
-                      {doc.expiryDate && <span className="text-[11px] font-medium" style={{ color: expColor }}>Expires: {new Date(doc.expiryDate).toLocaleDateString("en-AE")}{expired ? " (expired)" : soon ? " (soon)" : ""}</span>}
-                      <span className="text-[11px]" style={{ color: "var(--color-neutral-400)" }}>Uploaded: {new Date(doc.createdAt).toLocaleDateString("en-AE")}</span>
+                      {doc.issueDate && <span className="text-[11px]" style={{ color: "var(--color-neutral-500)" }}>Issued: {new Date(doc.issueDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}</span>}
+                      {doc.expiryDate && <span className="text-[11px] font-medium" style={{ color: expColor }}>Expires: {new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}{expired ? " (expired)" : soon ? " (soon)" : ""}</span>}
+                      <span className="text-[11px]" style={{ color: "var(--color-neutral-400)" }}>Uploaded: {new Date(doc.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}</span>
                       {doc.notes && <span className="text-[11px] w-full" style={{ color: "var(--color-neutral-500)" }}>Note: {doc.notes}</span>}
                     </div>
                   </div>
@@ -833,7 +834,7 @@ function TeamCard({
       {email && <p className="text-xs truncate mb-1" style={{ color: "var(--color-neutral-400)" }}>{email}</p>}
       <p className="text-xs" style={{ color: "var(--color-primary)" }}>{sub}</p>
       <p className="text-xs mt-1" style={{ color: "var(--color-neutral-400)" }}>
-        {new Date(date).toLocaleDateString("en-AE")}
+        {new Date(date).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
       </p>
     </button>
   );
@@ -855,8 +856,8 @@ function ManagerLeftPanel({ m }: { m: ManagerRow }) {
         <p className="text-xs font-semibold uppercase tracking-wide py-1" style={{ color: "var(--color-neutral-400)" }}>Account</p>
         {[
           { label: "Status", value: m.status },
-          { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE") },
-          { label: "Last login", value: m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString("en-AE") : "Never" },
+          { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
+          { label: "Last login", value: m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : "Never" },
         ].map(({ label, value }) => (
           <div key={label} className="rounded-xl p-2.5" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
             <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
@@ -888,7 +889,7 @@ function ManagerContentPanel({ m }: { m: ManagerRow }) {
           {[
             { label: "Role", value: "Asset Manager" },
             { label: "Landlords managed", value: String(m.landlordCount) },
-            { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE") },
+            { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
             { label: "Last login", value: m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("en-AE") : "Never" },
           ].map(({ label, value }) => (
             <div key={label} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
@@ -976,7 +977,7 @@ function TechnicianLeftPanel({ t }: { t: TechnicianRow }) {
         {[
           { label: "Service provider", value: t.spName },
           { label: "Status", value: t.status },
-          { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE") },
+          { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
         ].map(({ label, value }) => (
           <div key={label} className="rounded-xl p-2.5" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
             <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
@@ -1006,7 +1007,7 @@ function TechnicianContentPanel({ t }: { t: TechnicianRow }) {
             { label: "Role", value: "Technician" },
             { label: "Service provider", value: t.spName },
             { label: "Status", value: t.status },
-            { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE") },
+            { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
           ].map(({ label, value }) => (
             <div key={label} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
               <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>

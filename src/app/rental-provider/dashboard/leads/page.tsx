@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -238,13 +239,13 @@ function initials(name: string) {
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-AE', {
-    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai',
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE,
   });
 }
 
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-AE', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai',
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE,
   });
 }
 
@@ -714,7 +715,7 @@ function LeadRow({
       d.setFullYear(d.getFullYear() + 1); d.setDate(d.getDate() - 1);
       return d.toISOString().slice(0, 10);
     })() : null;
-    const fmtD = (s: string | null) => s ? new Date(s + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+    const fmtD = (s: string | null) => s ? new Date(s + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' }) : '—';
     const aed = (fils: number) => `AED ${(fils / 100).toLocaleString('en-AE')}`;
     const tenantName = lead.convertedTenant?.user?.name?.trim() || '—';
     const buildingName = lead.unit?.property?.buildingName ?? '—';
@@ -745,7 +746,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
 <body>
 <div class="btnrow noprint"><button class="btn" onclick="window.print()">Print / Save as PDF</button><button class="btn alt" onclick="window.close()">Close</button></div>
 <h1>Payment Plan — Customer Preview</h1>
-<p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'}) : '—'}</p>
+<p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE',{timeZone:APP_TIME_ZONE,day:'numeric',month:'short',year:'numeric'}) : '—'}</p>
 <h2>Contract &amp; Cheque Details</h2>
 <div class="grid">
   <div class="l">Cheque Drawer (Tenant)</div><div class="v">${tenantName}</div>
@@ -768,7 +769,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
 <tfoot><tr><td colspan="2">Total</td><td style="text-align:right">${aed(plan.totalAmountFils)}</td><td></td></tr></tfoot>
 </table>
 ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.notes.replace(/</g, '&lt;')}</p>` : ''}
-<div class="footer">UpNow · Customer preview · ${new Date().toLocaleDateString('en-AE',{day:'numeric',month:'short',year:'numeric'})}</div>
+<div class="footer">UpNow · Customer preview · ${new Date().toLocaleDateString('en-AE',{timeZone:APP_TIME_ZONE,day:'numeric',month:'short',year:'numeric'})}</div>
 </body></html>`;
     const w = window.open('', '_blank', 'width=820,height=900');
     if (!w) { alert('Please allow pop-ups to preview the plan.'); return; }

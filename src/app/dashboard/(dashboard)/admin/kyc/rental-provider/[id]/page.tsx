@@ -1,4 +1,5 @@
 "use client";
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -220,7 +221,7 @@ function ExpiryBadge({ expiryDate }: { expiryDate: string | null }) {
   const label = level === "expired" ? "Expired" : level === "soon" ? "Expiring soon" : "Valid";
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[level]}`}>
-      {label}: {new Date(expiryDate!).toLocaleDateString("en-AE")}
+      {label}: {new Date(expiryDate!).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
     </span>
   );
 }
@@ -417,7 +418,7 @@ export default function RpKycDetailPage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="text-xs text-gray-500 mb-1">Registered</div>
-          <div className="text-sm font-semibold text-gray-800">{new Date(profile.createdAt).toLocaleDateString("en-AE")}</div>
+          <div className="text-sm font-semibold text-gray-800">{new Date(profile.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}</div>
         </div>
       </div>
 
@@ -493,7 +494,7 @@ export default function RpKycDetailPage() {
                 <InfoRow label="Emirates ID" value={profile.emiratesIdNumber} />
                 <InfoRow label="Passport No." value={profile.passportNumber} />
                 <InfoRow label="Nationality" value={profile.nationality} />
-                <InfoRow label="Date of Birth" value={profile.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString("en-AE") : null} />
+                <InfoRow label="Date of Birth" value={profile.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : null} />
                 <InfoRow label="Contact Address" value={profile.contactAddress} />
                 {profile.hasPoa && <InfoRow label="PoA Person" value={profile.poaPersonName} />}
                 <div className="pt-3 mt-3 border-t border-gray-100">
@@ -692,7 +693,7 @@ export default function RpKycDetailPage() {
               <p className="text-xs text-amber-700">{profile.complianceNotes}</p>
               {profile.compliancePausedAt && (
                 <p className="text-xs text-amber-500 mt-1">
-                  Paused at {new Date(profile.compliancePausedAt).toLocaleDateString("en-AE")}
+                  Paused at {new Date(profile.compliancePausedAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
                 </p>
               )}
             </div>

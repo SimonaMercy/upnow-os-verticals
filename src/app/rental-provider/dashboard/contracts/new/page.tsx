@@ -13,6 +13,7 @@
  * Searching params: ?unitId=X pre-selects a unit (linked from portfolio page).
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -93,7 +94,7 @@ function chequeDate(startDate: string, installments: number, i: number): string 
   const monthsPerCheque = 12 / installments;
   const d = new Date(`${startDate}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() + Math.round(i * monthsPerCheque));
-  return d.toLocaleDateString('en-AE', { timeZone: 'Asia/Dubai', day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function calcDurationLabel(start: string, end: string): string {

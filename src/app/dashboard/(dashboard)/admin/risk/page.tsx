@@ -7,6 +7,7 @@
  * Amounts are WHOLE AED. Chart style matches reports/ExecutiveOverview.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -386,7 +387,7 @@ export default function AdminRiskPage() {
                       <li key={i} className="px-4 py-2 flex items-center justify-between gap-3 text-[12px]">
                         <div className="min-w-0">
                           <div className="font-semibold truncate" style={{ color: sevColor(f.severity) }}>{RULE_LABEL[f.ruleKey] ?? f.ruleKey}</div>
-                          <div className="text-[11px] text-[#9b9890]">first seen {new Date(f.firstSeen).toLocaleDateString('en-AE')} · open {f.openDays}d</div>
+                          <div className="text-[11px] text-[#9b9890]">first seen {new Date(f.firstSeen).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })} · open {f.openDays}d</div>
                         </div>
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize flex-shrink-0" style={{ backgroundColor: f.status === 'resolved' ? '#ecfdf5' : f.status === 'acknowledged' ? '#f5f4f0' : `${sevColor(f.severity)}1a`, color: f.status === 'resolved' ? '#047857' : f.status === 'acknowledged' ? '#6b6860' : sevColor(f.severity) }}>{f.status}</span>
                       </li>
@@ -402,7 +403,7 @@ export default function AdminRiskPage() {
             <AlertList title="Trapped deposits" icon={Wallet} accent={RED} count={deposits?.trap.length ?? 0} rows={deposits?.trap ?? []} emptyText="No deposits held past a closed lease."
               render={(r: TrapRow) => (
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · ended {new Date(r.endDate).toLocaleDateString('en-AE')}</div></div>
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · ended {new Date(r.endDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}</div></div>
                   <div className="text-right flex-shrink-0"><div className="font-bold text-[#b91c1c]">{fmtAED(r.amountAed)}</div><div className="text-[11px]" style={{ color: r.daysOverdue >= 90 ? RED : '#9b9890' }}>{r.daysOverdue}d overdue</div></div>
                 </div>
               )} />
@@ -434,7 +435,7 @@ export default function AdminRiskPage() {
             <AlertList title="Direct termination of paying tenants" icon={UserMinus} accent={RED} count={fairness?.directEvictions.length ?? 0} rows={fairness?.directEvictions ?? []} emptyText="No direct (no-consent) terminations."
               render={(r: EvictionRow) => (
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] capitalize text-[#9b9890]">Contract #{r.contractId} · {r.status}{r.terminationRequestedAt ? ` · ${new Date(r.terminationRequestedAt).toLocaleDateString('en-AE')}` : ''}</div></div>
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] capitalize text-[#9b9890]">Contract #{r.contractId} · {r.status}{r.terminationRequestedAt ? ` · ${new Date(r.terminationRequestedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}` : ''}</div></div>
                   <div className="text-right flex-shrink-0">{r.payingTenant ? (<><div className="font-bold text-[#b91c1c]">Paying</div><div className="text-[11px] text-[#9b9890]">{fmtAED(r.paidAed)} paid</div></>) : (<div className="text-[11px] text-[#9b9890]">no payments</div>)}</div>
                 </div>
               )} />

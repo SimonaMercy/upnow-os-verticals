@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useRef, useEffect } from 'react';
 import { Calendar, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -58,11 +59,11 @@ export function PreferredDayPicker({
     );
   }
 
-  const monthLabel   = new Date(year, month).toLocaleDateString('en-AE', { month: 'long', year: 'numeric' });
+  const monthLabel   = new Date(year, month).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, month: 'long', year: 'numeric' });
   const firstDow     = new Date(year, month, 1).getDay();
   const daysInMonth  = new Date(year, month + 1, 0).getDate();
   const displayValue = value
-    ? new Date(value + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? new Date(value + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })
     : '';
 
   function prev() {

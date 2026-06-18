@@ -8,6 +8,7 @@
  * POST /contracts/tenant/:id/inspection/sign?type=...
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -71,7 +72,7 @@ interface InspMeta {
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   const dt = new Date(d.length === 10 ? d + 'T00:00:00' : d);
-  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function InfoCell({ label, value }: { label: string; value: string }) {

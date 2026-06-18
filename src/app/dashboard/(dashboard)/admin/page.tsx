@@ -10,6 +10,7 @@
  * live on the Risk board (/dashboard/admin/risk). Amounts are WHOLE AED.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -566,7 +567,7 @@ export default function AdminDecisionDashboard() {
                             {!m.moneyPower && <span className="text-[11px] text-[#9b9890]">view-only</span>}
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-right text-[11px]" style={{ color: m.dormant ? RED : '#9b9890' }}>{m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString('en-AE') : 'never'}</td>
+                        <td className="px-3 py-2.5 text-right text-[11px]" style={{ color: m.dormant ? RED : '#9b9890' }}>{m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE }) : 'never'}</td>
                         <td className="px-3 py-2.5 text-center"><TierBadge tier={m.tier} /></td>
                       </tr>
                     ))}

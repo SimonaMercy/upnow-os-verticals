@@ -7,6 +7,7 @@
  * "All contracts" link. Lists every contract from GET /api/contracts.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -42,7 +43,7 @@ function fmtAed(v: number) {
 }
 function fmtDate(d: string | null) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function ContractsListPage() {

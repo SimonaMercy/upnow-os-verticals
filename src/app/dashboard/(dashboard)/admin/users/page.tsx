@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -285,7 +286,7 @@ export default function AdminUsersPage() {
 
                   {/* Date */}
                   <span className="text-xs ml-auto flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>
-                    {new Date(u.createdAt).toLocaleDateString('en-AE')}
+                    {new Date(u.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}
                   </span>
                   <ChevronRight size={16} className="flex-shrink-0" style={{ color: 'var(--color-neutral-300)' }} />
                 </div>

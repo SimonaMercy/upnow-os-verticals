@@ -12,6 +12,7 @@
  * Backend: GET /api/reports/data-gaps  (ReportsService.getDataGapsReport)
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -50,7 +51,7 @@ interface DataGaps {
 const fmtAed = (n: number | null | undefined) =>
   new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(Number(n ?? 0));
 const fmtDate = (d: string | null | undefined) =>
-  d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
 /** Count the truthy "noXxx" flags on a row object. */
 const countGaps = (o: Record<string, unknown> | null | undefined) =>

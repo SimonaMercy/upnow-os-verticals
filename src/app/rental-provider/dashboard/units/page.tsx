@@ -15,6 +15,7 @@
  * Image:  POST  /properties/floor-plans/image   (multipart: file, propertyId, planLabel)
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -603,7 +604,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const contract = contracts.find(c => c.unit?.id === u.id && c.contractActive) ?? null;
     const tenant = contract?.tenant?.name ?? null;
     const fmtLease = (d: string | null | undefined) =>
-      d ? new Date(d).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
+      d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : null;
     const start = fmtLease(contract?.startDate);
     const end = fmtLease(contract?.endDate);
     const leaseRange = start && end ? `${start} → ${end}` : start ? `from ${start}` : end ? `until ${end}` : '';
@@ -1105,7 +1106,7 @@ const RENTAL_TYPES = [
   { id: 'yearly', label: 'Yearly' }, { id: 'custom', label: 'Custom' },
 ];
 const fmtDate = (s?: string | null) =>
-  s ? new Date(s).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  s ? new Date(s).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
 // Shared form styling — matches UnitFormModal so both unit editors look the same.
 const FORM_INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';

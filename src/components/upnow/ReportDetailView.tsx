@@ -6,6 +6,7 @@
  * One component so the two portals can never drift again.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -548,7 +549,7 @@ const CELL_STATUS_STYLE: Record<string, string> = {
 };
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 const BUCKET_STYLE: Record<string, string> = {

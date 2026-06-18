@@ -26,6 +26,7 @@
  * so we don't pollute the global stylesheet.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
@@ -243,7 +244,10 @@ function fmtAed(n: number | null | undefined): string {
 
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  // Pin to Asia/Dubai so a date-only value (e.g. a cheque date "2026-06-01",
+  // parsed by new Date() as UTC midnight) renders on its real calendar day for
+  // every viewer — without a timeZone it shifts back a day west of UTC.
+  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE });
 }
 
 function fmtMethod(m: string | null | undefined): string {
@@ -2131,7 +2135,7 @@ function DetailsDrawer({
               const stt = ok ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
               const lbl = ok ? (d.status === 'approved' ? 'Approved' : 'On file')
                 : d.status === 'rejected' ? 'Rejected' : 'Pending review';
-              const exp = d.expiryDate ? ' · exp ' + new Date(d.expiryDate).toLocaleDateString('en-AE') : '';
+              const exp = d.expiryDate ? ' · exp ' + new Date(d.expiryDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE }) : '';
               return (
                 <div key={d.id} className={'docitem ' + stt}>
                   <FileText size={14} />

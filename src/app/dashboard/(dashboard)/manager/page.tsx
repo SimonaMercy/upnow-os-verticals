@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
@@ -30,7 +31,7 @@ interface ActionCenter {
   amcExpired: Bucket; delayedFollowups: Bucket;
 }
 
-const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
+const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '');
 
 function permLabel(key: string) {
   return key.replace('can', '').replace(/([A-Z])/g, ' $1').trim();

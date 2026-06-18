@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /**
  * Public tenant portal — landing (magic link, no login).
@@ -99,7 +100,7 @@ export default function TenantPortalPage() {
           <DocSection title="Rental documents" subtitle="Supporting documents for your tenancy" docs={data.otherDocuments} uploading={uploading} onUpload={upload} />
         )}
 
-        <p className="text-xs text-[#9b9890] text-center mt-6">Link expires {new Date(data.expiresAt).toLocaleDateString('en-AE')}. Powered by UpNow.</p>
+        <p className="text-xs text-[#9b9890] text-center mt-6">Link expires {new Date(data.expiresAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}. Powered by UpNow.</p>
       </div>
     </div>
   );

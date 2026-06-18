@@ -18,6 +18,7 @@
  * from this page's current implementation.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -150,7 +151,7 @@ function fmtAed(fils: number) {
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // ─── Signature Pad ─────────────────────────────────────────────────────────

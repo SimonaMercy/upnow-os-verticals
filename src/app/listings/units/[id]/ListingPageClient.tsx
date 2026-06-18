@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
@@ -794,8 +795,8 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
 
   if (done) {
     const dt = new Date(done);
-    const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Dubai' });
-    const timeStr = dt.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
+    const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: APP_TIME_ZONE });
+    const timeStr = dt.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE });
     return (
       <ModalShell onClose={onClose}>
         <div className="text-center py-4">
@@ -858,7 +859,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
           <MiniCalendar value={date} onChange={setDate} />
           {date && (
             <p className="mt-2 text-xs text-center font-medium" style={{ color: '#2e9f82' }}>
-              {new Date(date + 'T00:00:00').toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short' })}
+              {new Date(date + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'short', day: 'numeric', month: 'short' })}
             </p>
           )}
         </div>

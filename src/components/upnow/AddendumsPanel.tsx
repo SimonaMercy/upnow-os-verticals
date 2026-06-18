@@ -19,6 +19,7 @@
  *   POST   /api/contracts/tenant/:id/addendums/:addendumId/sign (Tenant)
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FileText, UploadCloud, Trash2, Loader2, AlertCircle, Plus, X, ExternalLink, CheckCircle2, FileSignature, RotateCcw, Lock } from 'lucide-react';
@@ -199,7 +200,7 @@ function AddendumRow({
           <div className="min-w-0">
             <p className="text-sm font-semibold text-[#1a1916]">{a.name}</p>
             <p className="text-[11px] text-[#9b9890] mt-0.5">
-              {fileTypeLabel} · Attached {new Date(a.createdAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {fileTypeLabel} · Attached {new Date(a.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}
             </p>
           </div>
         </div>
@@ -267,7 +268,7 @@ function SigStatusCell({
             <p className="text-[10px] font-semibold text-[#1a7a5a] flex items-center gap-1">
               <CheckCircle2 size={10} /> Signed
             </p>
-            {signedAt && <p className="text-[9px] text-[#6b6860]">{new Date(signedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short' })}</p>}
+            {signedAt && <p className="text-[9px] text-[#6b6860]">{new Date(signedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short' })}</p>}
           </div>
         </div>
       </div>

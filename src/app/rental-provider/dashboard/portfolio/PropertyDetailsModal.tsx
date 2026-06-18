@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useState } from 'react';
 import { openDocsTogether } from '@/lib/openDocsTogether';
@@ -100,6 +101,7 @@ function formatDate(value: string | null): string | null {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return null;
   return dt.toLocaleDateString('en-AE', {
+    timeZone: APP_TIME_ZONE,
     day: 'numeric',
     month: 'short',
     year: 'numeric',

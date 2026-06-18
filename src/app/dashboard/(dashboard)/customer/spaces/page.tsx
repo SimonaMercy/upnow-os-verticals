@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -105,7 +106,7 @@ function pickPrimaryContract(contracts: TenantContract[], unitId: number | null 
 }
 
 function fmtShort(iso: string) {
-  return new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'Asia/Dubai' });
+  return new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: '2-digit', timeZone: APP_TIME_ZONE });
 }
 
 function rowStatusConfig(row: SpaceRow): { label: string; bg: string; text: string; isAction: boolean } {
@@ -475,7 +476,7 @@ export default function MySpacesPage() {
                 key={`pc-${c.id}`}
                 label={c.unit?.name ?? (c.unit?.number ? `Unit ${c.unit.number}` : 'Property')}
                 subLabel={c.property?.buildingName ?? undefined}
-                dateStr={c.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : ''}
+                dateStr={c.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE }) : ''}
                 reason={c.status === 'terminated' ? 'Lease terminated' : 'Lease ended'}
               />
             ))}
@@ -484,7 +485,7 @@ export default function MySpacesPage() {
                 key={`iv-${g.leadId}`}
                 label={g.unit?.unitName ?? (g.unit ? `Unit ${g.unit.unitNumber}` : 'Property')}
                 subLabel={g.unit?.property?.buildingName}
-                dateStr={new Date(g.primary.scheduledAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' })}
+                dateStr={new Date(g.primary.scheduledAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })}
                 reason={g.primary.outcome === 'not_interested' ? 'Not interested' : g.primary.status === 'no_show' ? 'No show' : 'Cancelled'}
               />
             ))}
@@ -493,7 +494,7 @@ export default function MySpacesPage() {
                 key={`id-${l.id}`}
                 label={l.unit?.unitName ?? (l.unit ? `Unit ${l.unit.unitNumber}` : 'Property')}
                 subLabel={l.unit?.property?.buildingName}
-                dateStr={new Date(l.createdAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' })}
+                dateStr={new Date(l.createdAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })}
                 reason="Application rejected"
               />
             ))}

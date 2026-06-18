@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -96,7 +97,7 @@ interface ContractDocument {
 /* ── Helpers ──────────────────────────────────────────────────────────── */
 function fmt(dateStr: string | null) {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(dateStr).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' });
 }
 function fmtAed(n: number | null) {
   if (n == null) return '—';

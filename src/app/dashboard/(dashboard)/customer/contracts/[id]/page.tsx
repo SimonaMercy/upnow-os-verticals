@@ -12,6 +12,7 @@
  * a known open bug blocking automated testing.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -107,7 +108,7 @@ function fmtAed(fils: number) {
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -812,7 +813,7 @@ export default function TenantContractDetailPage() {
                                 <div className="min-w-0 flex-1">
                                   <p className="text-sm font-medium text-[#1a1916] truncate">{label}</p>
                                   <p className="text-[11px] text-[#9b9890]">
-                                    {d.expiryDate ? `Expires ${new Date(d.expiryDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' })}` : (d.category ?? '').replace(/_/g, ' ')}
+                                    {d.expiryDate ? `Expires ${new Date(d.expiryDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}` : (d.category ?? '').replace(/_/g, ' ')}
                                   </p>
                                 </div>
                                 {d.fileUrl && (

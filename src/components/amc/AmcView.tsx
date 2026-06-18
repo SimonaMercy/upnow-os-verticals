@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /**
  * AMC & Vendor Management — shared view used by both the rental-provider portal
@@ -42,7 +43,7 @@ const STATUS_STYLE: Record<Status, { bg: string; fg: string; label: string }> = 
   unknown:  { bg: '#f4f3ef', fg: '#6b6860', label: 'No expiry' },
 };
 const cap = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
-const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const FREQ_MONTHS: Record<string, number> = { monthly: 1, quarterly: 3, annually: 12 };
 const addMonths = (iso: string, n: number) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
 const addYears = (iso: string, n: number) => addMonths(iso, n * 12);

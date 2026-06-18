@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -109,7 +110,7 @@ export default function AdminAccountsPage() {
                       </span>
                     )}
                     <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-400)' }}>
-                      <Calendar size={12} /> {new Date(a.createdAt).toLocaleDateString('en-AE')}
+                      <Calendar size={12} /> {new Date(a.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}
                     </span>
                   </div>
                 </div>

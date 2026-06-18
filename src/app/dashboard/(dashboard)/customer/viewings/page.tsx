@@ -8,6 +8,7 @@
  * Cancellation: DELETE /leads/tenant/viewings/:id (blocked <1hr before, by backend).
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback } from 'react';
 import {
@@ -183,7 +184,7 @@ function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: Viewing; on
           <MiniCalendar value={date} onChange={setDate} />
           {date && (
             <p className="mt-2 text-xs text-center font-medium text-[#2e9f82]">
-              {new Date(date + 'T00:00:00').toLocaleDateString('en-AE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+              {new Date(date + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           )}
         </div>
@@ -281,8 +282,8 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
   const [actionError, setActionError] = useState<string | null>(null);
 
   const dt = new Date(viewing.scheduledAt);
-  const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Dubai' });
-  const timeStr = dt.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
+  const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: APP_TIME_ZONE });
+  const timeStr = dt.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE });
 
   const unitLabel = group.unit?.unitName ?? (group.unit ? `Unit ${group.unit.unitNumber}` : 'Property');
   const building = group.unit?.property?.buildingName ?? '';
@@ -452,8 +453,8 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
             <div className="space-y-1">
               {group.others.map(v => {
                 const d = new Date(v.scheduledAt);
-                const ds = d.toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Dubai' });
-                const ts = d.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
+                const ds = d.toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE });
+                const ts = d.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE });
                 return (
                   <div key={v.id} className="flex items-center gap-3 text-xs text-[#9b9890]">
                     <span className="flex items-center gap-1"><Calendar size={10} />{ds} · {ts}</span>
@@ -492,7 +493,7 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
 
 function InactiveCard({ viewing }: { viewing: Viewing }) {
   const dt = new Date(viewing.scheduledAt);
-  const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'Asia/Dubai' });
+  const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'short', month: 'short', day: 'numeric', timeZone: APP_TIME_ZONE });
   const unitLabel = viewing.unit?.unitName ?? (viewing.unit ? `Unit ${viewing.unit.unitNumber}` : 'Property');
   const building = viewing.unit?.property?.buildingName ?? '';
   const isNotInterested = viewing.outcome === 'not_interested';

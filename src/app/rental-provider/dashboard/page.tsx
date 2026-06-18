@@ -12,6 +12,7 @@
  *   /fee-rules/configured              (setup nudge)
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -85,7 +86,7 @@ function relativeTime(iso: string) {
   if (h < 24) return `${h}h ago`;
   const d = Math.round(h / 24);
   if (d < 7) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return new Date(iso).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'short', day: 'numeric' });
 }
 
 type RangePreset = 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time';

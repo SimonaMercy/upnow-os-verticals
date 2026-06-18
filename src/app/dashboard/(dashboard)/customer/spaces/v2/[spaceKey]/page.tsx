@@ -24,6 +24,7 @@
  *   POST   /api/documents                                (register doc after PUT)
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, usePathname } from 'next/navigation';
@@ -603,10 +604,10 @@ function fmtAedFils(fils: number | null | undefined) {
   return fmtAed(fils / 100);
 }
 function fmtDateLong(iso: string) {
-  return new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Dubai' });
+  return new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: APP_TIME_ZONE });
 }
 function fmtDateShort(iso: string) {
-  return new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' });
+  return new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE });
 }
 
 const PLAN_TYPE_ORDER: Record<string, number> = { first_bundle: 0, installment: 1, extra_installment: 2, security_deposit: 3 };
@@ -1062,8 +1063,8 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   if (!v) return null;
 
   const when = new Date(v.scheduledAt);
-  const dateStr = when.toLocaleDateString('en-AE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Dubai' });
-  const timeStr = when.toLocaleTimeString('en-AE', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dubai' });
+  const dateStr = when.toLocaleDateString('en-AE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: APP_TIME_ZONE });
+  const timeStr = when.toLocaleTimeString('en-AE', { hour: 'numeric', minute: '2-digit', timeZone: APP_TIME_ZONE });
   const buildingName = unit?.property?.buildingName ?? null;
   const fullAddress = unit?.property?.fullAddress ?? null;
 
@@ -1248,7 +1249,7 @@ function InterestedPopup({
     }
   }
 
-  const niceMoveIn = new Date(moveIn + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'long', year: 'numeric' });
+  const niceMoveIn = new Date(moveIn + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
     <Modal title="Let&rsquo;s set up your lease" onClose={onClose} footer={
@@ -1397,7 +1398,7 @@ function InterestedPopup({
                           </span>
                         </div>
                         <span style={{ color: 'var(--mute)', fontSize: 11, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                          {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short' }) : '—'}
+                          {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short' }) : '—'}
                         </span>
                         <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', minWidth: 90, textAlign: 'right' }}>
                           {fmtAedFils(it.amountFils)}
@@ -2339,7 +2340,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     d.setDate(d.getDate() - 1);
     return d.toISOString().slice(0, 10);
   })() : null;
-  const fmt = (iso: string | null) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const fmt = (iso: string | null) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' }) : '—';
   const ownerName = resolveChequePayee(u);
   const buildingName = u?.property?.buildingName ?? '—';
   const location = [u?.property?.community?.name, u?.property?.emirate?.name].filter(Boolean).join(', ') || u?.property?.fullAddress || '—';
@@ -2379,7 +2380,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     <button class="btn alt" onclick="window.close()">Close</button>
   </div>
   <h1>Payment Plan</h1>
-  <p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE', { day:'numeric', month:'short', year:'numeric' }) : '—'}</p>
+  <p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day:'numeric', month:'short', year:'numeric' }) : '—'}</p>
 
   <h2>Contract &amp; Cheque Details</h2>
   <div class="grid">
@@ -2410,7 +2411,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
 
   ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35;white-space:pre-wrap">${plan.notes.replace(/</g, '&lt;')}</p>` : ''}
 
-  <div class="footer">Generated by UpNow · ${new Date().toLocaleDateString('en-AE', { day:'numeric', month:'short', year:'numeric' })}</div>
+  <div class="footer">Generated by UpNow · ${new Date().toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day:'numeric', month:'short', year:'numeric' })}</div>
 </body></html>`;
 
   const w = window.open('', '_blank', 'width=820,height=900');
@@ -2483,7 +2484,7 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
                     </span>
                   </div>
                   <span style={{ color: 'var(--mute)', fontSize: 11, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                    {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short' }) : '—'}
+                    {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short' }) : '—'}
                   </span>
                   <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', minWidth: 90, textAlign: 'right' }}>
                     {fmtAedFils(it.amountFils)}
@@ -3004,7 +3005,7 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
   const inspectionUrl = `/dashboard/customer/contracts/${c.id}/inspection?type=move_in`;
   const submittedAt = insp?.reportGeneratedDate ?? insp?.inspectionDate ?? c.moveInInspection?.signedAt ?? null;
   const submittedLabel = submittedAt
-    ? `Submitted ${new Date(submittedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', timeZone: 'Asia/Dubai' })}`
+    ? `Submitted ${new Date(submittedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE })}`
     : 'Submitted by rental provider';
   const areas = insp?.areas ?? [];
   const photoCount = insp?.photos?.length ?? 0;
@@ -3063,7 +3064,7 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
               <div>
                 <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Move-in date</p>
                 <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: '2px 0 0' }}>
-                  {new Date(insp.moveInDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' })}
+                  {new Date(insp.moveInDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })}
                 </p>
               </div>
             )}
@@ -3270,7 +3271,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const u = resolved.unit;
   const pp = resolved.paymentPlan;
   const fmtD = (d: string | null | undefined) =>
-    d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : '—';
+    d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE }) : '—';
   const aed = (fils: number) => `AED ${(fils / 100).toLocaleString('en-AE')}`;
 
   const building = u?.property?.buildingName ?? '—';
@@ -3668,7 +3669,7 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const aedF = (n: number) => 'AED ' + new Intl.NumberFormat('en-AE', { maximumFractionDigits: 2 }).format(n);
-  const fmtDT = (d: string | null) => d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const fmtDT = (d: string | null) => d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const sumLines = (settlement.lines ?? []).reduce((a, l) => a + Number(l.amount || 0), 0);
   const paid = Number(settlement.paymentsReceivedTotal ?? 0);
   // Final position after deposit, charges AND any money you've paid back are netted.
@@ -4566,8 +4567,8 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
 
   const c = resolved.contract;
   const rc = resolved.renewalContract;
-  const endStr = c?.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : '—';
-  const renewalEndStr = rc?.endDate ? new Date(rc.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }) : '—';
+  const endStr = c?.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE }) : '—';
+  const renewalEndStr = rc?.endDate ? new Date(rc.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE }) : '—';
 
   // Phase 6 — the renewal section moves above the current lease here.
   // The action lives on the renewal track (accept terms, sign, etc.), so

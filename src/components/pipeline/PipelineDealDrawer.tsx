@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /**
  * PipelineDealDrawer — right-side panel showing the full journey for one Deal.
@@ -256,7 +257,7 @@ function StageDetail({ deal }: { deal: Deal }) {
       <div className="mt-2 bg-[#fef3c7] border border-[#fde68a] rounded-lg p-2.5 text-xs text-[#854d0e]">
         <p className="font-semibold mb-0.5 flex items-center gap-1">
           <Clock size={11} />
-          {deal.viewingAt.toLocaleString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })}
+          {deal.viewingAt.toLocaleString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE })}
         </p>
         <p>Status: <strong className="capitalize">{deal.viewingStatus ?? 'scheduled'}</strong></p>
       </div>
@@ -311,7 +312,7 @@ function StageDetail({ deal }: { deal: Deal }) {
         </p>
         <p>
           {deal.contractStart && deal.contractEnd
-            ? `${new Date(deal.contractStart).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' })} → ${new Date(deal.contractEnd).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' })}`
+            ? `${new Date(deal.contractStart).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' })} → ${new Date(deal.contractEnd).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' })}`
             : 'Awaiting signature.'}
         </p>
       </div>

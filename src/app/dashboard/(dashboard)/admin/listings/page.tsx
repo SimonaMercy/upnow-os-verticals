@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
@@ -934,7 +935,7 @@ export default function AdminListingsPage() {
                         <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.buildingName}</p>
                         {p.fullAddress && <p className="text-xs truncate mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>{p.fullAddress}</p>}
                         <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>
-                          RP #{p.rentalProviderId} · {new Date(p.createdAt).toLocaleDateString('en-AE')}
+                          RP #{p.rentalProviderId} · {new Date(p.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}
                         </p>
                       </div>
                       <span className="text-xs font-medium px-2.5 py-1 rounded-full shrink-0"

@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -97,7 +98,7 @@ const fmtDate = (v: string | null | undefined) => {
   if (!v) return '—';
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 };
 
 const titleCase = (s: string) =>

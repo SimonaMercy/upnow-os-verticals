@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /**
  * Admin — User detail.
@@ -66,7 +67,7 @@ interface UserDetail {
 
 const aed = (n: number | null | undefined) =>
   n == null ? '—' : `AED ${Math.round(Number(n)).toLocaleString('en-AE')}`;
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-AE') : '—');
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE }) : '—');
 const titleCase = (s: string | null | undefined) =>
   (s ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || '—';
 

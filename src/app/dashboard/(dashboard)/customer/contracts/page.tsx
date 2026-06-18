@@ -7,6 +7,7 @@
  * Data: GET /contracts/tenant — returns contracts with landlord + unit summary.
  */
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -48,7 +49,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 function fmtDate(d: string | null) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function fmtAed(fils: number) {

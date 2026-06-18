@@ -1,4 +1,5 @@
 'use client';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /**
  * PipelineDealRow — dense, scannable single-row layout.
@@ -30,7 +31,7 @@ function initials(name: string) {
 
 function fmtTime(d: Date | null): string {
   if (!d) return '';
-  return d.toLocaleString('en-AE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' });
+  return d.toLocaleString('en-AE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE });
 }
 
 function fmtMoney(fils: number | null): string {
@@ -78,7 +79,7 @@ function contextChip(deal: Deal): { icon: typeof Clock; text: string; tone: stri
     case 'contract_issued':
     case 'active':
       if (deal.contractEnd) {
-        const end = new Date(deal.contractEnd).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: '2-digit' });
+        const end = new Date(deal.contractEnd).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: '2-digit' });
         return { icon: Clock, text: `→ ${end}`, tone: 'text-[#5b21b6]' };
       }
       return null;
