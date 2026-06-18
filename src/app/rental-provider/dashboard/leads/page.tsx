@@ -23,6 +23,7 @@ import { getRequiredDocs } from '@/lib/docRequirements';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -476,7 +477,7 @@ function ChequeRow({
 
 /* ─── Lead Row ────────────────────────────────────────────────────────────── */
 function LeadRow({
-  lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays, manager,
+  lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays, allowedInstallments, manager,
 }: {
   lead: ApiLead;
   onMoveStage: (id: number, s: LeadStage) => void;
@@ -485,6 +486,7 @@ function LeadRow({
   setLeads: React.Dispatch<React.SetStateAction<ApiLead[]>>;
   feeRules: FeeRulesMap | null;
   preferredStartDays: number[];
+  allowedInstallments: number[];
   manager?: { rp: number };
 }) {
   const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
@@ -1855,14 +1857,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                   onChange={e => { const n = Number(e.target.value); setPlanInstallmentCount(n); resizeInstallmentDates(n); }}
                   className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916] cursor-pointer"
                 >
-                  {([
-                    [1,  'Annual'],
-                    [2,  'Semi-Annual'],
-                    [4,  'Quarterly'],
-                    [6,  'Bi-Monthly'],
-                    [12, 'Monthly'],
-                  ] as const).map(([n, label]) => (
-                    <option key={n} value={n}>{label}</option>
+                  {allowedInstallmentPlans(allowedInstallments, [planInstallmentCount]).map(p => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
               </div>
@@ -2876,6 +2872,8 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [movingLead, setMovingLead] = useState<number | null>(null);
   const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
+  // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
+  const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true); setError(null);
@@ -2917,9 +2915,12 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   useEffect(() => {
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { preferredStartDays?: number[] | null } } | null) => {
+      .then((data: { profile?: { preferredStartDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) {
           setPreferredStartDays(data!.profile!.preferredStartDays!);
+        }
+        if (Array.isArray(data?.profile?.allowedInstallments)) {
+          setAllowedInstallments(data!.profile!.allowedInstallments!);
         }
       })
       .catch(() => undefined);
@@ -3201,6 +3202,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
                 setLeads={setLeads}
                 feeRules={feeRules}
                 preferredStartDays={preferredStartDays}
+                allowedInstallments={allowedInstallments}
                 manager={manager}
               />
             </div>

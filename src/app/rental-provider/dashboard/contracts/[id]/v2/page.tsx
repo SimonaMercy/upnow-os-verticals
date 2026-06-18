@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { openDocViewer } from '@/lib/docViewer';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -2937,6 +2938,16 @@ function RenewalProposeModal({
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
+  const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
+  useEffect(() => {
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { profile?: { allowedInstallments?: number[] | null } } | null) => {
+        if (Array.isArray(data?.profile?.allowedInstallments)) setAllowedInstallments(data!.profile!.allowedInstallments!);
+      })
+      .catch(() => undefined);
+  }, []);
   const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
   const n = parseInt(f.numberOfInstallments) || 0;
   const rent = parseFloat(f.newAnnualRent) || 0;
@@ -3005,7 +3016,9 @@ function RenewalProposeModal({
             <div className="field" style={{ margin: 0 }}>
               <label>Installments</label>
               <select className="input" value={f.numberOfInstallments} onChange={e => set('numberOfInstallments', e.target.value)}>
-                {[1, 2, 3, 4, 6, 12].map(x => <option key={x} value={x}>{x}</option>)}
+                {allowedInstallmentPlans(allowedInstallments, [Number(f.numberOfInstallments)]).map(p => (
+                  <option key={p.value} value={p.value}>{p.value}</option>
+                ))}
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>

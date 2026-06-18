@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
@@ -69,6 +70,8 @@ interface ApiRentalProvider {
   bankAccountName?: string | null;
   /** Optional RP-restricted day-of-month list (1–28) for contract start dates. */
   preferredStartDays?: number[] | null;
+  /** Optional RP-restricted installment plans (subset of [1,2,3,4,6,12]). Empty = all. */
+  allowedInstallments?: number[] | null;
   user?: { name?: string | null } | null;
 }
 interface ApiUnit {
@@ -1123,6 +1126,7 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
       {modal === 'interested' && <InterestedPopup
         viewing={v}
         rpPreferredDays={(unit?.property?.rentalProvider ?? unit?.property?.rental_provider)?.preferredStartDays ?? []}
+        rpAllowedInstallments={(unit?.property?.rentalProvider ?? unit?.property?.rental_provider)?.allowedInstallments ?? []}
         defaultStart={defaultStart}
         defaultPayments={defaultPayments}
         defaultOccupants={v.occupantsAdults ?? 1}
@@ -1154,11 +1158,12 @@ function PaymentRow({ label, amountFils, bold }: { label: string; amountFils: nu
  * convert this to a "Complete KYC" deep link with returnTo=).
  */
 function InterestedPopup({
-  viewing, rpPreferredDays, defaultStart, defaultPayments, defaultOccupants,
+  viewing, rpPreferredDays, rpAllowedInstallments, defaultStart, defaultPayments, defaultOccupants,
   onClose, onSuccess,
 }: {
   viewing: ApiViewing;
   rpPreferredDays: number[];
+  rpAllowedInstallments: number[];
   defaultStart: string;
   defaultPayments: number;
   defaultOccupants: number;
@@ -1168,6 +1173,14 @@ function InterestedPopup({
   const [occupants, setOccupants] = useState<number>(defaultOccupants);
   const [paymentsCount, setPaymentsCount] = useState<number>(defaultPayments);
   const [moveIn, setMoveIn] = useState<string>(defaultStart);
+  // Snap the default plan to one this landlord offers (Settings → Rules).
+  const installmentChoices = allowedInstallmentPlans(rpAllowedInstallments);
+  useEffect(() => {
+    if (installmentChoices.length && !installmentChoices.some(p => p.value === paymentsCount)) {
+      setPaymentsCount(installmentChoices[0].value);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rpAllowedInstallments]);
   const [calOpen, setCalOpen] = useState(false);
   const calRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
@@ -1326,15 +1339,15 @@ function InterestedPopup({
         <div>
           <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Payment frequency</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {([[ 1,'Annual'],[2,'Semi-annual'],[4,'Quarterly'],[6,'Bi-monthly'],[12,'Monthly']] as const).map(([n, label]) => (
-              <button key={n} type="button" onClick={() => setPaymentsCount(n)}
+            {installmentChoices.map(p => (
+              <button key={p.value} type="button" onClick={() => setPaymentsCount(p.value)}
                 style={{
                   padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                  border: `1px solid ${paymentsCount === n ? 'var(--jade)' : 'var(--mist-strong)'}`,
-                  background: paymentsCount === n ? 'var(--jade)' : 'var(--paper)',
-                  color: paymentsCount === n ? 'var(--paper)' : 'var(--ink-2)', fontFamily: 'inherit',
+                  border: `1px solid ${paymentsCount === p.value ? 'var(--jade)' : 'var(--mist-strong)'}`,
+                  background: paymentsCount === p.value ? 'var(--jade)' : 'var(--paper)',
+                  color: paymentsCount === p.value ? 'var(--paper)' : 'var(--ink-2)', fontFamily: 'inherit',
                 }}>
-                {label}
+                {p.label}
               </button>
             ))}
           </div>

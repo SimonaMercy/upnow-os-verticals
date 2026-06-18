@@ -19,6 +19,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2, Send } from 'lucide-react';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -272,6 +273,8 @@ export default function NewContractPage() {
   const autoEndDateRef = useRef(true);
 
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
+  // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
+  const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoaded, setPropertiesLoaded] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -307,9 +310,17 @@ export default function NewContractPage() {
     if (isManager) return;
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { preferredStartDays?: number[] | null } } | null) => {
+      .then((data: { profile?: { preferredStartDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) {
           setPreferredStartDays(data!.profile!.preferredStartDays!);
+        }
+        const allowed = data?.profile?.allowedInstallments;
+        if (Array.isArray(allowed) && allowed.length) {
+          setAllowedInstallments(allowed);
+          // Snap the default plan to one the RP actually offers.
+          setForm(f => allowed.includes(Number(f.numberOfInstallments))
+            ? f
+            : { ...f, numberOfInstallments: String([...allowed].sort((a, b) => a - b)[0]) });
         }
       })
       .catch(() => undefined);
@@ -1055,12 +1066,9 @@ export default function NewContractPage() {
                   <div className="relative">
                     <select value={form.numberOfInstallments} onChange={set('numberOfInstallments')}
                       className="w-full appearance-none rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 pr-9 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]">
-                      <option value="1">1 — Annual</option>
-                      <option value="2">2 — Semi-annual</option>
-                      <option value="3">3 — Quarterly (3)</option>
-                      <option value="4">4 — Quarterly</option>
-                      <option value="6">6 — Bi-monthly</option>
-                      <option value="12">12 — Monthly</option>
+                      {allowedInstallmentPlans(allowedInstallments, [Number(form.numberOfInstallments)]).map(p => (
+                        <option key={p.value} value={p.value}>{p.longLabel}</option>
+                      ))}
                     </select>
                     <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
                   </div>

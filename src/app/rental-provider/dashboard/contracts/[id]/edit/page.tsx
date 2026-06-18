@@ -16,6 +16,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 interface Tenant {
   id: number;
@@ -164,6 +165,8 @@ export default function EditContractPage() {
   const [adminFee, setAdminFee] = useState('');
   const [ejariFee, setEjariFee] = useState('');
   const [installments, setInstallments] = useState('1');
+  // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
+  const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
   const [modeOfPayment, setModeOfPayment] = useState('cheque');
   const [clauses, setClauses] = useState<string[]>([]);
   const [clauseInput, setClauseInput] = useState('');
@@ -192,6 +195,9 @@ export default function EditContractPage() {
       .catch(() => { if (!cancelled) setCustomerEditable(false); });
     apiGet<Tenant[]>(`/contracts/tenants/list`)
       .then((rows) => { if (!cancelled) setActiveTenants(Array.isArray(rows) ? rows : []); })
+      .catch(() => undefined);
+    apiGet<{ profile?: { allowedInstallments?: number[] | null } }>(`/profiles/rental-provider/me`)
+      .then((d) => { if (!cancelled && Array.isArray(d?.profile?.allowedInstallments)) setAllowedInstallments(d!.profile!.allowedInstallments!); })
       .catch(() => undefined);
     apiGet<ContractDetail>(`/contracts/${id}`)
       .then((c) => {
@@ -515,12 +521,9 @@ export default function EditContractPage() {
                     <label className={labelCls}>Payments / Year</label>
                     <div className="relative">
                       <select value={installments} onChange={(e) => setInstallments(e.target.value)} className={`${inputCls} appearance-none pr-9`}>
-                        <option value="1">1 — Annual</option>
-                        <option value="2">2 — Semi-annual</option>
-                        <option value="3">3 — Quarterly (3)</option>
-                        <option value="4">4 — Quarterly</option>
-                        <option value="6">6 — Bi-monthly</option>
-                        <option value="12">12 — Monthly</option>
+                        {allowedInstallmentPlans(allowedInstallments, [Number(installments)]).map((p) => (
+                          <option key={p.value} value={p.value}>{p.longLabel}</option>
+                        ))}
                       </select>
                       <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
                     </div>

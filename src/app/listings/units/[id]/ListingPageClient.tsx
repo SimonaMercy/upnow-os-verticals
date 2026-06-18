@@ -9,6 +9,7 @@ import {
   Calendar, MessageSquare, ImageIcon,
   Flame, AppWindow, DoorOpen, Ruler,
 } from 'lucide-react';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 export interface UnitMediaItem {
@@ -925,7 +926,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
 }
 
 /* ── Book Now Modal ─────────────────────────────────────────────────────── */
-function InquireModal({ unit, property, preferredStartDays = [], onClose }: { unit: PublicUnit; property: PublicProperty; preferredStartDays?: number[]; onClose: () => void }) {
+function InquireModal({ unit, property, preferredStartDays = [], allowedInstallments = [], onClose }: { unit: PublicUnit; property: PublicProperty; preferredStartDays?: number[]; allowedInstallments?: number[]; onClose: () => void }) {
   const { refresh: refreshAuth } = useAuth();
 
   // Form state
@@ -935,6 +936,15 @@ function InquireModal({ unit, property, preferredStartDays = [], onClose }: { un
   const [pets,         setPets]         = useState('0');
   const [installments, setInstallments] = useState('4');
   const [msg,          setMsg]          = useState('');
+
+  // Snap the default plan to one this landlord offers (Settings → Rules).
+  const installmentChoices = allowedInstallmentPlans(allowedInstallments);
+  useEffect(() => {
+    if (installmentChoices.length && !installmentChoices.some(p => String(p.value) === installments)) {
+      setInstallments(String(installmentChoices[0].value));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowedInstallments]);
 
   // Submission state
   const [submitting, setSubmitting]   = useState(false);
@@ -1305,10 +1315,10 @@ function InquireModal({ unit, property, preferredStartDays = [], onClose }: { un
 
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Payment installments</label>
       <div className="grid grid-cols-4 gap-2 mb-4">
-        {[['1','Annual'],['2','Semi-annual'],['4','Quarterly'],['12','Monthly']].map(([v, lbl]) => (
-          <button key={v} type="button" onClick={() => setInstallments(v)}
-            className={`py-2 rounded-xl text-xs font-medium border transition-colors ${installments === v ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82]'}`}>
-            {lbl}
+        {installmentChoices.map(p => (
+          <button key={p.value} type="button" onClick={() => setInstallments(String(p.value))}
+            className={`py-2 rounded-xl text-xs font-medium border transition-colors ${installments === String(p.value) ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82]'}`}>
+            {p.label}
           </button>
         ))}
       </div>
@@ -1391,7 +1401,7 @@ function HeaderAuthSection() {
 }
 
 /* ── Main page component ─────────────────────────────────────────────────── */
-export default function ListingPageClient({ unit, property, media = [], preferredStartDays = [] }: { unit: PublicUnit; property: PublicProperty; media?: UnitMediaItem[]; preferredStartDays?: number[] }) {
+export default function ListingPageClient({ unit, property, media = [], preferredStartDays = [], allowedInstallments = [] }: { unit: PublicUnit; property: PublicProperty; media?: UnitMediaItem[]; preferredStartDays?: number[]; allowedInstallments?: number[] }) {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIdx, setGalleryIdx] = useState(0);
   const [modal, setModal] = useState<'book' | 'inquire' | null>(null);
@@ -1702,7 +1712,7 @@ export default function ListingPageClient({ unit, property, media = [], preferre
 
       {/* Modals */}
       {modal === 'book' && <BookModal unit={unit} property={property} preferredStartDays={preferredStartDays} onClose={() => setModal(null)} />}
-      {modal === 'inquire' && <InquireModal unit={unit} property={property} preferredStartDays={preferredStartDays} onClose={() => setModal(null)} />}
+      {modal === 'inquire' && <InquireModal unit={unit} property={property} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} onClose={() => setModal(null)} />}
     </div>
   );
 }

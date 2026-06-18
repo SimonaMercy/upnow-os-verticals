@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { openDocViewer } from '@/lib/docViewer';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,8 @@ interface ContractDetail {
   discountAmount: number | null;
   securityDepositAmount: number | null;
   numberOfInstallments: number | null;
+  // Installment plans the landlord offers (Settings → Rules). Empty = all allowed.
+  allowedInstallments?: number[] | null;
   modeOfPayment: string | null;
   adminFeeFils: number;
   ejariFeeFils: number;
@@ -683,8 +686,8 @@ export default function TenantContractDetailPage() {
                               className="w-full text-xs px-3 py-2.5 border border-[#e8e6e0] rounded-xl bg-white focus:border-[#2e9f82] focus:outline-none"
                             >
                               <option value="">— select —</option>
-                              {[1,2,3,4,6,12].map(n => (
-                                <option key={n} value={n}>{n} cheque{n > 1 ? 's' : ''}</option>
+                              {allowedInstallmentPlans(contract.allowedInstallments, prefInstallments === '' ? [] : [Number(prefInstallments)]).map(p => (
+                                <option key={p.value} value={p.value}>{p.value} cheque{p.value > 1 ? 's' : ''}</option>
                               ))}
                             </select>
                           </div>

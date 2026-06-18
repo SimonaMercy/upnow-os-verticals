@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
+import { INSTALLMENT_PLANS, installmentLabel } from '@/lib/installmentPlans';
 
 /* ─────────────────────────────────────────────────────────────
    General settings types
@@ -548,6 +549,23 @@ export default function SettingsPage() {
   const [renewalIncSaved,  setRenewalIncSaved]  = useState(false);
   const [renewalIncError,  setRenewalIncError]  = useState<string | null>(null);
 
+  // ── Bounced-cheque penalty (Rules) ──────────────────────────
+  // Charged per bounced rent cheque; auto-suggested as a deduction at move-out
+  // settlement. Per cheque = greater of a flat AED fee and a % of the cheque value.
+  const [bcEnabled,   setBcEnabled]   = useState(false);
+  const [bcFee,       setBcFee]       = useState<string>('');
+  const [bcPct,       setBcPct]       = useState<string>('');
+  const [bcSaving,    setBcSaving]    = useState(false);
+  const [bcSaved,     setBcSaved]     = useState(false);
+  const [bcError,     setBcError]     = useState<string | null>(null);
+
+  // ── Allowed installment plans (Rules) ───────────────────────
+  // Subset of [1,2,3,4,6,12] cheque counts this RP offers. Empty = all allowed.
+  const [allowedInst,    setAllowedInst]    = useState<number[]>([]);
+  const [instSaving,     setInstSaving]     = useState(false);
+  const [instSaved,      setInstSaved]      = useState(false);
+  const [instError,      setInstError]      = useState<string | null>(null);
+
   const [notifs, setNotifs] = useState<Record<NotifKey, boolean>>({
     newInquiry: true, chequeReminder: true, renewalAlert: true,
     maintenanceUpdate: false, promotional: false,
@@ -614,6 +632,10 @@ export default function SettingsPage() {
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
+        setBcEnabled(Boolean(p.bouncedChequePenaltyEnabled));
+        if (p.bouncedChequePenaltyFee != null) setBcFee(String(p.bouncedChequePenaltyFee));
+        if (p.bouncedChequePenaltyPct != null) setBcPct(String(p.bouncedChequePenaltyPct));
+        if (Array.isArray(p.allowedInstallments)) setAllowedInst(p.allowedInstallments as number[]);
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
         const matched = EMIRATES_LIST.find(e => addr.endsWith(`, ${e}`) || addr === e);
@@ -923,6 +945,62 @@ export default function SettingsPage() {
       setRenewalIncSaving(false);
     }
   };
+
+  async function saveBouncedPenalty() {
+    setBcSaving(true);
+    setBcError(null);
+    setBcSaved(false);
+    try {
+      const fee = bcFee.trim() === '' ? null : Number(bcFee);
+      const pct = bcPct.trim() === '' ? null : Number(bcPct);
+      if (fee !== null && (Number.isNaN(fee) || fee < 0)) {
+        setBcError('Enter a valid flat fee (0 or more).'); return;
+      }
+      if (pct !== null && (Number.isNaN(pct) || pct < 0 || pct > 100)) {
+        setBcError('Enter a percentage between 0 and 100.'); return;
+      }
+      if (bcEnabled && (fee == null || fee <= 0) && (pct == null || pct <= 0)) {
+        setBcError('Set a flat fee, a percentage, or both before enabling.'); return;
+      }
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bouncedChequePenaltyEnabled: bcEnabled,
+          bouncedChequePenaltyFee: fee,
+          bouncedChequePenaltyPct: pct,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setBcSaved(true);
+    } catch {
+      setBcError('Failed to save. Please try again.');
+    } finally {
+      setBcSaving(false);
+    }
+  }
+
+  async function saveAllowedInstallments() {
+    setInstSaving(true);
+    setInstError(null);
+    setInstSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        // Empty selection ⇒ null ⇒ "no restriction" on the backend.
+        body: JSON.stringify({ allowedInstallments: allowedInst.length ? [...allowedInst].sort((a, b) => a - b) : null }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setInstSaved(true);
+    } catch {
+      setInstError('Failed to save. Please try again.');
+    } finally {
+      setInstSaving(false);
+    }
+  }
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1556,6 +1634,135 @@ export default function SettingsPage() {
                 <SaveButton saving={chequeSaving} label="Save Cheque Days" />
               </div>
             </form>
+
+            {/* Bounced Cheque Penalty */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h2 className="font-semibold text-base text-[#1a1916]">Bounced Cheque Penalty</h2>
+                  <p className="text-xs text-[#9b9890] mt-0.5">
+                    Charge a penalty for each bounced rent cheque. When you open a move-out settlement,
+                    we auto-add this as an editable deduction — you can adjust or remove it before sending.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={bcEnabled}
+                  onClick={() => { setBcEnabled(v => !v); setBcSaved(false); }}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 cursor-pointer ${bcEnabled ? 'bg-[#2e9f82]' : 'bg-[#d9d6cf]'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${bcEnabled ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {bcEnabled && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+                    <label className="block">
+                      <span className="text-xs font-medium text-[#3d3b35]">Flat fee per cheque (AED)</span>
+                      <input
+                        type="number" min={0} step="1" inputMode="decimal"
+                        value={bcFee}
+                        onChange={e => { setBcFee(e.target.value); setBcSaved(false); }}
+                        placeholder="e.g. 250"
+                        className="mt-1 w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2e9f82] tabular-nums"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-[#3d3b35]">…or % of cheque value</span>
+                      <div className="mt-1 flex items-center border border-[#e8e6e0] rounded-lg px-3 focus-within:border-[#2e9f82]">
+                        <input
+                          type="number" min={0} max={100} step="0.1" inputMode="decimal"
+                          value={bcPct}
+                          onChange={e => { setBcPct(e.target.value); setBcSaved(false); }}
+                          placeholder="e.g. 5"
+                          className="w-full py-2 text-sm outline-none bg-transparent tabular-nums"
+                        />
+                        <span className="text-sm text-[#9b9890]">%</span>
+                      </div>
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-[#6b7a74] mb-3">
+                    Per bounced cheque we charge the <b className="text-[#3d3b35]">greater</b> of the flat fee and the percentage. Leave one blank to use only the other.
+                  </p>
+                </>
+              )}
+
+              <div className="flex items-center gap-3 flex-wrap">
+                {bcError && <p className="text-xs text-red-600 flex-1">{bcError}</p>}
+                {bcSaved && !bcSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+                <button
+                  type="button" onClick={saveBouncedPenalty} disabled={bcSaving}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
+                  style={{ background: '#2e9f82' }}
+                >
+                  {bcSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {bcSaving ? 'Saving…' : 'Save Penalty'}
+                </button>
+              </div>
+            </div>
+
+            {/* Payment Installment Plans */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="mb-4">
+                <h2 className="font-semibold text-base text-[#1a1916]">Payment Installment Plans</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">
+                  Choose which cheque-split plans you offer. Only the selected plans appear wherever a
+                  payment schedule is set up — your contract forms, the customer booking flow and the
+                  public listing. Select none to allow every plan.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-4">
+                {INSTALLMENT_PLANS.map(p => {
+                  const active = allowedInst.includes(p.value);
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => {
+                        setAllowedInst(prev =>
+                          prev.includes(p.value) ? prev.filter(v => v !== p.value) : [...prev, p.value].sort((a, b) => a - b),
+                        );
+                        setInstSaved(false);
+                      }}
+                      className={`px-3.5 py-2 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
+                        ${active
+                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
+                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
+                    >
+                      {p.value} · {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <p className={`text-xs mb-3 ${allowedInst.length ? 'text-[#2e9f82]' : 'text-[#9b9890]'}`}>
+                {allowedInst.length === 0
+                  ? 'All plans available — no restriction.'
+                  : `Offered: ${allowedInst.map(v => installmentLabel(v)).join(', ')}.`}
+              </p>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                {instError && <p className="text-xs text-red-600 flex-1">{instError}</p>}
+                {instSaved && !instSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+                {allowedInst.length > 0 && (
+                  <button type="button" onClick={() => { setAllowedInst([]); setInstSaved(false); }}
+                    className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
+                    Clear all
+                  </button>
+                )}
+                <button
+                  type="button" onClick={saveAllowedInstallments} disabled={instSaving}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
+                  style={{ background: '#2e9f82' }}
+                >
+                  {instSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {instSaving ? 'Saving…' : 'Save Plans'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Contract type switcher */}

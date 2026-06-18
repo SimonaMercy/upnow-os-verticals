@@ -38,6 +38,7 @@ import 'yet-another-react-lightbox/plugins/captions.css';
 import 'yet-another-react-lightbox/plugins/thumbnails.css';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { openDocViewer } from '@/lib/docViewer';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -500,6 +501,8 @@ export default function ContractDetailPage() {
   type FeeRule = { feeType: string; valueType: 'fixed_aed' | 'percentage'; value: number; isActive: boolean };
   const [feeRules, setFeeRules] = useState<Record<string, FeeRule[]> | null>(null);
   const [feesTouched, setFeesTouched] = useState({ adminFee: false, ejariFee: false, commission: false });
+  // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
+  const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
   const [renewalExtras, setRenewalExtras] = useState<Array<{ description: string; amount: string; dueDate: string }>>([]);
   type TenantKycDoc = { id: number; documentKey: string; displayName: string | null; fileUrl: string; mimeType: string | null; status: string; notes: string | null };
   const [tenantKycDocs, setTenantKycDocs] = useState<TenantKycDoc[] | null>(null);
@@ -997,12 +1000,15 @@ export default function ContractDetailPage() {
       .catch(() => setFeeRules(null));
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { renewalRentIncrementPct?: number | string | null } } | null) => {
+      .then((data: { profile?: { renewalRentIncrementPct?: number | string | null; allowedInstallments?: number[] | null } } | null) => {
         const raw = data?.profile?.renewalRentIncrementPct;
         const pct = raw == null ? 0 : Number(raw);
         if (pct > 0 && contract.annualRent) {
           const bumped = Math.round(contract.annualRent * (1 + pct / 100));
           setRenewalForm(f => ({ ...f, newAnnualRent: String(bumped) }));
+        }
+        if (Array.isArray(data?.profile?.allowedInstallments)) {
+          setAllowedInstallments(data!.profile!.allowedInstallments!);
         }
       })
       .catch(() => undefined);
@@ -3088,7 +3094,9 @@ export default function ContractDetailPage() {
                         onChange={e => setRenewalForm(f => ({ ...f, numberOfInstallments: e.target.value }))}
                         className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
                       >
-                        {[1, 2, 3, 4, 6, 12].map(n => <option key={n} value={n}>{n}</option>)}
+                        {allowedInstallmentPlans(allowedInstallments, [Number(renewalForm.numberOfInstallments)]).map(p => (
+                          <option key={p.value} value={p.value}>{p.value}</option>
+                        ))}
                       </select>
                     </div>
                     <div>
