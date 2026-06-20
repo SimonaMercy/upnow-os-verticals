@@ -240,13 +240,12 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   const commissionRaw = round2(feesPlusComm - admin - ejari);
   const commission = commissionRaw >= 1 ? commissionRaw : 0;
   const rentNet = Math.max(0, round2(sumNet - admin - ejari - commission));
-  const n = contract.numberOfInstallments ?? nonDeposit.length;
 
   const lines: LineItem[] = [];
   if (admin > 0) lines.push({ desc: 'Administration Fee', net: admin, vat: 0, total: admin });
   if (ejari > 0) lines.push({ desc: 'Ejari Registration Fee', net: ejari, vat: 0, total: ejari });
   if (commission > 0) lines.push({ desc: 'Agency Commission', net: commission, vat: 0, total: commission });
-  lines.push({ desc: `Rent — ${n} instalment${n === 1 ? '' : 's'} (lease term)`, net: rentNet, vat: sumVat, total: round2(rentNet + sumVat) });
+  lines.push({ desc: 'Rent (full lease term)', net: rentNet, vat: sumVat, total: round2(rentNet + sumVat) });
 
   return {
     kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT', titleAr: 'إيصال دفعات العقد',
@@ -481,41 +480,9 @@ export default function PaymentReceipt({ contract, selectedId, selectedIdx = 0, 
           </div>
         </div>
 
-        {/* Cheque schedule (consolidated receipt only) */}
-        {receipt.schedule && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ ...cardTitle, marginBottom: 4 }}>Cheque Schedule / جدول الشيكات</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f1f5f9', color: '#374151' }}>
-                  <th style={{ fontSize: 8, textAlign: 'left', padding: '5px 8px', width: 26 }}>#</th>
-                  <th style={{ fontSize: 8, textAlign: 'left', padding: '5px 8px' }}>Description</th>
-                  <th style={{ fontSize: 8, textAlign: 'left', padding: '5px 8px', width: 110 }}>Cheque / Ref</th>
-                  <th style={{ fontSize: 8, textAlign: 'left', padding: '5px 8px', width: 80 }}>Due Date</th>
-                  <th style={{ fontSize: 8, textAlign: 'right', padding: '5px 8px', width: 90 }}>Amount</th>
-                  <th style={{ fontSize: 8, textAlign: 'center', padding: '5px 8px', width: 72 }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receipt.schedule.map((p, i) => {
-                  const st = statusInfoFor(p.chequeStatus, contract.pdcConfirmed);
-                  return (
-                    <tr key={p.id} style={{ background: i % 2 ? '#f8fafc' : '#fff' }}>
-                      <td style={{ fontSize: 8.5, padding: '5px 8px', borderBottom: '1px solid #eceff3', color: '#6b7280' }}>{i + 1}</td>
-                      <td style={{ fontSize: 8.5, padding: '5px 8px', borderBottom: '1px solid #eceff3' }}>{p.description ?? `Instalment ${i + 1}`}</td>
-                      <td style={{ fontSize: 8.5, padding: '5px 8px', borderBottom: '1px solid #eceff3', fontFamily: 'ui-monospace, Menlo, monospace' }}>{p.chequeNumber ?? '—'}</td>
-                      <td style={{ fontSize: 8.5, padding: '5px 8px', borderBottom: '1px solid #eceff3' }}>{fmtDate(p.transactionDate) || '—'}</td>
-                      <td style={{ fontSize: 8.5, padding: '5px 8px', borderBottom: '1px solid #eceff3', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtAmt(p.amount || 0)}</td>
-                      <td style={{ padding: '5px 8px', borderBottom: '1px solid #eceff3', textAlign: 'center' }}>
-                        <span style={{ display: 'inline-block', fontSize: 7.5, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: st.bg, color: st.fg }}>{st.label}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/* The Contract Payment Receipt shows the TOTAL contract amount (composed of
+            admin/ejari/commission/rent), NOT the per-cheque payment split — the
+            cheque schedule lives on the Payments tab and the per-cheque receipts. */}
 
         {/* Note */}
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '6px 10px', marginBottom: 18, fontSize: 7.5, color: '#92400e' }}>
