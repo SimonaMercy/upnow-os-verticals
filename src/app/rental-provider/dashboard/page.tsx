@@ -46,7 +46,20 @@ interface UnitRow {
   listingStatus: string;
 }
 
-interface DrillState { title: string; note?: string; rows: UnitRow[] }
+type BadgeTone = 'green' | 'amber' | 'red' | 'indigo' | 'gray';
+interface DrillRow {
+  key: string | number;
+  title: string;
+  subtitle?: string;
+  href?: string;
+  badges?: { label: string; tone: BadgeTone }[];
+}
+interface DrillState {
+  title: string;
+  note?: string;
+  loading?: boolean;
+  groups: { label?: string; rows: DrillRow[] }[];
+}
 
 interface FinancialSummary {
   receivablesInRange: number;
@@ -99,6 +112,39 @@ function relativeTime(iso: string) {
   const d = Math.round(h / 24);
   if (d < 7) return `${d}d ago`;
   return new Date(iso).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'short', day: 'numeric' });
+}
+
+const AVAIL_TONE: Record<string, BadgeTone> = { occupied: 'indigo', available: 'green', maintenance: 'amber', reserved: 'gray' };
+function unitDrillRow(u: UnitRow): DrillRow {
+  return {
+    key: u.id,
+    title: u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`),
+    subtitle: u.building ?? undefined,
+    href: `/rental-provider/dashboard/units/${u.id}`,
+    badges: [
+      { label: u.availability, tone: AVAIL_TONE[u.availability] ?? 'gray' },
+      u.listingStatus === 'published'
+        ? { label: 'Published', tone: 'green' as BadgeTone }
+        : { label: `Not listed · ${u.listingStatus}`, tone: 'amber' as BadgeTone },
+    ],
+  };
+}
+/** Group units by building (sorted), units sorted by number — "properly arranged". */
+function unitGroups(rows: UnitRow[]): { label?: string; rows: DrillRow[] }[] {
+  const byBuilding = new Map<string, UnitRow[]>();
+  for (const u of rows) {
+    const b = u.building ?? '—';
+    const arr = byBuilding.get(b) ?? [];
+    arr.push(u); byBuilding.set(b, arr);
+  }
+  return [...byBuilding.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([building, us]) => ({
+      label: `${building} · ${us.length}`,
+      rows: us
+        .sort((a, b) => (a.number ?? '').localeCompare(b.number ?? '', undefined, { numeric: true }))
+        .map(unitDrillRow),
+    }));
 }
 
 type RangePreset = 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time';
@@ -265,18 +311,55 @@ export default function RentalProviderDashboard() {
   const units            = stats?.units ?? [];
   const [drill, setDrill] = useState<DrillState | null>(null);
 
-  // Drill-down openers — KPI tiles show "which units" behind the number.
+  // Drill-down openers — KPI tiles show the records behind the number.
   const drillAvailable = () => {
     const rows = units.filter(u => u.availability === 'available');
     const published = rows.filter(u => u.listingStatus === 'published').length;
     setDrill({
       title: `Available units · ${rows.length}`,
       note: `${published} published in public listings · ${rows.length - published} not listed (draft / pending) — only published units appear publicly.`,
-      rows,
+      groups: unitGroups(rows),
     });
   };
-  const drillOccupied = () => setDrill({ title: `Occupied units · ${occupied}`, rows: units.filter(u => u.availability === 'occupied') });
-  const drillAllUnits = () => setDrill({ title: `All units · ${units.length}`, rows: units });
+  const drillOccupied = () => setDrill({ title: `Occupied units · ${occupied}`, groups: unitGroups(units.filter(u => u.availability === 'occupied')) });
+  const drillAllUnits = () => setDrill({ title: `All units · ${units.length}`, groups: unitGroups(units) });
+  const drillRenewals = () => {
+    const list = (extras?.upcomingRenewals ?? []).slice().sort((a, b) => a.daysUntilEnd - b.daysUntilEnd);
+    setDrill({
+      title: `Renewals due · ${list.length}`,
+      note: list.length ? 'Active leases ending soon — propose a renewal before they lapse.' : 'No renewals due in this window.',
+      groups: [{ rows: list.map(x => ({
+        key: x.contractId,
+        title: x.unitLabel,
+        subtitle: `${x.tenantName ?? 'Tenant'} · ${x.daysUntilEnd <= 0 ? `expired ${Math.abs(x.daysUntilEnd)}d ago` : `${x.daysUntilEnd}d left`}`,
+        href: `/rental-provider/dashboard/contracts/${x.contractId}/v2`,
+        badges: x.renewalStatus
+          ? [{ label: x.renewalStatus, tone: 'indigo' as BadgeTone }]
+          : (x.daysUntilEnd <= 30 ? [{ label: 'urgent', tone: 'red' as BadgeTone }] : []),
+      })) }],
+    });
+  };
+  const drillOverdue = async () => {
+    setDrill({ title: 'Overdue / bounced', loading: true, groups: [] });
+    try {
+      const res = await fetch('/api/contracts/receivables', { credentials: 'include' });
+      const data = res.ok ? await res.json() : [];
+      const rows = (Array.isArray(data) ? data : []).filter((p: { status?: string }) => p.status === 'overdue');
+      setDrill({
+        title: `Overdue / bounced · ${rows.length}`,
+        note: rows.length ? 'Past-due or bounced cheques — follow up for collection.' : 'No overdue or bounced cheques.',
+        groups: [{ rows: rows.map((p: { id: number; tenant?: string; amount?: number; unit?: string; building?: string; transactionDate?: string; chequeNumber?: string; status?: string }) => ({
+          key: p.id,
+          title: `${p.tenant ?? 'Tenant'} — AED ${Number(p.amount ?? 0).toLocaleString()}`,
+          subtitle: `${p.unit ? `Unit ${p.unit} · ` : ''}${p.building ?? ''} · due ${p.transactionDate ? new Date(p.transactionDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: '2-digit' }) : '—'}${p.chequeNumber ? ` · #${p.chequeNumber}` : ''}`,
+          href: '/rental-provider/dashboard/receivables',
+          badges: [{ label: p.status ?? 'overdue', tone: 'red' as BadgeTone }],
+        })) }],
+      });
+    } catch {
+      setDrill({ title: 'Overdue / bounced', note: 'Could not load cheques.', groups: [] });
+    }
+  };
 
   const rangeLabel = RANGE_PRESETS.find(r => r.key === selectedRange)?.label ?? '';
 
@@ -446,6 +529,7 @@ export default function RentalProviderDashboard() {
           value={String(renewalsDue60)}
           sub={renewalsDue60 > 0 ? 'action needed' : 'none pending'}
           tone={renewalsDue60 > 0 ? 'warn' : 'default'}
+          onClick={drillRenewals}
         />
       </div>
 
@@ -454,7 +538,7 @@ export default function RentalProviderDashboard() {
         <KpiMini label="Total Units"        value={String(totalUnits)}                        sub={`${totalProperties} properties`} onClick={drillAllUnits} />
         <KpiMini label="Available"          value={String(available)}                         sub="ready to list" onClick={drillAvailable} />
         <KpiMini label="Deposits Held"      value={fin ? fmtAed(fin.depositsHeld) : '—'}      sub="active security" />
-        <KpiMini label="Overdue / Bounced"  value={fin ? String(fin.overdueOrBounced) : '—'}  sub="past due cheques" tone={(fin?.overdueOrBounced ?? 0) > 0 ? 'danger' : 'default'} />
+        <KpiMini label="Overdue / Bounced"  value={fin ? String(fin.overdueOrBounced) : '—'}  sub="past due cheques" tone={(fin?.overdueOrBounced ?? 0) > 0 ? 'danger' : 'default'} onClick={drillOverdue} />
       </div>
 
       {/* Charts row */}
@@ -637,7 +721,7 @@ export default function RentalProviderDashboard() {
         </div>
       </div>
 
-      <UnitsDrillDown drill={drill} onClose={() => setDrill(null)} />
+      <DrillDown drill={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }
@@ -698,16 +782,33 @@ function KpiMini({ label, value, sub, tone = 'default', onClick }: {
   );
 }
 
-function UnitsDrillDown({ drill, onClose }: { drill: DrillState | null; onClose: () => void }) {
+const DRILL_TONE: Record<BadgeTone, { bg: string; fg: string }> = {
+  green:  { bg: '#dcfce7', fg: '#166534' },
+  amber:  { bg: '#fef3c7', fg: '#92400e' },
+  red:    { bg: '#fee2e2', fg: '#991b1b' },
+  indigo: { bg: '#e0e7ff', fg: '#3730a3' },
+  gray:   { bg: '#f3f4f6', fg: '#374151' },
+};
+
+function DrillDown({ drill, onClose }: { drill: DrillState | null; onClose: () => void }) {
   if (!drill) return null;
-  const availBadge = (a: string) =>
-    a === 'occupied' ? { bg: '#e0e7ff', fg: '#3730a3', label: 'Occupied' }
-    : a === 'available' ? { bg: '#dcfce7', fg: '#166534', label: 'Available' }
-    : a === 'maintenance' ? { bg: '#fef3c7', fg: '#92400e', label: 'Maintenance' }
-    : { bg: '#f3f4f6', fg: '#374151', label: a.charAt(0).toUpperCase() + a.slice(1) };
-  const listBadge = (s: string) =>
-    s === 'published' ? { bg: '#dcfce7', fg: '#166534', label: 'Published' }
-    : { bg: '#fef3c7', fg: '#92400e', label: `Not listed · ${s}` };
+  const total = drill.groups.reduce((s, g) => s + g.rows.length, 0);
+  const renderRow = (r: DrillRow) => {
+    const inner = (
+      <>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-semibold text-[var(--neutral-900)] truncate">{r.title}</p>
+          {r.subtitle && <p className="text-[11.5px] text-[var(--neutral-400)] truncate">{r.subtitle}</p>}
+        </div>
+        {r.badges?.map((b, bi) => (
+          <span key={bi} className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: DRILL_TONE[b.tone].bg, color: DRILL_TONE[b.tone].fg }}>{b.label}</span>
+        ))}
+      </>
+    );
+    return r.href
+      ? <Link key={r.key} href={r.href} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">{inner}</Link>
+      : <div key={r.key} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg">{inner}</div>;
+  };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,18,14,0.5)' }} onClick={onClose} role="dialog" aria-modal="true">
       <div className="bg-white rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl border border-[var(--base-200)]" onClick={e => e.stopPropagation()}>
@@ -719,21 +820,16 @@ function UnitsDrillDown({ drill, onClose }: { drill: DrillState | null; onClose:
           <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--neutral-400)] hover:text-[var(--neutral-900)] shrink-0"><X size={18} /></button>
         </div>
         <div className="overflow-y-auto p-3">
-          {drill.rows.length === 0 ? (
-            <p className="text-sm text-[var(--neutral-400)] text-center py-8">No units.</p>
-          ) : drill.rows.map(u => {
-            const ab = availBadge(u.availability); const lb = listBadge(u.listingStatus);
-            return (
-              <Link key={u.id} href={`/rental-provider/dashboard/units/${u.id}`} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13.5px] font-semibold text-[var(--neutral-900)] truncate">{u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`)}</p>
-                  <p className="text-[11.5px] text-[var(--neutral-400)] truncate">{u.building ?? '—'}</p>
-                </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: ab.bg, color: ab.fg }}>{ab.label}</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: lb.bg, color: lb.fg }}>{lb.label}</span>
-              </Link>
-            );
-          })}
+          {drill.loading ? (
+            <p className="text-sm text-[var(--neutral-400)] text-center py-8">Loading…</p>
+          ) : total === 0 ? (
+            <p className="text-sm text-[var(--neutral-400)] text-center py-8">Nothing to show.</p>
+          ) : drill.groups.map((g, gi) => (
+            <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
+              {g.label && <p className="text-[10.5px] font-bold tracking-[0.1em] uppercase text-[var(--neutral-400)] px-3 pt-2 pb-1">{g.label}</p>}
+              {g.rows.map(renderRow)}
+            </div>
+          ))}
         </div>
       </div>
     </div>
