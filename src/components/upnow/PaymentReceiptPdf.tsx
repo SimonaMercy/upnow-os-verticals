@@ -39,13 +39,15 @@ Font.register({
 });
 Font.registerHyphenationCallback((w) => [w]);
 
-// Modern palette: dark slate ink + UpNow jade accent + cool grays.
-const INK = '#0f172a';
-const ACCENT = '#2e9f82';
-const ACCENT_DK = '#1a7a63';
-const MUTE = '#64748b';
-const LINE = '#e2e8f0';
-const TINT = '#f8fafc';
+// App color theme (warm jade): --jade / --jade-deep / --jade-tint / --ink / --mute / --mist-strong.
+const INK = '#1a1916';        // --ink (warm near-black) — body text
+const HEADER = '#1f5a3f';     // --jade-deep — header band
+const HEADER_SUB = '#b3cfc1'; // light jade tint — secondary text on the band
+const ACCENT = '#2e9f82';     // --jade — accent rule
+const ACCENT_DK = '#1f5a3f';  // --jade-deep — amount + total
+const MUTE = '#9b9890';       // --mute (warm gray) — labels
+const LINE = '#e8e6e0';       // --mist-strong — borders
+const TINT = '#eef8f4';       // --jade-tint — total card bg
 const NAVY = INK; // keep references working
 const AR = 'NotoAr';
 
@@ -284,17 +286,18 @@ const st = {
   page: { paddingTop: 0, paddingBottom: 30, paddingHorizontal: 0, fontSize: 9, fontFamily: 'Roboto', color: INK },
   metaLbl: { fontSize: 6.5, color: MUTE, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 3 },
   th: { fontSize: 6.5, color: MUTE, letterSpacing: 0.8, textTransform: 'uppercase', paddingVertical: 7 },
-  td: { fontSize: 9, paddingVertical: 8, color: '#334155' },
+  td: { fontSize: 9, paddingVertical: 8, color: '#57534e' },
 } as const;
 
 function pillFor(label: string): { bg: string; fg: string } {
   switch (label) {
-    case 'Cleared': return { bg: '#dcfce7', fg: '#166534' };
-    case 'Bounced': return { bg: '#fee2e2', fg: '#b91c1c' };
-    case 'Cancelled': return { bg: '#e5e7eb', fg: '#374151' };
+    case 'Receipt':
+    case 'Cleared':
     case 'Collected (PDC)':
-    case 'PDCs Collected': return { bg: '#dbeafe', fg: '#1e40af' };
-    default: return { bg: '#fef3c7', fg: '#92400e' }; // Pending
+    case 'PDCs Collected': return { bg: '#d8f2e8', fg: '#1f5a3f' }; // --jade-soft / --jade-deep
+    case 'Bounced': return { bg: '#fdede7', fg: '#9a3520' };        // --brick-soft / --brick-deep
+    case 'Cancelled': return { bg: '#f0ede8', fg: '#6b6860' };      // --mist / warm gray
+    default: return { bg: '#fff7ed', fg: '#c2410c' };              // --saffron-soft / --saffron-deep (Pending)
   }
 }
 function Pill({ text }: { text: string }) {
@@ -324,7 +327,7 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
     return (
       <Document>
         <Page size="A4" style={st.page}>
-          <Text style={{ marginTop: 40, textAlign: 'center', color: '#6b7280' }}>
+          <Text style={{ marginTop: 40, textAlign: 'center', color: MUTE }}>
             {kind === 'deposit' ? 'No security deposit is recorded for this contract.' : 'No payment is available to receipt for this contract yet.'}
           </Text>
         </Page>
@@ -342,7 +345,7 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
 
   const heroStatus = single
     ? statusLabel(single.chequeStatus, contract.pdcConfirmed)
-    : (contract.pdcConfirmed ? 'PDCs Collected' : 'Pending Collection');
+    : 'Receipt';
   const issuerLines = [
     (contract.landlord.licenseNumber || contract.landlord.licenseAuthority)
       ? `Licence ${contract.landlord.licenseNumber || '—'}${contract.landlord.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
@@ -355,20 +358,20 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
       <Page size="A4" style={st.page}>
 
         {/* ── Header band (full-bleed) ── */}
-        <View style={{ backgroundColor: INK, paddingHorizontal: PAD, paddingTop: 26, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <View style={{ backgroundColor: HEADER, paddingHorizontal: PAD, paddingTop: 26, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View style={{ maxWidth: '56%' }}>
             <Text style={{ fontSize: 15, color: '#fff', fontWeight: 700 }}>{landlordName}</Text>
-            {issuerLines.map((l, i) => <Text key={i} style={{ fontSize: 7.5, color: '#94a3b8', marginTop: 2 }}>{l}</Text>)}
+            {issuerLines.map((l, i) => <Text key={i} style={{ fontSize: 7.5, color: HEADER_SUB, marginTop: 2 }}>{l}</Text>)}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ fontSize: 8, color: ACCENT, letterSpacing: 2 }}>{receipt.title}</Text>
-            <Text style={{ fontSize: 9, color: '#94a3b8', fontFamily: AR, marginBottom: 9 }}>{receipt.titleAr}</Text>
+            <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2 }}>{receipt.title}</Text>
+            <Text style={{ fontSize: 9, color: HEADER_SUB, fontFamily: AR, marginBottom: 9 }}>{receipt.titleAr}</Text>
             <View style={{ flexDirection: 'row', marginBottom: 2 }}>
-              <Text style={{ fontSize: 7, color: '#94a3b8', letterSpacing: 0.5, marginRight: 6 }}>RECEIPT NO.</Text>
+              <Text style={{ fontSize: 7, color: HEADER_SUB, letterSpacing: 0.5, marginRight: 6 }}>RECEIPT NO.</Text>
               <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{receipt.receiptNo}</Text>
             </View>
             <View style={{ flexDirection: 'row' }}>
-              <Text style={{ fontSize: 7, color: '#94a3b8', letterSpacing: 0.5, marginRight: 6 }}>DATE</Text>
+              <Text style={{ fontSize: 7, color: HEADER_SUB, letterSpacing: 0.5, marginRight: 6 }}>DATE</Text>
               <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{fmtDate(receipt.date) || fmtDate(contract.startDate)}</Text>
             </View>
           </View>
@@ -421,16 +424,16 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
             <View style={{ alignItems: 'flex-end', paddingTop: 7 }}>
               <View style={{ flexDirection: 'row', width: 230, justifyContent: 'space-between', marginBottom: 3 }}>
                 <Text style={{ fontSize: 8.5, color: MUTE }}>Subtotal (Net)</Text>
-                <Text style={{ fontSize: 8.5, color: '#334155' }}>{fmtAmt(subtotal)}</Text>
+                <Text style={{ fontSize: 8.5, color: '#57534e' }}>{fmtAmt(subtotal)}</Text>
               </View>
               <View style={{ flexDirection: 'row', width: 230, justifyContent: 'space-between' }}>
                 <Text style={{ fontSize: 8.5, color: MUTE }}>VAT (5%)</Text>
-                <Text style={{ fontSize: 8.5, color: '#334155' }}>{fmtAmt(totalVat)}</Text>
+                <Text style={{ fontSize: 8.5, color: '#57534e' }}>{fmtAmt(totalVat)}</Text>
               </View>
             </View>
           ) : null}
           {/* Total card */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, backgroundColor: '#eafaf4', borderRadius: 8, paddingVertical: 11, paddingHorizontal: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, backgroundColor: TINT, borderRadius: 8, paddingVertical: 11, paddingHorizontal: 14 }}>
             <Text style={{ fontSize: 9, color: ACCENT_DK, letterSpacing: 0.5, fontWeight: 700 }}>TOTAL RECEIVED</Text>
             <Text style={{ fontSize: 14, color: ACCENT_DK, fontWeight: 700 }}>AED {fmtAmt(grandTotal)}</Text>
           </View>
@@ -456,7 +459,7 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
         </View>
 
         {/* Footer */}
-        <Text fixed style={{ position: 'absolute', bottom: 14, left: PAD, right: PAD, textAlign: 'center', fontSize: 7, color: '#94a3b8' }}>
+        <Text fixed style={{ position: 'absolute', bottom: 14, left: PAD, right: PAD, textAlign: 'center', fontSize: 7, color: MUTE }}>
           UpNow Property Management · {receipt.receiptNo} · Contract {contract.ref}
         </Text>
       </Page>
