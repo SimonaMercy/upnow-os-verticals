@@ -394,7 +394,17 @@ export default function ManagerPropertiesPage() {
                     longitude: p.longitude ?? null,
                     fullAddress: p.fullAddress ?? null,
                     unitCount: p.unitCount,
+                    coverPhotoUrl: p.coverPhotoUrl,
+                    spaceCategory: p.spaceCategory,
                   }))}
+                  onViewDetails={(id) => {
+                    const p = filtered.find((x) => x.id === id);
+                    if (p) setDetailsProperty(p);
+                  }}
+                  onEdit={can('canEditProperties') ? (id) => {
+                    const p = filtered.find((x) => x.id === id);
+                    if (p) setPropertyModal({ open: true, editing: p });
+                  } : undefined}
                 />
               </div>
             )}

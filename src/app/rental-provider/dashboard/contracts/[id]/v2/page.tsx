@@ -1326,6 +1326,12 @@ function DetailsDrawer({
   onAddNote: (body: string) => Promise<void>;
 }) {
   const depositRow = payments.find(p => p.paymentType === 'security_deposit');
+  // Receipt links must respect the portal (RP vs manager) — derive the base
+  // the same way the page does, so manager links don't 404.
+  const drawerPathname = usePathname();
+  const receiptBase = (drawerPathname?.startsWith('/dashboard/manager')
+    ? '/dashboard/manager/contracts'
+    : '/rental-provider/dashboard/contracts') + `/${contract.id}/print/receipt`;
   // ── Record-payment form state (Flow 1) ──
   const [showRec, setShowRec] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
@@ -1337,7 +1343,7 @@ function DetailsDrawer({
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
   // ── Inline cheque editor — correct amount / reference / description on existing rows ──
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ amount: '', chequeNumber: '', description: '', paymentMethod: 'cheque' });
+  const [editForm, setEditForm] = useState({ amount: '', chequeNumber: '', description: '', paymentMethod: 'cheque', transactionDate: '' });
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
   const startEdit = (p: ContractPayment) => {
@@ -1347,6 +1353,7 @@ function DetailsDrawer({
       chequeNumber: p.chequeNumber ?? '',
       description: p.description ?? '',
       paymentMethod: p.paymentMethod ?? 'cheque',
+      transactionDate: p.transactionDate ? p.transactionDate.slice(0, 10) : '',
     });
   };
   const saveEdit = async (paymentId: number) => {
@@ -1359,6 +1366,7 @@ function DetailsDrawer({
         chequeNumber: editForm.chequeNumber.trim() || null,
         description: editForm.description.trim() || null,
         paymentMethod: editForm.paymentMethod,
+        transactionDate: editForm.transactionDate || null,
       });
       setEditingId(null);
     } catch (e) {
@@ -1705,6 +1713,14 @@ function DetailsDrawer({
                                 >
                                   <Pencil size={12} /> Edit
                                 </button>
+                                <Link
+                                  href={`${receiptBase}?pid=${depositRow.id}`}
+                                  target="_blank"
+                                  className="mini-btn view"
+                                  title="Generate receipt"
+                                >
+                                  <FileText size={12} /> Receipt
+                                </Link>
                               </div>
                             </td>
                           </tr>
@@ -1793,7 +1809,8 @@ function DetailsDrawer({
                                         <Pencil size={12} /> Edit
                                       </button>
                                     </div>
-                                    {/* Settlement (with refund/deduction amounts) is captured on the Deposits page — read-only here */}
+                                    {/* Settlement (refund/deduction + customer agreement) is captured on the
+                                        move-out settlement — the single source of truth — read-only here */}
                                     {sd.status && sd.status !== 'held' ? (
                                       <div style={{ textAlign: 'right' }}>
                                         <span className={'cstat ' + sd.status} style={{ textTransform: 'capitalize' }}>{sd.status.replace('_', ' ')}</span>
@@ -1804,8 +1821,8 @@ function DetailsDrawer({
                                         )}
                                       </div>
                                     ) : (
-                                      <Link href="/rental-provider/dashboard/deposits" className="note" style={{ fontSize: 11, color: 'var(--jade)', textDecoration: 'underline' }}>
-                                        Settle on Deposits ↗
+                                      <Link href={`/rental-provider/dashboard/contracts/${contract.id}/settlement`} className="note" style={{ fontSize: 11, color: 'var(--jade)', textDecoration: 'underline' }}>
+                                        Settle deposit ↗
                                       </Link>
                                     )}
                                     {depStatusErr && (
@@ -1907,6 +1924,14 @@ function DetailsDrawer({
                               >
                                 <Pencil size={12} /> Edit
                               </button>
+                              <Link
+                                href={`${receiptBase}?pid=${p.id}`}
+                                target="_blank"
+                                className="mini-btn view"
+                                title="Generate receipt"
+                              >
+                                <FileText size={12} /> Receipt
+                              </Link>
                             </div>
                           </td>
                         </tr>
@@ -1924,16 +1949,22 @@ function DetailsDrawer({
                                     <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
                                       onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
                                   </div>
+                                  <div className="field"><label>Due date</label>
+                                    <input type="date" className="input" value={editForm.transactionDate}
+                                      onChange={e => setEditForm(v => ({ ...v, transactionDate: e.target.value }))} />
+                                  </div>
+                                </div>
+                                <div className="grid2">
                                   <div className="field"><label>Payment method</label>
                                     <select className="input" value={editForm.paymentMethod}
                                       onChange={e => setEditForm(v => ({ ...v, paymentMethod: e.target.value }))}>
                                       {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                                     </select>
                                   </div>
-                                </div>
-                                <div className="field"><label>Cheque / reference no.</label>
-                                  <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
-                                    onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                  <div className="field"><label>Cheque / reference no.</label>
+                                    <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
+                                      onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                  </div>
                                 </div>
                                 {showVat && (
                                   <p className="note" style={{ marginTop: 2 }}>VAT ({contract.rentVatRate ?? 0}%) is recalculated from the corrected amount automatically.</p>
@@ -2229,6 +2260,40 @@ function DetailsDrawer({
                           {checklistRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
                         </div>
                       </>
+                    )}
+                    {/* Generated payment receipts — auto-available after payment
+                        is confirmed (PDCs collected) and once the contract is
+                        activated. Two by default: the consolidated contract
+                        payment receipt (admin + ejari + commission + rent) and the
+                        security-deposit receipt. Virtual /print links, not files. */}
+                    {(contract.pdcConfirmed || contract.status === 'active' || contract.contractActive) && (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                          Payment receipts
+                        </div>
+                        <div className="doclist">
+                          <div className="docitem approved">
+                            <FileText size={14} />
+                            <div>
+                              <div className="dn">Contract Payment Receipt</div>
+                              <div className="ds">Admin, Ejari, commission &amp; rent instalments</div>
+                            </div>
+                            <div className="dacts">
+                              <Link href={`${receiptBase}?kind=contract`} target="_blank" className="mini-btn view"><ExternalLink size={12} /> View</Link>
+                            </div>
+                          </div>
+                          <div className="docitem approved">
+                            <FileText size={14} />
+                            <div>
+                              <div className="dn">Security Deposit Receipt</div>
+                              <div className="ds">Refundable security deposit</div>
+                            </div>
+                            <div className="dacts">
+                              <Link href={`${receiptBase}?kind=deposit`} target="_blank" className="mini-btn view"><ExternalLink size={12} /> View</Link>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     )}
                     {/* Everything else on this contract — one link, no inline dump. */}
                     <p className="note" style={{ marginTop: 8 }}>

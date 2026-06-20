@@ -27,6 +27,9 @@ type Lease = {
   startDate: string | null; endDate: string | null; annualRent: number;
   listedRent: number | null; discountType: 'percent' | 'fixed' | null; discountValue: number | null; discountAmount: number | null;
   securityDeposit: number; collected: number; outstanding: number;
+  // depositHeld = own deposit, or the amount carried forward from the chain's
+  // first lease on a renewal; depositSourceId = which contract actually holds it.
+  depositHeld: number; depositSourceId: number | null;
   isCurrent: boolean;
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
@@ -234,7 +237,7 @@ export default function CustomerDetailPage() {
         : l.contractActive;
       if (better) byUnit.set(uid, l);
     }
-    return [...byUnit.values()].filter(l => l.securityDeposit > 0);
+    return [...byUnit.values()].filter(l => l.depositHeld > 0);
   })();
   const plural = (n: number, w: string) => `${n} ${w}${n !== 1 ? 's' : ''}`;
   // ── Needs-attention items — each phrased as a chip with the suggested action ──
@@ -464,12 +467,18 @@ export default function CustomerDetailPage() {
               <p className="text-xs text-[#9b9890] mb-3">You hold these on the customer&apos;s behalf — refundable at move-out after the settlement.</p>
               <div className="space-y-2">
                 {depositHolders.map(l => {
-                  const proofs = data.documents.filter(d => d.leaseId === l.id && d.fileUrl &&
+                  // Carried deposit: the cheque/receipt and the editable record live
+                  // on the chain's first lease, not this renewal — resolve to it.
+                  const srcId = l.depositSourceId ?? l.id;
+                  const proofs = data.documents.filter(d => d.leaseId === srcId && d.fileUrl &&
                     (d.ownerType === 'security_deposit' || /deposit|cheque/i.test(`${d.documentKey} ${d.displayName ?? ''}`)));
                   return (
                     <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-[#e8e6e0] rounded-xl px-4 py-2.5">
-                      <span className="text-sm font-semibold text-[#1a1916]">{fmtAed(l.securityDeposit)}</span>
+                      <span className="text-sm font-semibold text-[#1a1916]">{fmtAed(l.depositHeld)}</span>
                       <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#fff7e0] text-[#9a6b00]">Owed back to customer</span>
+                      {l.depositSourceId && (
+                        <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#eef2fb] text-[#3b5bb5]">Carried from CID-{l.depositSourceId}</span>
+                      )}
                       <span className="text-xs text-[#6b6860]">
                         {l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}{l.property.buildingName ? ` · ${l.property.buildingName}` : ''} · {l.ref} · {fmtDate(l.startDate)} → {fmtDate(l.endDate)}
                       </span>

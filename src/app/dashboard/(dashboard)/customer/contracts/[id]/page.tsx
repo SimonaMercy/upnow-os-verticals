@@ -356,8 +356,15 @@ export default function TenantContractDetailPage() {
   const st4Done = hasEjari;                             // Ejari
   const st5Done = isActive;                             // Move-In & Utility
   const expectedCheques = contract?.numberOfInstallments ?? 0;
-  const rentChequePayments = rentPayments.filter(p => p.chequeStatus === 'received');
+  // ChequeStatus enum is pending|cleared|bounced|cancelled — the previous
+  // 'received' literal never matched, so this never tripped.
+  const rentChequePayments = rentPayments.filter(p => p.chequeStatus === 'cleared');
   const allChequesReceived = rentChequePayments.length >= expectedCheques && expectedCheques > 0;
+
+  // A receipt is available once the landlord has collected the PDCs (pdcConfirmed)
+  // or the individual payment has cleared. Matches the agreed trigger.
+  const receiptHref = (p: ContractPayment) => `/dashboard/customer/contracts/${contract!.id}/print/receipt?pid=${p.id}`;
+  const canReceipt = (p: ContractPayment) => p.chequeStatus === 'cleared' || !!contract?.pdcConfirmed;
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -734,6 +741,16 @@ export default function TenantContractDetailPage() {
                               'bg-amber-50 text-amber-700'
                             }`}>{depositPayment.chequeStatus}</span>
                           } />
+                          {canReceipt(depositPayment) && (
+                            <a
+                              href={receiptHref(depositPayment)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors"
+                            >
+                              <FileText size={12} /> View Receipt
+                            </a>
+                          )}
                         </>
                       ) : (
                         <p className="text-xs text-[#9b9890]">
@@ -760,6 +777,7 @@ export default function TenantContractDetailPage() {
                                 <th className="px-2 py-2 font-medium">Amount</th>
                                 <th className="px-2 py-2 font-medium">Due Date</th>
                                 <th className="px-2 py-2 font-medium">Status</th>
+                                <th className="px-2 py-2 font-medium text-right">Receipt</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -777,6 +795,21 @@ export default function TenantContractDetailPage() {
                                       'bg-amber-50 text-amber-700'
                                     }`}>{p.chequeStatus}</span>
                                   </td>
+                                  <td className="px-2 py-2 text-right">
+                                    {canReceipt(p) ? (
+                                      <a
+                                        href={receiptHref(p)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title="View receipt"
+                                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline"
+                                      >
+                                        <FileText size={11} /> Receipt
+                                      </a>
+                                    ) : (
+                                      <span className="text-[10px] text-[#c4c2bb]">—</span>
+                                    )}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -786,7 +819,7 @@ export default function TenantContractDetailPage() {
                                 <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
                                   {fmtAed(rentPayments.reduce((s, p) => s + p.amount, 0))}
                                 </td>
-                                <td colSpan={2} />
+                                <td colSpan={3} />
                               </tr>
                             </tfoot>
                           </table>

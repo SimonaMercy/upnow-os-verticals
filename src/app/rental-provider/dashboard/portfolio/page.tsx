@@ -7,7 +7,7 @@
  * and documents live. No inline unit expansion.
  *   • Row  — image-left cards.
  *   • Grid — cover-image tiles.
- *   • Map  — Airbnb-style: property list on the left, map on the right.
+ *   • Map  — full-width map; click a pin to surface that property's detail card.
  *
  * Data: GET /properties (returns properties with unit counts + coverPhotoUrl).
  */
@@ -560,23 +560,21 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* Map — Airbnb-style: property list on the left, map pinned on the right. */}
+        {/* Map — full-width. Click a pin to surface that property's details. */}
         {!isLoading && filteredProperties.length > 0 && view === 'map' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-            <div className="flex flex-col gap-3 lg:max-h-[78vh] lg:overflow-auto lg:pr-1">
-              {filteredProperties.map((p) => (
-                <PropertyCard
-                  key={p.id}
-                  property={p}
-                  onEdit={() => setPropertyModal({ open: true, editing: p })}
-                  onDelete={() => deleteProperty.mutate(p.id)}
-                  onShowDetails={() => setDetailsProperty(p)}
-                />
-              ))}
-            </div>
-            <div className="lg:sticky lg:top-4" style={{ background: '#fff', borderRadius: 16, padding: 8, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-              <PortfolioMapView properties={filteredProperties} heightClass="h-[78vh]" />
-            </div>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 8, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+            <PortfolioMapView
+              properties={filteredProperties}
+              heightClass="h-[78vh]"
+              onViewDetails={(id) => {
+                const p = filteredProperties.find((x) => x.id === id);
+                if (p) setDetailsProperty(p);
+              }}
+              onEdit={(id) => {
+                const p = filteredProperties.find((x) => x.id === id);
+                if (p) setPropertyModal({ open: true, editing: p });
+              }}
+            />
           </div>
         )}
 

@@ -1707,6 +1707,7 @@ export default function ContractDetailPage() {
                               <th className="px-2 py-2 font-medium">Reference</th>
                               <th className="px-2 py-2 font-medium">Due Date</th>
                               <th className="px-2 py-2 font-medium">Status</th>
+                              <th className="px-2 py-2 font-medium text-right">Receipt</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1742,6 +1743,13 @@ export default function ContractDetailPage() {
                                         <option value="cancelled">Cancelled</option>
                                       </select>
                                     </div>
+                                  </td>
+                                  <td className="px-2 py-2 text-right">
+                                    <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print/receipt?pid=${p.id}`} target="_blank"
+                                      title="Generate receipt"
+                                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline">
+                                      <FileText size={11} /> Receipt
+                                    </Link>
                                   </td>
                                 </tr>
                               );
@@ -1796,6 +1804,7 @@ export default function ContractDetailPage() {
                         <th className="px-2 py-2 font-medium">Reference</th>
                         <th className="px-2 py-2 font-medium">Due Date</th>
                         <th className="px-2 py-2 font-medium">Status</th>
+                        <th className="px-2 py-2 font-medium text-right">Receipt</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1833,6 +1842,13 @@ export default function ContractDetailPage() {
                                 </select>
                               </div>
                             </td>
+                            <td className="px-2 py-2 text-right">
+                              <Link href={`/rental-provider/dashboard/contracts/${contract.id}/print/receipt?pid=${p.id}`} target="_blank"
+                                title="Generate receipt"
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline">
+                                <FileText size={11} /> Receipt
+                              </Link>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1843,7 +1859,7 @@ export default function ContractDetailPage() {
                         <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
                           {fmtAed(rentChequePayments.reduce((s, p) => s + p.amount, 0))}
                         </td>
-                        <td colSpan={3} />
+                        <td colSpan={4} />
                       </tr>
                     </tfoot>
                   </table>
