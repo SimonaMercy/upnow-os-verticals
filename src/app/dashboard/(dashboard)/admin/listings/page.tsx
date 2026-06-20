@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
+import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,16 +111,17 @@ interface UnitDetail {
 
 const PAGE_SIZE = 25;
 
-const categoryLabel: Record<string, string> = {
-  residential: 'Residential',
-  commercial: 'Commercial',
-  industrial: 'Industrial',
-};
+// Category display labels come from the shared SPACE_CATEGORIES / categoryDisplayLabel
+// helper (PropertyFormModal) so all 5 canonical types + legacy buckets stay in sync.
 
 const categoryColor: Record<string, { bg: string; color: string }> = {
   residential: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
   commercial:  { bg: '#eff6ff', color: '#3b82f6' },
   industrial:  { bg: '#f5f3ff', color: '#8b5cf6' },
+  land:        { bg: '#f0fdf4', color: '#16a34a' },
+  mixed_use:   { bg: '#fffbeb', color: '#d97706' },
+  workspaces:  { bg: '#ecfeff', color: '#0891b2' },
+  venues:      { bg: '#fdf2f8', color: '#db2777' },
 };
 
 const statusCfg: Record<ListingStatus, { label: string; className: string; Icon: React.ElementType }> = {
@@ -149,16 +151,20 @@ function StatusBadge({ s }: { s: ListingStatus }) {
   );
 }
 
+// 'All' + the 5 canonical space categories (residential/commercial/industrial/
+// land/mixed_use), derived from the shared list so new categories appear here too.
+const CATEGORY_FILTER_OPTIONS = ['', ...SPACE_CATEGORIES.map((c) => c.id)];
+
 function CategoryFilters({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {(['', 'residential', 'commercial', 'industrial'] as const).map((cat) => (
-        <button key={cat} onClick={() => onChange(cat)}
+      {CATEGORY_FILTER_OPTIONS.map((cat) => (
+        <button key={cat || 'all'} onClick={() => onChange(cat)}
           className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
           style={value === cat
             ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
             : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>
-          {cat ? categoryLabel[cat] : 'All'}
+          {cat ? categoryDisplayLabel(cat) : 'All'}
         </button>
       ))}
     </div>
@@ -260,7 +266,7 @@ function UnitCard({ unit, selected, onClick }: { unit: PendingUnit; selected: bo
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs px-2 py-0.5 rounded-full font-medium"
           style={{ backgroundColor: cc.bg, color: cc.color }}>
-          {categoryLabel[unit.property.spaceCategory] ?? unit.property.spaceCategory}
+          {categoryDisplayLabel(unit.property.spaceCategory)}
         </span>
         <div className="flex items-center gap-2">
           {rent && <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-700)' }}>{rent}</span>}
@@ -636,6 +642,8 @@ const RERA_INDEX_CAP: Record<string, number> = {
   residential: 145000,
   commercial:  270000,
   industrial:  160000,
+  land:        220000,
+  mixed_use:   240000,
 };
 
 function indexDeviation(unit: PendingUnit): number | null {
@@ -854,7 +862,7 @@ export default function AdminListingsPage() {
           {!queueLoading && visibleQueue.length === 0 && (
             <DashboardEmpty message={
               queueOverIndex ? 'No listings exceed the RERA Rental Index on this page.' :
-              queueCategory ? `No ${categoryLabel[queueCategory]?.toLowerCase()} units pending approval.` :
+              queueCategory ? `No ${categoryDisplayLabel(queueCategory).toLowerCase()} units pending approval.` :
               'No listings pending approval — you\'re all caught up.'
             } />
           )}
@@ -919,7 +927,7 @@ export default function AdminListingsPage() {
             </div>
           )}
           {!propsLoading && propsData.length === 0 && (
-            <DashboardEmpty message={propsCategory ? `No ${categoryLabel[propsCategory]?.toLowerCase()} properties found.` : 'No properties on the platform yet.'} />
+            <DashboardEmpty message={propsCategory ? `No ${categoryDisplayLabel(propsCategory).toLowerCase()} properties found.` : 'No properties on the platform yet.'} />
           )}
           {!propsLoading && propsData.length > 0 && (
             <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
@@ -940,7 +948,7 @@ export default function AdminListingsPage() {
                       </div>
                       <span className="text-xs font-medium px-2.5 py-1 rounded-full shrink-0"
                         style={{ backgroundColor: cc.bg, color: cc.color }}>
-                        {categoryLabel[p.spaceCategory] ?? p.spaceCategory}
+                        {categoryDisplayLabel(p.spaceCategory)}
                       </span>
                       <div className="flex items-center gap-3 shrink-0">
                         <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-600)' }}>

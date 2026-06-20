@@ -117,7 +117,9 @@ export default function ManagerPropertiesPage() {
   const router   = useRouter();
   const rpFilter = params.get('rp') ? Number(params.get('rp')) : null;
 
-  const [category, setCategory] = useState<'all' | 'residential' | 'commercial' | 'industrial'>('all');
+  // 'all' or any spaceCategory id present in the loaded properties (incl. land /
+  // mixed_use / legacy buckets) — the tab list is derived dynamically below.
+  const [category, setCategory] = useState<string>('all');
   const [search, setSearch]     = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: ManagedProperty }>({ open: false });
@@ -166,6 +168,13 @@ export default function ManagerPropertiesPage() {
   const scoped = useMemo(
     () => properties.filter(p => !rpFilter || p.rentalProviderId === rpFilter),
     [properties, rpFilter],
+  );
+
+  // Category filter chips, derived from the loaded properties so land / mixed_use
+  // (and any legacy bucket present) get a chip automatically. 'all' always leads.
+  const categoryTabs = useMemo<string[]>(
+    () => ['all', ...Array.from(new Set(scoped.map(p => p.spaceCategory).filter(Boolean))).sort()],
+    [scoped],
   );
 
   const filtered = scoped.filter(p => {
@@ -272,7 +281,7 @@ export default function ManagerPropertiesPage() {
         {/* Range tabs */}
         <div className={s.rangetabs}>
           <div className={s.rangetabsTabs}>
-            {(['all', 'residential', 'commercial', 'industrial'] as const).map(key => {
+            {categoryTabs.map(key => {
               const label = key === 'all' ? 'All' : categoryLabel(key);
               const count = key === 'all' ? scoped.length : scoped.filter(p => p.spaceCategory === key).length;
               return (

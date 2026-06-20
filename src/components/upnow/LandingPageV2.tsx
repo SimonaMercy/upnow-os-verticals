@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Menu, X, LogOut, Building2, Home, Factory, Wrench, Leaf, Wind,
   Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check,
-  User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3,
+  User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain,
 } from 'lucide-react';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { HowItWorks } from '@/components/upnow/HowItWorks';
@@ -143,6 +143,8 @@ const SPACE_CAT_DEFS: Omit<SpaceCat, 'items'>[] = [
   { id: 'residential', label: 'Residential', blurb: 'Apartments, villas, studios & townhouses', href: '/listings?category=residential' },
   { id: 'commercial',  label: 'Commercial',  blurb: 'Offices, retail, coworking & showrooms',   href: '/listings?category=commercial' },
   { id: 'industrial',  label: 'Industrial',  blurb: 'Warehouses, storage & cold storage',        href: '/listings?category=industrial' },
+  { id: 'land',        label: 'Land',        blurb: 'Plots & development land',                  href: '/listings?category=land' },
+  { id: 'mixed_use',   label: 'Mixed-use',   blurb: 'Combined residential & commercial spaces',  href: '/listings?category=mixed_use' },
 ];
 
 const UPH = 'https://images.unsplash.com/photo-';
@@ -164,6 +166,14 @@ const FALLBACK_IMGS: Record<string, string[]> = {
     '1586528116311-ad8dd3c8310d', '1553413077-190dd305871c',
     '1601598851547-4302969d0614', '1578575437130-527eed3abbec',
     '1565793971055-2c4ef51ebe57',
+  ],
+  land: [
+    '1500382017468-9049fed747ef', '1416879595882-3373a0480b5b',
+    '1501785888041-af3ef285b470', '1469474968028-56623f02e42e',
+  ],
+  mixed_use: [
+    '1486406146926-c627a92ad1ab', '1493397212122-2b85dda8d643',
+    '1449824913935-59a10b8d2000', '1518005020951-eccb494ad742',
   ],
 };
 
@@ -227,6 +237,8 @@ const SPACE_CAT_ICONS: Record<string, React.ReactNode> = {
   residential: <Home size={16} />,
   commercial: <Building2 size={16} />,
   industrial: <Factory size={16} />,
+  land: <Mountain size={16} />,
+  mixed_use: <Grid3X3 size={16} />,
 };
 
 const SERVICE_CAT_ICONS: Record<string, React.ReactNode> = {

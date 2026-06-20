@@ -13,6 +13,8 @@ const PROPERTY_CATEGORIES = [
   { label: 'Residential', value: 'residential' },
   { label: 'Commercial', value: 'commercial' },
   { label: 'Industrial', value: 'industrial' },
+  { label: 'Land', value: 'land' },
+  { label: 'Mixed-use', value: 'mixed_use' },
 ];
 
 const BEDROOMS = [

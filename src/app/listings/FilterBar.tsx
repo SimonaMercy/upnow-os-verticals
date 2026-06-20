@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
-import { Search, ChevronDown, LayoutGrid, Rows3, SlidersHorizontal, X, Check, MapPin, Home, Building2, Factory } from 'lucide-react';
+import { Search, ChevronDown, LayoutGrid, Rows3, SlidersHorizontal, X, Check, MapPin, Home, Building2, Factory, Mountain } from 'lucide-react';
+import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 
 /* ── Sub-category data ────────────────────────────────────────── */
 const SPACE_TYPES: Record<string, { label: string; value: string }[]> = {
@@ -32,10 +33,8 @@ const SPACE_TYPES: Record<string, { label: string; value: string }[]> = {
 };
 
 const CATEGORIES = [
-  { label: 'All Spaces',  value: '' },
-  { label: 'Residential', value: 'residential' },
-  { label: 'Commercial',  value: 'commercial' },
-  { label: 'Industrial',  value: 'industrial' },
+  { label: 'All Spaces', value: '' },
+  ...SPACE_CATEGORIES.map(c => ({ label: c.label, value: c.id })),
 ];
 
 const BEDROOM_OPTIONS = [
@@ -323,6 +322,8 @@ export function FilterSidebar(
     residential: <Home size={16} />,
     commercial:  <Building2 size={16} />,
     industrial:  <Factory size={16} />,
+    land:        <Mountain size={16} />,
+    mixed_use:   <LayoutGrid size={16} />,
   };
 
   return (
@@ -501,7 +502,7 @@ export default function FilterBar(props: FilterBarProps) {
   if (country) pills.push({ label: countryName || country.toUpperCase(), clear: { country: '', emirate: '' } });
   if (emirate) pills.push({ label: emirateName || emirate, clear: { emirate: '' } });
   if (category) {
-    const catLabel = CATEGORIES.find(c => c.value === category)?.label ?? category;
+    const catLabel = CATEGORIES.find(c => c.value === category)?.label ?? categoryDisplayLabel(category);
     pills.push({ label: catLabel, clear: { category: '', spaceType: '', bedrooms: '', bathrooms: '', furnishing: '', amenities: '' } });
   }
   if (spaceType) {

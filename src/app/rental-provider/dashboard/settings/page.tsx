@@ -6,6 +6,7 @@ import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, 
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { INSTALLMENT_PLANS, installmentLabel } from '@/lib/installmentPlans';
+import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 
 /* ─────────────────────────────────────────────────────────────
    General settings types
@@ -38,7 +39,7 @@ interface FeeRuleDto {
 }
 
 type CategoryMap = Record<FeeType, FeeRuleDto>;
-const FEE_CATEGORIES = ['residential', 'commercial', 'industrial'] as const;
+const FEE_CATEGORIES = ['residential', 'commercial', 'industrial', 'land', 'mixed_use'] as const;
 type FeeCategory = (typeof FEE_CATEGORIES)[number];
 const FEE_ORDER: FeeType[] = ['ejari_fee', 'admin_fee', 'commission', 'security_deposit', 'rent_vat'];
 
@@ -68,6 +69,22 @@ const UAE_DEFAULTS: Record<FeeCategory, CategoryMap> = {
   industrial: {
     ejari_fee:        { feeType: 'ejari_fee',        valueType: 'fixed_aed',  value: 500,  vatApplicable: false, vatRate: 0, isActive: true },
     admin_fee:        { feeType: 'admin_fee',         valueType: 'fixed_aed',  value: 2500, vatApplicable: true,  vatRate: 5, isActive: true },
+    commission:       { feeType: 'commission',        valueType: 'percentage', value: 5,    vatApplicable: true,  vatRate: 5, isActive: true },
+    security_deposit: { feeType: 'security_deposit',  valueType: 'percentage', value: 10,   vatApplicable: false, vatRate: 0, isActive: true },
+    rent_vat:         { feeType: 'rent_vat',          valueType: 'percentage', value: 0,    vatApplicable: true,  vatRate: 5, isActive: true },
+  },
+  // Bare land lease — no rent VAT (treated like residential for VAT). Fees mirror commercial.
+  land: {
+    ejari_fee:        { feeType: 'ejari_fee',        valueType: 'fixed_aed',  value: 500,  vatApplicable: false, vatRate: 0, isActive: true },
+    admin_fee:        { feeType: 'admin_fee',         valueType: 'fixed_aed',  value: 2000, vatApplicable: true,  vatRate: 5, isActive: true },
+    commission:       { feeType: 'commission',        valueType: 'percentage', value: 5,    vatApplicable: true,  vatRate: 5, isActive: true },
+    security_deposit: { feeType: 'security_deposit',  valueType: 'percentage', value: 10,   vatApplicable: false, vatRate: 0, isActive: true },
+    rent_vat:         { feeType: 'rent_vat',          valueType: 'percentage', value: 0,    vatApplicable: false, vatRate: 0, isActive: true },
+  },
+  // Mixed-use — mirrors commercial, incl. 5% rent VAT applicable.
+  mixed_use: {
+    ejari_fee:        { feeType: 'ejari_fee',        valueType: 'fixed_aed',  value: 500,  vatApplicable: false, vatRate: 0, isActive: true },
+    admin_fee:        { feeType: 'admin_fee',         valueType: 'fixed_aed',  value: 2000, vatApplicable: true,  vatRate: 5, isActive: true },
     commission:       { feeType: 'commission',        valueType: 'percentage', value: 5,    vatApplicable: true,  vatRate: 5, isActive: true },
     security_deposit: { feeType: 'security_deposit',  valueType: 'percentage', value: 10,   vatApplicable: false, vatRate: 0, isActive: true },
     rent_vat:         { feeType: 'rent_vat',          valueType: 'percentage', value: 0,    vatApplicable: true,  vatRate: 5, isActive: true },
@@ -586,6 +603,8 @@ export default function SettingsPage() {
     residential: { ...UAE_DEFAULTS.residential },
     commercial:  { ...UAE_DEFAULTS.commercial },
     industrial:  { ...UAE_DEFAULTS.industrial },
+    land:        { ...UAE_DEFAULTS.land },
+    mixed_use:   { ...UAE_DEFAULTS.mixed_use },
   });
   const [previewRent, setPreviewRent]   = useState(120_000);
   const [feesSaving, setFeesSaving]     = useState(false);
@@ -664,6 +683,8 @@ export default function SettingsPage() {
           residential: rowsToMap(data.residential ?? [], 'residential'),
           commercial:  rowsToMap(data.commercial  ?? [], 'commercial'),
           industrial:  rowsToMap(data.industrial  ?? [], 'industrial'),
+          land:        rowsToMap(data.land         ?? [], 'land'),
+          mixed_use:   rowsToMap(data.mixed_use    ?? [], 'mixed_use'),
         });
       })
       .catch(() => undefined)
@@ -1814,12 +1835,12 @@ export default function SettingsPage() {
                         key={cat}
                         type="button"
                         onClick={() => { setFeeTab(cat); setFeesSaved(false); }}
-                        className={`px-3.5 py-[7px] rounded-[7px] text-[13px] font-semibold cursor-pointer capitalize flex items-center gap-1.5 transition-all ${
+                        className={`px-3.5 py-[7px] rounded-[7px] text-[13px] font-semibold cursor-pointer flex items-center gap-1.5 transition-all ${
                           feeTab === cat ? 'bg-[#0e1a16] text-white' : 'text-[#6b7a74] hover:text-[#0e1a16]'
                         }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full opacity-50 ${feeTab === cat ? 'bg-white' : 'bg-current'}`} />
-                        {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                        {categoryDisplayLabel(cat)}
                       </button>
                     ))}
                   </div>

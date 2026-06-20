@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
-import { DocSlotCard, type PropertyDoc } from '@/components/upnow/PropertyFormModal';
+import { DocSlotCard, categoryDisplayLabel, type PropertyDoc } from '@/components/upnow/PropertyFormModal';
 import { DocPreviewModal } from '@/components/upnow/DocPreviewModal';
 import { PROPERTY_DOC_SLOTS, docBelongsToSlot } from '@/lib/propertyDocs';
 
@@ -302,8 +302,8 @@ export function PropertyDetailsModal({
               {p.buildingName}
             </h2>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#dcfce7] text-[#166534] capitalize">
-                {p.spaceCategory}
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#dcfce7] text-[#166534]">
+                {categoryDisplayLabel(p.spaceCategory)}
               </span>
               <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#f4f3ef] text-[#6b6860]">
                 {p.isStandaloneUnit ? 'One title deed (single owner)' : 'Units titled separately'}

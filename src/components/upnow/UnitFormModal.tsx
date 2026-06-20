@@ -47,7 +47,7 @@ export const UNIT_TYPE_LABELS: Record<string, string> = {
   agricultural_land: 'Agricultural Land', labour_accommodation_land: 'Labour Accommodation Land',
 };
 
-function unitTypesForCategory(category: string): string[] {
+export function unitTypesForCategory(category: string): string[] {
   switch (category) {
     case 'residential':  return RESIDENTIAL_UNIT_TYPES;
     case 'commercial':   return COMMERCIAL_UNIT_TYPES;

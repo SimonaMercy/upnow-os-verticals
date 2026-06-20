@@ -16,8 +16,7 @@ import {
 } from '@/components/upnow/PropertyFormModal';
 import { PropertyPhotos } from '@/components/upnow/PropertyPhotos';
 import {
-  RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
-  WORKSPACES_UNIT_TYPES, VENUES_UNIT_TYPES,
+  RESIDENTIAL_UNIT_TYPES, unitTypesForCategory,
   FURNISHING_OPTIONS, UNIT_TYPE_LABELS, getAmenitiesForCategory,
   UNIT_TIERS, RENTAL_TYPE_OPTIONS, sqftFromSqm, sqmFromSqft,
 } from '@/components/upnow/UnitFormModal';
@@ -183,14 +182,6 @@ const VIEW_OPTIONS = [
   'Back View', 'Front View', 'Corner View', 'Facing View', 'Sunrise View', 'Sunset View',
   'Burj Khalifa View', 'Palm Jumeirah View', 'Dubai Marina View', 'Ain Dubai View', 'Fountain View',
 ];
-
-function unitTypesFor(cat: string) {
-  if (cat === 'commercial')  return COMMERCIAL_UNIT_TYPES;
-  if (cat === 'industrial')  return INDUSTRIAL_UNIT_TYPES;
-  if (cat === 'workspaces')  return WORKSPACES_UNIT_TYPES;
-  if (cat === 'venues')      return VENUES_UNIT_TYPES;
-  return RESIDENTIAL_UNIT_TYPES;
-}
 
 function isResidential(unitType: string) {
   return RESIDENTIAL_UNIT_TYPES.includes(unitType);
@@ -1079,7 +1070,7 @@ export default function AddListingPage() {
                   key={r.id}
                   row={r}
                   index={i}
-                  unitTypes={unitTypesFor(propCategory)}
+                  unitTypes={unitTypesForCategory(propCategory)}
                   propCategory={propCategory}
                   errors={rowErrors[r.id] ?? {}}
                   onUpdate={(patch) => updRow(r.id, patch)}
