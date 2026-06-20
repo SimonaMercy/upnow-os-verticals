@@ -20,6 +20,16 @@
 import React from 'react';
 import { Document, Page, View, Text, Font, PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
 
+// Roboto — clean modern sans for the whole document (no Bold ttf shipped, so map
+// bold → Medium). Arabic falls back to Noto Naskh.
+Font.register({
+  family: 'Roboto',
+  fonts: [
+    { src: '/fonts/Roboto-Regular.ttf', fontWeight: 400 },
+    { src: '/fonts/Roboto-Medium.ttf', fontWeight: 500 },
+    { src: '/fonts/Roboto-Medium.ttf', fontWeight: 700 },
+  ],
+});
 Font.register({
   family: 'NotoAr',
   fonts: [
@@ -29,7 +39,14 @@ Font.register({
 });
 Font.registerHyphenationCallback((w) => [w]);
 
-const NAVY = '#1a3c6e';
+// Modern palette: dark slate ink + UpNow jade accent + cool grays.
+const INK = '#0f172a';
+const ACCENT = '#2e9f82';
+const ACCENT_DK = '#1a7a63';
+const MUTE = '#64748b';
+const LINE = '#e2e8f0';
+const TINT = '#f8fafc';
+const NAVY = INK; // keep references working
 const AR = 'NotoAr';
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -262,22 +279,38 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
 
 // ─── PDF styles ──────────────────────────────────────────────────────────────
 
+const PAD = 34;
 const st = {
-  page: { paddingTop: 26, paddingBottom: 22, paddingHorizontal: 30, fontSize: 9, fontFamily: 'Helvetica', color: '#111827' },
-  card: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 4, padding: 8 },
-  cardTitle: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: NAVY, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 6 },
-  defRow: { flexDirection: 'row', marginBottom: 3 },
-  defLbl: { width: 78, fontSize: 7.5, color: '#6b7280' },
-  defVal: { flex: 1, fontSize: 8, color: '#111827', fontFamily: 'Helvetica-Bold' },
-  th: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#fff', paddingVertical: 5, paddingHorizontal: 6 },
-  td: { fontSize: 8.5, paddingVertical: 5, paddingHorizontal: 6 },
+  page: { paddingTop: 0, paddingBottom: 30, paddingHorizontal: 0, fontSize: 9, fontFamily: 'Roboto', color: INK },
+  metaLbl: { fontSize: 6.5, color: MUTE, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 3 },
+  th: { fontSize: 6.5, color: MUTE, letterSpacing: 0.8, textTransform: 'uppercase', paddingVertical: 7 },
+  td: { fontSize: 9, paddingVertical: 8, color: '#334155' },
 } as const;
 
-function Def({ label, value }: { label: string; value?: string | null }) {
+function pillFor(label: string): { bg: string; fg: string } {
+  switch (label) {
+    case 'Cleared': return { bg: '#dcfce7', fg: '#166534' };
+    case 'Bounced': return { bg: '#fee2e2', fg: '#b91c1c' };
+    case 'Cancelled': return { bg: '#e5e7eb', fg: '#374151' };
+    case 'Collected (PDC)':
+    case 'PDCs Collected': return { bg: '#dbeafe', fg: '#1e40af' };
+    default: return { bg: '#fef3c7', fg: '#92400e' }; // Pending
+  }
+}
+function Pill({ text }: { text: string }) {
+  const c = pillFor(text);
   return (
-    <View style={st.defRow}>
-      <Text style={st.defLbl}>{label}</Text>
-      <Text style={st.defVal}>{value || '—'}</Text>
+    <View style={{ backgroundColor: c.bg, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 11 }}>
+      <Text style={{ fontSize: 8, fontWeight: 700, color: c.fg }}>{text}</Text>
+    </View>
+  );
+}
+function Detail({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <View style={{ marginRight: 26, marginBottom: 8 }}>
+      <Text style={{ fontSize: 6.5, color: MUTE, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 2 }}>{label}</Text>
+      <Text style={{ fontSize: 9, color: INK, fontWeight: 500 }}>{value}</Text>
     </View>
   );
 }
@@ -307,138 +340,124 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
   const landlordName = contract.landlord.companyName || contract.landlord.name || '';
   const propertyDesc = [contract.property.buildingName, contract.unit.number || contract.unit.name, contract.property.community || contract.property.emirate].filter(Boolean).join(', ');
 
-  const amtCol = showVat ? 90 : 110;
+  const heroStatus = single
+    ? statusLabel(single.chequeStatus, contract.pdcConfirmed)
+    : (contract.pdcConfirmed ? 'PDCs Collected' : 'Pending Collection');
+  const issuerLines = [
+    (contract.landlord.licenseNumber || contract.landlord.licenseAuthority)
+      ? `Licence ${contract.landlord.licenseNumber || '—'}${contract.landlord.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
+    contract.landlord.phone ? `Tel ${contract.landlord.phone}` : null,
+    contract.landlord.email,
+  ].filter(Boolean) as string[];
 
   return (
-    <Document title={`${receipt.receiptNo}`}>
+    <Document title={receipt.receiptNo}>
       <Page size="A4" style={st.page}>
 
-        {/* Header */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 2, borderBottomColor: NAVY, paddingBottom: 10, marginBottom: 12 }}>
-          <View style={{ maxWidth: '58%' }}>
-            <Text style={{ fontSize: 14, fontFamily: 'Helvetica-Bold', color: NAVY }}>{landlordName}</Text>
-            {(contract.landlord.licenseNumber || contract.landlord.licenseAuthority) ? (
-              <Text style={{ fontSize: 7.5, color: '#6b7280', marginTop: 2 }}>Licence {contract.landlord.licenseNumber || '—'}{contract.landlord.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}</Text>
-            ) : null}
-            {contract.landlord.phone ? <Text style={{ fontSize: 7.5, color: '#6b7280' }}>Tel {contract.landlord.phone}</Text> : null}
-            {contract.landlord.email ? <Text style={{ fontSize: 7.5, color: '#6b7280' }}>{contract.landlord.email}</Text> : null}
+        {/* ── Header band (full-bleed) ── */}
+        <View style={{ backgroundColor: INK, paddingHorizontal: PAD, paddingTop: 26, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View style={{ maxWidth: '56%' }}>
+            <Text style={{ fontSize: 15, color: '#fff', fontWeight: 700 }}>{landlordName}</Text>
+            {issuerLines.map((l, i) => <Text key={i} style={{ fontSize: 7.5, color: '#94a3b8', marginTop: 2 }}>{l}</Text>)}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ fontSize: 15, fontFamily: 'Helvetica-Bold', color: NAVY }}>{receipt.title}</Text>
-            <Text style={{ fontSize: 11, fontFamily: AR, color: NAVY, marginBottom: 5 }}>{receipt.titleAr}</Text>
-            <View style={{ borderWidth: 1.5, borderColor: NAVY, borderRadius: 3, paddingVertical: 4, paddingHorizontal: 8 }}>
-              <View style={{ flexDirection: 'row' }}>
-                <Text style={{ fontSize: 7.5, color: '#6b7280', width: 56 }}>Receipt No.</Text>
-                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: NAVY }}>{receipt.receiptNo}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', marginTop: 2 }}>
-                <Text style={{ fontSize: 7.5, color: '#6b7280', width: 56 }}>Date</Text>
-                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold' }}>{fmtDate(receipt.date) || fmtDate(contract.startDate)}</Text>
-              </View>
+            <Text style={{ fontSize: 8, color: ACCENT, letterSpacing: 2 }}>{receipt.title}</Text>
+            <Text style={{ fontSize: 9, color: '#94a3b8', fontFamily: AR, marginBottom: 9 }}>{receipt.titleAr}</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 2 }}>
+              <Text style={{ fontSize: 7, color: '#94a3b8', letterSpacing: 0.5, marginRight: 6 }}>RECEIPT NO.</Text>
+              <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{receipt.receiptNo}</Text>
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              <Text style={{ fontSize: 7, color: '#94a3b8', letterSpacing: 0.5, marginRight: 6 }}>DATE</Text>
+              <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{fmtDate(receipt.date) || fmtDate(contract.startDate)}</Text>
             </View>
           </View>
         </View>
+        <View style={{ height: 3, backgroundColor: ACCENT }} />
 
-        {/* Received from + property */}
-        <View style={{ flexDirection: 'row', marginBottom: 9 }}>
-          <View style={[st.card, { flex: 1, marginRight: 8 }]}>
-            <Text style={st.cardTitle}>Received From</Text>
-            <Def label="Tenant" value={contract.tenant.name} />
-            <Def label="Emirates ID" value={contract.tenant.emiratesId} />
-            {contract.tenant.phone ? <Def label="Phone" value={contract.tenant.phone} /> : null}
+        {/* ── Hero amount ── */}
+        <View style={{ paddingHorizontal: PAD, paddingTop: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={{ fontSize: 6.5, color: MUTE, letterSpacing: 1.2 }}>AMOUNT RECEIVED</Text>
+            <Text style={{ fontSize: 25, color: ACCENT_DK, fontWeight: 700, marginTop: 3 }}>AED {fmtAmt(grandTotal)}</Text>
+            <Text style={{ fontSize: 7.5, color: MUTE, marginTop: 3 }}>{amountInWords(grandTotal)}</Text>
           </View>
-          <View style={[st.card, { flex: 1 }]}>
-            <Text style={st.cardTitle}>Property</Text>
-            <Def label="Premises" value={propertyDesc} />
-            <Def label="Lease Period" value={`${fmtDate(contract.startDate)}  to  ${fmtDate(contract.endDate)}`} />
-            <Def label="Contract Ref" value={contract.ref} />
+          <View style={{ marginTop: 4 }}><Pill text={heroStatus} /></View>
+        </View>
+
+        {/* ── Parties meta ── */}
+        <View style={{ paddingHorizontal: PAD, paddingTop: 18, flexDirection: 'row' }}>
+          <View style={{ flex: 1, paddingRight: 14 }}>
+            <Text style={st.metaLbl}>Billed To</Text>
+            <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{contract.tenant.name || '—'}</Text>
+            {contract.tenant.emiratesId ? <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>Emirates ID {contract.tenant.emiratesId}</Text> : null}
+            {contract.tenant.phone ? <Text style={{ fontSize: 8, color: MUTE }}>{contract.tenant.phone}</Text> : null}
+          </View>
+          <View style={{ flex: 1.25 }}>
+            <Text style={st.metaLbl}>Property</Text>
+            <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{propertyDesc || '—'}</Text>
+            <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>Lease {fmtDate(contract.startDate)} – {fmtDate(contract.endDate)}</Text>
+            <Text style={{ fontSize: 8, color: MUTE }}>Contract {contract.ref}</Text>
           </View>
         </View>
 
-        {/* Itemised line items */}
-        <View style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 3, marginBottom: 6 }}>
-          <View style={{ flexDirection: 'row', backgroundColor: NAVY }}>
-            <Text style={[st.th, { width: 22 }]}>#</Text>
+        {/* ── Line items ── */}
+        <View style={{ paddingHorizontal: PAD, paddingTop: 18 }}>
+          <View style={{ flexDirection: 'row', borderBottomWidth: 1.2, borderBottomColor: INK }}>
             <Text style={[st.th, { flex: 1 }]}>Description</Text>
-            {showVat ? <Text style={[st.th, { width: 80, textAlign: 'right' }]}>Net (AED)</Text> : null}
-            {showVat ? <Text style={[st.th, { width: 70, textAlign: 'right' }]}>VAT 5%</Text> : null}
-            <Text style={[st.th, { width: amtCol, textAlign: 'right' }]}>Amount (AED)</Text>
+            {showVat ? <Text style={[st.th, { width: 78, textAlign: 'right' }]}>Net</Text> : null}
+            {showVat ? <Text style={[st.th, { width: 60, textAlign: 'right' }]}>VAT 5%</Text> : null}
+            <Text style={[st.th, { width: 92, textAlign: 'right' }]}>Amount (AED)</Text>
           </View>
           {receipt.lines.map((l, i) => (
-            <View key={i} style={{ flexDirection: 'row', backgroundColor: i % 2 ? '#f8fafc' : '#fff', borderTopWidth: i === 0 ? 0 : 1, borderTopColor: '#eef2f7' }}>
-              <Text style={[st.td, { width: 22, color: '#6b7280' }]}>{i + 1}</Text>
-              <Text style={[st.td, { flex: 1 }]}>{l.desc}</Text>
-              {showVat ? <Text style={[st.td, { width: 80, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
-              {showVat ? <Text style={[st.td, { width: 70, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
-              <Text style={[st.td, { width: amtCol, textAlign: 'right', fontFamily: 'Helvetica-Bold' }]}>{fmtAmt(l.total)}</Text>
+            <View key={i} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: LINE }}>
+              <Text style={[st.td, { flex: 1, color: INK }]}>{l.desc}</Text>
+              {showVat ? <Text style={[st.td, { width: 78, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
+              {showVat ? <Text style={[st.td, { width: 60, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
+              <Text style={[st.td, { width: 92, textAlign: 'right', color: INK, fontWeight: 500 }]}>{fmtAmt(l.total)}</Text>
             </View>
           ))}
           {showVat ? (
-            <View>
-              <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-                <Text style={[st.td, { flex: 1, textAlign: 'right', color: '#6b7280' }]}>Subtotal (Net)</Text>
-                <Text style={[st.td, { width: amtCol, textAlign: 'right' }]}>{fmtAmt(subtotal)}</Text>
+            <View style={{ alignItems: 'flex-end', paddingTop: 7 }}>
+              <View style={{ flexDirection: 'row', width: 230, justifyContent: 'space-between', marginBottom: 3 }}>
+                <Text style={{ fontSize: 8.5, color: MUTE }}>Subtotal (Net)</Text>
+                <Text style={{ fontSize: 8.5, color: '#334155' }}>{fmtAmt(subtotal)}</Text>
               </View>
-              <View style={{ flexDirection: 'row' }}>
-                <Text style={[st.td, { flex: 1, textAlign: 'right', color: '#6b7280' }]}>VAT (5%)</Text>
-                <Text style={[st.td, { width: amtCol, textAlign: 'right' }]}>{fmtAmt(totalVat)}</Text>
+              <View style={{ flexDirection: 'row', width: 230, justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 8.5, color: MUTE }}>VAT (5%)</Text>
+                <Text style={{ fontSize: 8.5, color: '#334155' }}>{fmtAmt(totalVat)}</Text>
               </View>
             </View>
           ) : null}
-          <View style={{ flexDirection: 'row', backgroundColor: '#eef2f9', borderTopWidth: 1, borderTopColor: '#d8e0ee' }}>
-            <Text style={{ flex: 1, textAlign: 'right', paddingVertical: 7, paddingHorizontal: 6, fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: NAVY }}>TOTAL RECEIVED</Text>
-            <Text style={{ width: amtCol, textAlign: 'right', paddingVertical: 7, paddingHorizontal: 6, fontSize: 10.5, fontFamily: 'Helvetica-Bold', color: NAVY }}>{fmtAmt(grandTotal)}</Text>
+          {/* Total card */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, backgroundColor: '#eafaf4', borderRadius: 8, paddingVertical: 11, paddingHorizontal: 14 }}>
+            <Text style={{ fontSize: 9, color: ACCENT_DK, letterSpacing: 0.5, fontWeight: 700 }}>TOTAL RECEIVED</Text>
+            <Text style={{ fontSize: 14, color: ACCENT_DK, fontWeight: 700 }}>AED {fmtAmt(grandTotal)}</Text>
           </View>
         </View>
 
-        {/* Amount in words */}
-        <Text style={{ fontSize: 8.5, color: '#374151', marginBottom: 12 }}>
-          Amount in words: <Text style={{ fontFamily: 'Helvetica-Bold' }}>AED {amountInWords(grandTotal)}</Text>
-        </Text>
-
-        {/* Payment details + issued-by */}
-        <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-          <View style={[st.card, { flex: 1, marginRight: 8 }]}>
-            <Text style={st.cardTitle}>Payment Details</Text>
-            {single ? (
-              <View>
-                <Def label="Method" value={methodLabel(single, contract)} />
-                {single.chequeNumber ? <Def label="Cheque / Ref" value={single.chequeNumber} /> : null}
-                <Def label="Value Date" value={fmtDate(single.transactionDate)} />
-                <Def label="Status" value={statusLabel(single.chequeStatus, contract.pdcConfirmed)} />
-              </View>
-            ) : (
-              <View>
-                <Def label="Mode" value={titleCase(contract.modeOfPayment) || 'Cheque'} />
-                <Def label="No. of Cheques" value={String(receipt.scheduleCount ?? contract.numberOfInstallments ?? '—')} />
-                <Def label="Collection" value={contract.pdcConfirmed ? 'PDCs Collected' : 'Pending Collection'} />
-              </View>
-            )}
-          </View>
-          <View style={[st.card, { flex: 1 }]}>
-            <Text style={st.cardTitle}>Issued By</Text>
-            <Def label="Landlord / Agent" value={landlordName} />
-            <Def label="Phone" value={contract.landlord.phone} />
-            <Def label="Email" value={contract.landlord.email} />
+        {/* ── Payment details ── */}
+        <View style={{ paddingHorizontal: PAD, paddingTop: 18 }}>
+          <Text style={[st.metaLbl, { marginBottom: 7 }]}>Payment Details</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {single ? <Detail label="Method" value={methodLabel(single, contract)} /> : <Detail label="Mode" value={titleCase(contract.modeOfPayment) || 'Cheque'} />}
+            {single ? <Detail label="Cheque / Ref" value={single.chequeNumber} /> : <Detail label="No. of Cheques" value={String(receipt.scheduleCount ?? contract.numberOfInstallments ?? '—')} />}
+            {single ? <Detail label="Value Date" value={fmtDate(single.transactionDate)} /> : null}
           </View>
         </View>
 
-        {/* Retain note */}
-        <View style={{ borderWidth: 1, borderColor: '#fde68a', backgroundColor: '#fffbeb', borderRadius: 3, padding: 7, marginBottom: 12 }}>
-          <Text style={{ fontSize: 7.5, color: '#92400e' }}>This receipt acknowledges the payment described above against tenancy contract {contract.ref}. Please retain it for your records.</Text>
-          <Text style={{ fontSize: 8, color: '#92400e', fontFamily: AR, marginTop: 2, textAlign: 'right' }}>يُقرّ هذا الإيصال باستلام الدفعة الموضحة أعلاه بموجب عقد الإيجار. يُرجى الاحتفاظ به للسجلات.</Text>
-        </View>
-
-        {/* System-generated statement — no signature required */}
-        <View style={{ borderWidth: 1, borderColor: '#d1d5db', backgroundColor: '#f8fafc', borderRadius: 4, padding: 9, alignItems: 'center' }}>
-          <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: NAVY }}>This is a system-generated receipt.</Text>
-          <Text style={{ fontSize: 8, color: '#6b7280', marginTop: 2, textAlign: 'center' }}>It is computer-generated and valid without a signature or stamp. No physical signature is required.</Text>
-          <Text style={{ fontSize: 8, color: '#6b7280', fontFamily: AR, marginTop: 2 }}>هذا إيصال صادر آليًا عن النظام، وهو صالح بدون توقيع أو ختم.</Text>
+        {/* ── System-generated note ── */}
+        <View style={{ paddingHorizontal: PAD, paddingTop: 14 }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: LINE, paddingTop: 12, alignItems: 'center' }}>
+            <Text style={{ fontSize: 8.5, color: INK, fontWeight: 500 }}>This is a system-generated receipt — valid without a signature or stamp.</Text>
+            <Text style={{ fontSize: 8, color: MUTE, fontFamily: AR, marginTop: 3 }}>هذا إيصال صادر آليًا عن النظام، وهو صالح بدون توقيع أو ختم.</Text>
+            <Text style={{ fontSize: 7.5, color: MUTE, marginTop: 5 }}>Please retain this receipt against tenancy contract {contract.ref} for your records.</Text>
+          </View>
         </View>
 
         {/* Footer */}
-        <Text fixed style={{ position: 'absolute', bottom: 12, left: 30, right: 30, textAlign: 'center', fontSize: 7, color: '#9ca3af' }}>
-          UpNow Property Management · {receipt.receiptNo} · Contract {contract.ref} · This is a computer-generated receipt.
+        <Text fixed style={{ position: 'absolute', bottom: 14, left: PAD, right: PAD, textAlign: 'center', fontSize: 7, color: '#94a3b8' }}>
+          UpNow Property Management · {receipt.receiptNo} · Contract {contract.ref}
         </Text>
       </Page>
     </Document>
