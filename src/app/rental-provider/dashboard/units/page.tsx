@@ -107,8 +107,13 @@ const feeFromRules = (rules: FeeRuleLite[] | undefined, key: string, rent: numbe
   if (!r || !r.isActive) return null;
   return r.valueType === 'fixed_aed' ? Math.round(r.value) : Math.round((rent * r.value) / 100);
 };
-const sizeLabel = (a: number, b: number) =>
-  a === b ? a.toLocaleString() : `${a.toLocaleString()} – ${b.toLocaleString()}`;
+const sizeLabel = (a: number | null | undefined, b: number | null | undefined) => {
+  // Land / unsized units have no sqft (backend coerces missing → 0); show "—"
+  // instead of "0", and never call .toLocaleString() on null (no crash).
+  const lo = a || b, hi = b || a;
+  if (!lo || !hi) return '—';
+  return lo === hi ? lo.toLocaleString() : `${lo.toLocaleString()} – ${hi.toLocaleString()}`;
+};
 
 // Flag → chip styling + human explanation.
 const FLAG_META: Record<string, { label: string; cls: string; tip: (p: Plan) => string }> = {
