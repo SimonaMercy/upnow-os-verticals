@@ -17,6 +17,9 @@ import {
   ArrowLeft, Building2, Home, Users as UsersIcon, FileText, Mail, Phone,
   ShieldCheck, BadgeCheck, Clock, ChevronRight,
 } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
+} from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet } from '@/lib/api';
@@ -63,6 +66,42 @@ interface UserDetail {
       unitMix: Record<string, number>;
     };
   };
+  manager?: null | {
+    profile: null | {
+      assetManagerId: number; jobTitle: string | null; specialization: string | null;
+      yearsExperience: number | null; languages: string[]; areasServed: string[];
+      rating: number | null; status: string | null;
+    };
+    summary: { landlords: number; properties: number; units: number; occupiedUnits: number; activeLeases: number; annualRentManaged: number };
+    tenure: { since: string | null; days: number | null };
+    authority: {
+      createContracts: boolean; signDocuments: boolean; actAsPoa: boolean; manageDeposits: boolean;
+      manageCollections: boolean; viewFinancials: boolean; manageRenewals: boolean; manageAgreements: boolean;
+      manageMaintenance: boolean; listProperties: boolean; publishListings: boolean; manageViewings: boolean;
+      manageDocuments: boolean; inviteManager: boolean;
+    };
+    attributed: { contractsSigned: number; auditActions: number; lastActionAt: string | null };
+    portfolio: null | {
+      occupancy: { totalUnits: number; occupiedUnits: number; vacantUnits: number; occupancyPct: number };
+      collections: { byStatus: Record<string, { count: number; amount: number }>; collectedAmount: number; pendingAmount: number; bouncedCount: number; collectionRatePct: number };
+      leaseLifecycle: { byStatus: Record<string, number>; expiring30: number; expiring60: number; expiring90: number; renewalBacklog: number; startedThisYear: number; renewalsCompleted: number };
+      financials: { annualRentManaged: number; totalContractValue: number; depositsHeld: number };
+    };
+    landlords: { rentalProviderId: number; userId: number | null; companyName: string | null; ownerName: string | null; grantedAt: string | null; tenureDays: number | null; properties: number; units: number; leases: number; activeLeases: number; badges: { poa: boolean; sign: boolean; money: boolean; contracts: boolean } }[];
+  };
+  customer?: null | {
+    profile: null | { tenantId: number; companyName: string | null };
+    summary: { leases: number; activeLeases: number; landlords: number; annualRentActive: number; depositsHeld: number };
+    payments: null | { byStatus: Record<string, { count: number; amount: number }>; paidAmount: number; pendingAmount: number; bouncedCount: number };
+    documents: null | { total: number; verified: number; pending: number; requested: number };
+    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; unitNumber: string | null; rentalProviderId: number | null; companyName: string | null }[];
+    landlords: { rentalProviderId: number; userId: number | null; companyName: string | null; ownerName: string | null; leases: number }[];
+  };
+  staff?: null | {
+    summary: { totalActions: number; last30dActions: number; distinctEntities: number; lastActionAt: string | null };
+    actionsByKey: Record<string, number>;
+    recentActions: { actionKey: string; entityType: string; entityId: number; createdAt: string }[];
+  };
 }
 
 const aed = (n: number | null | undefined) =>
@@ -82,6 +121,80 @@ const statusColor: Record<string, { bg: string; color: string }> = {
 
 const ROW = 'rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-3';
 const ROW_STYLE = { border: '1px solid var(--color-base-200)', backgroundColor: '#fff' };
+
+// ── Charts (recharts) — palette/conventions shared with the admin dashboard ──
+const CHART = { teal: '#2e9f82', amber: '#d97706', red: '#dc2626', blue: '#2563eb', purple: '#7c3aed', gray: '#d4d2cc' };
+const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
+const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}K` : String(v));
+const leaseStatusColor: Record<string, string> = {
+  active: CHART.teal, expired: CHART.gray, terminated: CHART.red, pending: CHART.amber, issued: CHART.blue,
+};
+
+function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
+      <h3 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{title}</h3>
+      {sub && <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>{sub}</p>}
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+/** Simple vertical bar chart over [{name,value,fill?}]. AED toggles K-axis + currency tooltip. */
+function CountBars({ data, aedMode }: { data: { name: string; value: number; fill?: string }[]; aedMode?: boolean }) {
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} />
+        <YAxis allowDecimals={false} tickFormatter={aedMode ? aedAxis : undefined} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={aedMode ? 38 : 28} />
+        <Tooltip
+          formatter={(v: unknown) => [aedMode ? aed(Number(v)) : String(v), aedMode ? 'Amount' : 'Count'] as [string, string]}
+          contentStyle={tooltipStyle}
+          cursor={{ fill: '#fafaf8' }}
+        />
+        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+          {data.map((d, i) => <Cell key={i} fill={d.fill ?? CHART.teal} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Donut with a centred big-number/label overlay. */
+function Donut({ data, center, label }: { data: { name: string; value: number; fill: string }[]; center: string; label: string }) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  return (
+    <div className="relative">
+      <ResponsiveContainer width="100%" height={180}>
+        <PieChart>
+          <Pie data={total ? data : [{ name: 'None', value: 1, fill: CHART.gray }]} dataKey="value" nameKey="name" innerRadius={50} outerRadius={72} paddingAngle={total ? 2 : 0} startAngle={90} endAngle={-270} stroke="none">
+            {(total ? data : [{ name: 'None', value: 1, fill: CHART.gray }]).map((d, i) => <Cell key={i} fill={d.fill} />)}
+          </Pie>
+          {total > 0 && <Tooltip contentStyle={tooltipStyle} />}
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-2xl font-bold leading-none" style={{ color: 'var(--color-neutral-900)' }}>{center}</span>
+        <span className="text-[10px] mt-1" style={{ color: 'var(--color-neutral-400)' }}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Small legend row for donut slices. */
+function Legend({ items }: { items: { name: string; value: number; fill: string }[] }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center">
+      {items.map((d) => (
+        <span key={d.name} className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-neutral-500)' }}>
+          <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: d.fill }} />
+          {d.name} <span className="font-semibold" style={{ color: 'var(--color-neutral-700)' }}>{d.value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function KpiCard({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: string }) {
   return (
@@ -127,6 +240,16 @@ type LandlordInsights = NonNullable<UserDetail['landlord']>['insights'];
 function Insights({ ins }: { ins: LandlordInsights }) {
   const f = ins.financials, o = ins.occupancy, col = ins.collections, ls = ins.leaseLifecycle, lst = ins.listings, pl = ins.pipeline;
   const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1];
+  const occData = [
+    { name: 'Occupied', value: o.occupiedUnits, fill: CHART.teal },
+    { name: 'Vacant', value: o.vacantUnits, fill: CHART.gray },
+  ];
+  const statusData = Object.entries(ls.byStatus).map(([k, v]) => ({ name: titleCase(k), value: v, fill: leaseStatusColor[k] ?? CHART.blue }));
+  const collData = [
+    { name: 'Cleared', value: col.byStatus.cleared?.amount ?? 0, fill: CHART.teal },
+    { name: 'Pending', value: col.byStatus.pending?.amount ?? 0, fill: CHART.amber },
+    { name: 'Bounced', value: col.byStatus.bounced?.amount ?? 0, fill: CHART.red },
+  ];
   return (
     <>
       {/* KPI strip */}
@@ -137,6 +260,20 @@ function Insights({ ins }: { ins: LandlordInsights }) {
         <KpiCard label="Listed units" value={`${lst.published}/${lst.total}`} sub="published on platform" accent={lst.total > 0 && lst.published === 0 ? 'var(--color-error)' : undefined} />
         <KpiCard label="Renewal backlog" value={ls.renewalBacklog} sub="expired leases" accent={ls.renewalBacklog > 0 ? 'var(--color-gold)' : undefined} />
         <KpiCard label="Expiring ≤90d" value={ls.expiring90} sub={`30d: ${ls.expiring30} · 60d: ${ls.expiring60}`} />
+      </div>
+
+      {/* Charts — portfolio at a glance */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <ChartCard title="Occupancy" sub={`${o.occupiedUnits}/${o.totalUnits} units occupied`}>
+          <Donut data={occData} center={`${o.occupancyPct}%`} label="occupied" />
+          <Legend items={occData} />
+        </ChartCard>
+        <ChartCard title="Lease status mix" sub="all tenancies">
+          <CountBars data={statusData} />
+        </ChartCard>
+        <ChartCard title="Collections" sub="cheque amounts by status">
+          <CountBars data={collData} aedMode />
+        </ChartCard>
       </div>
 
       {/* Detail panels */}
@@ -202,6 +339,291 @@ function Pill({ value }: { value: string }) {
   return <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0" style={{ backgroundColor: sc.bg, color: sc.color }}>{value.replace(/_/g, ' ')}</span>;
 }
 
+/** Human duration from a day count: "today" / "12 days" / "5 mo" / "1y 3mo". */
+function fmtDuration(days: number | null): string {
+  if (days == null) return '—';
+  if (days < 1) return 'today';
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'}`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} mo`;
+  const years = Math.floor(months / 12);
+  const rem = months % 12;
+  return rem ? `${years}y ${rem}mo` : `${years} yr${years === 1 ? '' : 's'}`;
+}
+
+function ProfileBit({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      <span style={{ color: 'var(--color-neutral-400)' }}>{label}: </span>
+      <span style={{ color: 'var(--color-neutral-800)', fontWeight: 600 }}>{value}</span>
+    </span>
+  );
+}
+
+function MiniBadge({ label }: { label: string }) {
+  return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>{label}</span>;
+}
+
+const byCountDesc = (a: [string, number], b: [string, number]) => b[1] - a[1];
+
+/** Manager breakdown — landlords worked for, authority, attributed activity, portfolio. */
+function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
+  const s = m.summary, p = m.portfolio, a = m.attributed, t = m.tenure, auth = m.authority;
+  const prof = m.profile;
+  const occData = p ? [
+    { name: 'Occupied', value: p.occupancy.occupiedUnits, fill: CHART.teal },
+    { name: 'Vacant', value: p.occupancy.vacantUnits, fill: CHART.gray },
+  ] : [];
+  const statusData = p ? Object.entries(p.leaseLifecycle.byStatus).map(([k, v]) => ({ name: titleCase(k), value: v, fill: leaseStatusColor[k] ?? CHART.blue })) : [];
+  const collData = p ? [
+    { name: 'Cleared', value: p.collections.byStatus.cleared?.amount ?? 0, fill: CHART.teal },
+    { name: 'Pending', value: p.collections.byStatus.pending?.amount ?? 0, fill: CHART.amber },
+    { name: 'Bounced', value: p.collections.byStatus.bounced?.amount ?? 0, fill: CHART.red },
+  ] : [];
+  const authList: [string, boolean][] = [
+    ['Create contracts', auth.createContracts], ['Sign documents', auth.signDocuments],
+    ['Power of Attorney', auth.actAsPoa], ['Manage deposits', auth.manageDeposits],
+    ['Manage collections', auth.manageCollections], ['View financials', auth.viewFinancials],
+    ['Manage renewals', auth.manageRenewals], ['Manage agreements', auth.manageAgreements],
+    ['Manage maintenance', auth.manageMaintenance], ['List properties', auth.listProperties],
+    ['Publish listings', auth.publishListings], ['Manage viewings', auth.manageViewings],
+    ['Manage documents', auth.manageDocuments], ['Invite managers', auth.inviteManager],
+  ];
+  const hasProfile = !!prof && (!!prof.jobTitle || !!prof.specialization || prof.yearsExperience != null || prof.rating != null || (prof.languages?.length ?? 0) > 0 || (prof.areasServed?.length ?? 0) > 0);
+  return (
+    <>
+      {hasProfile && prof && (
+        <div className="bg-white rounded-2xl p-4 mb-6 flex flex-wrap gap-x-8 gap-y-2 text-sm" style={{ boxShadow: 'var(--shadow-sm)' }}>
+          {prof.jobTitle && <ProfileBit label="Title" value={prof.jobTitle} />}
+          {prof.specialization && <ProfileBit label="Specialization" value={prof.specialization} />}
+          {prof.yearsExperience != null && <ProfileBit label="Experience" value={`${prof.yearsExperience} yrs`} />}
+          {prof.rating != null && <ProfileBit label="Rating" value={`${prof.rating}/5`} />}
+          {(prof.languages?.length ?? 0) > 0 && <ProfileBit label="Languages" value={prof.languages.join(', ')} />}
+          {(prof.areasServed?.length ?? 0) > 0 && <ProfileBit label="Areas" value={prof.areasServed.join(', ')} />}
+        </div>
+      )}
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+        <KpiCard label="Landlords managed" value={s.landlords} sub={t.since ? `since ${fmtDate(t.since)}` : 'no grants yet'} accent="var(--color-primary)" />
+        <KpiCard label="Tenure" value={fmtDuration(t.days)} sub={t.since ? `first grant ${fmtDate(t.since)}` : '—'} />
+        <KpiCard label="Units managed" value={s.units} sub={`${s.properties} properties`} />
+        <KpiCard label="Active leases" value={s.activeLeases} sub="under management" />
+        <KpiCard label="Annual rent managed" value={aed(s.annualRentManaged)} sub="active leases" />
+        <KpiCard label="Portfolio occupancy" value={p ? `${p.occupancy.occupancyPct}%` : '—'} sub={p ? `${p.occupancy.occupiedUnits}/${p.occupancy.totalUnits} occupied` : ''} />
+      </div>
+
+      {/* Charts — portfolio at a glance */}
+      {p && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <ChartCard title="Portfolio occupancy" sub={`${p.occupancy.occupiedUnits}/${p.occupancy.totalUnits} units occupied`}>
+            <Donut data={occData} center={`${p.occupancy.occupancyPct}%`} label="occupied" />
+            <Legend items={occData} />
+          </ChartCard>
+          <ChartCard title="Lease status mix" sub="across managed landlords">
+            <CountBars data={statusData} />
+          </ChartCard>
+          <ChartCard title="Collections" sub="cheque amounts by status">
+            <CountBars data={collData} aedMode />
+          </ChartCard>
+        </div>
+      )}
+
+      {/* Attributed activity + authority */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <MiniPanel title="Attributed to this manager">
+          <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>What this manager personally did. Most manager work is still logged under the landlord, so these may read low.</p>
+          <KV label="Contracts signed" value={a.contractsSigned} />
+          <KV label="Logged actions" value={a.auditActions} />
+          <KV label="Last action" value={a.lastActionAt ? fmtDate(a.lastActionAt) : '—'} />
+        </MiniPanel>
+
+        <MiniPanel title="Authority footprint">
+          <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>Powers held for at least one managed landlord.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {authList.map(([label, on]) => (
+              <span key={label} className="text-xs font-medium px-2 py-1 rounded-full" style={on ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' } : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>
+                {on ? '✓ ' : ''}{label}
+              </span>
+            ))}
+          </div>
+        </MiniPanel>
+      </div>
+
+      {/* Portfolio outcomes */}
+      {p && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <MiniPanel title="Portfolio outcomes (across managed landlords)">
+            <KV label="Leases started this year" value={p.leaseLifecycle.startedThisYear} />
+            <KV label="Renewals completed" value={p.leaseLifecycle.renewalsCompleted} />
+            <Divider />
+            <KV label="Expiring 30 / 60 / 90 days" value={`${p.leaseLifecycle.expiring30} / ${p.leaseLifecycle.expiring60} / ${p.leaseLifecycle.expiring90}`} />
+            <KV label="Renewal backlog (expired)" value={p.leaseLifecycle.renewalBacklog} dot={p.leaseLifecycle.renewalBacklog > 0 ? 'var(--color-gold)' : undefined} />
+            <Divider />
+            <KV label="Annual rent managed" value={aed(p.financials.annualRentManaged)} />
+            <KV label="Total contract value" value={aed(p.financials.totalContractValue)} />
+            <KV label="Deposits held" value={aed(p.financials.depositsHeld)} />
+          </MiniPanel>
+
+          <MiniPanel title="Collections (across managed landlords)">
+            <KV label="Cleared" value={`${p.collections.byStatus.cleared?.count ?? 0} · ${aed(p.collections.byStatus.cleared?.amount ?? 0)}`} dot="var(--color-primary)" />
+            <KV label="Pending" value={`${p.collections.byStatus.pending?.count ?? 0} · ${aed(p.collections.byStatus.pending?.amount ?? 0)}`} dot="var(--color-gold)" />
+            <KV label="Bounced" value={`${p.collections.byStatus.bounced?.count ?? 0} · ${aed(p.collections.byStatus.bounced?.amount ?? 0)}`} dot="var(--color-error)" />
+            <KV label="Collection rate" value={`${p.collections.collectionRatePct}%`} />
+            <Divider />
+            <Caption>Lease status mix</Caption>
+            {Object.entries(p.leaseLifecycle.byStatus).sort(byCountDesc).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
+          </MiniPanel>
+        </div>
+      )}
+
+      {/* Landlords worked for */}
+      <Section title="Landlords worked for" count={m.landlords.length}>
+        {m.landlords.map((l) => (
+          <Link key={l.rentalProviderId} href={l.userId ? `/dashboard/admin/users/${l.userId}` : '#'} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+            <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{l.companyName || l.ownerName || `RP #${l.rentalProviderId}`}</p>
+              <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                {l.units} units · {l.activeLeases}/{l.leases} active leases · since {fmtDate(l.grantedAt)} ({fmtDuration(l.tenureDays)})
+              </p>
+            </div>
+            <div className="flex gap-1 flex-shrink-0">
+              {l.badges.poa && <MiniBadge label="POA" />}
+              {l.badges.sign && <MiniBadge label="Sign" />}
+              {l.badges.money && <MiniBadge label="$" />}
+              {l.badges.contracts && <MiniBadge label="Contracts" />}
+            </div>
+            <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+          </Link>
+        ))}
+      </Section>
+    </>
+  );
+}
+
+/** Customer breakdown — tenancies, landlords, payment track record, KYC docs. */
+function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
+  const s = c.summary, pay = c.payments, docs = c.documents;
+  const payData = pay ? [
+    { name: 'Cleared', value: pay.byStatus.cleared?.amount ?? 0, fill: CHART.teal },
+    { name: 'Pending', value: pay.byStatus.pending?.amount ?? 0, fill: CHART.amber },
+    { name: 'Bounced', value: pay.byStatus.bounced?.amount ?? 0, fill: CHART.red },
+  ] : [];
+  const tStatus: Record<string, number> = {};
+  c.leases.forEach((l) => { tStatus[l.status] = (tStatus[l.status] ?? 0) + 1; });
+  const tData = Object.entries(tStatus).map(([k, v]) => ({ name: titleCase(k), value: v, fill: leaseStatusColor[k] ?? CHART.blue }));
+  const docData = docs ? [
+    { name: 'Verified', value: docs.verified, fill: CHART.teal },
+    { name: 'Pending review', value: docs.pending, fill: CHART.amber },
+    { name: 'Requested', value: docs.requested, fill: CHART.gray },
+  ].filter((d) => d.value > 0) : [];
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+        <KpiCard label="Tenancies" value={s.leases} sub={`${s.activeLeases} active`} accent="var(--color-primary)" />
+        <KpiCard label="Landlords" value={s.landlords} sub="rented from" />
+        <KpiCard label="Annual rent (active)" value={aed(s.annualRentActive)} />
+        <KpiCard label="Deposits held" value={aed(s.depositsHeld)} />
+        <KpiCard label="Paid to date" value={pay ? aed(pay.paidAmount) : '—'} sub={pay ? `${aed(pay.pendingAmount)} pending` : ''} />
+        <KpiCard label="Bounced cheques" value={pay?.bouncedCount ?? 0} accent={(pay?.bouncedCount ?? 0) > 0 ? 'var(--color-error)' : undefined} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <ChartCard title="Payments" sub="cheque amounts by status">
+          {pay ? <CountBars data={payData} aedMode /> : <p className="text-sm py-8 text-center" style={{ color: 'var(--color-neutral-400)' }}>No payments yet.</p>}
+        </ChartCard>
+        <ChartCard title="Tenancy status" sub={`${s.leases} total · ${s.activeLeases} active`}>
+          <Donut data={tData} center={String(s.activeLeases)} label="active" />
+          <Legend items={tData} />
+        </ChartCard>
+        <ChartCard title="KYC documents" sub={docs ? `${docs.total} on file${docs.requested > 0 ? ` · ${docs.requested} requested` : ''}` : ''}>
+          {docData.length > 0
+            ? <><Donut data={docData} center={String(docs?.verified ?? 0)} label="verified" /><Legend items={docData} /></>
+            : <p className="text-sm py-8 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents uploaded.</p>}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Section title="Tenancies" count={c.leases.length}>
+          {c.leases.map((l) => (
+            <div key={l.id} className={ROW} style={ROW_STYLE}>
+              <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                  {l.companyName || '—'}{l.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {l.unitNumber}</span>}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{fmtDate(l.contractStartDate)} → {fmtDate(l.contractEndDate)} · {aed(l.annualRent)}/yr</p>
+              </div>
+              <Pill value={l.status} />
+            </div>
+          ))}
+        </Section>
+
+        <Section title="Landlords" count={c.landlords.length}>
+          {c.landlords.map((l) => (
+            <Link key={l.rentalProviderId} href={l.userId ? `/dashboard/admin/users/${l.userId}` : '#'} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+              <Building2 size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{l.companyName || l.ownerName || `RP #${l.rentalProviderId}`}</p>
+                <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{l.leases} lease{l.leases === 1 ? '' : 's'}</p>
+              </div>
+              <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+            </Link>
+          ))}
+        </Section>
+      </div>
+    </>
+  );
+}
+
+/** Staff (admin / super-admin) breakdown — platform activity from the audit log. */
+function StaffView({ s, role }: { s: NonNullable<UserDetail['staff']>; role: string }) {
+  const actionData = Object.entries(s.actionsByKey).sort(byCountDesc).map(([k, v]) => ({ name: titleCase(k), value: v }));
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <KpiCard label="Total actions" value={s.summary.totalActions} sub="logged on platform" accent="var(--color-primary)" />
+        <KpiCard label="Last 30 days" value={s.summary.last30dActions} />
+        <KpiCard label="Entities touched" value={s.summary.distinctEntities} />
+        <KpiCard label="Last action" value={s.summary.lastActionAt ? fmtDate(s.summary.lastActionAt) : '—'} />
+      </div>
+
+      {s.summary.totalActions === 0 ? (
+        <p className="text-sm bg-white rounded-2xl p-4" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
+          No logged platform activity for this {roleLabel[role] ?? role} account yet. Note: manager and some staff actions are still recorded under the landlord rather than the individual.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ChartCard title="Actions by type" sub="platform actions, all time">
+            <ResponsiveContainer width="100%" height={Math.max(140, actionData.length * 34)}>
+              <BarChart layout="vertical" data={actionData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" horizontal={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 10, fill: '#6b6860' }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v: unknown) => [String(v), 'Actions'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                <Bar dataKey="value" radius={[0, 4, 4, 0]} fill={CHART.purple} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+          <Section title="Recent activity" count={s.recentActions.length}>
+            {s.recentActions.map((a, i) => (
+              <div key={i} className={ROW} style={ROW_STYLE}>
+                <Clock size={14} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{titleCase(a.actionKey)}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{titleCase(a.entityType)} #{a.entityId}</p>
+                </div>
+                <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>{fmtDate(a.createdAt)}</span>
+              </div>
+            ))}
+          </Section>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function AdminUserDetailPage() {
   useAuth();
   const params = useParams<{ id: string }>();
@@ -227,6 +649,9 @@ export default function AdminUserDetailPage() {
 
   const u = data?.user;
   const L = data?.landlord;
+  const M = data?.manager;
+  const C = data?.customer;
+  const S = data?.staff;
 
   return (
     <DashboardPage title="User Detail" subtitle={u ? u.name : ''}>
@@ -275,8 +700,8 @@ export default function AdminUserDetailPage() {
             </div>
           </div>
 
-          {/* ── Landlord breakdown ── */}
-          {L ? (
+          {/* ── Role-specific breakdown ── */}
+          {L && (
             <>
               {/* Profile line */}
               {(L.profile.companyName || L.profile.tradeLicenseNumber) && (
@@ -353,12 +778,16 @@ export default function AdminUserDetailPage() {
                 </Section>
               </div>
             </>
-          ) : (
-            u.role !== 'rental_provider' && (
-              <p className="text-sm bg-white rounded-2xl p-4" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
-                No additional breakdown for {roleLabel[u.role] ?? u.role} accounts yet.
-              </p>
-            )
+          )}
+
+          {M && <ManagerView m={M} />}
+          {C && <CustomerView c={C} />}
+          {S && <StaffView s={S} role={u.role} />}
+
+          {!L && !M && !C && !S && (
+            <p className="text-sm bg-white rounded-2xl p-4" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
+              No additional breakdown for {roleLabel[u.role] ?? u.role} accounts yet.
+            </p>
           )}
         </>
       )}

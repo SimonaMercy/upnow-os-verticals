@@ -17,11 +17,11 @@
  *     text. All display / filter / search / detail UI is preserved.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Search, X, Wallet, Loader2, RefreshCw, Lock, ExternalLink, FileText } from 'lucide-react';
+import { Search, X, Wallet, Loader2, RefreshCw, Lock, Calendar } from 'lucide-react';
 import { apiGet } from '@/lib/api';
-import { openDocViewer } from '@/lib/docViewer';
+import DepositDetailModal, { type DepositDetail } from '@/components/upnow/DepositDetailModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
@@ -45,16 +45,23 @@ interface Deposit {
   depositRef: string;
   contractRef: string;
   contractId: number | null;
+  currentContractId: number | null;
   tenant: string;
   building: string;
   unit: string;
   amount: number;
   amountReceipt: number | null;
   recordedDate: string | null;
+  startDate: string | null;
+  endDate: string | null;
   status: DepositStatus;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;
+  settledRefundAmount: number | null;
+  settledDeductionAmount: number | null;
+  settledOn: string | null;
+  settledViaSettlementId: number | null;
   proofs?: DepositProof[];
 }
 
@@ -69,12 +76,43 @@ function fmtAed(v: number) {
   return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(v);
 }
 
-/** Human label for a deposit proof, derived from its document_key. */
-function proofLabel(key: string): string {
-  if (key.startsWith('deposit_cheque')) return 'Cheque';
-  if (key.startsWith('deposit_slip') || key.startsWith('bank')) return 'Bank Transfer';
-  if (key.startsWith('deposit_receipt')) return 'Receipt';
-  return key.replace(/_/g, ' ');
+/** A deposit belongs to year Y if its lease TERM overlaps Y — the same scope as
+ *  the Tenancy Contracts page. Falls back to the deposit's from/to year range,
+ *  then its recorded year, for rows without a resolvable term. */
+function depositYearMatch(
+  d: { startDate: string | null; endDate: string | null; fromYear: number | null; toYear: number | null; recordedDate: string | null },
+  y: number,
+): boolean {
+  if (d.startDate || d.endDate) {
+    const s = d.startDate ? Number(d.startDate.slice(0, 4)) : -Infinity;
+    const e = d.endDate ? Number(d.endDate.slice(0, 4)) : Infinity;
+    return y >= s && y <= e;
+  }
+  if (d.fromYear != null || d.toYear != null) {
+    const lo = d.fromYear ?? d.toYear!;
+    const hi = d.toYear ?? d.fromYear!;
+    return y >= Math.min(lo, hi) && y <= Math.max(lo, hi);
+  }
+  if (d.recordedDate) return Number(d.recordedDate.slice(0, 4)) === y;
+  return false;
+}
+
+/** Collect every lease year present in the data for the year dropdown. */
+function depositYears(deposits: { startDate: string | null; endDate: string | null; fromYear: number | null; toYear: number | null; recordedDate: string | null }[]): number[] {
+  const set = new Set<number>();
+  for (const d of deposits) {
+    if (d.startDate || d.endDate) {
+      if (d.startDate) set.add(Number(d.startDate.slice(0, 4)));
+      if (d.endDate) set.add(Number(d.endDate.slice(0, 4)));
+    } else if (d.fromYear != null || d.toYear != null) {
+      if (d.fromYear != null) set.add(d.fromYear);
+      if (d.toYear != null) set.add(d.toYear);
+    } else if (d.recordedDate) {
+      set.add(Number(d.recordedDate.slice(0, 4)));
+    }
+  }
+  set.add(new Date().getFullYear());
+  return [...set].filter(n => Number.isFinite(n) && n > 0).sort((a, b) => b - a);
 }
 
 export default function ManagerDepositsPage() {
@@ -94,6 +132,7 @@ export default function ManagerDepositsPage() {
   const [search, setSearch]     = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterBuilding, setFilterBuilding] = useState('all');
+  const [filterYear, setFilterYear] = useState('all');
   const [detailId, setDetailId] = useState<string | null>(null);
 
   async function load() {
@@ -110,6 +149,21 @@ export default function ManagerDepositsPage() {
   }
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [effectiveRp, allowed]);
+
+  // Lazy-load the full detail bundle for the popup (scoped to the selected landlord).
+  const loadDepositDetail = useCallback(
+    (id: string): Promise<DepositDetail> => apiGet<DepositDetail>(`/manager/deposits/${id}/detail?rp=${effectiveRp}`),
+    [effectiveRp],
+  );
+
+  // Year scope — same behaviour as the Tenancy Contracts page: options derived
+  // from the data, default to the current year, with an "All years" escape.
+  const years = useMemo(() => depositYears(deposits), [deposits]);
+
+  const yearScoped = useMemo(
+    () => (filterYear === 'all' ? deposits : deposits.filter(d => depositYearMatch(d, Number(filterYear)))),
+    [deposits, filterYear],
+  );
 
   // Per-landlord permission gate — mirrors the lock the nav enforces.
   if (!permsLoading && !allowed) {
@@ -130,7 +184,7 @@ export default function ManagerDepositsPage() {
 
   const buildings = [...new Set(deposits.map(d => d.building).filter(b => b !== '—'))];
 
-  const filtered = deposits.filter(d => {
+  const filtered = yearScoped.filter(d => {
     if (filterStatus !== 'all' && d.status !== filterStatus) return false;
     if (filterBuilding !== 'all' && d.building !== filterBuilding) return false;
     if (search) {
@@ -149,11 +203,11 @@ export default function ManagerDepositsPage() {
   const clearFilters = () => { setFilterStatus('all'); setFilterBuilding('all'); setSearch(''); };
 
   // Summary stats
-  const totalHeld      = deposits.filter(d => d.status === 'held').reduce((s, d) => s + d.amount, 0);
-  const heldCount      = deposits.filter(d => d.status === 'held').length;
-  const returnedCount  = deposits.filter(d => d.status === 'returned').length;
-  const dedCount       = deposits.filter(d => d.status === 'partial_return').length;
-  const totalAmount    = deposits.reduce((s, d) => s + d.amount, 0);
+  const totalHeld      = yearScoped.filter(d => d.status === 'held').reduce((s, d) => s + d.amount, 0);
+  const heldCount      = yearScoped.filter(d => d.status === 'held').length;
+  const returnedCount  = yearScoped.filter(d => d.status === 'returned').length;
+  const dedCount       = yearScoped.filter(d => d.status === 'partial_return').length;
+  const totalAmount    = yearScoped.reduce((s, d) => s + d.amount, 0);
 
   const detail = detailId !== null ? deposits.find(d => d.id === detailId) ?? null : null;
 
@@ -165,16 +219,27 @@ export default function ManagerDepositsPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Security Deposits</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">Track all security deposits across the landlord’s rental agreements.</p>
         </div>
-        <button onClick={load} disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] transition-colors disabled:opacity-50 cursor-pointer">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e8e6e0] bg-white text-[#6b6860]"
+            title="Scope the page by lease year">
+            <Calendar size={14} />
+            <select value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter deposits by year"
+              className="bg-transparent text-sm font-semibold text-[#1a1916] focus:outline-none cursor-pointer pr-1 py-1">
+              <option value="all">All years</option>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <button onClick={load} disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] transition-colors disabled:opacity-50 cursor-pointer">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
         {[
-          { label: 'Total Records',       value: String(deposits.length),     sub: 'all deposits' },
+          { label: 'Total Records',       value: String(yearScoped.length),   sub: filterYear === 'all' ? 'all deposits' : `in ${filterYear}` },
           { label: 'Total Amount',        value: fmtAed(totalAmount),         sub: 'recorded' },
           { label: 'Currently Held',      value: fmtAed(totalHeld),           sub: `${heldCount} active` },
           { label: 'Returned',            value: String(returnedCount),       sub: 'completed' },
@@ -239,9 +304,13 @@ export default function ManagerDepositsPage() {
               <Wallet size={24} className="text-[#2e9f82]" />
             </div>
             <p className="text-sm text-[#6b6860] mb-1">
-              {hasFilters ? 'No deposits match your filters.' : 'No security deposits recorded yet.'}
+              {filterYear !== 'all'
+                ? `No deposits for ${filterYear}.`
+                : hasFilters ? 'No deposits match your filters.' : 'No security deposits recorded yet.'}
             </p>
-            <p className="text-xs text-[#9b9890]">Deposits are recorded from the contract detail page.</p>
+            <p className="text-xs text-[#9b9890]">
+              {filterYear !== 'all' ? 'Switch to “All years” to see every deposit.' : 'Deposits are recorded from the contract detail page.'}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -280,85 +349,13 @@ export default function ManagerDepositsPage() {
         )}
       </div>
 
-      {/* Detail drawer */}
       {detail && (
-        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setDetailId(null)}>
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-          <div className="relative w-full max-w-md bg-white h-full shadow-xl overflow-y-auto flex flex-col"
-            onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0]">
-              <div>
-                <p className="font-bold text-[#1a1916]">Deposit Detail</p>
-                <p className="text-xs text-[#9b9890] font-mono mt-0.5">{detail.depositRef}</p>
-              </div>
-              <button onClick={() => setDetailId(null)} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer p-1">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="p-6 flex-1 space-y-4">
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center rounded-full text-xs font-semibold px-3 py-1 ${STATUS_STYLE[detail.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
-                  {STATUS_LABELS[detail.status] ?? detail.status}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: 'Contract',    value: detail.contractRef },
-                  { label: 'Building',    value: detail.building },
-                  { label: 'Unit',        value: detail.unit },
-                  { label: 'Customer',    value: detail.tenant },
-                  { label: 'Cheque Amount', value: fmtAed(detail.amount) },
-                  { label: 'Receipt Amount', value: detail.amountReceipt != null ? fmtAed(detail.amountReceipt) : '—' },
-                ].map(item => (
-                  <div key={item.label} className="bg-[#f4f3ef] rounded-xl p-3">
-                    <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">{item.label}</p>
-                    <p className="text-sm font-semibold text-[#1a1916]">{item.value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Payment proof — the cheque image or bank-transfer slip/receipt */}
-              <div>
-                <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-2">Payment proof</p>
-                {(detail.proofs?.length ?? 0) === 0 ? (
-                  <div className="bg-[#fffbeb] border border-[#fde68a] rounded-xl p-3">
-                    <p className="text-xs text-[#92400e]">No cheque image or bank-transfer proof uploaded for this deposit.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    {detail.proofs!.map((pf, i) => {
-                      const isImg = (pf.mimeType ?? '').startsWith('image/');
-                      return (
-                        <button key={i} type="button"
-                          onClick={() => openDocViewer({ fileUrl: pf.fileUrl, caption: proofLabel(pf.documentKey), mimeType: pf.mimeType })}
-                          className="block w-full text-left rounded-xl border border-[#e8e6e0] overflow-hidden hover:border-[#2e9f82] transition-colors cursor-pointer">
-                          {isImg && pf.fileUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={pf.fileUrl} alt={proofLabel(pf.documentKey)} className="w-full h-28 object-cover bg-[#f4f3ef]" />
-                          ) : (
-                            <div className="w-full h-28 flex items-center justify-center bg-[#f4f3ef] text-[#9b9890]">
-                              <FileText size={28} />
-                            </div>
-                          )}
-                          <div className="px-2.5 py-2">
-                            <p className="text-xs font-semibold text-[#1a1916]">{proofLabel(pf.documentKey)}</p>
-                            <p className="text-[10px] text-[#2e9f82] flex items-center gap-1"><ExternalLink size={10} /> View</p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              {detail.notes && (
-                <div className="bg-[#f4f3ef] rounded-xl p-3">
-                  <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">Notes</p>
-                  <p className="text-sm text-[#3d3b35]">{detail.notes}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <DepositDetailModal
+          deposit={detail}
+          loadDetail={loadDepositDetail}
+          onClose={() => setDetailId(null)}
+          links={null}
+        />
       )}
     </div>
   );
