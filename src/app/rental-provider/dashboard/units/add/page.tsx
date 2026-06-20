@@ -397,10 +397,12 @@ export default function AddListingPage() {
     const newRowErrors: typeof rowErrors = {};
     for (const r of rows) {
       const e: Partial<Record<keyof UnitRow, string>> = {};
+      // Only the unit reference + type are mandatory — same as the CSV-import
+      // path and the backend DTO. Size & price are optional so a unit can be
+      // stubbed with limited detail (e.g. an accommodation room) and sized /
+      // priced later; the /units page flags unsized/unpriced units for follow-up.
       if (!r.unitNumber.trim()) { e.unitNumber = 'Required'; ok = false; }
       if (!r.unitType)          { e.unitType   = 'Required'; ok = false; }
-      if (!r.unitSizeSqft && !r.unitSizeSqm) { e.unitSizeSqft = 'Required'; ok = false; }
-      if (!r.rentalPrice)       { e.rentalPrice = 'Required'; ok = false; }
       if (Object.keys(e).length) newRowErrors[r.id] = e;
     }
     setRowErrors(newRowErrors);
