@@ -41,7 +41,7 @@ import {
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
 type DisplayStatus = ContractStatus | 'declined' | 'needs_activation' | 'starts_later' | 'superseded' | 'terminating';
-type TabKey = 'all' | 'active' | 'expiring' | 'expired';
+type TabKey = 'all' | 'active' | 'expiring' | 'renewals' | 'expired';
 
 /** Expiring window for the renewal-attention bucket. */
 const EXPIRING_DAYS = 90;
@@ -66,6 +66,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'all',      label: 'All' },
   { key: 'active',   label: 'Active' },
   { key: 'expiring', label: `Expiring < ${EXPIRING_DAYS}d` },
+  { key: 'renewals', label: 'Renewals' },
   { key: 'expired',  label: 'Expired' },
 ];
 
@@ -100,7 +101,11 @@ function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contract
     return 'superseded';
   }
   if (c.status === 'active' && c.termination?.response === 'accepted') return 'terminating';
-  if (c.status === 'pending') {
+  // Time-split forward drafts. Renewal children are promoted pending → issued
+  // for signing, so an 'issued' renewal whose term hasn't started is still a
+  // forward draft (without this it fell through to the raw 'issued' label and
+  // showed in NO tab — the "renewal not visible in contracts" bug).
+  if (c.status === 'pending' || (c.status === 'issued' && c.contractType === 'renewal')) {
     const s = (c.startDate ?? '').slice(0, 10);
     const e = (c.endDate ?? '').slice(0, 10);
     if (s && s > TODAY) return 'starts_later';
@@ -355,25 +360,30 @@ export default function OrdersPage() {
     [yearScoped],
   );
 
-  // Future renewals already signed ahead — context only (their expiring parent
-  // already represents the unit in Expiring), never a headline bucket.
-  const signedAhead = useMemo(() => yearScoped.filter(c => displayStatusOf(c) === 'starts_later').length, [yearScoped]);
+  // Forward renewals already signed ahead (pending/issued, term not yet begun).
+  // Their expiring parent still represents the unit in Expiring, but the RP also
+  // needs to open the renewal itself — so they get their own visible Upcoming
+  // tab (previously an issued forward renewal showed in NO tab at all).
+  const upcomingRenewals = useMemo(() => yearScoped.filter(c => displayStatusOf(c) === 'starts_later'), [yearScoped]);
+  const signedAhead = upcomingRenewals.length;
 
   const tabCounts = useMemo<Record<TabKey, number>>(() => ({
     all: currentLeases.length,
     active: activeLeases.length,
     expiring: expiringLeases.length,
+    renewals: upcomingRenewals.length,
     expired: expiredRows.length,
-  }), [currentLeases, activeLeases, expiringLeases, expiredRows]);
+  }), [currentLeases, activeLeases, expiringLeases, upcomingRenewals, expiredRows]);
 
   const baseList = useMemo(() => {
     switch (activeTab) {
       case 'active':   return activeLeases;
       case 'expiring': return expiringLeases;
+      case 'renewals': return upcomingRenewals;
       case 'expired':  return expiredRows;
       default:         return currentLeases;
     }
-  }, [activeTab, currentLeases, activeLeases, expiringLeases, expiredRows]);
+  }, [activeTab, currentLeases, activeLeases, expiringLeases, upcomingRenewals, expiredRows]);
 
   const filtered = useMemo(() => {
     const list = baseList.filter(c => {
