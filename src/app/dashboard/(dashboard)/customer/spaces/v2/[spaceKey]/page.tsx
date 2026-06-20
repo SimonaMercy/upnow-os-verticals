@@ -19,7 +19,7 @@
  *   PATCH  /api/contracts/tenant/:id/termination/respond { response }
  *   PATCH  /api/contracts/:parentId/renewal/accept
  *   PATCH  /api/contracts/:parentId/renewal/reject
- *   POST   /api/contracts/tenant/:childId/cheques-submitted
+ *   PATCH  /api/contracts/tenant/:childId/cheques-submitted
  *   POST   /api/documents/upload-url                     (utility proof; presigned S3)
  *   POST   /api/documents                                (register doc after PUT)
  */
@@ -3853,6 +3853,131 @@ function TerminationReceivedAction({ resolved, onRefresh }: { resolved: Resolved
 }
 
 /* ─── RENEWAL ──────────────────────────────────────────────────────── */
+/** Shared renewal terms + payment-schedule summary. Rendered on BOTH the
+ *  renewal OFFER step (before acceptance) and the renewal PAYMENTS step
+ *  (after acceptance, while the RP finalises the contract) so the customer
+ *  always sees the new rent, cost breakdown and per-installment schedule —
+ *  link, don't duplicate. `parent` is the current lease (drives the
+ *  rent-vs-current delta); `child` is the proposed/renewed contract that
+ *  carries the new terms + Payment rows. */
+function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; child: ApiContract | null }) {
+  const currentRent = parent?.annualRent ?? 0;
+  const newRent = child?.annualRent ?? null;
+  const rentDelta = newRent != null && currentRent ? newRent - currentRent : null;
+  const rentDeltaPct = newRent != null && currentRent ? Math.round(((newRent - currentRent) / currentRent) * 1000) / 10 : null;
+
+  const newCheques = child?.numberOfInstallments ?? null;
+  const newContractValue = child?.contractValue ?? null;
+  const securityDeposit = parent?.securityDepositAmount ?? null;
+
+  // Renewal payment schedule comes straight from the renewal contract's
+  // Payment rows (built by proposeRenewal — first row bundles admin + ejari
+  // + commission + rent installment 1). Mirrors the new-lease payment_review
+  // step so the customer sees identical detail.
+  const payments = (child?.payments ?? []).slice().sort((a, b) => {
+    const ad = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+    const bd = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+    return ad - bd;
+  });
+  const totalScheduled = payments.reduce((s, p) => s + (p.amountPaid ?? 0), 0);
+  const fmt = (v: number | null | undefined) => v != null ? fmtAed(v) : '—';
+
+  return (
+    <>
+      {/* Headline rent comparison */}
+      <div style={{
+        background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14,
+        padding: '18px 20px', display: 'grid', gap: 14,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>New annual rent</p>
+            <p style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>
+              {fmt(newRent)}
+            </p>
+            {rentDelta != null && rentDelta !== 0 && (
+              <p style={{
+                fontSize: 12, fontWeight: 600, margin: '4px 0 0',
+                color: rentDelta > 0 ? 'var(--brick)' : 'var(--jade-deep)',
+              }}>
+                {rentDelta > 0 ? '↑' : '↓'} {fmt(Math.abs(rentDelta))} ({rentDeltaPct! > 0 ? '+' : ''}{rentDeltaPct}%) vs current
+              </p>
+            )}
+            {rentDelta === 0 && (
+              <p style={{ fontSize: 12, color: 'var(--jade-deep)', fontWeight: 600, margin: '4px 0 0' }}>
+                No change from current rent
+              </p>
+            )}
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Currently paying</p>
+            <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink-2)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums' }}>
+              {fmt(currentRent)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Key stats trio — matches the new-lease payment_review look */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        <Stat label="Total contract value" value={fmt(newContractValue ?? (newRent ?? 0))} accent />
+        <Stat label="Installments" value={newCheques ? `${newCheques}` : '—'} />
+        <Stat label="First payment" value={payments[0]?.transactionDate ? fmtDateShort(payments[0].transactionDate) : '—'} />
+      </div>
+
+      {/* Cost breakdown — same lines as PaymentPlanSummary */}
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost breakdown</p>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <PaymentRow label="Annual rent" amountFils={(newRent ?? 0) * 100} />
+          {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
+            <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
+          )}
+          {child?.ejariFeeFils != null && child.ejariFeeFils > 0 && (
+            <PaymentRow label="Ejari fee" amountFils={child.ejariFeeFils * 100} />
+          )}
+          {securityDeposit != null && securityDeposit > 0 && (
+            <PaymentRow label="Security deposit (carries forward)" amountFils={securityDeposit * 100} />
+          )}
+          <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
+          <PaymentRow label="Total scheduled" amountFils={totalScheduled * 100} bold />
+        </div>
+      </div>
+
+      {/* Per-installment schedule — driven by the renewal contract's Payment rows */}
+      {payments.length > 0 && (
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Payment schedule · {payments.length} payment{payments.length === 1 ? '' : 's'}
+            </span>
+            {newCheques && (
+              <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>{newCheques} rent installments</span>
+            )}
+          </div>
+          {payments.map((p, i) => {
+            const isFirstBundle = i === 0 && (child?.adminFeeFils ?? 0) + (child?.ejariFeeFils ?? 0) > 0;
+            const isDeposit = (p.paymentType ?? '').toLowerCase() === 'security_deposit';
+            return (
+              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)', background: isFirstBundle ? 'var(--saffron-soft)' : undefined }}>
+                <span style={{ fontSize: 12, color: 'var(--mute)', fontWeight: 600 }}>#{i + 1}</span>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{p.description ?? (isDeposit ? 'Security deposit' : `Payment ${i + 1}`)}</p>
+                  <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{p.transactionDate ? fmtDateLong(p.transactionDate) : 'No due date'}</p>
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : 'Rent'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const parent = resolved.contract;
   const child = resolved.renewalContract;
@@ -3982,29 +4107,6 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(null); }
   }
 
-  // ── Derive comparable figures ────────────────────────────────────────
-  const currentRent = parent.annualRent ?? 0;
-  const newRent = child?.annualRent ?? null;
-  const rentDelta = newRent != null && currentRent ? newRent - currentRent : null;
-  const rentDeltaPct = newRent != null && currentRent ? Math.round(((newRent - currentRent) / currentRent) * 1000) / 10 : null;
-
-  const newCheques = child?.numberOfInstallments ?? null;
-  const newContractValue = child?.contractValue ?? null;
-  const securityDeposit = parent.securityDepositAmount ?? null;
-
-  // Renewal payment schedule comes straight from the renewal contract's
-  // Payment rows (built by proposeRenewal — first row bundles admin + ejari
-  // + commission + rent installment 1). Mirrors the new-lease payment_review
-  // step so the customer sees identical detail before they accept.
-  const payments = (child?.payments ?? []).slice().sort((a, b) => {
-    const ad = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-    const bd = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-    return ad - bd;
-  });
-  const totalScheduled = payments.reduce((s, p) => s + (p.amountPaid ?? 0), 0);
-
-  const fmt = (v: number | null | undefined) => v != null ? fmtAed(v) : '—';
-
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {/* Contract preview — pinned to the top of the renewal card so the
@@ -4048,96 +4150,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
         </>
       )}
 
-      {/* Headline rent comparison */}
-      <div style={{
-        background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14,
-        padding: '18px 20px', display: 'grid', gap: 14,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>New annual rent</p>
-            <p style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>
-              {fmt(newRent)}
-            </p>
-            {rentDelta != null && rentDelta !== 0 && (
-              <p style={{
-                fontSize: 12, fontWeight: 600, margin: '4px 0 0',
-                color: rentDelta > 0 ? 'var(--brick)' : 'var(--jade-deep)',
-              }}>
-                {rentDelta > 0 ? '↑' : '↓'} {fmt(Math.abs(rentDelta))} ({rentDeltaPct! > 0 ? '+' : ''}{rentDeltaPct}%) vs current
-              </p>
-            )}
-            {rentDelta === 0 && (
-              <p style={{ fontSize: 12, color: 'var(--jade-deep)', fontWeight: 600, margin: '4px 0 0' }}>
-                No change from current rent
-              </p>
-            )}
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Currently paying</p>
-            <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink-2)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums' }}>
-              {fmt(currentRent)}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Key stats trio — matches the new-lease payment_review look */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-        <Stat label="Total contract value" value={fmt(newContractValue ?? (newRent ?? 0))} accent />
-        <Stat label="Installments" value={newCheques ? `${newCheques}` : '—'} />
-        <Stat label="First payment" value={payments[0]?.transactionDate ? fmtDateShort(payments[0].transactionDate) : '—'} />
-      </div>
-
-      {/* Cost breakdown — same lines as PaymentPlanSummary */}
-      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
-        <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost breakdown</p>
-        <div style={{ display: 'grid', gap: 6 }}>
-          <PaymentRow label="Annual rent" amountFils={(newRent ?? 0) * 100} />
-          {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
-            <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
-          )}
-          {child?.ejariFeeFils != null && child.ejariFeeFils > 0 && (
-            <PaymentRow label="Ejari fee" amountFils={child.ejariFeeFils * 100} />
-          )}
-          {securityDeposit != null && securityDeposit > 0 && (
-            <PaymentRow label="Security deposit (carries forward)" amountFils={securityDeposit * 100} />
-          )}
-          <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
-          <PaymentRow label="Total scheduled" amountFils={totalScheduled * 100} bold />
-        </div>
-      </div>
-
-      {/* Per-installment schedule — driven by the renewal contract's Payment rows */}
-      {payments.length > 0 && (
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Payment schedule · {payments.length} payment{payments.length === 1 ? '' : 's'}
-            </span>
-            {newCheques && (
-              <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>{newCheques} rent installments</span>
-            )}
-          </div>
-          {payments.map((p, i) => {
-            const isFirstBundle = i === 0 && (child?.adminFeeFils ?? 0) + (child?.ejariFeeFils ?? 0) > 0;
-            const isDeposit = (p.paymentType ?? '').toLowerCase() === 'security_deposit';
-            return (
-              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)', background: isFirstBundle ? 'var(--saffron-soft)' : undefined }}>
-                <span style={{ fontSize: 12, color: 'var(--mute)', fontWeight: 600 }}>#{i + 1}</span>
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{p.description ?? (isDeposit ? 'Security deposit' : `Payment ${i + 1}`)}</p>
-                  <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{p.transactionDate ? fmtDateLong(p.transactionDate) : 'No due date'}</p>
-                </div>
-                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : 'Rent'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <RenewalTermsSummary parent={parent} child={child} />
 
       {/* Attach payment references — mirrors the new-lease payment_review
           step. Optional, multi-file, in-page preview via the existing
@@ -4368,7 +4381,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
   async function confirm() {
     setBusy(true); setErr(null);
     try {
-      const res = await fetch(`/api/contracts/tenant/${child!.id}/cheques-submitted`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`/api/contracts/tenant/${child!.id}/cheques-submitted`, { method: 'PATCH', credentials: 'include' });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(false); }
@@ -4380,6 +4393,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
           Your rental provider prepared the renewal payment schedule on the renewal contract. Once you&rsquo;ve prepared your payments, confirm here and we&rsquo;ll let your rental provider collect them.
         </p>
       </div>
+      <RenewalTermsSummary parent={resolved.contract} child={child} />
       {err && <ErrorBox msg={err} />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <PrimaryBtn onClick={confirm} disabled={busy}>
@@ -4472,8 +4486,35 @@ export default function CustomerSpaceV2Page() {
       }
       if (!unit) { setError('Space not found.'); setLoading(false); return; }
       const allForUnit = contracts.filter(c => c.unit?.id === unit?.id);
-      const contract = allForUnit.find(c => !c.parentContractId) ?? allForUnit[0] ?? null;
-      const renewalContract = contract ? (allForUnit.find(c => c.parentContractId === contract.id) ?? null) : null;
+      // Renewal chains link each year's lease to the previous via
+      // parentContractId and can run many generations deep
+      // (root → … → current lease → proposed renewal). The old
+      // root-and-first-child resolver collapsed to the ORIGINAL lease and its
+      // FIRST renewal, so a customer on their 3rd renewal saw stale year-1
+      // amounts (and the renewal panel pointed at a long-expired child). Walk
+      // from the TIP instead — the newest contract in the chain:
+      //   • If the tip is a renewal still being processed (a pending/issued
+      //     child), the current lease is its parent and the tip is the proposed
+      //     renewal — this keeps the renewal_* journey framing intact.
+      //   • Otherwise the tip is itself the current contract (active lease, or a
+      //     brand-new draft with no renewal yet).
+      // Recency = latest start date, then highest id (newer rows / superseded
+      // re-proposals win, so a stale duplicate proposal never shadows the live
+      // one).
+      const byRecency = (a: ApiContract, b: ApiContract) =>
+        (b.startDate ?? '').localeCompare(a.startDate ?? '') || (b.id - a.id);
+      const tip = allForUnit.slice().sort(byRecency)[0] ?? null;
+      let contract: ApiContract | null;
+      let renewalContract: ApiContract | null;
+      if (tip && tip.parentContractId && tip.status !== 'active') {
+        contract = allForUnit.find(c => c.id === tip.parentContractId) ?? tip;
+        renewalContract = tip;
+      } else {
+        contract = tip;
+        renewalContract = tip
+          ? (allForUnit.filter(c => c.parentContractId === tip.id).sort(byRecency)[0] ?? null)
+          : null;
+      }
       // Docs-complete gate combines KYC identity + financial/business docs.
       // Use getRequiredDocs (which prepends KYC_DOCS to the rental section)
       // so a customer who's uploaded financials but skipped KYC still gets
