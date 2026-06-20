@@ -347,7 +347,7 @@ export default function RentalProviderDashboard() {
         rows: items.map(x => ({
           key: x.contractId,
           title: x.unitLabel,
-          subtitle: `${x.tenantName ?? 'Tenant'}${x.renewalStatus ? ` · ${x.renewalStatus}` : ''}`,
+          subtitle: `Ends ${new Date(x.endDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} · ${x.tenantName ?? 'Tenant'}${x.renewalStatus ? ` · ${x.renewalStatus}` : ''}`,
           href: `/rental-provider/dashboard/contracts/${x.contractId}/v2`,
           badges: [daysBadge(x.daysUntilEnd)],
         })),
