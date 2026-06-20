@@ -325,18 +325,37 @@ export default function RentalProviderDashboard() {
   const drillAllUnits = () => setDrill({ title: `All units · ${units.length}`, groups: unitGroups(units) });
   const drillRenewals = () => {
     const list = (extras?.upcomingRenewals ?? []).slice().sort((a, b) => a.daysUntilEnd - b.daysUntilEnd);
+    // "Days left" as a highlighted badge on the right, by urgency.
+    const daysBadge = (n: number): { label: string; tone: BadgeTone } =>
+      n <= 0 ? { label: `expired ${Math.abs(n)}d`, tone: 'red' }
+      : n <= 30 ? { label: `${n}d left`, tone: 'red' }
+      : n <= 60 ? { label: `${n}d left`, tone: 'amber' }
+      : { label: `${n}d left`, tone: 'green' };
+    // Group by the month the lease ends (renewal due month) so the RP sees
+    // priority at a glance; soonest month first.
+    const byMonth = new Map<string, UpcomingRenewal[]>();
+    for (const x of list) {
+      const d = new Date(x.endDate);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const arr = byMonth.get(key) ?? [];
+      arr.push(x); byMonth.set(key, arr);
+    }
+    const groups = [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, items]) => ({
+        label: `${new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'long', year: 'numeric' })} · ${items.length}`,
+        rows: items.map(x => ({
+          key: x.contractId,
+          title: x.unitLabel,
+          subtitle: `${x.tenantName ?? 'Tenant'}${x.renewalStatus ? ` · ${x.renewalStatus}` : ''}`,
+          href: `/rental-provider/dashboard/contracts/${x.contractId}/v2`,
+          badges: [daysBadge(x.daysUntilEnd)],
+        })),
+      }));
     setDrill({
       title: `Renewals due · ${list.length}`,
-      note: list.length ? 'Active leases ending soon — propose a renewal before they lapse.' : 'No renewals due in this window.',
-      groups: [{ rows: list.map(x => ({
-        key: x.contractId,
-        title: x.unitLabel,
-        subtitle: `${x.tenantName ?? 'Tenant'} · ${x.daysUntilEnd <= 0 ? `expired ${Math.abs(x.daysUntilEnd)}d ago` : `${x.daysUntilEnd}d left`}`,
-        href: `/rental-provider/dashboard/contracts/${x.contractId}/v2`,
-        badges: x.renewalStatus
-          ? [{ label: x.renewalStatus, tone: 'indigo' as BadgeTone }]
-          : (x.daysUntilEnd <= 30 ? [{ label: 'urgent', tone: 'red' as BadgeTone }] : []),
-      })) }],
+      note: list.length ? 'Grouped by lease-end month — soonest first. Propose a renewal before they lapse.' : 'No renewals due in this window.',
+      groups,
     });
   };
   const drillOverdue = async () => {
