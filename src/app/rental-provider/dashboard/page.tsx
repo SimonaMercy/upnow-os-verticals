@@ -348,11 +348,11 @@ export default function RentalProviderDashboard() {
       setDrill({
         title: `Overdue / bounced · ${rows.length}`,
         note: rows.length ? 'Past-due or bounced cheques — follow up for collection.' : 'No overdue or bounced cheques.',
-        groups: [{ rows: rows.map((p: { id: number; tenant?: string; amount?: number; unit?: string; building?: string; transactionDate?: string; chequeNumber?: string; status?: string }) => ({
+        groups: [{ rows: rows.map((p: { id: number; contractId?: number | null; tenant?: string; amount?: number; unit?: string; building?: string; transactionDate?: string; chequeNumber?: string; status?: string }) => ({
           key: p.id,
           title: `${p.tenant ?? 'Tenant'} — AED ${Number(p.amount ?? 0).toLocaleString()}`,
           subtitle: `${p.unit ? `Unit ${p.unit} · ` : ''}${p.building ?? ''} · due ${p.transactionDate ? new Date(p.transactionDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: '2-digit' }) : '—'}${p.chequeNumber ? ` · #${p.chequeNumber}` : ''}`,
-          href: '/rental-provider/dashboard/receivables',
+          href: p.contractId ? `/rental-provider/dashboard/contracts/${p.contractId}/v2` : '/rental-provider/dashboard/receivables',
           badges: [{ label: p.status ?? 'overdue', tone: 'red' as BadgeTone }],
         })) }],
       });
