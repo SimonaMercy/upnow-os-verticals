@@ -15,7 +15,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Building2, Home, Users as UsersIcon, FileText, Mail, Phone,
-  ShieldCheck, BadgeCheck, Clock, ChevronRight,
+  ShieldCheck, ShieldAlert, BadgeCheck, Clock, ChevronRight,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -80,7 +80,11 @@ interface UserDetail {
       manageMaintenance: boolean; listProperties: boolean; publishListings: boolean; manageViewings: boolean;
       manageDocuments: boolean; inviteManager: boolean;
     };
-    attributed: { contractsSigned: number; auditActions: number; lastActionAt: string | null };
+    attributed: { contractsSigned: number; auditActions: number; terminations: number; lastActionAt: string | null };
+    risk: {
+      tier: 'ok' | 'monitor' | 'review' | 'critical'; moneyPower: boolean; dormant: boolean; dormantDays: number | null; signalCount: number;
+      signals: { key: string; label: string; severity: 'critical' | 'high' | 'medium' | 'info'; detail: string }[];
+    };
     portfolio: null | {
       occupancy: { totalUnits: number; occupiedUnits: number; vacantUnits: number; occupancyPct: number };
       collections: { byStatus: Record<string, { count: number; amount: number }>; collectedAmount: number; pendingAmount: number; bouncedCount: number; collectionRatePct: number };
@@ -366,6 +370,58 @@ function MiniBadge({ label }: { label: string }) {
 
 const byCountDesc = (a: [string, number], b: [string, number]) => b[1] - a[1];
 
+const sevStyle: Record<string, { dot: string; chip: string; text: string }> = {
+  critical: { dot: '#dc2626', chip: '#fef2f2', text: '#dc2626' },
+  high: { dot: '#ea580c', chip: '#fff7ed', text: '#c2410c' },
+  medium: { dot: '#d97706', chip: '#fef9eb', text: '#b45309' },
+  info: { dot: '#6b7280', chip: '#f3f4f6', text: '#4b5563' },
+};
+const tierStyle: Record<string, { label: string; bg: string; fg: string; accent: string }> = {
+  ok: { label: 'No concerns', bg: 'var(--color-primary-50)', fg: 'var(--color-primary)', accent: 'var(--color-primary)' },
+  monitor: { label: 'Monitor', bg: '#eff6ff', fg: '#1e40af', accent: '#2563eb' },
+  review: { label: 'Review', bg: '#fef9eb', fg: '#b45309', accent: '#d97706' },
+  critical: { label: 'Critical', bg: '#fef2f2', fg: '#dc2626', accent: '#dc2626' },
+};
+
+/** Suspicious-behaviour / oversight panel for a manager. */
+function RiskPanel({ risk }: { risk: NonNullable<UserDetail['manager']>['risk'] }) {
+  const t = tierStyle[risk.tier] ?? tierStyle.ok;
+  return (
+    <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: 'var(--shadow-sm)', borderLeft: `3px solid ${t.accent}` }}>
+      <div className="flex items-center gap-2 flex-wrap mb-1">
+        <ShieldAlert size={16} style={{ color: t.accent }} />
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Risk &amp; oversight</h3>
+        <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: t.bg, color: t.fg }}>{t.label}</span>
+        {risk.signalCount > 0 && <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>{risk.signalCount} signal{risk.signalCount === 1 ? '' : 's'}</span>}
+      </div>
+      {risk.signals.length === 0 ? (
+        <p className="text-sm" style={{ color: 'var(--color-neutral-500)' }}>No suspicious behaviour or excess-authority signals detected for this manager.</p>
+      ) : (
+        <div className="space-y-2 mt-2">
+          {risk.signals.map((sg) => {
+            const ss = sevStyle[sg.severity] ?? sevStyle.info;
+            return (
+              <div key={sg.key} className="flex items-start gap-2.5">
+                <span className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: ss.dot }} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{sg.label}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide" style={{ backgroundColor: ss.chip, color: ss.text }}>{sg.severity}</span>
+                  </div>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>{sg.detail}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <Link href="/dashboard/admin/risk" className="inline-flex items-center gap-1 text-xs font-medium mt-3" style={{ color: 'var(--color-primary)' }}>
+        Open manager risk board <ChevronRight size={13} />
+      </Link>
+    </div>
+  );
+}
+
 /** Manager breakdown — landlords worked for, authority, attributed activity, portfolio. */
 function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
   const s = m.summary, p = m.portfolio, a = m.attributed, t = m.tenure, auth = m.authority;
@@ -403,6 +459,9 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
         </div>
       )}
 
+      {/* Suspicious behaviour / oversight — surfaced first */}
+      <RiskPanel risk={m.risk} />
+
       {/* KPI strip */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
         <KpiCard label="Landlords managed" value={s.landlords} sub={t.since ? `since ${fmtDate(t.since)}` : 'no grants yet'} accent="var(--color-primary)" />
@@ -434,6 +493,7 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
         <MiniPanel title="Attributed to this manager">
           <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>What this manager personally did. Most manager work is still logged under the landlord, so these may read low.</p>
           <KV label="Contracts signed" value={a.contractsSigned} />
+          <KV label="Terminations performed" value={a.terminations} dot={a.terminations > 0 ? 'var(--color-gold)' : undefined} />
           <KV label="Logged actions" value={a.auditActions} />
           <KV label="Last action" value={a.lastActionAt ? fmtDate(a.lastActionAt) : '—'} />
         </MiniPanel>
