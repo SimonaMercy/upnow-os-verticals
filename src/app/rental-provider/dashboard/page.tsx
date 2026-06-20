@@ -33,7 +33,7 @@ interface DashboardStats {
   reserved: number;
   occupancyRate: number;
   activeContracts: number;
-  renewalsDue60Days: number;
+  renewalsDue90Days: number;
   units?: UnitRow[];
 }
 
@@ -307,7 +307,7 @@ export default function RentalProviderDashboard() {
   const totalProperties  = stats?.totalProperties ?? 0;
   const occupancyRate    = stats?.occupancyRate ?? 0;
   const activeContracts  = stats?.activeContracts ?? 0;
-  const renewalsDue60    = stats?.renewalsDue60Days ?? 0;
+  const renewalsDue90    = stats?.renewalsDue90Days ?? 0;
   const units            = stats?.units ?? [];
   const [drill, setDrill] = useState<DrillState | null>(null);
 
@@ -525,10 +525,10 @@ export default function RentalProviderDashboard() {
         {/* Renewals due */}
         <KpiCard
           icon={<AlertCircle size={12} />}
-          label="Renewals · 60 days"
-          value={String(renewalsDue60)}
-          sub={renewalsDue60 > 0 ? 'action needed' : 'none pending'}
-          tone={renewalsDue60 > 0 ? 'warn' : 'default'}
+          label="Renewals · 90 days"
+          value={String(renewalsDue90)}
+          sub={renewalsDue90 > 0 ? 'action needed' : 'none pending'}
+          tone={renewalsDue90 > 0 ? 'warn' : 'default'}
           onClick={drillRenewals}
         />
       </div>
@@ -691,10 +691,10 @@ export default function RentalProviderDashboard() {
           ) : !extras ? (
             <ActivitySkeleton rows={4} />
           ) : extras.upcomingRenewals.length === 0 ? (
-            <p className="text-sm text-[var(--neutral-400)] py-8 text-center">No renewals due in the next 60 days.</p>
+            <p className="text-sm text-[var(--neutral-400)] py-8 text-center">No renewals due in the next 90 days.</p>
           ) : (
             <div className="flex flex-col">
-              {extras.upcomingRenewals.map((r) => {
+              {extras.upcomingRenewals.slice(0, 5).map((r) => {
                 const urgent = r.daysUntilEnd <= 14;
                 return (
                   <Link
@@ -717,6 +717,11 @@ export default function RentalProviderDashboard() {
                 );
               })}
             </div>
+          )}
+          {extras && extras.upcomingRenewals.length > 5 && (
+            <button type="button" onClick={drillRenewals} className="mt-2 w-full text-center text-xs font-semibold text-[var(--primary-dark)] hover:underline py-1.5 cursor-pointer">
+              View all {extras.upcomingRenewals.length} renewals
+            </button>
           )}
         </div>
       </div>
