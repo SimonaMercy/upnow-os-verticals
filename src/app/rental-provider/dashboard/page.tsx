@@ -34,7 +34,19 @@ interface DashboardStats {
   occupancyRate: number;
   activeContracts: number;
   renewalsDue60Days: number;
+  units?: UnitRow[];
 }
+
+interface UnitRow {
+  id: number;
+  number: string | null;
+  name: string | null;
+  building: string | null;
+  availability: string;
+  listingStatus: string;
+}
+
+interface DrillState { title: string; note?: string; rows: UnitRow[] }
 
 interface FinancialSummary {
   receivablesInRange: number;
@@ -250,6 +262,21 @@ export default function RentalProviderDashboard() {
   const occupancyRate    = stats?.occupancyRate ?? 0;
   const activeContracts  = stats?.activeContracts ?? 0;
   const renewalsDue60    = stats?.renewalsDue60Days ?? 0;
+  const units            = stats?.units ?? [];
+  const [drill, setDrill] = useState<DrillState | null>(null);
+
+  // Drill-down openers — KPI tiles show "which units" behind the number.
+  const drillAvailable = () => {
+    const rows = units.filter(u => u.availability === 'available');
+    const published = rows.filter(u => u.listingStatus === 'published').length;
+    setDrill({
+      title: `Available units · ${rows.length}`,
+      note: `${published} published in public listings · ${rows.length - published} not listed (draft / pending) — only published units appear publicly.`,
+      rows,
+    });
+  };
+  const drillOccupied = () => setDrill({ title: `Occupied units · ${occupied}`, rows: units.filter(u => u.availability === 'occupied') });
+  const drillAllUnits = () => setDrill({ title: `All units · ${units.length}`, rows: units });
 
   const rangeLabel = RANGE_PRESETS.find(r => r.key === selectedRange)?.label ?? '';
 
@@ -403,6 +430,7 @@ export default function RentalProviderDashboard() {
           label="Occupancy"
           value={`${occupancyRate}%`}
           sub={`${occupied} of ${totalUnits} units`}
+          onClick={drillOccupied}
         />
         {/* Active orders */}
         <KpiCard
@@ -423,8 +451,8 @@ export default function RentalProviderDashboard() {
 
       {/* Secondary stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiMini label="Total Units"        value={String(totalUnits)}                        sub={`${totalProperties} properties`} />
-        <KpiMini label="Available"          value={String(available)}                         sub="ready to list" />
+        <KpiMini label="Total Units"        value={String(totalUnits)}                        sub={`${totalProperties} properties`} onClick={drillAllUnits} />
+        <KpiMini label="Available"          value={String(available)}                         sub="ready to list" onClick={drillAvailable} />
         <KpiMini label="Deposits Held"      value={fin ? fmtAed(fin.depositsHeld) : '—'}      sub="active security" />
         <KpiMini label="Overdue / Bounced"  value={fin ? String(fin.overdueOrBounced) : '—'}  sub="past due cheques" tone={(fin?.overdueOrBounced ?? 0) > 0 ? 'danger' : 'default'} />
       </div>
@@ -457,8 +485,8 @@ export default function RentalProviderDashboard() {
             </div>
           </div>
           <div className="flex justify-center gap-6 text-[13px] text-[var(--neutral-700)] font-medium">
-            <span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--primary)]" />Occupied {occupied}</span>
-            <span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--base-200)]" />Available {available}</span>
+            <button type="button" onClick={drillOccupied} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--primary)]" />Occupied {occupied}</button>
+            <button type="button" onClick={drillAvailable} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--base-200)]" />Available {available}</button>
           </div>
         </div>
 
@@ -608,22 +636,39 @@ export default function RentalProviderDashboard() {
           )}
         </div>
       </div>
+
+      <UnitsDrillDown drill={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }
 
-function KpiCard({ icon, label, value, sub, tone = 'default' }: {
+function clickableProps(onClick?: () => void) {
+  if (!onClick) return {};
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick,
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } },
+  };
+}
+
+function KpiCard({ icon, label, value, sub, tone = 'default', onClick }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   sub: string;
   tone?: 'default' | 'warn';
+  onClick?: () => void;
 }) {
   return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm border border-[var(--base-200)] flex flex-col gap-2">
+    <div
+      {...clickableProps(onClick)}
+      className={`bg-white rounded-2xl p-5 shadow-sm border border-[var(--base-200)] flex flex-col gap-2${onClick ? ' cursor-pointer hover:border-[var(--neutral-400)] hover:shadow-md transition-all' : ''}`}
+    >
       <div className="text-[11px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] inline-flex items-center gap-1.5">
         <span className={tone === 'warn' ? 'text-amber-600' : 'text-[var(--primary-dark)]'}>{icon}</span>
         {label}
+        {onClick && <Eye size={11} className="text-[var(--neutral-400)] ml-auto" />}
       </div>
       <div className="text-[30px] font-bold tracking-tight leading-none tabular-nums text-[var(--neutral-900)]">{value}</div>
       <div className="text-[12.5px] text-[var(--neutral-400)] font-medium">{sub}</div>
@@ -631,17 +676,66 @@ function KpiCard({ icon, label, value, sub, tone = 'default' }: {
   );
 }
 
-function KpiMini({ label, value, sub, tone = 'default' }: {
+function KpiMini({ label, value, sub, tone = 'default', onClick }: {
   label: string;
   value: string;
   sub: string;
   tone?: 'default' | 'danger';
+  onClick?: () => void;
 }) {
   return (
-    <div className="bg-white rounded-xl p-4 shadow-sm border border-[var(--base-200)]">
-      <div className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)]">{label}</div>
+    <div
+      {...clickableProps(onClick)}
+      className={`bg-white rounded-xl p-4 shadow-sm border border-[var(--base-200)]${onClick ? ' cursor-pointer hover:border-[var(--neutral-400)] hover:shadow-md transition-all' : ''}`}
+    >
+      <div className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] flex items-center gap-1.5">
+        {label}
+        {onClick && <Eye size={10} className="text-[var(--neutral-400)] ml-auto" />}
+      </div>
       <div className={`text-[22px] font-bold tracking-tight mt-1.5 tabular-nums ${tone === 'danger' ? 'text-red-600' : 'text-[var(--neutral-900)]'}`}>{value}</div>
       <div className="text-[11.5px] text-[var(--neutral-400)] mt-0.5">{sub}</div>
+    </div>
+  );
+}
+
+function UnitsDrillDown({ drill, onClose }: { drill: DrillState | null; onClose: () => void }) {
+  if (!drill) return null;
+  const availBadge = (a: string) =>
+    a === 'occupied' ? { bg: '#e0e7ff', fg: '#3730a3', label: 'Occupied' }
+    : a === 'available' ? { bg: '#dcfce7', fg: '#166534', label: 'Available' }
+    : a === 'maintenance' ? { bg: '#fef3c7', fg: '#92400e', label: 'Maintenance' }
+    : { bg: '#f3f4f6', fg: '#374151', label: a.charAt(0).toUpperCase() + a.slice(1) };
+  const listBadge = (s: string) =>
+    s === 'published' ? { bg: '#dcfce7', fg: '#166534', label: 'Published' }
+    : { bg: '#fef3c7', fg: '#92400e', label: `Not listed · ${s}` };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,18,14,0.5)' }} onClick={onClose} role="dialog" aria-modal="true">
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl border border-[var(--base-200)]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 p-5 border-b border-[var(--base-200)]">
+          <div>
+            <h3 className="text-base font-bold text-[var(--neutral-900)]">{drill.title}</h3>
+            {drill.note && <p className="text-xs text-[var(--neutral-500)] mt-1 leading-snug">{drill.note}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--neutral-400)] hover:text-[var(--neutral-900)] shrink-0"><X size={18} /></button>
+        </div>
+        <div className="overflow-y-auto p-3">
+          {drill.rows.length === 0 ? (
+            <p className="text-sm text-[var(--neutral-400)] text-center py-8">No units.</p>
+          ) : drill.rows.map(u => {
+            const ab = availBadge(u.availability); const lb = listBadge(u.listingStatus);
+            return (
+              <Link key={u.id} href={`/rental-provider/dashboard/units/${u.id}`} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13.5px] font-semibold text-[var(--neutral-900)] truncate">{u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`)}</p>
+                  <p className="text-[11.5px] text-[var(--neutral-400)] truncate">{u.building ?? '—'}</p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: ab.bg, color: ab.fg }}>{ab.label}</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: lb.bg, color: lb.fg }}>{lb.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
