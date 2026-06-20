@@ -1329,9 +1329,10 @@ function DetailsDrawer({
   // Receipt links must respect the portal (RP vs manager) — derive the base
   // the same way the page does, so manager links don't 404.
   const drawerPathname = usePathname();
-  const receiptBase = (drawerPathname?.startsWith('/dashboard/manager')
+  const contractBase = (drawerPathname?.startsWith('/dashboard/manager')
     ? '/dashboard/manager/contracts'
-    : '/rental-provider/dashboard/contracts') + `/${contract.id}/print/receipt`;
+    : '/rental-provider/dashboard/contracts') + `/${contract.id}`;
+  const receiptBase = `${contractBase}/print/receipt`;
   // ── Record-payment form state (Flow 1) ──
   const [showRec, setShowRec] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
@@ -1795,7 +1796,8 @@ function DetailsDrawer({
                               <td>
                                 {editable && sd.amount ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    {/* One clean action toolbar — status · Edit · Receipt · Settle */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                                       <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
                                         title="Cheque / banking status" value={sd.chequeStatus ?? 'pending'} disabled={depStatusBusy}
                                         onChange={e => void changeDepStatus(sd.depositId!, e.target.value)}>
@@ -1808,10 +1810,17 @@ function DetailsDrawer({
                                         onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
                                         <Pencil size={12} /> Edit
                                       </button>
+                                      <Link href={`${receiptBase}?kind=deposit`} target="_blank" className="mini-btn view" title="Generate deposit receipt">
+                                        <FileText size={12} /> Receipt
+                                      </Link>
+                                      {(!sd.status || sd.status === 'held') && (
+                                        <Link href={`${contractBase}/settlement`} className="mini-btn view" title="Settle the deposit (refund / deduction)">
+                                          <Stamp size={12} /> Settle
+                                        </Link>
+                                      )}
                                     </div>
-                                    {/* Settlement (refund/deduction + customer agreement) is captured on the
-                                        move-out settlement — the single source of truth — read-only here */}
-                                    {sd.status && sd.status !== 'held' ? (
+                                    {/* Settled outcome (move-out settlement is the source of truth) */}
+                                    {sd.status && sd.status !== 'held' && (
                                       <div style={{ textAlign: 'right' }}>
                                         <span className={'cstat ' + sd.status} style={{ textTransform: 'capitalize' }}>{sd.status.replace('_', ' ')}</span>
                                         {(sd.settledRefundAmount != null || sd.settledDeductionAmount != null) && (
@@ -1820,10 +1829,6 @@ function DetailsDrawer({
                                           </span>
                                         )}
                                       </div>
-                                    ) : (
-                                      <Link href={`/rental-provider/dashboard/contracts/${contract.id}/settlement`} className="note" style={{ fontSize: 11, color: 'var(--jade)', textDecoration: 'underline' }}>
-                                        Settle deposit ↗
-                                      </Link>
                                     )}
                                     {depStatusErr && (
                                       <span className="note" style={{ color: 'var(--brick)', fontSize: 11, textAlign: 'right' }}>{depStatusErr}</span>

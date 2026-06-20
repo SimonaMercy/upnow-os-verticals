@@ -51,7 +51,17 @@ export interface ReceiptContract {
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
   pdcConfirmed?: boolean;
-  securityDepositAmount?: number | null;
+  securityDepositAmount?: number | null;   // contract's own deposit column (often null on renewals)
+  securityDepositHeld?: number | null;     // resolved held amount (own or carried down the renewal chain)
+  securityDeposit?: {                      // resolved deposit entity (RP endpoint) — richer detail
+    amount?: number | null;
+    chequeNumber?: string | null;
+    paymentMethod?: string | null;
+    chequeStatus?: string | null;
+    dueDate?: string | null;
+    isCarried?: boolean;
+    sourceContractId?: number | null;
+  } | null;
   adminFeeFils?: number;   // WHOLE AED (misnomer) — first-bundle admin fee
   ejariFeeFils?: number;   // WHOLE AED (misnomer) — first-bundle ejari fee
   landlord: {
@@ -283,13 +293,25 @@ export default function PaymentReceipt({ contract, selectedId, selectedIdx = 0, 
     receipt = buildContractReceipt(contract, payments);
   } else if (kind === 'deposit') {
     let dep = payments.find(isDeposit);
-    if (!dep && (contract.securityDepositAmount ?? 0) > 0) {
-      dep = {
-        id: -1, paymentType: 'security_deposit', description: 'Security deposit',
-        amount: contract.securityDepositAmount ?? 0, vatAmount: 0, chequeNumber: null,
-        chequeStatus: contract.pdcConfirmed ? 'cleared' : 'pending',
-        paymentMethod: contract.modeOfPayment ?? null, transactionDate: null,
-      };
+    if (!dep) {
+      // The deposit is usually NOT a payment row — it's the resolved deposit
+      // entity (own, or carried down a renewal chain). Prefer that, then the
+      // resolved held amount, then the contract's own column.
+      const sd = contract.securityDeposit;
+      const amt = (sd?.amount ?? 0) > 0 ? Number(sd!.amount)
+        : (contract.securityDepositHeld ?? 0) > 0 ? Number(contract.securityDepositHeld)
+        : (contract.securityDepositAmount ?? 0) > 0 ? Number(contract.securityDepositAmount)
+        : 0;
+      if (amt > 0) {
+        dep = {
+          id: -1, paymentType: 'security_deposit', description: 'Security deposit',
+          amount: amt, vatAmount: 0,
+          chequeNumber: sd?.chequeNumber ?? null,
+          chequeStatus: sd?.chequeStatus ?? (contract.pdcConfirmed ? 'cleared' : 'pending'),
+          paymentMethod: sd?.paymentMethod ?? contract.modeOfPayment ?? null,
+          transactionDate: sd?.dueDate ?? null,
+        };
+      }
     }
     if (dep) receipt = buildSingleReceipt(dep, contract, rentals);
   } else {
@@ -322,7 +344,10 @@ export default function PaymentReceipt({ contract, selectedId, selectedIdx = 0, 
   ].filter(Boolean).join(', ');
 
   // Nav tabs: the two generated receipts + each individual payment.
-  const hasDeposit = payments.some(isDeposit) || (contract.securityDepositAmount ?? 0) > 0;
+  const hasDeposit = payments.some(isDeposit)
+    || (contract.securityDeposit?.amount ?? 0) > 0
+    || (contract.securityDepositHeld ?? 0) > 0
+    || (contract.securityDepositAmount ?? 0) > 0;
   const tabBase = '';
   function tabStyle(active: boolean): React.CSSProperties {
     return { margin: '0 3px', color: active ? BRAND : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none' };
@@ -490,20 +515,15 @@ export default function PaymentReceipt({ contract, selectedId, selectedIdx = 0, 
           <span style={{ direction: 'rtl', display: 'block', marginTop: 2 }}>يُقرّ هذا الإيصال باستلام الدفعات الموضحة أعلاه بموجب عقد الإيجار. يُرجى الاحتفاظ به للسجلات.</span>
         </div>
 
-        {/* Signatures / stamp */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          {[
-            { label: 'Received By / Authorised Signature & Stamp', labelAr: 'توقيع وختم المستلم المعتمد' },
-            { label: 'Tenant Acknowledgement', labelAr: 'إقرار المستأجر' },
-          ].map(({ label, labelAr }) => (
-            <div key={label} style={{ border: '1px solid #d1d5db', borderRadius: 4, padding: 10 }}>
-              <div style={{ height: 50, borderBottom: '1px dashed #cbd5e1', marginBottom: 4 }} />
-              <div style={{ fontSize: 7.5, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                <span>{label} <span style={{ direction: 'rtl', fontSize: 7 }}>{labelAr}</span></span>
-                <span>Date: <span style={{ borderBottom: '1px dashed #94a3b8', display: 'inline-block', width: 50 }} /></span>
-              </div>
-            </div>
-          ))}
+        {/* System-generated — no signature required (replaces the signature/stamp boxes). */}
+        <div style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '10px 14px', textAlign: 'center', background: '#f8fafc' }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: BRAND }}>This is a system-generated receipt.</div>
+          <div style={{ fontSize: 8, color: '#6b7280', marginTop: 2 }}>
+            It is computer-generated and valid without a signature or stamp. No physical signature is required.
+          </div>
+          <div style={{ fontSize: 8, color: '#6b7280', direction: 'rtl', marginTop: 2 }}>
+            هذا إيصال صادر آليًا عن النظام، وهو صالح بدون توقيع أو ختم.
+          </div>
         </div>
 
         <div style={{ marginTop: 18, borderTop: '1px solid #e5e7eb', paddingTop: 6, textAlign: 'center', fontSize: 7, color: '#9ca3af' }}>
