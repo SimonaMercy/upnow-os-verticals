@@ -40,6 +40,7 @@ import {
   User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
+  Trash2, Plus,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { openDocViewer } from '@/lib/docViewer';
@@ -1298,7 +1299,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
-  onRecordPayment, onUpdatePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
+  onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
   notes, onAddNote,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
@@ -1310,16 +1311,18 @@ function DetailsDrawer({
   inline?: boolean;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
   onApproveDoc: (id: number) => void; onRejectDoc: (id: number) => void;
-  /** POST /api/contracts/:id/payments — record a new instalment / payment. */
+  /** POST /api/contracts/:id/payments — record a new instalment / payment / fee. */
   onRecordPayment: (body: {
-    description?: string; amount: number; paymentType?: string; paymentMethod?: string;
-    chequeNumber?: string; transactionDate?: string;
+    description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
+    chequeNumber?: string; transactionDate?: string; chequeStatus?: string;
   }) => Promise<void>;
-  /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / reference / description. */
+  /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / VAT / reference / description. */
   onUpdatePayment: (paymentId: number, patch: {
-    chequeStatus?: string; amount?: number; chequeNumber?: string | null;
+    chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string;
   }) => Promise<void>;
+  /** DELETE /api/contracts/:id/payments/:paymentId — remove a fee / payment line. */
+  onDeletePayment: (paymentId: number) => Promise<void>;
   /** PATCH /api/contracts/:id/deposits/:depositId — edit a held security deposit. */
   onUpdateDeposit: (depositId: number, patch: {
     chequeStatus?: string; paymentMethod?: string | null; dueDate?: string | null;
@@ -1512,6 +1515,75 @@ function DetailsDrawer({
   const feeGross = feeRows.reduce((s, p) => s + (p.amount || 0), 0);
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission' : (t ?? 'Fee');
+  // ── Fees editor (admin-filled: admin / ejari / commission). Fees are never
+  //    auto-fabricated — the RP enters them here. Amount is NET (excl. VAT);
+  //    VAT is an optional separate figure; the stored gross = net + VAT. ──
+  const FEE_TYPE_OPTIONS = [
+    { value: 'admin_fee', label: 'Admin fee' },
+    { value: 'ejari_fee', label: 'Ejari fee' },
+    { value: 'commission', label: 'Commission' },
+  ];
+  const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '' };
+  const [showAddFee, setShowAddFee] = useState(false);
+  const [feeAdd, setFeeAdd] = useState(emptyFeeForm);
+  const [feeAddBusy, setFeeAddBusy] = useState(false);
+  const [feeAddErr, setFeeAddErr] = useState<string | null>(null);
+  const [feeEditId, setFeeEditId] = useState<number | null>(null);
+  const [feeEdit, setFeeEdit] = useState(emptyFeeForm);
+  const [feeEditBusy, setFeeEditBusy] = useState(false);
+  const [feeEditErr, setFeeEditErr] = useState<string | null>(null);
+  const [feeDeleteBusy, setFeeDeleteBusy] = useState<number | null>(null);
+  const submitAddFee = async () => {
+    const net = Number(feeAdd.amount); const vat = Number(feeAdd.vatAmount || 0);
+    if (!Number.isFinite(net) || net <= 0) { setFeeAddErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(vat) || vat < 0) { setFeeAddErr('Enter a valid VAT amount'); return; }
+    setFeeAddBusy(true); setFeeAddErr(null);
+    try {
+      await onRecordPayment({
+        paymentType: feeAdd.paymentType,
+        amount: Math.round((net + vat) * 100) / 100,   // backend stores GROSS
+        vatAmount: vat,
+        description: feeAdd.description.trim() || feeLabel(feeAdd.paymentType),
+        transactionDate: feeAdd.transactionDate || undefined,
+        paymentMethod: 'cheque',
+        chequeStatus: 'pending',
+      });
+      setFeeAdd(emptyFeeForm); setShowAddFee(false);
+    } catch (e) { setFeeAddErr(e instanceof Error ? e.message : 'Failed to add fee'); }
+    finally { setFeeAddBusy(false); }
+  };
+  const startFeeEdit = (f: ContractPayment) => {
+    setFeeEditId(f.id); setFeeEditErr(null);
+    const vat = f.vatAmount ?? 0;
+    setFeeEdit({
+      paymentType: f.paymentType ?? 'admin_fee',
+      amount: String(Math.max(Math.round(((f.amount ?? 0) - vat) * 100) / 100, 0)),  // NET
+      vatAmount: vat ? String(vat) : '',
+      transactionDate: f.transactionDate ? f.transactionDate.slice(0, 10) : '',
+      description: f.description ?? '',
+    });
+  };
+  const saveFeeEdit = async (paymentId: number) => {
+    const net = Number(feeEdit.amount); const vat = Number(feeEdit.vatAmount || 0);
+    if (!Number.isFinite(net) || net < 0) { setFeeEditErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(vat) || vat < 0) { setFeeEditErr('Enter a valid VAT amount'); return; }
+    setFeeEditBusy(true); setFeeEditErr(null);
+    try {
+      await onUpdatePayment(paymentId, {
+        amount: Math.round((net + vat) * 100) / 100,
+        vatAmount: vat,
+        description: feeEdit.description.trim() || null,
+        transactionDate: feeEdit.transactionDate || null,
+      });
+      setFeeEditId(null);
+    } catch (e) { setFeeEditErr(e instanceof Error ? e.message : 'Failed to save changes'); }
+    finally { setFeeEditBusy(false); }
+  };
+  const deleteFee = async (paymentId: number) => {
+    setFeeDeleteBusy(paymentId);
+    try { await onDeletePayment(paymentId); }
+    finally { setFeeDeleteBusy(null); }
+  };
   // Rent VAT (commercial/industrial): amounts are GROSS; split net vs VAT for display.
   const rentGross = rentRows.reduce((s, p) => s + (p.amount || 0), 0);
   const rentVat   = rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0);
@@ -2022,45 +2094,160 @@ function DetailsDrawer({
                   </table>
 
                   {/* Fees — admin / ejari / commission as their own line items,
-                      separate from the rent schedule above. */}
-                  {feeRows.length > 0 && (
-                    <div style={{ marginTop: 18 }}>
-                      <p className="subhead" style={{ marginBottom: 6 }}>
+                      separate from the rent schedule above. Admin-filled: the RP
+                      adds / edits / removes them here; nothing is auto-fabricated. */}
+                  <div style={{ marginTop: 18 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
+                      <p className="subhead" style={{ margin: 0 }}>
                         Fees <span className="note" style={{ fontWeight: 400 }}>· one-off charges, separate from rent</span>
                       </p>
-                      <table className="ptable">
-                        <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Due date</th><th>Status</th></tr></thead>
-                        <tbody>
-                          {feeRows.map(f => (
-                            <tr key={f.id}>
-                              <td>{feeLabel(f.paymentType)}</td>
-                              <td>{f.description ?? '—'}</td>
-                              <td className="amt">
-                                {fmtAed(f.amount)}
-                                {f.vatAmount ? <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(f.vatAmount)} VAT</span> : null}
-                              </td>
-                              <td>{fmtDate(f.transactionDate)}</td>
-                              <td>
-                                <select
-                                  className={'cstat ' + (f.chequeStatus ?? 'pending')}
-                                  style={{ cursor: 'pointer' }}
-                                  value={f.chequeStatus ?? 'pending'}
-                                  disabled={statusBusy === f.id}
-                                  onChange={e => void changeStatus(f.id, e.target.value)}
+                      <button
+                        type="button"
+                        className="mini-btn view"
+                        title="Add a fee line"
+                        onClick={() => { setShowAddFee(v => !v); setFeeAddErr(null); }}
+                      >
+                        <Plus size={12} /> Add fee
+                      </button>
+                    </div>
+                    <table className="ptable">
+                      <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Due date</th><th>Status</th><th></th></tr></thead>
+                      <tbody>
+                        {feeRows.map(f => (
+                          <Fragment key={f.id}>
+                          <tr>
+                            <td>{feeLabel(f.paymentType)}</td>
+                            <td>{f.description ?? '—'}</td>
+                            <td className="amt">
+                              {fmtAed(f.amount)}
+                              {f.vatAmount ? <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(f.vatAmount)} VAT</span> : null}
+                            </td>
+                            <td>{fmtDate(f.transactionDate)}</td>
+                            <td>
+                              <select
+                                className={'cstat ' + (f.chequeStatus ?? 'pending')}
+                                style={{ cursor: 'pointer' }}
+                                value={f.chequeStatus ?? 'pending'}
+                                disabled={statusBusy === f.id}
+                                onChange={e => void changeStatus(f.id, e.target.value)}
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="cleared">Cleared</option>
+                                <option value="bounced">Bounced</option>
+                                <option value="cancelled">Cancelled</option>
+                              </select>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="mini-btn view"
+                                  title="Edit fee amount / VAT / date"
+                                  onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
                                 >
-                                  <option value="pending">Pending</option>
-                                  <option value="cleared">Cleared</option>
-                                  <option value="bounced">Bounced</option>
-                                  <option value="cancelled">Cancelled</option>
-                                </select>
+                                  <Pencil size={12} /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="mini-btn"
+                                  title="Remove this fee"
+                                  disabled={feeDeleteBusy === f.id}
+                                  onClick={() => void deleteFee(f.id)}
+                                  style={{ color: 'var(--brick)' }}
+                                >
+                                  <Trash2 size={12} /> {feeDeleteBusy === f.id ? '…' : 'Delete'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {feeEditId === f.id && (
+                            <tr>
+                              <td colSpan={6} style={{ background: 'var(--jade-tint)' }}>
+                                <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                  <p className="subhead">Edit {feeLabel(f.paymentType).toLowerCase()}</p>
+                                  <div className="grid2">
+                                    <div className="field"><label>Amount (excl. VAT, AED)</label>
+                                      <input type="number" min="0" step="0.01" className="input" value={feeEdit.amount}
+                                        onChange={e => setFeeEdit(v => ({ ...v, amount: e.target.value }))} />
+                                    </div>
+                                    <div className="field"><label>VAT (AED, optional)</label>
+                                      <input type="number" min="0" step="0.01" className="input" value={feeEdit.vatAmount} placeholder="0.00"
+                                        onChange={e => setFeeEdit(v => ({ ...v, vatAmount: e.target.value }))} />
+                                    </div>
+                                  </div>
+                                  <div className="grid2">
+                                    <div className="field"><label>Due date</label>
+                                      <input type="date" className="input" value={feeEdit.transactionDate}
+                                        onChange={e => setFeeEdit(v => ({ ...v, transactionDate: e.target.value }))} />
+                                    </div>
+                                    <div className="field"><label>Description</label>
+                                      <input className="input" value={feeEdit.description} placeholder={feeLabel(f.paymentType)}
+                                        onChange={e => setFeeEdit(v => ({ ...v, description: e.target.value }))} />
+                                    </div>
+                                  </div>
+                                  <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed((Number(feeEdit.amount) || 0) + (Number(feeEdit.vatAmount) || 0))}</strong></p>
+                                  {feeEditErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{feeEditErr}</p>}
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                    <button className="btn btn-jade btn-sm" disabled={feeEditBusy} onClick={() => void saveFeeEdit(f.id)}>
+                                      <Check size={14} /> {feeEditBusy ? 'Saving…' : 'Save changes'}
+                                    </button>
+                                    <button className="btn btn-ghost btn-sm" disabled={feeEditBusy} onClick={() => { setFeeEditId(null); setFeeEditErr(null); }}>Cancel</button>
+                                  </div>
+                                </div>
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
-                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross)}</td><td colSpan={2} /></tr></tfoot>
-                      </table>
-                    </div>
-                  )}
+                          )}
+                          </Fragment>
+                        ))}
+                        {feeRows.length === 0 && !showAddFee && (
+                          <tr><td colSpan={6}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, ejari, or commission charges — amounts are not auto-calculated.</span></td></tr>
+                        )}
+                      </tbody>
+                      {feeRows.length > 0 && (
+                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross)}</td><td colSpan={3} /></tr></tfoot>
+                      )}
+                    </table>
+
+                    {/* Add-fee form (admin-filled) */}
+                    {showAddFee && (
+                      <div style={{ marginTop: 12, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
+                        <p className="subhead">Add fee</p>
+                        <div className="grid2">
+                          <div className="field"><label>Fee type</label>
+                            <select className="input" value={feeAdd.paymentType} onChange={e => setFeeAdd(v => ({ ...v, paymentType: e.target.value }))}>
+                              {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                          </div>
+                          <div className="field"><label>Amount (excl. VAT, AED)</label>
+                            <input type="number" min="0" step="0.01" className="input" value={feeAdd.amount} placeholder="e.g. 750"
+                              onChange={e => setFeeAdd(v => ({ ...v, amount: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="grid2">
+                          <div className="field"><label>VAT (AED, optional)</label>
+                            <input type="number" min="0" step="0.01" className="input" value={feeAdd.vatAmount} placeholder="0.00"
+                              onChange={e => setFeeAdd(v => ({ ...v, vatAmount: e.target.value }))} />
+                          </div>
+                          <div className="field"><label>Due date</label>
+                            <input type="date" className="input" value={feeAdd.transactionDate}
+                              onChange={e => setFeeAdd(v => ({ ...v, transactionDate: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="field"><label>Description (optional)</label>
+                          <input className="input" value={feeAdd.description} placeholder={feeLabel(feeAdd.paymentType)}
+                            onChange={e => setFeeAdd(v => ({ ...v, description: e.target.value }))} />
+                        </div>
+                        <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed((Number(feeAdd.amount) || 0) + (Number(feeAdd.vatAmount) || 0))}</strong></p>
+                        {feeAddErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{feeAddErr}</p>}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                          <button className="btn btn-jade btn-sm" disabled={feeAddBusy} onClick={() => void submitAddFee()}>
+                            <Check size={14} /> {feeAddBusy ? 'Adding…' : 'Add fee'}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" disabled={feeAddBusy} onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Record-payment form (Flow 1) */}
                   {showRec && (
@@ -3549,8 +3736,8 @@ export default function ContractV2Page() {
   // ── Flow 1: record payment + update status ──
   // POST /api/contracts/:id/payments  (mirrors old page addPaymentInstalment)
   const onRecordPayment = async (body: {
-    description?: string; amount: number; paymentType?: string; paymentMethod?: string;
-    chequeNumber?: string; transactionDate?: string;
+    description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
+    chequeNumber?: string; transactionDate?: string; chequeStatus?: string;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments`, {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -3562,14 +3749,25 @@ export default function ContractV2Page() {
     }
     void reload();
   };
-  // PATCH /api/contracts/:id/payments/:paymentId — status, or correct amount / reference / description.
+  // PATCH /api/contracts/:id/payments/:paymentId — status, or correct amount / VAT / reference / description.
   const onUpdatePayment = async (paymentId: number, patch: {
-    chequeStatus?: string; amount?: number; chequeNumber?: string | null;
+    chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
+    void reload();
+  };
+  // DELETE /api/contracts/:id/payments/:paymentId — remove a fee / payment line.
+  const onDeletePayment = async (paymentId: number) => {
+    const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
+      method: 'DELETE', credentials: 'include',
     });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
@@ -4187,6 +4385,7 @@ export default function ContractV2Page() {
             onRejectDoc={onRejectDoc}
             onRecordPayment={onRecordPayment}
             onUpdatePayment={onUpdatePayment}
+            onDeletePayment={onDeletePayment}
             onUpdateDeposit={onUpdateDeposit}
             onSaveClauses={onSaveClauses}
             onConfirmPdc={onConfirmPdc}
