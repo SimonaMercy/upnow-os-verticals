@@ -12,7 +12,14 @@ export interface PropertyDocSlot {
   multiple: boolean;
 }
 
+// Document key for the head-lease (master-lease) agreement — the contract that
+// gives a sub-leasing RP the right to sub-let the building. Rendered ONLY when a
+// property's leasing model is 'sub' (handled in PropertyFields), but kept in the
+// slot list so the existing three save flows upload + detect it automatically.
+export const HEAD_LEASE_KEY = 'head_lease';
+
 export const PROPERTY_DOC_SLOTS: PropertyDocSlot[] = [
+  { key: HEAD_LEASE_KEY,           label: 'Head-lease / Master-lease Agreement', category: 'legal', multiple: false },
   { key: 'affection_plan',         label: 'Affection Plan',         category: 'property',   multiple: false },
   { key: 'completion_certificate', label: 'Completion Certificate', category: 'compliance', multiple: false },
   { key: 'architectural_drawings', label: 'Architectural Drawings', category: 'property',   multiple: true },

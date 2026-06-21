@@ -5,7 +5,7 @@ import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, Fil
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
-import { PROPERTY_DOC_SLOTS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
+import { PROPERTY_DOC_SLOTS, HEAD_LEASE_KEY, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
 import { DocPreviewModal } from './DocPreviewModal';
 import { PropertyPhotos } from './PropertyPhotos';
 
@@ -579,7 +579,7 @@ const DISABLED_CLS = 'opacity-50 cursor-not-allowed';
  * docs and locally-queued files (create flow) render as rows beneath.
  */
 export function DocSlotCard({
-  label, multiple, existing, queued, onAdd, onRemoveQueued, onRemoveExisting, onView,
+  label, multiple, existing, queued, onAdd, onRemoveQueued, onRemoveExisting, onView, required = false,
 }: {
   label: string;
   multiple: boolean;
@@ -589,6 +589,8 @@ export function DocSlotCard({
   onRemoveQueued: (idx: number) => void;
   onRemoveExisting?: (id: number) => void;
   onView: (doc: { url: string; mime?: string | null; name: string }) => void;
+  /** Show a red "Required" badge instead of the default "Optional". */
+  required?: boolean;
 }) {
   const count = existing.length + queued.length;
   const hasAny = count > 0;
@@ -605,7 +607,9 @@ export function DocSlotCard({
           ? <Check size={16} className="shrink-0" style={{ color: '#16a34a' }} />
           : <FileText size={16} className="shrink-0 text-[#c8c6c0]" />}
         <span className="text-sm font-medium text-[#1a1916]">{label}</span>
-        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">Optional</span>
+        {required
+          ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#fde8e8] text-[#b91c1c]">Required</span>
+          : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">Optional</span>}
         {hasAny && <span className="text-[11px] text-[#16a34a] font-medium">{count} file{count === 1 ? '' : 's'}</span>}
         <label className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
           style={{ background: hasAny && !multiple ? '#f4f3ef' : '#2e9f82', color: hasAny && !multiple ? '#6b6860' : '#fff' }}>
@@ -1010,6 +1014,37 @@ export function PropertyFields({
             );
           })}
         </div>
+
+        {/* The proof-of-right document follows the leasing model: a directly-held
+            building has a Title Deed; a sub-leased one has the Master-lease
+            agreement (the contract that lets you sub-let it). Both optional. */}
+        {value.leasingType === 'direct' ? (
+          <div className="mt-2.5">
+            <DocSlotCard
+              label="Title Deed" multiple={false}
+              existing={existingDeed}
+              queued={titleDeed ? [titleDeed] : []}
+              onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
+              onRemoveQueued={() => setTitleDeed(null)}
+              onRemoveExisting={onRemoveExisting}
+              onView={setViewerDoc}
+            />
+            <p className="text-[11px] text-[#9b9890] mt-1">The building&apos;s title deed — for a directly-owned / directly-leased property.</p>
+          </div>
+        ) : (
+          <div className="mt-2.5">
+            <DocSlotCard
+              label="Master Lease Agreement" multiple={false}
+              existing={existingDocs.filter(d => d.documentKey === HEAD_LEASE_KEY)}
+              queued={extraDocs[HEAD_LEASE_KEY] ?? []}
+              onAdd={files => addSlotFiles(HEAD_LEASE_KEY, files, false)}
+              onRemoveQueued={i => removeSlotFile(HEAD_LEASE_KEY, i)}
+              onRemoveExisting={onRemoveExisting}
+              onView={setViewerDoc}
+            />
+            <p className="text-[11px] text-[#9b9890] mt-1">Your master-lease agreement with the building owner — for a sub-leased property.</p>
+          </div>
+        )}
       </div>
 
       {/* Search + Map — triggers auto-fill of all fields below */}
@@ -1192,8 +1227,8 @@ export function PropertyFields({
       <div>
         <p className="text-[11px] font-bold uppercase tracking-wider text-[#9b9890] mb-2">Property documents</p>
 
-        {/* Title-deed structure — one deed for the whole property (single owner)
-            vs a deed per unit (units owned/titled separately). */}
+        {/* Property structure flag. The title deed / master-lease itself is asked
+            up top, driven by the leasing model. */}
         <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc] mb-2.5">
           <input
             type="checkbox"
@@ -1202,11 +1237,10 @@ export function PropertyFields({
             className="mt-0.5 accent-[#2e9f82]"
           />
           <span>
-            <span className="block text-sm font-medium text-[#1a1916]">One title deed for the whole property (single owner)</span>
+            <span className="block text-sm font-medium text-[#1a1916]">Standalone property (the property is a single unit)</span>
             <span className="block text-[11px] text-[#9b9890] mt-0.5">
-              On — a single owner holds the entire property under one title deed: a villa,
-              a standalone office, or a whole building owned by one party (deed attached below).
-              Off — units are owned separately, each with its own title deed added in the unit form.
+              On — a villa or single standalone unit held as one whole (its title deed / master-lease is the one above).
+              Off — a multi-unit building; units are managed separately, each with its own deed in the unit form.
             </span>
           </span>
         </label>
@@ -1215,18 +1249,7 @@ export function PropertyFields({
           {/* Single-file documents — one file each (re-uploading replaces it). */}
           <div className="space-y-2.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Single file</p>
-            {value.isStandaloneUnit && (
-              <DocSlotCard
-                label="Title Deed" multiple={false}
-                existing={existingDeed}
-                queued={titleDeed ? [titleDeed] : []}
-                onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
-                onRemoveQueued={() => setTitleDeed(null)}
-                onRemoveExisting={onRemoveExisting}
-                onView={setViewerDoc}
-              />
-            )}
-            {PROPERTY_DOC_SLOTS.filter(s => !s.multiple).map(slot => (
+            {PROPERTY_DOC_SLOTS.filter(s => !s.multiple && s.key !== HEAD_LEASE_KEY).map(slot => (
               <DocSlotCard
                 key={slot.key}
                 label={slot.label} multiple={slot.multiple}
@@ -1325,7 +1348,9 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     // Title deed is OPTIONAL — even for a standalone property.
     if (Object.keys(errs).length > 0) return;
     setSaving(true);
-    try { await onSave(form, form.isStandaloneUnit ? titleDeed : null, drawings, extraDocs); onClose(); }
+    // Title deed travels for directly-held properties (sub-leases carry a master
+    // lease via extraDocs instead).
+    try { await onSave(form, form.leasingType === 'direct' ? titleDeed : null, drawings, extraDocs); onClose(); }
     finally { setSaving(false); }
   };
 
