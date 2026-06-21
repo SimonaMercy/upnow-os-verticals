@@ -160,6 +160,9 @@ interface ContractDetail {
   unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
   documents: ContractDoc[];
   payments: ContractPayment[];
+  /** One-off leasing fees (admin / ejari / commission) — stored as their own
+   *  rows, kept out of the rent schedule/totals and shown in their own section. */
+  fees?: ContractPayment[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1502,19 +1505,18 @@ function DetailsDrawer({
       setNoteBusy(false);
     }
   };
-  // ── Confirm PDC state (Flow 3) ──
-  const [pdcBusy, setPdcBusy] = useState(false);
   const rentRows = payments.filter(p => p.paymentType !== 'security_deposit');
+  // One-off leasing fees (admin / ejari / commission) — their own line items,
+  // kept out of the rent schedule and rent totals.
+  const feeRows = contract.fees ?? [];
+  const feeGross = feeRows.reduce((s, p) => s + (p.amount || 0), 0);
+  const feeLabel = (t: string | null) =>
+    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission' : (t ?? 'Fee');
   // Rent VAT (commercial/industrial): amounts are GROSS; split net vs VAT for display.
   const rentGross = rentRows.reduce((s, p) => s + (p.amount || 0), 0);
   const rentVat   = rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
-  const allRecorded = rentRows.length > 0;
-  const confirmPdc = async () => {
-    setPdcBusy(true);
-    try { await onConfirmPdc(); } finally { setPdcBusy(false); }
-  };
   // ── Upload document state (Flow 5) ──
   const docFileRef = useRef<HTMLInputElement>(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -2019,6 +2021,47 @@ function DetailsDrawer({
                     </tfoot>
                   </table>
 
+                  {/* Fees — admin / ejari / commission as their own line items,
+                      separate from the rent schedule above. */}
+                  {feeRows.length > 0 && (
+                    <div style={{ marginTop: 18 }}>
+                      <p className="subhead" style={{ marginBottom: 6 }}>
+                        Fees <span className="note" style={{ fontWeight: 400 }}>· one-off charges, separate from rent</span>
+                      </p>
+                      <table className="ptable">
+                        <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Due date</th><th>Status</th></tr></thead>
+                        <tbody>
+                          {feeRows.map(f => (
+                            <tr key={f.id}>
+                              <td>{feeLabel(f.paymentType)}</td>
+                              <td>{f.description ?? '—'}</td>
+                              <td className="amt">
+                                {fmtAed(f.amount)}
+                                {f.vatAmount ? <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(f.vatAmount)} VAT</span> : null}
+                              </td>
+                              <td>{fmtDate(f.transactionDate)}</td>
+                              <td>
+                                <select
+                                  className={'cstat ' + (f.chequeStatus ?? 'pending')}
+                                  style={{ cursor: 'pointer' }}
+                                  value={f.chequeStatus ?? 'pending'}
+                                  disabled={statusBusy === f.id}
+                                  onChange={e => void changeStatus(f.id, e.target.value)}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="cleared">Cleared</option>
+                                  <option value="bounced">Bounced</option>
+                                  <option value="cancelled">Cancelled</option>
+                                </select>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross)}</td><td colSpan={2} /></tr></tfoot>
+                      </table>
+                    </div>
+                  )}
+
                   {/* Record-payment form (Flow 1) */}
                   {showRec && (
                     <div style={{ marginTop: 14, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
@@ -2029,6 +2072,8 @@ function DetailsDrawer({
                             <option value="rental_income">Rental income</option>
                             <option value="security_deposit">Security deposit</option>
                             <option value="admin_fee">Admin fee</option>
+                            <option value="ejari_fee">Ejari fee</option>
+                            <option value="commission">Commission</option>
                             <option value="maintenance_fee">Maintenance fee</option>
                             <option value="service_charge">Service charge</option>
                             <option value="other">Other</option>
@@ -2068,21 +2113,6 @@ function DetailsDrawer({
                     </div>
                   )}
 
-                  {/* Confirm PDC received (Flow 3) */}
-                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--mist-strong)' }}>
-                    {contract.pdcConfirmed ? (
-                      <p className="note" style={{ color: 'var(--jade-deep)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Check size={13} /> PDC collection confirmed{contract.pdcConfirmedAt ? ` on ${fmtDate(contract.pdcConfirmedAt)}` : ''}.
-                      </p>
-                    ) : (
-                      <>
-                        <button className="btn btn-jade btn-sm" disabled={pdcBusy || !allRecorded} onClick={() => void confirmPdc()}>
-                          <ClipboardCheck size={14} /> {pdcBusy ? 'Confirming…' : 'Confirm PDC received'}
-                        </button>
-                        {!allRecorded && <p className="note" style={{ marginTop: 6 }}>Record the rental cheques above first.</p>}
-                      </>
-                    )}
-                  </div>
                 </div>
               </div>
               {/* Payment documents (receipts / advices / invoices) live in the
