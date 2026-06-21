@@ -13,7 +13,9 @@
  *   • default (pid)   → one payment (instalment #1 itemises the bundled fees)
  *
  * Money: contract adminFeeFils/ejariFeeFils are stored inconsistently (AED or fils)
- * → normalizeFees() self-corrects. Commission is the residual of the real payments.
+ * → normalizeFees() self-corrects (legacy/bundled contracts only). Admin/ejari/
+ * commission are read from the real fee rows (contract.fees) when present;
+ * commission is NEVER synthesised from a residual.
  */
 'use client';
 
@@ -256,14 +258,14 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
     rentNet = netOf(rentRows);
   } else {
     // Legacy / renewal: no separate fee rows — fees were bundled into the rent
-    // cheques. Reconstruct admin/ejari from columns; commission is the residual.
+    // cheques. Reconstruct admin/ejari from the (RP-entered) columns; everything
+    // else in the cheque total is rent. Commission is NEVER synthesised from a
+    // residual — it only appears when a real commission fee row exists (above).
     const sumNet = netOf(rentRows);
     const feesPlusComm = round2(sumNet - (contract.annualRent ?? 0));
     const n = normalizeFees(contract.adminFeeFils ?? 0, contract.ejariFeeFils ?? 0, feesPlusComm);
     admin = n.admin; ejari = n.ejari;
-    const commissionRaw = round2(feesPlusComm - admin - ejari);
-    commission = commissionRaw >= 1 ? commissionRaw : 0;
-    rentNet = Math.max(0, round2(sumNet - admin - ejari - commission));
+    rentNet = Math.max(0, round2(sumNet - admin - ejari));
   }
 
   const lines: LineItem[] = [];

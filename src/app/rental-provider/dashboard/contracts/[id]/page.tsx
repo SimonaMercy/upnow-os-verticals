@@ -591,28 +591,21 @@ export default function ContractDetailPage() {
     return () => ctrl.abort();
   }, [params?.id]);
 
-  // Phase 6 — auto-fill admin / ejari / commission from the RP's saved fee
-  // rules whenever the renewal rent changes, unless the RP has manually
-  // touched that specific field. Keeps the modal aligned with /settings/fees
-  // and removes the "remember to blank the field" trick.
+  // Prefill admin / ejari from the PARENT lease's actual stored fees (a real
+  // carry-forward default the RP can edit), unless the RP has touched the field.
+  // NOT from fee rules — what the modal shows is exactly what carries forward, so
+  // no rule/default figure is ever charged the RP didn't confirm. Commission has
+  // no parent column, so it starts blank (RP enters it if the renewal charges one).
   useEffect(() => {
-    if (!showRenewalModal || !feeRules || !contract) return;
-    const cat = spaceCategoryFromUnitType(contract.unit?.type ?? null);
-    const rules = feeRules[cat] ?? feeRules['residential'] ?? [];
-    const rent = parseFloat(renewalForm.newAnnualRent) || 0;
-    const applyRule = (feeType: string): string => {
-      const r = rules.find(x => x.feeType === feeType && x.isActive !== false);
-      if (!r) return '';
-      const v = r.valueType === 'percentage' ? rent * Number(r.value) / 100 : Number(r.value);
-      return v > 0 ? String(Math.round(v)) : '';
-    };
+    if (!showRenewalModal || !contract) return;
+    const carried = (col?: number | null) => (col && col > 0 ? String(col) : '');
     setRenewalForm(f => ({
       ...f,
-      adminFee:   feesTouched.adminFee   ? f.adminFee   : applyRule('admin_fee'),
-      ejariFee:   feesTouched.ejariFee   ? f.ejariFee   : applyRule('ejari_fee'),
-      commission: feesTouched.commission ? f.commission : applyRule('commission'),
+      adminFee:   feesTouched.adminFee   ? f.adminFee   : carried(contract.adminFeeFils),
+      ejariFee:   feesTouched.ejariFee   ? f.ejariFee   : carried(contract.ejariFeeFils),
+      commission: feesTouched.commission ? f.commission : f.commission,
     }));
-  }, [showRenewalModal, feeRules, renewalForm.newAnnualRent, feesTouched, contract]);
+  }, [showRenewalModal, feesTouched, contract]);
 
   // Load tenant rental documents when the Documents drawer opens.
   // For RENEWAL contracts the tenant uploads to ownerType='tenancy_contract', ownerId=<child id>
