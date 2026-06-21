@@ -912,6 +912,17 @@ export function ReportDetailView({
   const visibleColumns = useMemo(() => activeColumns.filter(c => !deadColKeys.has(c.key)), [activeColumns, deadColKeys]);
   const visibleTotals = useMemo(() => def.totals.filter(t => !deadTotalKeys.has(t.key)), [def, deadTotalKeys]);
 
+  // Fee-taxation stacks several filter bars; gather them into one aligned card so
+  // the labels line up in a column instead of a ragged stack. Reports with a
+  // single control bar keep their bare row (the wrapper collapses to display:contents).
+  const filtersPanel = !!def?.buildingLeaseFilter;
+  const ctrlRowCls = filtersPanel
+    ? 'flex items-center gap-2 flex-wrap px-4 py-3 print:hidden'
+    : 'flex items-center gap-2 mb-4 flex-wrap print:hidden';
+  const ctrlLabelCls = filtersPanel
+    ? 'text-xs text-[#6b6860] font-semibold min-w-[104px]'
+    : 'text-xs text-[#6b6860] font-medium';
+
   function handleCsv() {
     if (!data) return;
     const datestamp = new Date(data.generatedAt).toISOString().slice(0, 10);
@@ -1027,6 +1038,10 @@ export function ReportDetailView({
         </div>
       )}
 
+      {/* Filters — grouped into one aligned card for fee-taxation; a transparent
+          (display:contents) wrapper everywhere else so single-bar reports are unchanged. */}
+      <div className={filtersPanel ? 'rounded-2xl border border-[#e8e6e0] bg-white divide-y divide-[#f0ede8] mb-6 print:hidden' : 'contents'}>
+
       {/* Lease-expiry window control */}
       {def.controlKey === 'leaseExpiryWindow' && (
         <div className="flex items-center gap-2 mb-4 print:hidden">
@@ -1059,8 +1074,8 @@ export function ReportDetailView({
 
       {/* Date-range control (day / month / 3-6 mo / year / custom) */}
       {def.controlKey === 'dateRange' && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Period:</span>
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Period:</span>
           {RANGE_PRESETS.map(p => {
             const r = p.range();
             const active = from === r.from && to === r.to;
@@ -1080,8 +1095,8 @@ export function ReportDetailView({
 
       {/* View (overall summary vs per-contract detail) + bucketing granularity. */}
       {def.buildingLeaseFilter && (
-        <div className="flex items-center gap-2 mb-3 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">View:</span>
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>View:</span>
           {([
             { id: 'overall',  label: 'Overall' },
             { id: 'detailed', label: 'Detailed' },
@@ -1109,9 +1124,9 @@ export function ReportDetailView({
 
       {/* Building + leasing-model (direct/sub) filters — fee-taxation only. */}
       {def.buildingLeaseFilter && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+        <div className={ctrlRowCls}>
           {/* Leasing model — true multi-select; both on = all. */}
-          <span className="text-xs text-[#6b6860] font-medium">Leasing model:</span>
+          <span className={ctrlLabelCls}>Leasing model:</span>
           {([
             { id: 'direct', label: 'Direct lease' },
             { id: 'sub',    label: 'Sub-lease' },
@@ -1224,8 +1239,8 @@ export function ReportDetailView({
 
       {/* Tenant scope — active customers only (default) vs include ended tenants. */}
       {TENANT_SCOPED.has(slug) && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Customers:</span>
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Customers:</span>
           {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
             <button key={v} onClick={() => setScope(v)}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
@@ -1237,6 +1252,8 @@ export function ReportDetailView({
           </span>
         </div>
       )}
+
+      </div>{/* /filters */}
 
       {/* Totals */}
       {data && visibleTotals.length > 0 && (
@@ -1431,7 +1448,18 @@ export function ReportDetailView({
                       className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
                       {visibleColumns.map(c => (
                         <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
-                          <CellValue value={row[c.key]} type={c.type} />
+                          {feeDetailed && c.key === 'contractRef' && row.contractId != null ? (
+                            <Link
+                              href={`${contractsBase}/${row.contractId}/v2`}
+                              onClick={e => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
+                              title="Open contract to cross-verify">
+                              {String(row.contractRef ?? `CID-${row.contractId}`)}
+                              <ExternalLink size={12} className="print:hidden" />
+                            </Link>
+                          ) : (
+                            <CellValue value={row[c.key]} type={c.type} />
+                          )}
                         </td>
                       ))}
                       {def.drilldown && (
