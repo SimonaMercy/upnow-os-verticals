@@ -61,6 +61,11 @@ interface FormState {
   numberOfInstallments: string;
   modeOfPayment: string;
   notes: string;
+  // One-off fees (AED) — prefilled from the unit/lead suggestion but editable.
+  // Whatever the RP confirms here is what's stored; blank = fee not charged.
+  adminFee: string;
+  ejariFee: string;
+  commission: string;
 }
 
 const PAYMENT_METHODS: { value: string; label: string }[] = [
@@ -303,6 +308,9 @@ export default function NewContractPage() {
     numberOfInstallments: qChequeCount && Number(qChequeCount) > 0 ? String(Math.max(1, Number(qChequeCount) - 1)) : '4',
     modeOfPayment: 'cheque',
     notes: '',
+    adminFee: '',
+    ejariFee: '',
+    commission: '',
   });
 
   // Load preferred start days from RP profile (RP only — managers have no RP profile;
@@ -407,6 +415,25 @@ export default function NewContractPage() {
       })
       .catch(() => undefined);
   }, [qLeadId]);
+
+  // Prefill the editable one-off fee fields with the suggested default (lead plan
+  // or the unit's configured fees) — only while a field is still blank, so the RP's
+  // own edits are never clobbered. Whatever ends up here is exactly what's stored;
+  // nothing is auto-derived on the backend. Blank = fee not charged.
+  useEffect(() => {
+    const u = units.find(un => String(un.id) === form.unitId);
+    const a = planFromLead ? planFromLead.adminFeeFils / 100 : Number(u?.adminFee) || 0;
+    const e = planFromLead ? planFromLead.ejariFils / 100 : Number(u?.ejariFeeFils) || 0;
+    const c = planFromLead ? planFromLead.commissionFils / 100 : Number(u?.commission) || 0;
+    if (!u && !planFromLead) return;
+    setForm(f => ({
+      ...f,
+      adminFee:   f.adminFee === ''   && a ? String(a) : f.adminFee,
+      ejariFee:   f.ejariFee === ''   && e ? String(e) : f.ejariFee,
+      commission: f.commission === '' && c ? String(c) : f.commission,
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.unitId, units, planFromLead]);
 
   // Load units when property changes; auto-select unit from query param
   useEffect(() => {
@@ -530,12 +557,11 @@ export default function NewContractPage() {
         securityDepositAmount: planFromLead
           ? planFromLead.securityDepositFils / 100
           : su?.securityDeposit != null ? Number(su.securityDeposit) : undefined,
-        adminFee: planFromLead
-          ? planFromLead.adminFeeFils / 100
-          : su?.adminFee != null ? Number(su.adminFee) : undefined,
-        ejariFee: planFromLead
-          ? planFromLead.ejariFils / 100
-          : su?.ejariFeeFils != null ? Number(su.ejariFeeFils) : undefined,
+        // One-off fees: send exactly what the RP confirmed in the editable fields
+        // (blank = omit → no fee row). Never auto-derived on the backend.
+        adminFee:   form.adminFee   !== '' ? Number(form.adminFee)   : undefined,
+        ejariFee:   form.ejariFee   !== '' ? Number(form.ejariFee)   : undefined,
+        commission: form.commission !== '' ? Number(form.commission) : undefined,
         numberOfInstallments: form.numberOfInstallments ? Number(form.numberOfInstallments) : undefined,
         modeOfPayment: form.modeOfPayment,
         notes: form.notes || undefined,
@@ -588,9 +614,10 @@ export default function NewContractPage() {
                           : 0;
   const annualRent    = planFromLead ? planFromLead.rentFils / 100 : Math.max(0, listedRent - discountAmt);
   const secDeposit    = planFromLead ? planFromLead.securityDepositFils / 100 : Number(selectedUnit?.securityDeposit) || 0;
-  const adminFee      = planFromLead ? planFromLead.adminFeeFils / 100      : Number(selectedUnit?.adminFee)      || 0;
-  const ejariFee      = planFromLead ? planFromLead.ejariFils / 100         : Number(selectedUnit?.ejariFeeFils)  || 0;
-  const commission    = planFromLead ? planFromLead.commissionFils / 100    : Number(selectedUnit?.commission)    || 0;
+  // Editable, RP-confirmed values (prefilled by the effect above from the suggestion).
+  const adminFee      = Number(form.adminFee)   || 0;
+  const ejariFee      = Number(form.ejariFee)   || 0;
+  const commission    = Number(form.commission) || 0;
   const installments  = Number(form.numberOfInstallments) || 4;
   const chequeAmount  = installments > 0 ? annualRent / installments : 0;
   const durationLabel = calcDurationLabel(form.contractStartDate, form.contractEndDate);
@@ -980,19 +1007,47 @@ export default function NewContractPage() {
                           )}
                         </span>
                       </div>
-                      {([
-                        ['Security Deposit',  secDeposit],
-                        ['Admin Fee',         adminFee],
-                        ['Ejari Fee',         ejariFee],
-                        ['Commission',        commission],
-                      ] as [string, number][]).map(([label, val]) => (
-                        <div key={label} className="flex justify-between items-center px-4 py-2.5">
-                          <span className="text-xs text-[#6b6860]">{label}</span>
-                          <span className="text-xs font-semibold text-[#1a1916]">
-                            {val > 0 ? fmtAed(val) : <span className="text-[#c0bdb8]">—</span>}
-                          </span>
-                        </div>
-                      ))}
+                      <div className="flex justify-between items-center px-4 py-2.5">
+                        <span className="text-xs text-[#6b6860]">Security Deposit</span>
+                        <span className="text-xs font-semibold text-[#1a1916]">
+                          {secDeposit > 0 ? fmtAed(secDeposit) : <span className="text-[#c0bdb8]">—</span>}
+                        </span>
+                      </div>
+                      {/* One-off fees — editable (prefilled from the unit/lead suggestion).
+                          Lead-driven plans are final, so they show read-only there. */}
+                      {planFromLead ? (
+                        ([['Admin Fee', adminFee], ['Ejari Fee', ejariFee], ['Commission', commission]] as [string, number][]).map(([label, val]) => (
+                          <div key={label} className="flex justify-between items-center px-4 py-2.5">
+                            <span className="text-xs text-[#6b6860]">{label}</span>
+                            <span className="text-xs font-semibold text-[#1a1916]">
+                              {val > 0 ? fmtAed(val) : <span className="text-[#c0bdb8]">—</span>}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        ([
+                          ['Admin Fee', 'adminFee'],
+                          ['Ejari Fee', 'ejariFee'],
+                          ['Commission', 'commission'],
+                        ] as [string, 'adminFee' | 'ejariFee' | 'commission'][]).map(([label, key]) => (
+                          <div key={label} className="flex justify-between items-center gap-3 px-4 py-2">
+                            <span className="text-xs text-[#6b6860]">{label}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-[#9b9890]">AED</span>
+                              <input
+                                type="number" min={0} step="0.01" inputMode="decimal"
+                                value={form[key]}
+                                placeholder="0"
+                                onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
+                                className="w-28 rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1.5 text-xs text-right text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
+                              />
+                            </div>
+                          </div>
+                        ))
+                      )}
+                      <p className="px-4 pb-2 pt-0.5 text-[10px] leading-snug text-[#9b9890]">
+                        Suggested from the unit/lead — edit as needed. Blank means the fee isn’t charged; nothing is auto-added.
+                      </p>
                     </div>
                   </div>
 

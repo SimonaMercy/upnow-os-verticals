@@ -3228,14 +3228,22 @@ function RenewalProposeModal({
   const ns = new Date(contract.endDate); ns.setDate(ns.getDate() + 1);
   const ne = new Date(ns); ne.setFullYear(ne.getFullYear() + 1); ne.setDate(ne.getDate() - 1);
   const iso = (x: Date) => x.toISOString().slice(0, 10);
+  // Prefill one-off fees from the PARENT lease's actual fees (its fee rows, else
+  // its stored column) — a sensible renewal default the RP can edit. Blank when
+  // the parent had none; never a hardcoded/auto figure.
+  const parentFeeAmt = (t: string, col?: number | null) => {
+    const row = (contract.fees ?? []).find(x => x.paymentType === t)?.amount;
+    const v = row ?? col ?? 0;
+    return v > 0 ? String(v) : '';
+  };
   const [f, setF] = useState({
     newAnnualRent: String(Math.round(contract.annualRent * 1.05)),
     newStartDate: iso(ns),
     newEndDate: iso(ne),
     numberOfInstallments: String(contract.numberOfInstallments ?? 4),
-    adminFee: '2000',
-    ejariFee: '515',
-    commission: '7250',
+    adminFee: parentFeeAmt('admin_fee', contract.adminFeeFils),
+    ejariFee: parentFeeAmt('ejari_fee', contract.ejariFeeFils),
+    commission: parentFeeAmt('commission'),
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -3259,7 +3267,9 @@ function RenewalProposeModal({
   const last = rent - base * (n - 1);
   const rows: { i: number; d: string; a: number; b: boolean }[] = [];
   if (n && rent) {
-    rows.push({ i: 1, d: `Admin + Ejari + Commission + Installment 1 (1/${n})`, a: adminN + ejariN + commN + (n === 1 ? last : base), b: true });
+    const feeParts = [adminN > 0 && 'Admin', ejariN > 0 && 'Ejari', commN > 0 && 'Commission'].filter(Boolean);
+    const firstLabel = [...feeParts, `Installment 1 (1/${n})`].join(' + ');
+    rows.push({ i: 1, d: firstLabel, a: adminN + ejariN + commN + (n === 1 ? last : base), b: true });
     for (let i = 1; i < n; i++) rows.push({ i: i + 1, d: `Rent — Payment ${i + 1}/${n}`, a: i === n - 1 ? last : base, b: false });
   }
   const total = rows.reduce((s, r) => s + r.a, 0);

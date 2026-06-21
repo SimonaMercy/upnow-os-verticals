@@ -88,6 +88,10 @@ export interface ReceiptContract {
   } | null;
   adminFeeFils?: number;
   ejariFeeFils?: number;
+  /** Real one-off fee rows (admin/ejari/commission) — the source of truth for
+   *  the receipt's fee lines. When present we read these directly instead of
+   *  reconstructing from columns + a commission residual. */
+  fees?: ReceiptPayment[];
   landlord: {
     name: string | null;
     companyName: string | null;
@@ -164,10 +168,17 @@ function statusLabel(chequeStatus: string | null | undefined, pdcConfirmed?: boo
     default: return pdcConfirmed ? 'Collected (PDC)' : 'Pending';
   }
 }
+const FEE_TYPES = new Set(['admin_fee', 'ejari_fee', 'commission']);
+function isFee(p: ReceiptPayment): boolean {
+  return FEE_TYPES.has((p.paymentType ?? '').toLowerCase());
+}
 function isRental(p: ReceiptPayment): boolean {
   const t = (p.paymentType ?? '').toLowerCase();
-  return t !== 'security_deposit' && t !== 'admin_fee';
+  return t !== 'security_deposit' && !FEE_TYPES.has(t);
 }
+const FEE_LABEL: Record<string, string> = {
+  admin_fee: 'Administration Fee', ejari_fee: 'Ejari Registration Fee', commission: 'Agency Commission',
+};
 function isDeposit(p: ReceiptPayment): boolean {
   return (p.paymentType ?? '').toLowerCase() === 'security_deposit';
 }
@@ -195,10 +206,11 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
       receiptNo: `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
       lines: [{ desc: 'Refundable Security Deposit', net: gross, vat: 0, total: gross }] };
   }
-  if (type === 'admin_fee') {
+  if (isFee(sel)) {
+    const code = type === 'ejari_fee' ? 'EJR' : type === 'commission' ? 'COM' : 'ADM';
     return { kind: 'fee', title: 'FEE RECEIPT', titleAr: 'إيصال رسوم',
-      receiptNo: `RCP-${contract.ref}-ADM`, date: sel.transactionDate, single: sel,
-      lines: [{ desc: sel.description || 'Administration Fee', net, vat, total: gross }] };
+      receiptNo: `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
+      lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross }] };
   }
 
   const rentalIdx = rentals.findIndex(p => p.id === sel.id);
@@ -224,26 +236,45 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
 }
 
 function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
-  const nonDeposit = payments.filter(p => !isDeposit(p));
-  if (nonDeposit.length === 0) return null;
-  const sumGross = round2(nonDeposit.reduce((s, p) => s + (p.amount || 0), 0));
-  const sumVat = round2(nonDeposit.reduce((s, p) => s + (p.vatAmount || 0), 0));
-  const sumNet = round2(sumGross - sumVat);
-  const annualRent = contract.annualRent ?? 0;
-  const feesPlusComm = round2(sumNet - annualRent);
-  const { admin, ejari } = normalizeFees(contract.adminFeeFils ?? 0, contract.ejariFeeFils ?? 0, feesPlusComm);
-  const commissionRaw = round2(feesPlusComm - admin - ejari);
-  const commission = commissionRaw >= 1 ? commissionRaw : 0;
-  const rentNet = Math.max(0, round2(sumNet - admin - ejari - commission));
+  // Rent (and any non-fee, non-deposit charges) — the fee rows are a separate set.
+  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p));
+  const feeRows = (contract.fees ?? []).filter(isFee);
+  if (rentRows.length === 0 && feeRows.length === 0) return null;
+
+  const netOf = (rows: ReceiptPayment[]) =>
+    round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
+  const rentVat = round2(rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0));
+
+  let admin = 0, ejari = 0, commission = 0, rentNet: number;
+
+  if (feeRows.length > 0) {
+    // Real fee rows — read each fee directly from its own row(s). No residual,
+    // no column reconstruction; commission is whatever the RP actually recorded.
+    admin = netOf(feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === 'admin_fee'));
+    ejari = netOf(feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === 'ejari_fee'));
+    commission = netOf(feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === 'commission'));
+    rentNet = netOf(rentRows);
+  } else {
+    // Legacy / renewal: no separate fee rows — fees were bundled into the rent
+    // cheques. Reconstruct admin/ejari from columns; commission is the residual.
+    const sumNet = netOf(rentRows);
+    const feesPlusComm = round2(sumNet - (contract.annualRent ?? 0));
+    const n = normalizeFees(contract.adminFeeFils ?? 0, contract.ejariFeeFils ?? 0, feesPlusComm);
+    admin = n.admin; ejari = n.ejari;
+    const commissionRaw = round2(feesPlusComm - admin - ejari);
+    commission = commissionRaw >= 1 ? commissionRaw : 0;
+    rentNet = Math.max(0, round2(sumNet - admin - ejari - commission));
+  }
 
   const lines: LineItem[] = [];
   if (admin > 0) lines.push({ desc: 'Administration Fee', net: admin, vat: 0, total: admin });
   if (ejari > 0) lines.push({ desc: 'Ejari Registration Fee', net: ejari, vat: 0, total: ejari });
   if (commission > 0) lines.push({ desc: 'Agency Commission', net: commission, vat: 0, total: commission });
-  lines.push({ desc: 'Rent (full lease term)', net: rentNet, vat: sumVat, total: round2(rentNet + sumVat) });
+  lines.push({ desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) });
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT', titleAr: 'إيصال دفعات العقد',
-    receiptNo: `RCP-${contract.ref}-PAY`, date: nonDeposit[0]?.transactionDate ?? null, lines, scheduleCount: nonDeposit.length };
+    receiptNo: `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
+    lines, scheduleCount: rentRows.length + feeRows.length };
 }
 
 /** Resolve the deposit pseudo-payment from the entity / held amount / column. */
@@ -267,6 +298,9 @@ function resolveDeposit(contract: ReceiptContract): ReceiptPayment | undefined {
 
 function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selectedId?: number | null, selectedIdx = 0): Receipt | null {
   const payments = contract.payments ?? [];
+  // Fee rows live in their own array — include them so a per-fee receipt
+  // (?pid=<feeRowId>) resolves to the right admin/ejari/commission line.
+  const all = [...payments, ...((contract.fees ?? []).filter(isFee))];
   const rentals = payments.filter(isRental);
   if (kind === 'contract') return buildContractReceipt(contract, payments);
   if (kind === 'deposit') {
@@ -274,7 +308,7 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
     return dep ? buildSingleReceipt(dep, contract, rentals) : null;
   }
   let sel: ReceiptPayment | undefined;
-  if (selectedId != null) sel = payments.find(p => p.id === selectedId);
+  if (selectedId != null) sel = all.find(p => p.id === selectedId);
   if (!sel) sel = payments[Math.min(Math.max(selectedIdx, 0), Math.max(payments.length - 1, 0))];
   return sel ? buildSingleReceipt(sel, contract, rentals) : null;
 }
