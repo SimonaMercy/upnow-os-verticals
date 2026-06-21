@@ -59,7 +59,10 @@ type NavBadgeKey = 'leads' | 'properties' | 'units' | 'leases';
 type NavCounts = Partial<Record<NavBadgeKey, number>>;
 
 type NavItem =
-  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string; badgeKey?: NavBadgeKey }
+  // `match` lists extra path prefixes that also activate the item — for sections
+  // whose detail pages live under a different route than the nav href (e.g. the
+  // Leases list is /orders but a lease opens at /contracts/:id/v2).
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string; badgeKey?: NavBadgeKey; match?: string[] }
   | { divider: true }
   | { section: string };
 
@@ -76,7 +79,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Units',            href: '/rental-provider/dashboard/units',          icon: Home, badgeKey: 'units' },
     { label: 'Customers',        href: '/rental-provider/dashboard/tenants',        icon: UserCheck },
     { label: 'Security Deposits', href: '/rental-provider/dashboard/deposits',      icon: Wallet },
-    { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, badgeKey: 'leases' },
+    { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, badgeKey: 'leases', match: ['/rental-provider/dashboard/contracts'] },
     { label: 'Ended Leases',     href: '/rental-provider/dashboard/ended-leases',   icon: Archive },
     { divider: true },
     { section: 'More' },
@@ -300,9 +303,10 @@ function Sidebar({
             '/dashboard/technician', '/dashboard/admin',
           ];
           const isOverview = overviewRoutes.includes(item.href);
+          const onPath = (base: string) => pathname === base || pathname.startsWith(base + '/');
           const isActive = isOverview
             ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(item.href + '/');
+            : onPath(item.href) || (item.match?.some(onPath) ?? false);
 
           const badgeCount = item.badgeKey ? (counts[item.badgeKey] ?? 0) : 0;
           const hasBadge = badgeCount > 0;
@@ -328,7 +332,7 @@ function Sidebar({
                   className="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums leading-none"
                   style={{ background: '#2e9f82', color: '#fff' }}
                 >
-                  {badgeCount > 99 ? '99+' : badgeCount}
+                  {badgeCount > 999 ? '999+' : badgeCount}
                 </span>
               )}
               {!collapsed && isActive && !hasBadge && <ChevronRight size={14} className={shell.activeChevron} />}
