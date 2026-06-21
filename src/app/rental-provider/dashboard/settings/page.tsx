@@ -1359,6 +1359,33 @@ export default function SettingsPage() {
             </div>}
           </form>
 
+          {/* KYC Documents — landlord / rental-provider identity, licensing,
+              banking and (when assigned) Power of Attorney documents. Reuses the
+              shared KycDocumentsPanel which drives the presigned-S3 upload flow.
+              Remounts via docsReloadKey after a profile save so a POA toggle is
+              picked up immediately. */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
+                <ShieldCheck size={18} className="text-[#166651]" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-base text-[#1a1916]">KYC Documents</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">
+                  Upload your identity and licensing documents for verification.
+                  {hasPoa && ' Power of Attorney documents are attached in the Authorized Signatory & POA section below.'}
+                </p>
+              </div>
+            </div>
+            <KycDocumentsPanel
+              key={docsReloadKey}
+              profileApiPath="/profiles/rental-provider/me"
+              ownerType="rental_provider"
+              compact
+              excludeKeys={POA_DOC_KEYS}
+            />
+          </div>
+
           {/* Authorized Signatory & Power of Attorney — its own card, saved
               independently. When a POA holder acts on the landlord's behalf, the
               required POA documents can be attached right here. */}
@@ -1516,33 +1543,6 @@ export default function SettingsPage() {
               <SaveButton saving={savingBank} label="Save Banking Details" />
             </div>
           </form>
-
-          {/* KYC Documents — landlord / rental-provider identity, licensing,
-              banking and (when assigned) Power of Attorney documents. Reuses the
-              shared KycDocumentsPanel which drives the presigned-S3 upload flow.
-              Remounts via docsReloadKey after a profile save so a POA toggle is
-              picked up immediately. */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
-                <ShieldCheck size={18} className="text-[#166651]" />
-              </div>
-              <div>
-                <h2 className="font-semibold text-base text-[#1a1916]">KYC Documents</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">
-                  Upload your identity and licensing documents for verification.
-                  {hasPoa && ' Power of Attorney documents are attached in the Authorized Signatory & POA section above.'}
-                </p>
-              </div>
-            </div>
-            <KycDocumentsPanel
-              key={docsReloadKey}
-              profileApiPath="/profiles/rental-provider/me"
-              ownerType="rental_provider"
-              compact
-              excludeKeys={POA_DOC_KEYS}
-            />
-          </div>
 
         </div>
       )}
