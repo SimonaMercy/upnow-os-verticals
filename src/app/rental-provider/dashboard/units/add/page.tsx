@@ -111,7 +111,7 @@ function emptyRow(expanded = true): UnitRow {
 }
 
 const EMPTY_PROP: PropertyFormData = {
-  buildingName: '', spaceCategory: '',
+  buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
@@ -423,6 +423,7 @@ export default function AddListingPage() {
           ...(actingRpId ? { rentalProviderId: Number(actingRpId) } : {}),
           buildingName: pf.buildingName,
           spaceCategory: pf.spaceCategory,
+          leasingType: pf.leasingType,
           fullAddress: parts.join(', ') || undefined,
           countryId: pf.countryId ?? undefined,
           emirateId: pf.emirateId ?? undefined,

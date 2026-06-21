@@ -12,6 +12,7 @@ export default function Page() {
       config={MISSING_REPORTS['missing-customers']}
       endpoint="/api/reports/missing-customers"
       backHref="/rental-provider/dashboard/reports"
+      scopeToggle
     />
   );
 }

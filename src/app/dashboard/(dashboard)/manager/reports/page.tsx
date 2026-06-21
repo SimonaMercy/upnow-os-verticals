@@ -85,6 +85,7 @@ export default function ManagerReportsPage() {
         config={MISSING_REPORTS[openSlug]}
         endpoint={`/api/manager/reports/${openSlug}?rp=${effectiveRp}`}
         onBack={() => navigate(null)}
+        scopeToggle={openSlug === 'missing-customers'}
       />
     );
   }

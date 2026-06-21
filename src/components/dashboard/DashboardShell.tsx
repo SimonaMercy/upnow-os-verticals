@@ -9,7 +9,7 @@ import {
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle,
+  Heart, HelpCircle, Archive,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
@@ -54,8 +54,12 @@ function useManagerNavPerms(role: UserRole): Record<string, boolean> {
 /* ─────────────────────────────────────────────
    Nav definitions per role
 ───────────────────────────────────────────── */
+/** Keys for the cheap sidebar count badges (GET /api/properties/nav-counts). */
+type NavBadgeKey = 'leads' | 'properties' | 'units' | 'leases';
+type NavCounts = Partial<Record<NavBadgeKey, number>>;
+
 type NavItem =
-  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string }
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string; badgeKey?: NavBadgeKey }
   | { divider: true }
   | { section: string };
 
@@ -67,12 +71,13 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
   rental_provider: [
     { label: 'Dashboard',        href: '/rental-provider/dashboard',                icon: LayoutDashboard },
-    { label: 'Leads',            href: '/rental-provider/dashboard/leads',          icon: TrendingUp },
-    { label: 'Properties',       href: '/rental-provider/dashboard/portfolio',      icon: Building2 },
-    { label: 'Units',            href: '/rental-provider/dashboard/units',          icon: Home },
+    { label: 'Leads',            href: '/rental-provider/dashboard/leads',          icon: TrendingUp, badgeKey: 'leads' },
+    { label: 'Properties',       href: '/rental-provider/dashboard/portfolio',      icon: Building2, badgeKey: 'properties' },
+    { label: 'Units',            href: '/rental-provider/dashboard/units',          icon: Home, badgeKey: 'units' },
     { label: 'Customers',        href: '/rental-provider/dashboard/tenants',        icon: UserCheck },
     { label: 'Security Deposits', href: '/rental-provider/dashboard/deposits',      icon: Wallet },
-    { label: 'Contract',         href: '/rental-provider/dashboard/orders',         icon: FileText },
+    { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, badgeKey: 'leases' },
+    { label: 'Ended Leases',     href: '/rental-provider/dashboard/ended-leases',   icon: Archive },
     { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/rental-provider/dashboard/templates',      icon: BookOpen },
@@ -99,7 +104,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties' },
     { label: 'Customers',        href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
     { label: 'Security Deposits', href: '/dashboard/manager/deposits',  icon: Wallet,  requirePerm: 'canManageDeposits' },
-    { label: 'Contract',         href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
+    { label: 'Leases',           href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
+    { label: 'Ended Leases',     href: '/dashboard/manager/ended-leases', icon: Archive, requirePerm: 'canManageAgreements' },
     { divider: true },
     { section: 'More' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
@@ -150,6 +156,44 @@ const ROLE_LABEL: Record<UserRole, string> = {
 };
 
 /* ─────────────────────────────────────────────
+   Sidebar count badges — one cheap scalar fetch per session (RP only),
+   refreshed on tab focus (throttled). Never blocks render; on any failure
+   the badges simply stay hidden.
+───────────────────────────────────────────── */
+function useNavBadgeCounts(role: UserRole): NavCounts {
+  const [counts, setCounts] = useState<NavCounts>({});
+  useEffect(() => {
+    if (role !== 'rental_provider') return;   // no endpoint for other roles → no badges
+    let cancelled = false;
+    let last = 0;
+    const load = () => {
+      last = Date.now();
+      fetch('/api/properties/nav-counts', { credentials: 'include' })
+        .then(r => (r.ok ? r.json() : null))
+        .then((d: NavCounts | null) => {
+          if (cancelled || !d) return;
+          setCounts({
+            leads:      Number(d.leads ?? 0),
+            properties: Number(d.properties ?? 0),
+            units:      Number(d.units ?? 0),
+            leases:     Number(d.leases ?? 0),
+          });
+        })
+        .catch(() => { /* keep last-known / empty */ });
+    };
+    load();
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - last < 30_000) return;   // throttle re-fetch on focus churn
+      load();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+  }, [role]);
+  return counts;
+}
+
+/* ─────────────────────────────────────────────
    Sidebar
 ───────────────────────────────────────────── */
 function Sidebar({
@@ -157,11 +201,13 @@ function Sidebar({
   pathname,
   onClose,
   collapsed = false,
+  counts = {},
 }: {
   role: UserRole;
   pathname: string;
   onClose?: () => void;
   collapsed?: boolean;
+  counts?: NavCounts;
 }) {
   const managerPerms = useManagerNavPerms(role);
   const rawNav = NAV[role] ?? [];
@@ -258,6 +304,9 @@ function Sidebar({
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(item.href + '/');
 
+          const badgeCount = item.badgeKey ? (counts[item.badgeKey] ?? 0) : 0;
+          const hasBadge = badgeCount > 0;
+
           return (
             <Link
               key={item.href}
@@ -265,11 +314,24 @@ function Sidebar({
               onClick={onClose}
               className={cn(shell.item, isActive && shell.active)}
               style={collapsed ? { justifyContent: 'center', padding: '8px', gap: 0 } : undefined}
-              title={collapsed ? item.label : undefined}
+              title={collapsed ? (hasBadge ? `${item.label} (${badgeCount})` : item.label) : undefined}
             >
-              <span className={shell.glyph}><Icon size={16} /></span>
+              <span className={shell.glyph} style={collapsed && hasBadge ? { position: 'relative' } : undefined}>
+                <Icon size={16} />
+                {collapsed && hasBadge && (
+                  <span style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 99, background: '#2e9f82', border: '1.5px solid #fff' }} />
+                )}
+              </span>
               {!collapsed && <span>{item.label}</span>}
-              {!collapsed && isActive && <ChevronRight size={14} className={shell.activeChevron} />}
+              {!collapsed && hasBadge && (
+                <span
+                  className="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums leading-none"
+                  style={{ background: '#2e9f82', color: '#fff' }}
+                >
+                  {badgeCount > 99 ? '99+' : badgeCount}
+                </span>
+              )}
+              {!collapsed && isActive && !hasBadge && <ChevronRight size={14} className={shell.activeChevron} />}
             </Link>
           );
         })}
@@ -391,6 +453,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const checkedAuthRef = useRef(false);
+  // Sidebar count badges — safe before auth resolves (hook no-ops for non-RP / undefined role).
+  const navCounts = useNavBadgeCounts(user?.role as UserRole);
 
   useEffect(() => {
     const stored = localStorage.getItem('upnow_sidebar_collapsed');
@@ -461,7 +525,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           className="hidden lg:flex flex-shrink-0 h-full overflow-hidden"
           style={{ width: sidebarCollapsed ? 60 : 240, transition: 'width 0.2s ease' }}
         >
-          <Sidebar role={role} pathname={pathname} collapsed={sidebarCollapsed} />
+          <Sidebar role={role} pathname={pathname} collapsed={sidebarCollapsed} counts={navCounts} />
         </div>
       )}
 
@@ -473,7 +537,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             onClick={() => setSidebarOpen(false)}
           />
           <div className="absolute left-0 top-0 h-full z-50" style={{ width: 240 }}>
-            <Sidebar role={role} pathname={pathname} onClose={() => setSidebarOpen(false)} />
+            <Sidebar role={role} pathname={pathname} onClose={() => setSidebarOpen(false)} counts={navCounts} />
           </div>
         </div>
       )}

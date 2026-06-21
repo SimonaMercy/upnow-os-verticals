@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Search, X, Users, Plus } from 'lucide-react';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
+import { liveLeaseTips } from '@/lib/activeCustomer';
 
 type Customer = {
   id: number;
@@ -32,7 +33,6 @@ export default function TenantsPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterActive, setFilterActive] = useState('all'); // all | active | inactive
   const [renewalOnly, setRenewalOnly] = useState(false); // only renewals within 90d
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export default function TenantsPage() {
         // Collect raw leases per customer, then resolve the CURRENT lease per unit.
         // Imported renewals are all flagged contractActive=true, so the live lease for
         // a unit is the one with the latest start date; older same-unit leases are history.
-        type Raw = { unitId: number | null; startDate: string | null; endDate: string | null; annualRent: number; status: string | null };
+        type Raw = { id: number | null; unitId: number | null; startDate: string | null; endDate: string | null; annualRent: number; status: string | null; contractActive: boolean | null };
         const byTenant = new Map<number, { c: Customer; leases: Raw[] }>();
         for (const c of data) {
           const tid = c.tenant?.id;
@@ -56,25 +56,22 @@ export default function TenantsPage() {
             c: { id: tid, name: displayName, email: c.tenant.email ?? '', phone: c.tenant.phone ?? null, nationality: c.tenant.nationality ?? null, leaseCount: 0, activeLeaseCount: 0, totalActiveRent: 0, latestActiveEnd: null } as Customer,
             leases: [] as Raw[],
           };
-          e.leases.push({ unitId: c.unit?.id ?? null, startDate: c.startDate ?? null, endDate: c.endDate ?? null, annualRent: c.annualRent ?? 0, status: c.status ?? null });
+          e.leases.push({ id: c.id ?? null, unitId: c.unit?.id ?? null, startDate: c.startDate ?? null, endDate: c.endDate ?? null, annualRent: c.annualRent ?? 0, status: c.status ?? null, contractActive: c.contractActive ?? null });
           byTenant.set(tid, e);
         }
-        const TERMINAL = new Set(['terminated', 'cancelled']);
         const customers = Array.from(byTenant.values()).map(({ c, leases }) => {
-          const currentByUnit = new Map<number, Raw>();
-          const noUnit: Raw[] = [];
-          for (const l of leases) {
-            if (l.unitId == null) { noUnit.push(l); continue; }
-            const cur = currentByUnit.get(l.unitId);
-            if (!cur || String(l.startDate ?? '') > String(cur.startDate ?? '')) currentByUnit.set(l.unitId, l);
-          }
-          const current = [...currentByUnit.values(), ...noUnit].filter(l => !TERMINAL.has((l.status ?? '').toLowerCase()));
+          // Live leases = the in-force / in-flight tip of each renewal chain
+          // (shared definition, exact inverse of the Ended Leases nav).
+          const tips = liveLeaseTips(leases);
           c.leaseCount = leases.length;
-          c.activeLeaseCount = current.length;
-          c.totalActiveRent = current.reduce((s, l) => s + (l.annualRent ?? 0), 0);
-          c.latestActiveEnd = current.reduce<string | null>((m, l) => (l.endDate && (!m || new Date(l.endDate) > new Date(m)) ? l.endDate : m), null);
+          c.activeLeaseCount = tips.length;
+          c.totalActiveRent = tips.reduce((s, l) => s + (l.annualRent ?? 0), 0);
+          c.latestActiveEnd = tips.reduce<string | null>((m, l) => (l.endDate && (!m || new Date(l.endDate) > new Date(m)) ? l.endDate : m), null);
           return c;
-        });
+        })
+        // Active tenants only — drop customers whose every lease has ended; they
+        // live under the Ended Leases nav.
+        .filter(c => c.activeLeaseCount > 0);
         setCustomers(customers.sort((a, b) => a.name.localeCompare(b.name)));
       })
       .catch(() => undefined)
@@ -87,8 +84,6 @@ export default function TenantsPage() {
   };
 
   const filtered = customers.filter(t => {
-    if (filterActive === 'active' && t.activeLeaseCount === 0) return false;
-    if (filterActive === 'inactive' && t.activeLeaseCount > 0) return false;
     if (renewalOnly && !isRenewalSoon(t)) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -97,8 +92,8 @@ export default function TenantsPage() {
     return true;
   });
 
-  const hasFilters = filterActive !== 'all' || search !== '' || renewalOnly;
-  const clearFilters = () => { setFilterActive('all'); setSearch(''); setRenewalOnly(false); };
+  const hasFilters = search !== '' || renewalOnly;
+  const clearFilters = () => { setSearch(''); setRenewalOnly(false); };
 
   const activeLeases = customers.reduce((s, t) => s + t.activeLeaseCount, 0);
   const totalRent = customers.reduce((s, t) => s + t.totalActiveRent, 0);
@@ -117,7 +112,7 @@ export default function TenantsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">All current and past customers across your units.</p>
+          <p className="text-sm text-[#6b6860] mt-0.5">Your active customers — anyone with a live or upcoming lease. Ended tenancies move to Ended Leases.</p>
         </div>
         <button onClick={() => setShowAdd(true)}
           className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65]">
@@ -172,11 +167,6 @@ export default function TenantsPage() {
             className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
           />
         </div>
-        <select value={filterActive} onChange={e => setFilterActive(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
-          <option value="all">All Customers</option>
-          <option value="active">With active lease</option>
-          <option value="inactive">Without active lease</option>
-        </select>
         {hasFilters && (
           <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
             <X size={12} /> Reset

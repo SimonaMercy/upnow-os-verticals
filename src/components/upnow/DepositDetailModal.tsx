@@ -13,15 +13,23 @@
  * fetch, manager uses apiGet) and, for the RP, the action `links`. Manager
  * passes `links={null}` → read-only (no contract / settle / receipt navigation,
  * matching the manager portal's read-only deposits view).
+ *
+ * The move-in/out, settlement and document blocks are shared with the
+ * Ended-Leases popup — see ./leaseLifecycleSections.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  X, FileText, ExternalLink, Loader2, Camera, ClipboardList,
-  Receipt, Wallet, CheckCircle2, AlertCircle, Upload,
+  X, FileText, ExternalLink, Loader2, Receipt, Wallet, AlertCircle,
 } from 'lucide-react';
-import { openDocViewer } from '@/lib/docViewer';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import {
+  fmtAed, SectionTitle, DetailCol, InspectionSection, DocsBucket, SettlementLines,
+  type ProofDoc, type InspectionView, type SettlementView,
+} from './leaseLifecycleSections';
+
+// Re-export the shared lifecycle types so existing importers of this module keep working.
+export type { ProofDoc, InspectionView, SettlementView } from './leaseLifecycleSections';
 
 export type DepositStatus = 'held' | 'returned' | 'partial_return' | 'forfeited';
 
@@ -55,39 +63,6 @@ export interface DepositRow {
   settledViaSettlementId?: number | null;
 }
 
-export interface ProofDoc {
-  documentKey: string;
-  displayName: string | null;
-  mimeType: string | null;
-  fileUrl: string | null;
-}
-export interface InspectionView {
-  contractId: number;
-  inspectionDate: string | null;
-  inspectorName: string | null;
-  generalNotes: string | null;
-  tenantSigned: boolean;
-  rpSigned: boolean;
-  photos: { url: string; caption: string | null }[];
-  areas: { name: string; remarks: string | null; items: { name: string; inCondition: string | null; outCondition: string | null; remarks: string | null }[] }[];
-}
-export interface SettlementView {
-  contractId: number;
-  status: string;
-  depositHeld: number;
-  chargesTotal: number;
-  paymentsReceivedTotal: number;
-  balance: number;
-  refundAmount: number | null;
-  notes: string | null;
-  rpSigned: boolean;
-  tenantSigned: boolean;
-  lines: { label: string; amount: number; type: string }[];
-  payments: { amount: number; method: string; reference: string | null; receivedOn: string | null }[];
-  sentAt: string | null;
-  agreedAt: string | null;
-  paidAt: string | null;
-}
 export interface DepositDetail {
   id: string;
   chequeNumber: string | null;
@@ -117,241 +92,17 @@ interface Props {
   links?: DepositDetailLinks | null;
 }
 
-function fmtAed(v: number) {
-  return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(v);
-}
-function condText(c: string | null) {
-  if (c === 'G') return { label: 'Good', cls: 'text-[#16a34a]' };
-  if (c === 'F') return { label: 'Fair', cls: 'text-[#f59e0b]' };
-  if (c === 'D') return { label: 'Damaged', cls: 'text-[#dc2626]' };
-  return { label: '—', cls: 'text-[#9b9890]' };
-}
-
-function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 mb-2.5">
-      <span className="text-[#2e9f82]">{icon}</span>
-      <h3 className="text-sm font-bold text-[#1a1916]">{children}</h3>
-    </div>
-  );
-}
-
-/** One inline label/value column for the compact main-details row card. */
-function DetailCol({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">{label}</p>
-      <p className="text-sm font-semibold text-[#1a1916] capitalize truncate">{value}</p>
-    </div>
-  );
-}
-
-function PhotoGrid({ photos }: { photos: { url: string; caption: string | null }[] }) {
-  if (!photos.length) return null;
-  return (
-    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
-      {photos.map((p, i) => (
-        <button key={i} type="button"
-          onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption ?? undefined, mimeType: 'image/jpeg' })}
-          className="block rounded-lg border border-[#e8e6e0] overflow-hidden hover:border-[#2e9f82] transition-colors cursor-pointer">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={p.url} alt={p.caption ?? `Photo ${i + 1}`} className="w-full h-20 object-cover bg-[#f4f3ef]" />
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ConditionSummary({ data, mode }: { data: InspectionView; mode: 'in' | 'out' }) {
-  // Only areas that actually have a recorded condition for this side.
-  const areas = data.areas
-    .map(a => ({ ...a, items: a.items.filter(it => (mode === 'out' ? (it.outCondition || it.inCondition) : it.inCondition)) }))
-    .filter(a => a.items.length || a.remarks);
-  if (!areas.length) {
-    return <p className="text-xs text-[#9b9890] italic">No item conditions were recorded.</p>;
-  }
-  return (
-    <div className="space-y-3">
-      {areas.map((a, ai) => (
-        <div key={ai} className="rounded-xl border border-[#f0ede8] overflow-hidden">
-          <div className="bg-[#f4f3ef] px-3 py-1.5 text-xs font-semibold text-[#3d3b35]">{a.name || 'Area'}</div>
-          <div className="divide-y divide-[#f4f3ef]">
-            {a.items.map((it, ii) => {
-              const inC = condText(it.inCondition);
-              const outC = condText(it.outCondition);
-              return (
-                <div key={ii} className="flex items-center justify-between px-3 py-1.5 text-xs">
-                  <span className="text-[#3d3b35]">{it.name}</span>
-                  {mode === 'out' ? (
-                    <span className="flex items-center gap-1.5 font-semibold">
-                      <span className={inC.cls}>{inC.label}</span>
-                      <span className="text-[#9b9890]">→</span>
-                      <span className={outC.cls}>{outC.label}</span>
-                    </span>
-                  ) : (
-                    <span className={`font-semibold ${inC.cls}`}>{inC.label}</span>
-                  )}
-                </div>
-              );
-            })}
-            {a.remarks && <div className="px-3 py-1.5 text-[11px] text-[#6b6860] bg-[#fcfcfa]">{a.remarks}</div>}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function InspectionSection({ title, data, mode }: { title: string; data: InspectionView | null; mode: 'in' | 'out' }) {
-  return (
-    <div className="bg-white rounded-2xl border border-[#f0ede8] p-4">
-      <SectionTitle icon={<ClipboardList size={15} />}>{title}</SectionTitle>
-      {!data ? (
-        <div className="bg-[#f4f3ef] rounded-xl p-3">
-          <p className="text-xs text-[#6b6860]">No {title.toLowerCase()} inspection was recorded for this lease.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#9b9890]">
-            {data.inspectionDate && <span>Inspected {data.inspectionDate}</span>}
-            {data.inspectorName && <span>By {data.inspectorName}</span>}
-            <span className={data.tenantSigned ? 'text-[#1a7a5a] font-medium' : ''}>
-              {data.tenantSigned ? '✓ Customer signed' : 'Customer not signed'}
-            </span>
-            <span className={data.rpSigned ? 'text-[#1a7a5a] font-medium' : ''}>
-              {data.rpSigned ? '✓ Landlord signed' : 'Landlord not signed'}
-            </span>
-          </div>
-          {data.photos.length > 0 && (
-            <div>
-              <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                <Camera size={11} /> Photos ({data.photos.length})
-              </p>
-              <PhotoGrid photos={data.photos} />
-            </div>
-          )}
-          <div>
-            <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1.5">Condition summary</p>
-            <ConditionSummary data={data} mode={mode} />
-          </div>
-          {data.generalNotes && (
-            <div className="bg-[#f4f3ef] rounded-xl p-3">
-              <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">General notes</p>
-              <p className="text-xs text-[#3d3b35] whitespace-pre-wrap">{data.generalNotes}</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function proofCaption(p: ProofDoc, fallback: string) {
-  return p.displayName || fallback;
-}
-
-/** Pick a file and run it through `onPick`, showing an inline spinner. */
-function AttachButton({ onPick }: { onPick: (f: File) => Promise<void> }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  return (
-    <>
-      <input ref={ref} type="file" className="hidden" accept="image/*,application/pdf"
-        onChange={async e => {
-          const f = e.target.files?.[0]; if (!f) return;
-          setBusy(true);
-          try { await onPick(f); } catch (err) { alert((err as Error)?.message || 'Upload failed.'); }
-          finally { setBusy(false); if (ref.current) ref.current.value = ''; }
-        }} />
-      <button type="button" disabled={busy} onClick={() => ref.current?.click()}
-        className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2e9f82] hover:underline disabled:opacity-50 cursor-pointer">
-        {busy ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />} Attach
-      </button>
-    </>
-  );
-}
-
-function DocsBucket({ title, docs, empty, action, onAttach }: { title: string; docs: ProofDoc[]; empty: string; action?: React.ReactNode; onAttach?: (f: File) => Promise<void> }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">{title}</p>
-        {onAttach && <AttachButton onPick={onAttach} />}
-      </div>
-      {docs.length === 0 ? (
-        <div className="bg-[#f4f3ef] rounded-xl p-2.5">
-          <p className="text-[11px] text-[#9b9890]">{empty}</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-2.5">
-          {docs.map((d, i) => {
-            const isImg = (d.mimeType ?? '').startsWith('image/');
-            const cap = proofCaption(d, title);
-            return (
-              <button key={i} type="button"
-                onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: cap, mimeType: d.mimeType, documentKey: d.documentKey })}
-                className="block w-full text-left rounded-xl border border-[#e8e6e0] overflow-hidden hover:border-[#2e9f82] transition-colors cursor-pointer">
-                {isImg && d.fileUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={d.fileUrl} alt={cap} className="w-full h-24 object-cover bg-[#f4f3ef]" />
-                ) : (
-                  <div className="w-full h-24 flex items-center justify-center bg-[#f4f3ef] text-[#9b9890]"><FileText size={26} /></div>
-                )}
-                <div className="px-2.5 py-1.5">
-                  <p className="text-[11px] font-semibold text-[#1a1916] truncate">{cap}</p>
-                  <p className="text-[10px] text-[#2e9f82] flex items-center gap-1"><ExternalLink size={10} /> View</p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {action && <div className="mt-2">{action}</div>}
-    </div>
-  );
-}
-
 function SettlementBlock({ deposit, detail, links }: { deposit: DepositRow; detail: DepositDetail; links?: DepositDetailLinks | null }) {
   const s = detail.settlement;
   const settleHref = (deposit.currentContractId ?? deposit.contractId) ?? null;
 
   if (s) {
-    const refund = s.balance > 0;
-    const owes = s.balance < 0;
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#eef2ff] text-[#3730a3] capitalize">{s.status}</span>
-          {s.tenantSigned && <span className="text-[11px] text-[#1a7a5a] font-medium flex items-center gap-1"><CheckCircle2 size={12} /> Customer agreed</span>}
-        </div>
-        <div className="rounded-xl border border-[#f0ede8] divide-y divide-[#f4f3ef] text-sm">
-          <Row label="Deposit held" value={fmtAed(s.depositHeld)} />
-          {s.lines.map((l, i) => (
-            <Row key={i} label={l.label} value={`− ${fmtAed(l.amount)}`} valueClass="text-[#b91c1c]" />
-          ))}
-          {s.paymentsReceivedTotal > 0 && <Row label="Payments received from customer" value={`+ ${fmtAed(s.paymentsReceivedTotal)}`} valueClass="text-[#1a7a5a]" />}
-          <Row
-            label={refund ? 'Refund due to customer' : owes ? 'Customer still owes' : 'Settled — no balance'}
-            value={fmtAed(Math.abs(s.balance))}
-            bold
-            valueClass={refund ? 'text-[#1a7a5a]' : owes ? 'text-[#b91c1c]' : 'text-[#1a1916]'}
-          />
-        </div>
-        {detail.settlementAttachments.length > 0 && (
-          <DocsBucket title="Settlement attachments" docs={detail.settlementAttachments} empty="" />
-        )}
-        {s.notes && (
-          <div className="bg-[#f4f3ef] rounded-xl p-3">
-            <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">Settlement notes</p>
-            <p className="text-xs text-[#3d3b35] whitespace-pre-wrap">{s.notes}</p>
-          </div>
-        )}
-        {links?.settlement && settleHref != null && (
-          <a href={links.settlement(s.contractId ?? settleHref)} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
-            <ExternalLink size={11} /> Open settlement
-          </a>
-        )}
-      </div>
+      <SettlementLines
+        s={s}
+        attachments={detail.settlementAttachments}
+        openHref={links?.settlement && settleHref != null ? links.settlement(s.contractId ?? settleHref) : null}
+      />
     );
   }
 
@@ -391,15 +142,6 @@ function SettlementBlock({ deposit, detail, links }: { deposit: DepositRow; deta
   return (
     <div className="bg-[#f4f3ef] rounded-xl p-3">
       <p className="text-xs text-[#6b6860]">This deposit is recorded as a payment — its status follows the cheque (cleared / bounced) and isn&rsquo;t settled separately.</p>
-    </div>
-  );
-}
-
-function Row({ label, value, bold, valueClass }: { label: string; value: string; bold?: boolean; valueClass?: string }) {
-  return (
-    <div className="flex items-center justify-between px-3 py-2">
-      <span className={`text-[#6b6860] ${bold ? 'font-semibold text-[#1a1916]' : ''}`}>{label}</span>
-      <span className={`tabular-nums ${bold ? 'font-bold' : 'font-semibold'} ${valueClass ?? 'text-[#1a1916]'}`}>{value}</span>
     </div>
   );
 }

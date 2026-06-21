@@ -488,6 +488,9 @@ export function categoryDisplayLabel(id: string | null | undefined): string {
 export interface PropertyFormData {
   buildingName: string;
   spaceCategory: string;
+  // How the RP holds this building: 'direct' (owns/leases directly) vs 'sub'
+  // (head-leases then sub-leases). Drives the Fee & VAT report's direct/sub split.
+  leasingType: 'direct' | 'sub';
   // Structured location (FK IDs) — Country → Emirate → City → Community → Sub-Community
   countryId: number | null;
   emirateId: number | null;
@@ -520,7 +523,7 @@ export interface PropertyFormData {
 }
 
 const EMPTY: PropertyFormData = {
-  buildingName: '', spaceCategory: '',
+  buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
@@ -979,6 +982,34 @@ export function PropertyFields({
             {errors.spaceCategory && <p className="text-xs text-red-500 mt-1">{errors.spaceCategory}</p>}
           </>
         )}
+      </div>
+
+      {/* Leasing model — direct lease vs sub-lease. Editable in both add & edit
+          (unlike Category, which locks). Used by the Fee & VAT report's split. */}
+      <div>
+        <FieldLabel label="Leasing model" />
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            { id: 'direct', label: 'Direct lease', desc: 'You own / lease this building directly to tenants' },
+            { id: 'sub',    label: 'Sub-lease',    desc: 'You head-lease this building, then sub-lease its units' },
+          ] as const).map(opt => {
+            const on = value.leasingType === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => upd('leasingType', opt.id)}
+                className={cn(
+                  'text-left rounded-lg border px-3 py-2 transition-colors cursor-pointer',
+                  on ? 'border-[#2e9f82] bg-[#e6f7f1]' : 'border-[#e8e6e0] hover:border-[#c5c2bc]',
+                )}
+              >
+                <span className={cn('block text-sm font-medium', on ? 'text-[#1f6655]' : 'text-[#1a1916]')}>{opt.label}</span>
+                <span className="block text-[11px] text-[#9b9890] mt-0.5 leading-tight">{opt.desc}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Search + Map — triggers auto-fill of all fields below */}

@@ -26,6 +26,7 @@
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
+import { liveTenantIdSet } from '@/lib/activeCustomer';
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -354,10 +355,19 @@ export default function OrdersPage() {
   const expiringLeases = useMemo(() => currentLeases.filter(c => endsSoon(c, soonBy)), [currentLeases, soonBy]);
   const activeLeases   = useMemo(() => currentLeases.filter(c => !endsSoon(c, soonBy)), [currentLeases, soonBy]);
 
-  // Expired = ended/terminated leases within the selected year scope.
+  // Active tenants only: the customers who still have a live/upcoming lease
+  // somewhere (shared definition, exact inverse of the Ended Leases nav). Fully-
+  // ended customers are dropped from the Expired tab — they live under Ended
+  // Leases. An active customer's own expired history still shows.
+  const liveTenantIds = useMemo(() => liveTenantIdSet(contracts), [contracts]);
+
+  // Expired = ended/terminated leases within the selected year scope, limited to
+  // customers who are still active.
   const expiredRows = useMemo(
-    () => yearScoped.filter(c => displayStatusOf(c) === 'expired' || c.status === 'terminated'),
-    [yearScoped],
+    () => yearScoped.filter(c =>
+      (displayStatusOf(c) === 'expired' || c.status === 'terminated')
+      && c.tenant.id != null && liveTenantIds.has(c.tenant.id)),
+    [yearScoped, liveTenantIds],
   );
 
   // Forward renewals already signed ahead (pending/issued, term not yet begun).

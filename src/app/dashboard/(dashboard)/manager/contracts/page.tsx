@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { liveTenantIdSet } from '@/lib/activeCustomer';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Status model (preserved from previous version)
@@ -265,7 +266,14 @@ export default function ManagerContractsPage() {
     if (effectiveRp == null || !allowed) { setContracts([]); setLoading(false); return; }
     setLoading(true);
     apiGet<Contract[]>(`/manager/contracts?rp=${effectiveRp}`)
-      .then(data => { if (Array.isArray(data)) setContracts(data); })
+      .then(data => {
+        if (!Array.isArray(data)) return;
+        // Active tenants only — drop fully-ended customers (all their leases have
+        // ended); they live under Ended Leases. Active customers keep their full
+        // history, including expired/terminated rows.
+        const live = liveTenantIdSet(data);
+        setContracts(data.filter(c => c.tenant?.id == null || live.has(c.tenant.id)));
+      })
       .catch(() => undefined)
       .finally(() => setLoading(false));
   }, [effectiveRp, allowed]);

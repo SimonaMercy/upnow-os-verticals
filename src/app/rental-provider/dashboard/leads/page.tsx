@@ -8,7 +8,7 @@ import {
   Clock, CheckCircle2, MessageSquare, User, Calendar,
   FileText, ExternalLink, Loader2, MoreVertical, ArrowRight,
   StickyNote, ShieldAlert, Copy, Check, CreditCard, Plus, Trash2,
-  ClipboardList, BadgeCheck, Printer, Eye, ZoomIn,
+  ClipboardList, BadgeCheck, Printer, Eye, ZoomIn, LayoutGrid, LayoutList,
 } from 'lucide-react';
 import Lightbox from 'yet-another-react-lightbox';
 import Zoom from 'yet-another-react-lightbox/plugins/zoom';
@@ -104,22 +104,11 @@ const STAGE_PILL: Record<LeadStage, string> = {
   converted:            'bg-[#e0f2fe] text-[#0369a1]',
 };
 
-// Filter tabs mirror the live pipeline only. Legacy/never-reached stages
-// (new, contacted, approved, offer_made, applied) are intentionally omitted —
-// their labels/colors are still defined above so any stray record renders a
-// badge and remains visible under "All".
-const TABS: { key: 'all' | LeadStage; label: string }[] = [
-  { key: 'all',                  label: 'All' },
-  { key: 'viewing_scheduled',    label: 'Viewing' },
-  { key: 'interested',           label: 'Interested' },
-  { key: 'documents_collection', label: 'Docs' },
-  { key: 'payment_plan_shared',  label: 'Plan Shared' },
-  { key: 'cheques_submitted',    label: 'Cheques Ready' },
-  { key: 'cheques_collected',    label: 'Collected' },
-  { key: 'contract_issued',      label: 'Contract' },
-  { key: 'converted',            label: 'Converted' },
-  { key: 'rejected',             label: 'Rejected' },
-];
+// The live pipeline stages, in funnel order — see FUNNEL_COLS below, which
+// drives the (only) stage filter. Legacy/never-reached stages (new, contacted,
+// approved, offer_made, applied) are intentionally omitted there; their
+// labels/colors are still defined above so any stray record renders a badge
+// and remains visible under "All".
 
 interface ApiViewing {
   id: number;
@@ -479,6 +468,7 @@ function ChequeRow({
 /* ─── Lead Row ────────────────────────────────────────────────────────────── */
 function LeadRow({
   lead, onMoveStage, moving, onConvert, setLeads, feeRules, preferredStartDays, allowedInstallments, manager,
+  layout = 'row',
 }: {
   lead: ApiLead;
   onMoveStage: (id: number, s: LeadStage) => void;
@@ -489,6 +479,8 @@ function LeadRow({
   preferredStartDays: number[];
   allowedInstallments: number[];
   manager?: { rp: number };
+  /** 'row' = full-width horizontal row (default); 'grid' = compact card for the grid view. */
+  layout?: 'row' | 'grid';
 }) {
   const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
   const [visitRemarks, setVisitRemarks] = useState('');
@@ -1007,10 +999,234 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
     if (primary.kind === 'confirm_collected') { handleConfirmCollected(); return; }
   }
 
+  // Action cluster — Details · docs badge · primary CTA · ··· menu. Shared
+  // verbatim by the row layout and the grid card so behaviour is identical.
+  const actionCluster = (
+    <>
+      {/* Viewing details button — visible whenever there is any viewing */}
+      {anyViewing && (
+        <button
+          onClick={() => openPanel('details')}
+          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors cursor-pointer whitespace-nowrap ${
+            panel === 'details'
+              ? 'bg-[#eef2ff] border-[#c7d2fe] text-[#4338ca]'
+              : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#c7d2fe] hover:text-[#4338ca]'
+          }`}
+        >
+          <StickyNote size={11} />
+          Details
+        </button>
+      )}
+
+      {/* Doc upload badge */}
+      {lead.docStats && lead.docStats.total > 0 && (
+        <button
+          onClick={() => openPanel('docs')}
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium border transition-colors cursor-pointer whitespace-nowrap ${
+            lead.docStats.pending > 0
+              ? 'bg-amber-50 border-amber-200 text-amber-700'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+          }`}
+        >
+          <FileText size={11} />
+          {lead.docStats.pending > 0
+            ? `${lead.docStats.pending} pending`
+            : `${lead.docStats.total} docs`}
+        </button>
+      )}
+
+      {primary && (
+        <button
+          disabled={moving || approvingDocs}
+          onClick={handlePrimary}
+          title={approveDocsError ?? undefined}
+          className={`flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap ${primary.cls}`}
+        >
+          {primary.kind === 'convert' ? <ArrowRight size={12} /> : <CheckCircle2 size={12} />}
+          {primary.kind === 'approve_docs' && approvingDocs ? 'Approving…' : primary.label}
+        </button>
+      )}
+
+      {/* ··· menu */}
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setMenuOpen(o => !o)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-[#c8c6c0] hover:bg-[#f4f3f0] hover:text-[#3d3b35] transition-colors cursor-pointer"
+        >
+          <MoreVertical size={15} />
+        </button>
+
+        {menuOpen && (
+          <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-xl shadow-2xl border border-[#e8e6e0] py-1 text-sm">
+            {email && (
+              <a
+                href={`mailto:${email}`}
+                className="flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0]"
+                onClick={() => setMenuOpen(false)}
+              >
+                <Mail size={13} className="text-[#9b9890]" /> Send Email
+              </a>
+            )}
+            {phone && (
+              <a
+                href={`tel:${phone}`}
+                className="flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0]"
+                onClick={() => setMenuOpen(false)}
+              >
+                <Phone size={13} className="text-[#9b9890]" /> Call
+              </a>
+            )}
+
+            {/* Notify guard — only for scheduled viewings */}
+            {viewing && (viewing.status === 'scheduled' || viewing.status === 'confirmed') && (
+              <>
+                <div className="my-1 border-t border-[#f0ede8]" />
+                <button
+                  onClick={() => openPanel('guard')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                >
+                  <ShieldAlert size={13} className="text-[#9b9890]" />
+                  {panel === 'guard' ? 'Hide Guard Alert' : 'Notify Guard'}
+                </button>
+              </>
+            )}
+
+            {canDocs && (
+              <>
+                <div className="my-1 border-t border-[#f0ede8]" />
+                <button
+                  onClick={() => openPanel('docs')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                >
+                  <FileText size={13} className="text-[#9b9890]" />
+                  {panel === 'docs' ? 'Hide Documents' : 'Documents'}
+                </button>
+              </>
+            )}
+            {canCheques && (
+              <>
+                <div className="my-1 border-t border-[#f0ede8]" />
+                <button
+                  onClick={() => openPanel('plan_summary')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                >
+                  <ClipboardList size={13} className="text-[#9b9890]" />
+                  {panel === 'plan_summary' ? 'Hide Plan' : 'View Payment Plan'}
+                </button>
+              </>
+            )}
+            {canEditPlan && (
+              <>
+                <div className="my-1 border-t border-[#f0ede8]" />
+                <button
+                  onClick={() => openPanel('plan')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                >
+                  <ClipboardList size={13} className="text-[#9b9890]" />
+                  {panel === 'plan' ? 'Hide Plan Editor' : 'Edit Payment Plan'}
+                </button>
+              </>
+            )}
+            {canCheques && (
+              <>
+                <div className="my-1 border-t border-[#f0ede8]" />
+                <button
+                  onClick={() => openPanel('cheques')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
+                >
+                  <CreditCard size={13} className="text-[#9b9890]" />
+                  {panel === 'cheques' ? 'Hide Payments' : 'Record Payments'}
+                </button>
+              </>
+            )}
+            {canReject && (
+              <>
+                <div className="my-1 border-t border-[#f0ede8]" />
+                <button
+                  onClick={() => openPanel('reject')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50 cursor-pointer"
+                >
+                  <X size={13} /> Reject Lead
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="bg-white rounded-xl border border-[#ede9e3]">
 
-      {/* ── Single row ── */}
+      {layout === 'grid' ? (
+        /* ── Compact grid card header ── */
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <div
+              className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
+              style={{ backgroundColor: '#2e9f82' }}
+            >
+              {initials(displayName)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-[#1a1916] truncate">{displayName}</p>
+              <p className="text-xs text-[#9b9890] truncate mt-0.5">
+                {email ?? 'No email'}{phone ? ` · ${phone}` : ''}
+              </p>
+            </div>
+            <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 shrink-0 ${STAGE_PILL[lead.stage]}`}>
+              {STAGE_LABELS[lead.stage]}
+            </span>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+            {unitLabel ? (
+              <span className="text-[#1a1916] font-medium flex items-center gap-1 min-w-0">
+                <Building2 size={11} className="text-[#c8c6c0] shrink-0" />
+                <span className="truncate">{unitLabel}{building ? ` · ${building}` : ''}</span>
+              </span>
+            ) : (
+              <span className="text-[#c8c6c0]">No unit</span>
+            )}
+            {viewing ? (
+              <span className={`flex items-center gap-1 font-medium ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600' : 'text-[#6b6860]'}`}>
+                <Clock size={11} className="shrink-0" /> {fmtDateTime(viewing.scheduledAt)}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[#9b9890]">
+                <Calendar size={11} className="shrink-0" /> {fmtDate(lead.createdAt)}
+              </span>
+            )}
+          </div>
+
+          {(() => {
+            const u = getUrgency(lead);
+            return u ? (
+              <p
+                className={`inline-flex items-center gap-1 rounded-full text-[10px] font-semibold px-1.5 py-0.5 mt-2 max-w-full ${URGENCY_PILL[u.level]}`}
+                title={u.label}
+              >
+                <Clock size={9} className="shrink-0" />
+                <span className="truncate">{u.label}</span>
+              </p>
+            ) : null;
+          })()}
+          {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
+            <p
+              className="text-[10px] text-[#b91c1c] truncate mt-1"
+              title={anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+            >
+              {anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+            </p>
+          )}
+
+          <div className="mt-3 pt-3 border-t border-[#f0ede8] flex items-center gap-2 flex-wrap">
+            {actionCluster}
+          </div>
+        </div>
+      ) : (
+      /* ── Single row ── */
       <div className="flex items-center">
 
         {/* Scrollable section — avatar through date */}
@@ -1094,158 +1310,10 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
         {/* Fixed right section — CTA + menu (never inside overflow container) */}
         <div className="flex items-center gap-2 pr-4 pl-2 shrink-0">
-          {/* Viewing details button — visible whenever there is any viewing */}
-          {anyViewing && (
-            <button
-              onClick={() => openPanel('details')}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors cursor-pointer whitespace-nowrap ${
-                panel === 'details'
-                  ? 'bg-[#eef2ff] border-[#c7d2fe] text-[#4338ca]'
-                  : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#c7d2fe] hover:text-[#4338ca]'
-              }`}
-            >
-              <StickyNote size={11} />
-              Details
-            </button>
-          )}
-
-          {/* Doc upload badge */}
-          {lead.docStats && lead.docStats.total > 0 && (
-            <button
-              onClick={() => openPanel('docs')}
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium border transition-colors cursor-pointer whitespace-nowrap ${
-                lead.docStats.pending > 0
-                  ? 'bg-amber-50 border-amber-200 text-amber-700'
-                  : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              }`}
-            >
-              <FileText size={11} />
-              {lead.docStats.pending > 0
-                ? `${lead.docStats.pending} pending`
-                : `${lead.docStats.total} docs`}
-            </button>
-          )}
-
-          {primary && (
-            <button
-              disabled={moving || approvingDocs}
-              onClick={handlePrimary}
-              title={approveDocsError ?? undefined}
-              className={`flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap ${primary.cls}`}
-            >
-              {primary.kind === 'convert' ? <ArrowRight size={12} /> : <CheckCircle2 size={12} />}
-              {primary.kind === 'approve_docs' && approvingDocs ? 'Approving…' : primary.label}
-            </button>
-          )}
-
-          {/* ··· menu */}
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen(o => !o)}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-[#c8c6c0] hover:bg-[#f4f3f0] hover:text-[#3d3b35] transition-colors cursor-pointer"
-            >
-              <MoreVertical size={15} />
-            </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-xl shadow-2xl border border-[#e8e6e0] py-1 text-sm">
-                {email && (
-                  <a
-                    href={`mailto:${email}`}
-                    className="flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0]"
-                    onClick={() => setMenuOpen(false)}
-                  >
-                    <Mail size={13} className="text-[#9b9890]" /> Send Email
-                  </a>
-                )}
-                {phone && (
-                  <a
-                    href={`tel:${phone}`}
-                    className="flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0]"
-                    onClick={() => setMenuOpen(false)}
-                  >
-                    <Phone size={13} className="text-[#9b9890]" /> Call
-                  </a>
-                )}
-
-                {/* Notify guard — only for scheduled viewings */}
-                {viewing && (viewing.status === 'scheduled' || viewing.status === 'confirmed') && (
-                  <>
-                    <div className="my-1 border-t border-[#f0ede8]" />
-                    <button
-                      onClick={() => openPanel('guard')}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                    >
-                      <ShieldAlert size={13} className="text-[#9b9890]" />
-                      {panel === 'guard' ? 'Hide Guard Alert' : 'Notify Guard'}
-                    </button>
-                  </>
-                )}
-
-                {canDocs && (
-                  <>
-                    <div className="my-1 border-t border-[#f0ede8]" />
-                    <button
-                      onClick={() => openPanel('docs')}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                    >
-                      <FileText size={13} className="text-[#9b9890]" />
-                      {panel === 'docs' ? 'Hide Documents' : 'Documents'}
-                    </button>
-                  </>
-                )}
-                {canCheques && (
-                  <>
-                    <div className="my-1 border-t border-[#f0ede8]" />
-                    <button
-                      onClick={() => openPanel('plan_summary')}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                    >
-                      <ClipboardList size={13} className="text-[#9b9890]" />
-                      {panel === 'plan_summary' ? 'Hide Plan' : 'View Payment Plan'}
-                    </button>
-                  </>
-                )}
-                {canEditPlan && (
-                  <>
-                    <div className="my-1 border-t border-[#f0ede8]" />
-                    <button
-                      onClick={() => openPanel('plan')}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                    >
-                      <ClipboardList size={13} className="text-[#9b9890]" />
-                      {panel === 'plan' ? 'Hide Plan Editor' : 'Edit Payment Plan'}
-                    </button>
-                  </>
-                )}
-                {canCheques && (
-                  <>
-                    <div className="my-1 border-t border-[#f0ede8]" />
-                    <button
-                      onClick={() => openPanel('cheques')}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                    >
-                      <CreditCard size={13} className="text-[#9b9890]" />
-                      {panel === 'cheques' ? 'Hide Payments' : 'Record Payments'}
-                    </button>
-                  </>
-                )}
-                {canReject && (
-                  <>
-                    <div className="my-1 border-t border-[#f0ede8]" />
-                    <button
-                      onClick={() => openPanel('reject')}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50 cursor-pointer"
-                    >
-                      <X size={13} /> Reject Lead
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          {actionCluster}
         </div>
       </div>
+      )}
 
       {/* ── Mark Visited panel ── */}
       {panel === 'visited' && viewing && (
@@ -2868,7 +2936,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [error, setError]           = useState<string | null>(null);
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
-  const [view, setView]             = useState<'list' | 'calendar'>('list');
+  const [view, setView]             = useState<'row' | 'grid' | 'calendar'>('grid');
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [movingLead, setMovingLead] = useState<number | null>(null);
   const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
@@ -3004,12 +3072,20 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
           {/* View toggle */}
           <div className="inline-flex bg-[#f4f3ef] rounded-lg p-0.5 border border-[#e8e6e0]">
             <button
-              onClick={() => setView('list')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
-                view === 'list' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
+              onClick={() => setView('row')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
+                view === 'row' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
               }`}
             >
-              List
+              <LayoutList size={12} /> Row
+            </button>
+            <button
+              onClick={() => setView('grid')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
+                view === 'grid' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'
+              }`}
+            >
+              <LayoutGrid size={12} /> Grid
             </button>
             <button
               onClick={() => setView('calendar')}
@@ -3035,7 +3111,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
         <LeadsCalendarView
           leads={leads}
           onOpenLead={(id) => {
-            setView('list');
+            setView('row');
             // Scroll the matching lead into view after the list re-renders
             setTimeout(() => {
               const el = document.getElementById(`lead-${id}`);
@@ -3045,30 +3121,32 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
         />
       )}
 
-      {/* List view — stage tabs, search, list */}
-      {view === 'list' && (
+      {/* Row + Grid views — shared stage filter, search; only the leads container differs */}
+      {view !== 'calendar' && (
       <>
-      {/* Pipeline header — hairline-divided columns, label over count; click a
-          column to filter (same effect as the tab), click again to clear. */}
-      {!loading && leads.length > 0 && (
-        <div className="bg-white rounded-xl border border-[#e8e6e0] mb-4 flex items-stretch divide-x divide-[#f0ede8] overflow-x-auto scrollbar-none">
-          {FUNNEL_COLS.map(([s, label]) => {
+      {/* Pipeline strip — every stage (plus All) on a SINGLE line in one
+          bordered card; columns flex to fit so there is no horizontal scroll.
+          Always shown once loaded (even at zero leads). Doubles as the stage
+          filter: click a column to filter, click again / click All to clear. */}
+      {!loading && (
+        <div className="bg-white rounded-xl border border-[#e8e6e0] shadow-sm mb-6 flex items-stretch divide-x divide-[#f0ede8] overflow-hidden">
+          {([['all', 'All'], ...FUNNEL_COLS] as ['all' | LeadStage, string][]).map(([s, label]) => {
             const n = tabCount(s);
             const isActive = activeTab === s;
             return (
               <button
                 key={s}
                 onClick={() => setActiveTab(isActive ? 'all' : s)}
-                className={`relative flex-1 min-w-[92px] shrink-0 flex flex-col gap-1 px-4 py-3 text-left transition-colors cursor-pointer ${
-                  isActive ? 'bg-[#fafaf8]' : 'hover:bg-[#fafaf8]'
+                className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 px-2 py-3 text-center transition-colors cursor-pointer ${
+                  isActive ? 'bg-[#f5fdf9]' : 'hover:bg-[#fafaf8]'
                 }`}
               >
-                <span className={`text-[10px] font-medium uppercase tracking-[0.08em] whitespace-nowrap ${
+                <span className={`text-[10px] font-semibold uppercase tracking-[0.05em] truncate max-w-full ${
                   isActive ? 'text-[#2e9f82]' : 'text-[#9b9890]'
                 }`}>
                   {label}
                 </span>
-                <span className={`text-xl font-semibold leading-none tabular-nums ${
+                <span className={`text-lg font-bold leading-none tabular-nums ${
                   n > 0 ? 'text-[#1a1916]' : 'text-[#c8c6c0]'
                 }`}>
                   {n}
@@ -3104,34 +3182,6 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
           </button>
         </div>
       )}
-
-      {/* Stage tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 mb-5 scrollbar-none">
-        {TABS.map(tab => {
-          const count    = tabCount(tab.key);
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
-                isActive
-                  ? 'bg-[#1a1916] text-white'
-                  : 'bg-white text-[#6b6860] border border-[#e8e6e0] hover:bg-[#f4f3ef]'
-              }`}
-            >
-              {tab.label}
-              {!loading && (
-                <span className={`rounded-full px-1.5 py-0.5 font-bold text-[10px] ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-[#f0ede8] text-[#9b9890]'
-                }`}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
 
       {/* Search */}
       <div className="flex items-center gap-2 mb-4">
@@ -3190,9 +3240,10 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
         </div>
       )}
 
-      {/* List */}
+      {/* Leads — vertical rows or a 2-up card grid (items-start so an expanded
+          panel in one card doesn't stretch its neighbour). */}
       {!loading && filtered.length > 0 && (
-        <div className="space-y-2">
+        <div className={view === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3 items-start' : 'space-y-2'}>
           {filtered.map(lead => (
             <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`}>
               <LeadRow
@@ -3205,6 +3256,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
                 preferredStartDays={preferredStartDays}
                 allowedInstallments={allowedInstallments}
                 manager={manager}
+                layout={view === 'grid' ? 'grid' : 'row'}
               />
             </div>
           ))}

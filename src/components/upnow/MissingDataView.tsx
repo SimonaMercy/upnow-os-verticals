@@ -54,24 +54,32 @@ export function MissingDataView({
   endpoint,
   backHref,
   onBack,
+  scopeToggle,
 }: {
   config: MissingReportConfig;
   endpoint: string;
   backHref?: string;
   onBack?: () => void;
+  /** When set, render the active/all tenant-scope toggle (missing-customers). */
+  scopeToggle?: boolean;
 }) {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scope, setScope] = useState<'active' | 'all'>('active');
 
   useEffect(() => {
     setLoading(true); setError(null);
-    fetch(endpoint, { credentials: 'include' })
+    // Backend defaults to active tenants; only the explicit "all" needs sending.
+    const url = scopeToggle && scope === 'all'
+      ? endpoint + (endpoint.includes('?') ? '&' : '?') + 'scope=all'
+      : endpoint;
+    fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [endpoint]);
+  }, [endpoint, scope, scopeToggle]);
 
   const rows = data?.rows ?? [];
 
@@ -106,6 +114,19 @@ export function MissingDataView({
           <Printer size={14} /> Print / PDF
         </button>
       </div>
+
+      {/* Tenant scope — active customers only (default) vs include ended tenants. */}
+      {scopeToggle && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Customers:</span>
+          {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
+            <button key={v} onClick={() => setScope(v)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="hidden print:block mb-6">
         <h1 className="text-2xl font-bold">{config.title}</h1>

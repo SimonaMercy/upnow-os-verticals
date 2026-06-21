@@ -19,6 +19,7 @@ import { Search, X, Users, Lock, Plus } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { liveTenantIdSet } from '@/lib/activeCustomer';
 
 type ContractStatus = 'active' | 'terminated' | 'none';
 
@@ -41,9 +42,10 @@ type ContractRow = {
   status: string;
   contractActive: boolean;
   annualRent: number | null;
+  startDate: string | null;
   endDate: string | null;
   tenant: { id: number | null; name: string | null; email: string | null };
-  unit: { number: string | null; name: string | null };
+  unit: { id: number | null; number: string | null; name: string | null };
   property: { buildingName: string | null };
 };
 
@@ -94,6 +96,9 @@ export default function ManagerTenantsPage() {
     apiGet<ContractRow[]>(`/manager/contracts?rp=${effectiveRp}`)
       .then(data => {
         if (!Array.isArray(data)) return;
+        // Active tenants only — the set of customers with a live/upcoming lease
+        // (shared definition, exact inverse of the Ended Leases nav).
+        const liveIds = liveTenantIdSet(data);
         // Deduplicate by tenant id, keeping the most recent active contract
         // (logic copied verbatim from the RP Customers page).
         const map = new Map<number, Tenant>();
@@ -122,7 +127,7 @@ export default function ManagerTenantsPage() {
             });
           }
         }
-        setTenants(Array.from(map.values()));
+        setTenants(Array.from(map.values()).filter(t => liveIds.has(t.id)));
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
@@ -173,7 +178,7 @@ export default function ManagerTenantsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">All current and past customers across the landlord’s units.</p>
+          <p className="text-sm text-[#6b6860] mt-0.5">Active customers — anyone with a live or upcoming lease. Ended tenancies move to Ended Leases.</p>
         </div>
         {canCreate && (
           <button onClick={() => setShowAdd(true)}
@@ -226,8 +231,7 @@ export default function ManagerTenantsPage() {
         <select value={filterContract} onChange={e => setFilterContract(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
           <option value="all">All Contracts</option>
           <option value="active">Active</option>
-          <option value="terminated">Terminated</option>
-          <option value="none">No Contract</option>
+          <option value="none">Upcoming / no active lease</option>
         </select>
         {hasFilters && (
           <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">

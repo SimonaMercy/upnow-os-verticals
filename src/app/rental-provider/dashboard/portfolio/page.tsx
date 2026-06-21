@@ -41,6 +41,7 @@ interface Property {
   id: number;
   buildingName: string;
   spaceCategory: string;
+  leasingType?: 'direct' | 'sub';
   fullAddress: string | null;
   emirateId: number | null;
   cityId: number | null;
@@ -111,6 +112,7 @@ function formToCreateDto(data: PropertyFormData) {
   return {
     buildingName: data.buildingName,
     spaceCategory: data.spaceCategory,
+    leasingType: data.leasingType,
     street: data.street || undefined,
     // Without a street segment, leave full_address untouched (PATCH omits it)
     // so a legacy row's embedded street isn't recomposed away.
@@ -597,6 +599,7 @@ export default function PortfolioPage() {
           initial={propertyModal.editing ? {
             buildingName:        propertyModal.editing.buildingName,
             spaceCategory:       propertyModal.editing.spaceCategory,
+            leasingType:         propertyModal.editing.leasingType ?? 'direct',
             emirateId:           propertyModal.editing.emirateId ?? null,
             cityId:              propertyModal.editing.cityId ?? null,
             communityId:         propertyModal.editing.communityId ?? null,

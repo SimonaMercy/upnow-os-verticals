@@ -8,13 +8,15 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Search, Download, Printer, Loader2, FileSpreadsheet,
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
+  Building2, Check, ChevronDown,
 } from 'lucide-react';
+import { apiPatch } from '@/lib/api';
 
 type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'leases-by-month' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
@@ -48,7 +50,14 @@ interface ReportDef {
   layout?: 'table' | 'grouped' | 'matrix';
   /** Optional caution banner shown above the report (e.g. data-quality notes). */
   dataNote?: string;
+  /** When set, render the building + leasing-model (direct/sub) multi-select
+   *  filters (fee-taxation). The backend returns a `buildings` option list and
+   *  honours `buildings=` / `leaseTypes=` query params. */
+  buildingLeaseFilter?: boolean;
 }
+
+/** A building option for the fee-taxation building multi-select (from the API). */
+interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'sub'; contracts: number; }
 
 interface Column {
   key: string;
@@ -480,12 +489,13 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'fee-taxation': {
     title: 'Fee & VAT (Taxation)',
-    description: 'One-off fees and rent VAT per year, bucketed by the contract start date — net, VAT and the output VAT to file. Admin & commission are VAT-able (5%); ejari is exempt; rent VAT applies to commercial/industrial leases. Use the date range to scope the period.',
+    description: 'One-off fees and rent VAT per year, bucketed by the contract start date — net, VAT and the output VAT to file. Admin & commission are VAT-able (5%); ejari is exempt; rent VAT applies to commercial/industrial leases. Scope the period with the date range, and narrow to specific buildings or a leasing model (direct vs sub-lease).',
     endpoint: '/api/reports/fee-taxation',
     controlKey: 'dateRange',
-    dataNote: 'Commission is estimated from your fee rules (annual rent × commission %), since it is not stored per contract — a manually-overridden commission on an individual deal won\'t be reflected. Admin & ejari are the actual net fees on each contract. VAT uses your configured fee rules. Only issued/active/expired/terminated contracts are counted.',
+    buildingLeaseFilter: true,
+    dataNote: 'Commission is estimated from your fee rules (annual rent × commission %), since it is not stored per contract — a manually-overridden commission on an individual deal won\'t be reflected. Admin & ejari are the actual net fees on each contract. VAT uses your configured fee rules. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
     columns: [
-      { key: 'yearLabel', label: 'Year' },
+      { key: 'periodLabel', label: 'Period' },
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
       { key: 'adminNetFils', label: 'Admin (net)', align: 'right', type: 'aed' },
       { key: 'adminVatFils', label: 'Admin VAT', align: 'right', type: 'aed' },
@@ -511,6 +521,36 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     ],
   },
 };
+
+// Fee & VAT — the DETAILED (per-contract) view columns. Every line traces a
+// figure in the per-period summary back to the contract that produced it, so the
+// totals can be audited. Reuses the standard table render (sortable / CSV).
+const FEE_DETAIL_COLUMNS: Column[] = [
+  { key: 'periodLabel', label: 'Period' },
+  { key: 'contractRef', label: 'Contract' },
+  { key: 'buildingName', label: 'Property' },
+  { key: 'unitLabel', label: 'Unit' },
+  { key: 'tenantName', label: 'Customer' },
+  { key: 'startDate', label: 'Start', type: 'date' },
+  { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+  { key: 'adminNetFils', label: 'Admin (net)', align: 'right', type: 'aed' },
+  { key: 'adminVatFils', label: 'Admin VAT', align: 'right', type: 'aed' },
+  { key: 'ejariNetFils', label: 'Ejari (net)', align: 'right', type: 'aed' },
+  { key: 'ejariVatFils', label: 'Ejari VAT', align: 'right', type: 'aed' },
+  { key: 'commissionNetFils', label: 'Commission (net)', align: 'right', type: 'aed' },
+  { key: 'commissionVatFils', label: 'Commission VAT', align: 'right', type: 'aed' },
+  { key: 'rentVatFils', label: 'Rent VAT', align: 'right', type: 'aed' },
+  { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
+];
+
+// Reports whose rows are tenant/financial and so honour the "active tenants
+// only" vs "all" scope toggle (backend ?scope=all includes ended tenants).
+// Inventory / occupancy reports aren't listed — they have no ended-tenant noise.
+const TENANT_SCOPED = new Set<ReportSlug>([
+  'receivables', 'security-deposits', 'cheque-register', 'collection-rate',
+  'tenant-ledger', 'rent-collection', 'leasing-activity', 'fee-taxation',
+  'cashflow-forecast', 'leases-by-month',
+]);
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -650,7 +690,7 @@ export function ReportDetailView({
   const slug = slugProp as ReportSlug;
   const def = REPORTS[slug];
 
-  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; year?: number } | null>(null);
+  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; year?: number; buildings?: BuildingOption[]; items?: Record<string, unknown>[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -663,8 +703,26 @@ export function ReportDetailView({
   const [to, setTo]     = useState<string>(sp?.get('to') ?? YEAR_END);
   // Matrix (rent-roll) year selector — defaults to the current year.
   const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || CURRENT_YEAR);
+  // Tenant scope — show active customers only (default) or include ended tenants.
+  const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Fee-taxation building + leasing-model filters. [] buildings = all; lease
+  // types default to both selected (= all). Inline reclassify bumps refreshTick
+  // to refetch so the rows reflect the building's new leasing model.
+  const [selectedBuildings, setSelectedBuildings] = useState<number[]>([]);
+  const [selectedLeaseTypes, setSelectedLeaseTypes] = useState<('direct' | 'sub')[]>(['direct', 'sub']);
+  const [buildingMenuOpen, setBuildingMenuOpen] = useState(false);
+  const [classifyingId, setClassifyingId] = useState<number | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const buildingMenuRef = useRef<HTMLDivElement>(null);
+  // Fee-taxation: view (per-period summary vs per-contract detail) + bucketing
+  // granularity (year vs quarter). View is client-only — one fetch returns both
+  // rows + items; granularity re-buckets server-side so it refetches.
+  const [feeView, setFeeView] = useState<'overall' | 'detailed'>('overall');
+  const [granularity, setGranularity] = useState<'year' | 'quarter'>(() => (sp?.get('groupBy') === 'quarter' ? 'quarter' : 'year'));
+  // RP portal can reclassify a building's leasing model inline; managers can't.
+  const canClassify = endpointBase === '/api/reports';
 
   useEffect(() => {
     if (!def) return;
@@ -686,27 +744,99 @@ export function ReportDetailView({
     } else if (def.controlKey === 'year') {
       url = `${endpoint}?year=${year}`;
     }
+    // Building + leasing-model filters (fee-taxation). Buildings: omit when none
+    // selected (= all). Lease types: send only when exactly one of the two is
+    // selected; both or none → no param (= all), so a contract is never hidden
+    // by an empty selection.
+    if (def.buildingLeaseFilter) {
+      const extra = new URLSearchParams();
+      if (selectedBuildings.length) extra.set('buildings', selectedBuildings.join(','));
+      if (selectedLeaseTypes.length === 1) extra.set('leaseTypes', selectedLeaseTypes[0]);
+      if (granularity === 'quarter') extra.set('groupBy', 'quarter');
+      const s = extra.toString();
+      if (s) url += (url.includes('?') ? '&' : '?') + s;
+    }
+    // Tenant scope — only the tenant/financial reports honour it; default is
+    // active-only on the backend, so only the explicit "all" needs sending.
+    if (TENANT_SCOPED.has(slug) && scope === 'all') url += (url.includes('?') ? '&' : '?') + 'scope=all';
     if (extraQuery) url += (url.includes('?') ? '&' : '?') + extraQuery;
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, leaseWindow, forecastMonths, from, to, year, endpointBase, extraQuery]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
+
+  // Close the building filter menu on an outside click.
+  useEffect(() => {
+    if (!buildingMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (buildingMenuRef.current && !buildingMenuRef.current.contains(e.target as Node)) setBuildingMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [buildingMenuOpen]);
+
+  const buildingOptions = data?.buildings ?? [];
+  // Empty selection = ALL buildings. Boxes render checked in that state; the
+  // first toggle expands to an explicit set, and re-selecting everything
+  // collapses back to "all" (empty) so the report stays unfiltered.
+  const allBuildingIds = buildingOptions.map(b => b.id);
+  const isAllBuildings = selectedBuildings.length === 0;
+  const buildingChecked = (id: number) => isAllBuildings || selectedBuildings.includes(id);
+  const toggleBuilding = (id: number) =>
+    setSelectedBuildings(prev => {
+      const base = prev.length === 0 ? allBuildingIds : prev;
+      const next = base.includes(id) ? base.filter(b => b !== id) : [...base, id];
+      return next.length === allBuildingIds.length ? [] : next; // all selected → "all"
+    });
+  // Toggle a leasing model; never allow an empty selection (resets to both = all).
+  const toggleLeaseType = (t: 'direct' | 'sub') =>
+    setSelectedLeaseTypes(prev => {
+      const next = prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t];
+      return next.length ? next : (['direct', 'sub'] as ('direct' | 'sub')[]);
+    });
+  // Reclassify a building's leasing model inline (RP only). Optimistic on the
+  // badge, then refetch so the rows/totals follow the new model.
+  async function classifyBuilding(id: number, leasingType: 'direct' | 'sub') {
+    if (!canClassify) return;
+    setClassifyingId(id);
+    setData(prev => prev ? { ...prev, buildings: prev.buildings?.map(b => b.id === id ? { ...b, leasingType } : b) } : prev);
+    try {
+      await apiPatch(`/properties/${id}`, { leasingType });
+    } catch {
+      /* fall through — the refetch re-syncs the badge from the server */
+    } finally {
+      setRefreshTick(t => t + 1);
+      setClassifyingId(null);
+    }
+  }
+
+  // Fee-taxation Detailed view swaps the per-period summary for per-contract
+  // line items, reusing the whole table pipeline (sort / search / CSV / render).
+  // For every other report these collapse to def.columns / data.rows unchanged.
+  const feeDetailed = !!def?.buildingLeaseFilter && feeView === 'detailed';
+  const activeColumns = useMemo(() => {
+    const base = feeDetailed ? FEE_DETAIL_COLUMNS : def.columns;
+    if (!def?.buildingLeaseFilter) return base;
+    // Period column header follows the chosen granularity.
+    const periodLabel = granularity === 'quarter' ? 'Quarter' : 'Year';
+    return base.map(c => (c.key === 'periodLabel' ? { ...c, label: periodLabel } : c));
+  }, [def, feeDetailed, granularity]);
+  const activeRows: Record<string, unknown>[] = feeDetailed ? (data?.items ?? []) : (data?.rows ?? []);
 
   const filtered = useMemo(() => {
-    if (!data?.rows) return [];
     const needle = search.trim().toLowerCase();
-    if (!needle) return data.rows;
+    if (!needle) return activeRows;
     if (def.layout === 'matrix') {
-      return data.rows.filter(row =>
+      return activeRows.filter(row =>
         ['customer', 'unitLabel', 'buildingName', 'contractRef'].some(
           k => String(row[k] ?? '').toLowerCase().includes(needle)));
     }
-    return data.rows.filter(row =>
-      def.columns.some(c => String(row[c.key] ?? '').toLowerCase().includes(needle)),
+    return activeRows.filter(row =>
+      activeColumns.some(c => String(row[c.key] ?? '').toLowerCase().includes(needle)),
     );
-  }, [data, search, def]);
+  }, [activeRows, activeColumns, search, def]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
@@ -769,17 +899,17 @@ export function ReportDetailView({
 
   const deadColKeys = useMemo(() => {
     const dead = new Set<string>();
-    if (!data?.rows?.length || def.layout) return dead; // plain table only
-    for (const c of def.columns) {
+    if (!activeRows.length || def.layout) return dead; // plain table only
+    for (const c of activeColumns) {
       if (c.type === 'aed' || c.type === 'number') {
-        const allZero = data.rows.every(r => { const v = r[c.key]; return v == null || Number(v) === 0; });
+        const allZero = activeRows.every(r => { const v = r[c.key]; return v == null || Number(v) === 0; });
         if (allZero) dead.add(c.key);
       }
     }
     return dead;
-  }, [data, def]);
+  }, [activeRows, activeColumns, def]);
 
-  const visibleColumns = useMemo(() => def.columns.filter(c => !deadColKeys.has(c.key)), [def, deadColKeys]);
+  const visibleColumns = useMemo(() => activeColumns.filter(c => !deadColKeys.has(c.key)), [activeColumns, deadColKeys]);
   const visibleTotals = useMemo(() => def.totals.filter(t => !deadTotalKeys.has(t.key)), [def, deadTotalKeys]);
 
   function handleCsv() {
@@ -825,9 +955,10 @@ export function ReportDetailView({
       return;
     }
 
-    const headers = def.columns.map(c => c.label);
-    const rows = sorted.map(row => def.columns.map(c => fmtCell(row[c.key], c.type)));
-    downloadCsv(`${slug}-${datestamp}.csv`, headers, rows);
+    const headers = activeColumns.map(c => c.label);
+    const rows = sorted.map(row => activeColumns.map(c => fmtCell(row[c.key], c.type)));
+    const suffix = feeDetailed ? '-detailed' : '';
+    downloadCsv(`${slug}${suffix}-${datestamp}.csv`, headers, rows);
   }
 
   if (!def) {
@@ -947,6 +1078,116 @@ export function ReportDetailView({
         </div>
       )}
 
+      {/* View (overall summary vs per-contract detail) + bucketing granularity. */}
+      {def.buildingLeaseFilter && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">View:</span>
+          {([
+            { id: 'overall',  label: 'Overall' },
+            { id: 'detailed', label: 'Detailed' },
+          ] as const).map(v => (
+            <button key={v.id} onClick={() => setFeeView(v.id)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${feeView === v.id ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {v.label}
+            </button>
+          ))}
+          <span className="text-xs text-[#6b6860] font-medium ml-2">Group by:</span>
+          {([
+            { id: 'year',    label: 'Year' },
+            { id: 'quarter', label: 'Quarter' },
+          ] as const).map(g => (
+            <button key={g.id} onClick={() => { setGranularity(g.id); if (urlBase) router.replace(`${urlBase}/${slug}?groupBy=${g.id}`); }}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${granularity === g.id ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {g.label}
+            </button>
+          ))}
+          <span className="text-[11px] text-[#9b9890] ml-1">
+            {feeView === 'detailed' ? 'Every contract — verify the totals add up' : 'Totals per ' + (granularity === 'quarter' ? 'quarter' : 'year')}
+          </span>
+        </div>
+      )}
+
+      {/* Building + leasing-model (direct/sub) filters — fee-taxation only. */}
+      {def.buildingLeaseFilter && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          {/* Leasing model — true multi-select; both on = all. */}
+          <span className="text-xs text-[#6b6860] font-medium">Leasing model:</span>
+          {([
+            { id: 'direct', label: 'Direct lease' },
+            { id: 'sub',    label: 'Sub-lease' },
+          ] as const).map(t => {
+            const on = selectedLeaseTypes.includes(t.id);
+            return (
+              <button key={t.id} onClick={() => toggleLeaseType(t.id)}
+                className={`inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${on ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+                {on && <Check size={12} />} {t.label}
+              </button>
+            );
+          })}
+
+          {/* Building multi-select (with inline reclassify for RPs). */}
+          <span className="text-xs text-[#6b6860] font-medium ml-2">Buildings:</span>
+          <div className="relative" ref={buildingMenuRef}>
+            <button
+              type="button"
+              disabled={buildingOptions.length === 0}
+              onClick={() => setBuildingMenuOpen(o => !o)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+              <Building2 size={13} />
+              {selectedBuildings.length === 0
+                ? (buildingOptions.length ? 'All buildings' : 'No buildings')
+                : `${selectedBuildings.length} of ${buildingOptions.length}`}
+              <ChevronDown size={13} className={buildingMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+            </button>
+            {buildingMenuOpen && buildingOptions.length > 0 && (
+              <div className="absolute z-40 mt-1 left-0 w-80 bg-white border border-[#e8e6e0] rounded-xl shadow-xl overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[#f0eeea] bg-[#faf9f6]">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890]">{isAllBuildings ? 'All buildings' : `${selectedBuildings.length} of ${allBuildingIds.length} selected`}</span>
+                  {!isAllBuildings && (
+                    <button type="button" onClick={() => setSelectedBuildings([])}
+                      className="text-[11px] font-semibold text-[#2e9f82] hover:underline">Reset to all</button>
+                  )}
+                </div>
+                <ul className="max-h-72 overflow-y-auto py-1">
+                  {buildingOptions.map(b => {
+                    const checked = buildingChecked(b.id);
+                    return (
+                      <li key={b.id} className="flex items-center gap-2 px-3 py-2 hover:bg-[#f9f8f5]">
+                        <button type="button" onClick={() => toggleBuilding(b.id)} className="flex items-center gap-2 min-w-0 flex-1 text-left">
+                          <span className={`w-4 h-4 rounded border grid place-items-center shrink-0 ${checked ? 'bg-[#2e9f82] border-[#2e9f82]' : 'border-[#c5c2bc] bg-white'}`}>
+                            {checked && <Check size={11} className="text-white" />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm text-[#1a1916] truncate">{b.name}</span>
+                            <span className="block text-[10px] text-[#9b9890]">{b.contracts} contract{b.contracts === 1 ? '' : 's'}{checked ? '' : ' · excluded'}</span>
+                          </span>
+                        </button>
+                        {/* Leasing model — inline toggle for RP, read-only badge for managers. */}
+                        {canClassify ? (
+                          <span className="inline-flex shrink-0 rounded-md border border-[#e8e6e0] overflow-hidden text-[10px] font-semibold">
+                            {(['direct', 'sub'] as const).map(t => (
+                              <button key={t} type="button" disabled={classifyingId === b.id}
+                                onClick={() => b.leasingType !== t && classifyBuilding(b.id, t)}
+                                className={`px-2 py-1 transition-colors disabled:opacity-50 ${b.leasingType === t ? 'bg-[#2e9f82] text-white' : 'bg-white text-[#6b6860] hover:bg-[#f0fdf8]'}`}>
+                                {t === 'direct' ? 'Direct' : 'Sub'}
+                              </button>
+                            ))}
+                          </span>
+                        ) : (
+                          <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${b.leasingType === 'sub' ? 'bg-[#ede9fe] text-[#5b21b6]' : 'bg-[#d8f2e8] text-[#1a7a5a]'}`}>
+                            {b.leasingType === 'sub' ? 'Sub-lease' : 'Direct'}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Year dropdown (deposit register — "yearly document"): maps the picked
           year to a Jan 1 – Dec 31 from/to range, or clears it for All years. */}
       {def.controlKey === 'yearRange' && (
@@ -978,6 +1219,22 @@ export function ReportDetailView({
               {y}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Tenant scope — active customers only (default) vs include ended tenants. */}
+      {TENANT_SCOPED.has(slug) && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Customers:</span>
+          {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
+            <button key={v} onClick={() => setScope(v)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {label}
+            </button>
+          ))}
+          <span className="text-[11px] text-[#9b9890] ml-1">
+            {scope === 'active' ? 'Showing current tenants — ended tenancies are hidden.' : 'Showing all tenants, including ended tenancies.'}
+          </span>
         </div>
       )}
 

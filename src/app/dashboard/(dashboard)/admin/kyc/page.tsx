@@ -6,10 +6,11 @@ import { apiGet, apiPatch } from "@/lib/api";
 import { openDocViewer } from "@/lib/docViewer";
 import {
   Building2, Wrench, Users, Clock, CheckCircle2, XCircle,
-  AlertCircle, RefreshCw, ShieldCheck, FileText, User,
+  AlertCircle, RefreshCw, ShieldCheck, FileText, Files, User,
   CreditCard, MousePointerClick, ExternalLink, UserCheck,
 } from "lucide-react";
 import Link from "next/link";
+import { CustomerDocsModal, type CustomerDoc } from "@/components/upnow/CustomerDocsModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,10 @@ interface RentalProvider {
   dateOfBirth?: string;
   nationality?: string;
   gender?: string;
+  hasPoa?: boolean;
+  poaPersonName?: string | null;
+  poaPersonPhone?: string | null;
+  poaPersonEmail?: string | null;
   bankIban?: string;
   bankName?: string;
   bankAccountName?: string;
@@ -121,7 +126,7 @@ interface RpDetail {
 }
 
 type Tab = "rental" | "service" | "tenants" | "managers" | "technicians";
-type StatusFilter = "all" | "pending_review" | "action_required" | "compliant";
+type StatusFilter = "all" | "pending_review" | "action_required" | "compliant" | "expired";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -188,25 +193,13 @@ function UserStatusToggle({ userId, status, onChange }: { userId?: number; statu
   );
 }
 
-function ScoreBar({ score }: { score: number }) {
-  const color = score >= 80 ? "#16a34a" : score >= 50 ? "#d97706" : "#dc2626";
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ backgroundColor: "var(--color-base-100)" }}>
-        <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, backgroundColor: color }} />
-      </div>
-      <span className="text-xs tabular-nums w-7" style={{ color: "var(--color-neutral-500)" }}>{score}%</span>
-    </div>
-  );
-}
-
 // ─── Queue card (list item) ───────────────────────────────────────────────────
 
 function KycCard({
-  name, email, status, score, date, selected, onClick,
+  name, email, status, date, selected, onClick,
 }: {
   name: string; email?: string; status: ComplianceStatus;
-  score: number; date: string; selected: boolean; onClick: () => void;
+  date: string; selected: boolean; onClick: () => void;
 }) {
   return (
     <button
@@ -223,159 +216,12 @@ function KycCard({
         <ComplianceBadge s={status} />
       </div>
       {email && (
-        <p className="text-xs truncate mb-2" style={{ color: "var(--color-neutral-400)" }}>{email}</p>
+        <p className="text-xs truncate mb-1.5" style={{ color: "var(--color-neutral-400)" }}>{email}</p>
       )}
-      <ScoreBar score={score} />
-      <p className="text-xs mt-1.5" style={{ color: "var(--color-neutral-400)" }}>
+      <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
         {new Date(date).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
       </p>
     </button>
-  );
-}
-
-// ─── LEFT panel: RP document checklist ───────────────────────────────────────
-
-function RpChecklistPanel({
-  detail, loading,
-}: {
-  detail: RpDetail | null;
-  loading: boolean;
-}) {
-  const checklist = detail?.checklist ?? [];
-  const checkPass = checklist.filter((c) => c.uploaded).length;
-  const score = detail?.completionScore ?? 0;
-
-  return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-
-      {/* Score badge */}
-      <div className="px-3 pt-3 pb-2 shrink-0">
-        <div className="rounded-xl px-3 py-3 text-center"
-          style={{ backgroundColor: score >= 80 ? "#dcfce7" : "#fef9eb" }}>
-          <p className="text-3xl font-bold leading-none"
-            style={{ color: score >= 80 ? "#16a34a" : "#b45309" }}>
-            {loading ? "—" : `${score}%`}
-          </p>
-          <p className="text-xs mt-1 font-medium"
-            style={{ color: score >= 80 ? "#166534" : "#92400e" }}>
-            KYC Score
-          </p>
-        </div>
-      </div>
-
-      {/* Document checklist */}
-      <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide py-1"
-          style={{ color: "var(--color-neutral-400)" }}>
-          Documents
-        </p>
-
-        {loading && <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>Loading…</p>}
-        {!loading && checklist.length === 0 && (
-          <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>No checklist</p>
-        )}
-
-        {checklist.map((item) => (
-          <div key={item.key} className="rounded-xl p-3"
-            style={{
-              backgroundColor: item.uploaded ? "#f0fdf4" : item.required ? "#fef2f2" : "#f9fafb",
-              border: `1px solid ${item.uploaded ? "#bbf7d0" : item.required ? "#fecaca" : "#e5e7eb"}`,
-            }}>
-            <div className="flex items-center gap-2 mb-0.5">
-              {item.uploaded
-                ? <CheckCircle2 size={13} style={{ color: "#16a34a", flexShrink: 0 }} />
-                : <XCircle size={13} style={{ color: item.required ? "#dc2626" : "#9ca3af", flexShrink: 0 }} />}
-              <span className="text-xs font-semibold leading-tight"
-                style={{ color: item.uploaded ? "#15803d" : item.required ? "#b91c1c" : "#6b7280" }}>
-                {item.displayName}
-              </span>
-            </div>
-            <p className="text-xs pl-5 leading-tight"
-              style={{ color: item.uploaded ? "#166534" : item.required ? "#dc2626" : "#9ca3af", opacity: 0.85 }}>
-              {item.uploaded ? (item.status ?? "Uploaded") : item.required ? "Required" : "Optional"}
-            </p>
-          </div>
-        ))}
-
-        {checklist.length > 0 && (
-          <p className="text-xs pt-1" style={{ color: "var(--color-neutral-400)" }}>
-            {checkPass}/{checklist.length} uploaded
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── LEFT panel: SP summary ───────────────────────────────────────────────────
-
-function SpLeftPanel({ sp }: { sp: ServiceProvider }) {
-  return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        <div className="rounded-xl p-3 text-center"
-          style={{ backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-          <Wrench size={20} style={{ color: "#16a34a", margin: "0 auto 6px" }} />
-          <p className="text-xs font-bold" style={{ color: "#15803d" }}>Service Provider</p>
-          <p className="text-xs mt-0.5" style={{ color: "#166534" }}>
-            {sp.serviceCategory?.replace(/_/g, " ") ?? "—"}
-          </p>
-        </div>
-
-        <p className="text-xs font-semibold uppercase tracking-wide py-1"
-          style={{ color: "var(--color-neutral-400)" }}>
-          Summary
-        </p>
-
-        {([
-          { label: "Status", value: <ComplianceBadge s={sp.complianceStatus} /> },
-          { label: "Entity", value: sp.entityType?.replace(/_/g, " ") ?? "—" },
-          { label: "Rating", value: sp.averageRating != null ? `${sp.averageRating.toFixed(1)} (${sp.totalReviews ?? 0})` : "—" },
-        ] as { label: string; value: React.ReactNode }[]).map(({ label, value }) => (
-          <div key={label} className="flex items-center justify-between py-2 border-b"
-            style={{ borderColor: "var(--color-base-100)" }}>
-            <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-            <span className="text-xs font-semibold" style={{ color: "var(--color-neutral-700)" }}>{value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── LEFT panel: Tenant summary ───────────────────────────────────────────────
-
-function TenantLeftPanel({ tenant }: { tenant: Tenant }) {
-  return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        <div className="rounded-xl p-3 text-center"
-          style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}>
-          <Users size={20} style={{ color: "#2563eb", margin: "0 auto 6px" }} />
-          <p className="text-xs font-bold" style={{ color: "#1d4ed8" }}>Customer</p>
-          <p className="text-xs mt-0.5" style={{ color: "#1e40af" }}>
-            {tenant.entityType?.replace(/_/g, " ") ?? "—"}
-          </p>
-        </div>
-
-        <p className="text-xs font-semibold uppercase tracking-wide py-1"
-          style={{ color: "var(--color-neutral-400)" }}>
-          Summary
-        </p>
-
-        {[
-          { label: "Doc status",    value: tenant.documentStatus ?? "—" },
-          { label: "Active status", value: tenant.activeStatus ?? "—" },
-          { label: "Registered",    value: new Date(tenant.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
-        ].map(({ label, value }) => (
-          <div key={label} className="flex items-center justify-between py-2 border-b"
-            style={{ borderColor: "var(--color-base-100)" }}>
-            <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-            <span className="text-xs font-semibold" style={{ color: "var(--color-neutral-700)" }}>{value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -392,17 +238,19 @@ function RpContentPanel({
 }) {
   const [acting, setActing] = useState(false);
   const [notes, setNotes] = useState("");
-  const [showAllDocs, setShowAllDocs] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setNotes("");
-    setShowAllDocs(false);
     scrollRef.current?.scrollTo({ top: 0 });
   }, [rpId]);
 
   const profile = detail?.profile;
-  const docs = detail?.uploadedDocs ?? [];
+  const allDocs = detail?.uploadedDocs ?? [];
+  // Keep Power-of-Attorney documents (the deed + the holder's identity docs) in
+  // their own card so they never blur into the owner's own KYC documents.
+  const poaDocs = allDocs.filter((d) => d.documentKey.startsWith("poa_"));
+  const docs = allDocs.filter((d) => !d.documentKey.startsWith("poa_"));
 
   async function act(status: ComplianceStatus) {
     if (!profile) return;
@@ -533,6 +381,83 @@ function RpContentPanel({
               </div>
             </div>
 
+            {/* Power of Attorney — kept separate from the owner's own KYC */}
+            {(profile.hasPoa || poaDocs.length > 0) && (
+              <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <ShieldCheck size={12} style={{ color: "var(--color-primary)" }} />
+                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-500)" }}>
+                    Power of Attorney
+                  </span>
+                  {poaDocs.some((d) => d.fileUrl) && (
+                    <button type="button"
+                      onClick={() => openDocViewer(
+                        poaDocs.map((d) => ({ fileUrl: d.fileUrl, caption: d.documentKey.replace(/_/g, " ") })),
+                        "Power of Attorney",
+                      )}
+                      className="ml-auto flex items-center gap-0.5 text-[11px] font-semibold cursor-pointer"
+                      style={{ color: "var(--color-primary)" }}>
+                      <ExternalLink size={11} /> View all
+                    </button>
+                  )}
+                </div>
+
+                {/* POA holder person */}
+                {(profile.poaPersonName || profile.poaPersonPhone || profile.poaPersonEmail) && (
+                  <div className="grid grid-cols-2 gap-x-4 mb-2">
+                    {[
+                      { label: "Holder", value: profile.poaPersonName },
+                      { label: "Phone",  value: profile.poaPersonPhone },
+                      { label: "Email",  value: profile.poaPersonEmail },
+                    ].filter((r) => r.value).map(({ label, value }) => (
+                      <div key={label} className="flex items-center justify-between gap-2 py-1.5 border-b col-span-1"
+                        style={{ borderColor: "var(--color-base-100)" }}>
+                        <span className="text-xs shrink-0" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
+                        <span className="text-xs font-semibold truncate" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* POA documents */}
+                {poaDocs.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {poaDocs.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between gap-2 py-1.5 border-b"
+                        style={{ borderColor: "var(--color-base-100)" }}>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate capitalize" style={{ color: "var(--color-neutral-700)" }}>
+                            {doc.documentKey.replace(/^poa_/, "").replace(/_/g, " ")}
+                          </p>
+                          {doc.expiryDate && (
+                            <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
+                              Exp: {new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                            style={{
+                              backgroundColor: ["processed", "complete"].includes(String(doc.status).toLowerCase()) ? "#dcfce7" : "#fef3c7",
+                              color: ["processed", "complete"].includes(String(doc.status).toLowerCase()) ? "#15803d" : "#b45309",
+                            }}>
+                            {doc.status}
+                          </span>
+                          {doc.fileUrl && (
+                            <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="cursor-pointer">
+                              <ExternalLink size={11} style={{ color: "var(--color-primary)" }} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>No POA documents uploaded yet.</p>
+                )}
+              </div>
+            )}
+
             {/* Uploaded documents */}
             {docs.length > 0 && (
               <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
@@ -541,9 +466,20 @@ function RpContentPanel({
                   <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-500)" }}>
                     Uploaded Docs ({docs.length})
                   </span>
+                  {docs.some((d) => d.fileUrl) && (
+                    <button type="button"
+                      onClick={() => openDocViewer(
+                        docs.map((d) => ({ fileUrl: d.fileUrl, caption: d.documentKey.replace(/_/g, " ") })),
+                        "Uploaded Documents",
+                      )}
+                      className="ml-auto flex items-center gap-0.5 text-[11px] font-semibold cursor-pointer"
+                      style={{ color: "var(--color-primary)" }}>
+                      <ExternalLink size={11} /> View all
+                    </button>
+                  )}
                 </div>
                 <div className="space-y-1.5">
-                  {(showAllDocs ? docs : docs.slice(0, 4)).map((doc) => (
+                  {docs.map((doc) => (
                     <div key={doc.id} className="flex items-center justify-between gap-2 py-1.5 border-b"
                       style={{ borderColor: "var(--color-base-100)" }}>
                       <div className="min-w-0">
@@ -573,13 +509,6 @@ function RpContentPanel({
                     </div>
                   ))}
                 </div>
-                {docs.length > 4 && (
-                  <button onClick={() => setShowAllDocs((v) => !v)}
-                    className="w-full mt-2 py-1.5 rounded-lg text-xs font-semibold"
-                    style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-primary)" }}>
-                    {showAllDocs ? "Show fewer documents" : `Show all documents (${docs.length})`}
-                  </button>
-                )}
               </div>
             )}
           </div>
@@ -606,12 +535,12 @@ function RpContentPanel({
             <button onClick={() => void act("action_required")} disabled={acting || loading}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
               style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}>
-              <AlertCircle size={13} /> Request Action
+              <AlertCircle size={13} /> Mark Action Required
             </button>
             <button onClick={() => void act("expired")} disabled={acting || loading}
               className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
               style={{ backgroundColor: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" }}>
-              <XCircle size={13} /> Expire
+              <XCircle size={13} /> Mark Expired
             </button>
           </div>
         </div>
@@ -675,55 +604,111 @@ function SpContentPanel({ sp }: { sp: ServiceProvider }) {
 
 // ─── RIGHT panel: Tenant content ─────────────────────────────────────────────
 
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
+function KycBadge({ status }: { status?: string | null }) {
+  const v = (status ?? "").toLowerCase();
+  const cfg = !v
+    ? { bg: "#f3f4f6", fg: "#6b7280", label: "KYC unknown" }
+    : v.includes("verif") || v === "approved" || v === "complete"
+      ? { bg: "#dcfce7", fg: "#15803d", label: "Verified" }
+      : v.includes("reject") || v.includes("fail")
+        ? { bg: "#fee2e2", fg: "#b91c1c", label: status!.replace(/_/g, " ") }
+        : { bg: "#fef3c7", fg: "#b45309", label: status!.replace(/_/g, " ") };
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+      style={{ backgroundColor: cfg.bg, color: cfg.fg }}>
+      <ShieldCheck size={10} /> {cfg.label}
+    </span>
+  );
+}
+
 function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detail: TenantDetail | null; loading: boolean }) {
+  const [showDocs, setShowDocs] = useState(false);
   const name = providerName(tenant, `Customer #${tenant.id}`);
   const p = detail?.profile;
   const u = p?.user;
   const docs = detail?.uploadedDocs ?? null;
+  const email = u?.email ?? tenant.user?.email;
+  const phone = u?.phone;
   const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : "—");
 
-  const profileRows = [
-    { label: "Email",            value: u?.email ?? tenant.user?.email },
-    { label: "Phone",            value: u?.phone },
-    { label: "Entity type",      value: (p?.entityType ?? tenant.entityType)?.replace(/_/g, " ") },
-    { label: "KYC status",       value: u?.kycStatus?.replace(/_/g, " ") },
-    { label: "Document status",  value: p?.documentStatus ?? tenant.documentStatus },
-    { label: "Active status",    value: p?.activeStatus ?? tenant.activeStatus },
-    { label: "Trade licence no", value: p?.tradeLicenseNumber },
-    { label: "Licence authority",value: p?.tradeLicenseAuthority },
-    { label: "Registered",       value: fmtDate(p?.createdAt ?? tenant.createdAt) },
-    { label: "Last updated",     value: p?.updatedAt ? fmtDate(p.updatedAt) : undefined },
+  const overviewRows = [
+    { label: "Entity type",       value: (p?.entityType ?? tenant.entityType)?.replace(/_/g, " ") },
+    { label: "Document status",   value: (p?.documentStatus ?? tenant.documentStatus)?.replace(/_/g, " ") },
+    { label: "Active status",     value: (p?.activeStatus ?? tenant.activeStatus)?.replace(/_/g, " ") },
+    { label: "Registered",        value: fmtDate(p?.createdAt ?? tenant.createdAt) },
+    { label: "Last updated",      value: p?.updatedAt ? fmtDate(p.updatedAt) : undefined },
+    { label: "Trade licence no",  value: p?.tradeLicenseNumber },
+    { label: "Licence authority", value: p?.tradeLicenseAuthority },
   ].filter(r => r.value);
+
+  // Map the admin uploaded docs into the shared CustomerDocsModal shape.
+  const customerDocs: CustomerDoc[] = (docs ?? []).map(d => ({
+    id: d.id, documentKey: d.documentKey, displayName: null, category: null,
+    status: d.status, fileUrl: d.fileUrl, expiryDate: d.expiryDate, ownerType: "customer",
+  }));
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{name}</h2>
-            <div className="ml-auto">
-              <UserStatusToggle userId={tenant.user?.id} status={tenant.user?.status} />
-            </div>
+        {/* Header — avatar + identity */}
+        <div className="flex items-start gap-3 mb-4 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+          <div className="w-11 h-11 rounded-full grid place-items-center text-sm font-bold shrink-0"
+            style={{ backgroundColor: "var(--color-primary-50)", color: "var(--color-primary)" }}>
+            {initials(name)}
           </div>
-          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{u?.email ?? tenant.user?.email}</p>
-        </div>
-
-        {/* Profile — full detail */}
-        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>Profile</p>
-        <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
-          {profileRows.map(({ label, value }) => (
-            <div key={label} className="flex items-center justify-between gap-3 py-1.5 border-b"
-              style={{ borderColor: "var(--color-base-100)" }}>
-              <span className="text-xs shrink-0" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-              <span className="text-xs font-semibold text-right capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{name}</h2>
+              <KycBadge status={u?.kycStatus} />
+              <div className="ml-auto">
+                <UserStatusToggle userId={tenant.user?.id} status={tenant.user?.status} />
+              </div>
             </div>
-          ))}
+            <p className="text-xs mt-0.5" style={{ color: "var(--color-neutral-500)" }}>
+              {email}{phone ? ` · ${phone}` : ""}
+            </p>
+          </div>
         </div>
 
-        {/* Documents — full detail inline (number / issue / expiry / notes) */}
-        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>
-          Documents{docs ? ` (${docs.length})` : ""}
-        </p>
+        {/* Overview */}
+        <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          <div className="flex items-center gap-1.5 mb-2">
+            <User size={12} style={{ color: "var(--color-primary)" }} />
+            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-500)" }}>Overview</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4">
+            {overviewRows.map(({ label, value }) => (
+              <div key={label} className="flex items-center justify-between gap-2 py-1.5 border-b"
+                style={{ borderColor: "var(--color-base-100)" }}>
+                <span className="text-xs shrink-0" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
+                <span className="text-xs font-semibold text-right capitalize truncate" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Documents */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5">
+            <FileText size={12} style={{ color: "var(--color-primary)" }} />
+            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-500)" }}>
+              Documents{docs ? ` (${docs.length})` : ""}
+            </span>
+          </div>
+          {docs && docs.length > 0 && (
+            <button type="button" onClick={() => setShowDocs(true)}
+              className="inline-flex items-center gap-1 text-xs font-semibold cursor-pointer hover:underline"
+              style={{ color: "var(--color-primary)" }}>
+              <Files size={12} /> View all documents
+            </button>
+          )}
+        </div>
         <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
           {loading ? (
             <p className="text-xs py-3 text-center" style={{ color: "var(--color-neutral-400)" }}>Loading documents…</p>
@@ -772,6 +757,10 @@ function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detai
           )}
         </div>
       </div>
+
+      {showDocs && (
+        <CustomerDocsModal tenantName={name} documents={customerDocs} onClose={() => setShowDocs(false)} />
+      )}
     </div>
   );
 }
@@ -837,35 +826,6 @@ function TeamCard({
         {new Date(date).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
       </p>
     </button>
-  );
-}
-
-/** Column-2 summary for a selected manager. */
-function ManagerLeftPanel({ m }: { m: ManagerRow }) {
-  return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-      <div className="px-3 pt-3 pb-2 shrink-0">
-        <div className="rounded-xl px-3 py-3 text-center" style={{ backgroundColor: "#eef6ff" }}>
-          <p className="text-3xl font-bold leading-none" style={{ color: "#1d4ed8" }}>{m.landlordCount}</p>
-          <p className="text-xs mt-1 font-medium" style={{ color: "#1e40af" }}>
-            Landlord{m.landlordCount !== 1 ? "s" : ""}
-          </p>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide py-1" style={{ color: "var(--color-neutral-400)" }}>Account</p>
-        {[
-          { label: "Status", value: m.status },
-          { label: "Member since", value: new Date(m.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
-          { label: "Last login", value: m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : "Never" },
-        ].map(({ label, value }) => (
-          <div key={label} className="rounded-xl p-2.5" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
-            <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
-            <p className="text-xs font-semibold capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</p>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -963,27 +923,6 @@ function ManagerContentPanel({ m }: { m: ManagerRow }) {
             );
           })}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/** Column-2 summary for a selected technician. */
-function TechnicianLeftPanel({ t }: { t: TechnicianRow }) {
-  return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: "#fafdf9" }}>
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-3 space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide py-1" style={{ color: "var(--color-neutral-400)" }}>Account</p>
-        {[
-          { label: "Service provider", value: t.spName },
-          { label: "Status", value: t.status },
-          { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
-        ].map(({ label, value }) => (
-          <div key={label} className="rounded-xl p-2.5" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
-            <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
-            <p className="text-xs font-semibold capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</p>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -1169,15 +1108,6 @@ export default function AdminKycPage() {
     return () => controller.abort();
   }, [selectedId, tab]);
 
-  function kycScore(rp: RentalProvider) {
-    const fields = [rp.entityType, rp.contactAddress, rp.tradeLicenseNumber, rp.emiratesIdNumber, rp.bankIban, rp.companyName];
-    return Math.round((fields.filter(Boolean).length / fields.length) * 100);
-  }
-  function spScore(sp: ServiceProvider) {
-    const fields = [sp.entityType, sp.businessName ?? sp.ownerName, sp.serviceCategory];
-    return Math.round((fields.filter(Boolean).length / fields.length) * 100);
-  }
-
   function handleTabChange(t: Tab) {
     setTab(t); setSelectedId(null); setStatusFilter("all");
     // Persist to the URL so a refresh keeps this tab selected.
@@ -1195,11 +1125,6 @@ export default function AdminKycPage() {
   const filteredRps     = rps.filter((r)  => statusFilter === "all" || r.complianceStatus === statusFilter);
   const filteredSps     = sps.filter((sp) => statusFilter === "all" || sp.complianceStatus === statusFilter);
   const filteredTenants = tenants;
-
-  const rpPending = rps.filter((r)  => r.complianceStatus === "pending_review").length;
-  const rpAction  = rps.filter((r)  => r.complianceStatus === "action_required").length;
-  const spPending = sps.filter((sp) => sp.complianceStatus === "pending_review").length;
-  const spAction  = sps.filter((sp) => sp.complianceStatus === "action_required").length;
 
   const selectedRp     = selectedId !== null && tab === "rental"  ? rps.find((r)  => r.id === selectedId) ?? null : null;
   const selectedSp     = selectedId !== null && tab === "service" ? sps.find((s)  => s.id === selectedId) ?? null : null;
@@ -1248,27 +1173,8 @@ export default function AdminKycPage() {
           </button>
         ))}
 
-        {/* Compact stats */}
-        <div className="ml-auto flex items-center gap-3 mr-2">
-          {[
-            { label: "RP Pending", value: rpPending, warn: rpPending > 0 },
-            { label: "RP Action",  value: rpAction,  warn: rpAction > 0 },
-            { label: "SP Pending", value: spPending, warn: spPending > 0 },
-            { label: "SP Action",  value: spAction,  warn: spAction > 0 },
-          ].map(({ label, value, warn }, i, arr) => (
-            <span key={label} className="flex items-center gap-2">
-              <span className="flex items-center gap-1 text-xs">
-                <span className="font-semibold"
-                  style={{ color: warn ? "#dc2626" : "var(--color-neutral-700)" }}>{value}</span>
-                <span style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-              </span>
-              {i < arr.length - 1 && <span style={{ color: "var(--color-base-200)" }}>·</span>}
-            </span>
-          ))}
-        </div>
-
         <button onClick={() => void load()} disabled={loading}
-          className="p-1.5 rounded-lg transition-colors"
+          className="ml-auto p-1.5 rounded-lg transition-colors"
           style={{ border: "1px solid var(--color-base-200)" }} title="Refresh">
           <RefreshCw size={13} className={loading ? "animate-spin" : ""}
             style={{ color: "var(--color-neutral-500)" }} />
@@ -1291,6 +1197,7 @@ export default function AdminKycPage() {
               { id: "pending_review"  as StatusFilter, label: "Pending Review" },
               { id: "action_required" as StatusFilter, label: "Action Required" },
               { id: "compliant"       as StatusFilter, label: "Compliant" },
+              { id: "expired"         as StatusFilter, label: "Expired" },
             ]).map(({ id, label }) => (
               <button key={id} onClick={() => handleStatusFilter(id)}
                 className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
@@ -1329,7 +1236,6 @@ export default function AdminKycPage() {
                     name={providerName(rp, `RP #${rp.id}`)}
                     email={rp.user?.email}
                     status={rp.complianceStatus}
-                    score={kycScore(rp)}
                     date={rp.createdAt}
                     selected={selectedId === rp.id}
                     onClick={() => setSelectedId(rp.id)}
@@ -1340,7 +1246,6 @@ export default function AdminKycPage() {
                     name={sp.businessName ?? sp.ownerName ?? providerName(sp, `SP #${sp.id}`)}
                     email={sp.user?.email}
                     status={sp.complianceStatus}
-                    score={spScore(sp)}
                     date={sp.createdAt}
                     selected={selectedId === sp.id}
                     onClick={() => setSelectedId(sp.id)}
@@ -1351,7 +1256,6 @@ export default function AdminKycPage() {
                     name={providerName(t, `Customer #${t.id}`)}
                     email={t.user?.email}
                     status={"pending_review"}
-                    score={t.documentStatus === "complete" ? 100 : 40}
                     date={t.createdAt}
                     selected={selectedId === t.id}
                     onClick={() => setSelectedId(t.id)}
@@ -1390,24 +1294,6 @@ export default function AdminKycPage() {
                 )}
               </div>
             </div>
-
-            {/* COLUMN 2: checklist / summary for the selected record */}
-            {hasSelection && (
-              <div className="flex flex-col shrink-0 border-r overflow-hidden"
-                style={{ width: 240, borderColor: "var(--color-base-200)" }}>
-                {selectedRp ? (
-                  <RpChecklistPanel detail={rpDetail} loading={rpDetailLoading} />
-                ) : selectedSp ? (
-                  <SpLeftPanel sp={selectedSp} />
-                ) : selectedTenant ? (
-                  <TenantLeftPanel tenant={selectedTenant} />
-                ) : selectedManager ? (
-                  <ManagerLeftPanel m={selectedManager} />
-                ) : selectedTechnician ? (
-                  <TechnicianLeftPanel t={selectedTechnician} />
-                ) : null}
-              </div>
-            )}
 
             {/* COLUMN 3: detail content */}
             <div className="flex-1 overflow-hidden" style={{ backgroundColor: "#fafafa" }}>

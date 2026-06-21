@@ -61,7 +61,7 @@ export interface WizardProperty {
 }
 
 const EMPTY_PROP: PropertyFormData = {
-  buildingName: '', spaceCategory: '',
+  buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
   street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
@@ -284,6 +284,7 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
         const created = await apiPost<WizardProperty>('/properties', {
           buildingName: pf.buildingName,
           spaceCategory: pf.spaceCategory,
+          leasingType: pf.leasingType,
           fullAddress: parts.join(', ') || undefined,
           emirateId: pf.emirateId ?? undefined,
           communityId: pf.communityId ?? undefined,
