@@ -131,6 +131,8 @@ interface ContractDetail {
   securityDepositAmount: number | null;
   adminFeeFils: number | null;
   ejariFeeFils: number | null;
+  /** Actual fee payment rows — the source of truth the Fees section displays. */
+  fees?: { paymentType: string | null; amount: number }[];
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
   customClauses?: string[] | null;
@@ -212,8 +214,12 @@ export default function EditContractPage() {
         setDiscountType(c.discountType ?? 'none');
         setDiscountValue(c.discountValue != null ? String(c.discountValue) : '');
         setSecurityDeposit(numStr(c.securityDepositAmount));
-        setAdminFee(numStr(c.adminFeeFils));
-        setEjariFee(numStr(c.ejariFeeFils));
+        // Prefill from the actual fee rows (what the Fees section shows) so the
+        // form round-trips; fall back to the legacy column only when no row exists.
+        const adminRow = (c.fees ?? []).find((f) => f.paymentType === 'admin_fee');
+        const ejariRow = (c.fees ?? []).find((f) => f.paymentType === 'ejari_fee');
+        setAdminFee(adminRow ? numStr(adminRow.amount) : numStr(c.adminFeeFils));
+        setEjariFee(ejariRow ? numStr(ejariRow.amount) : numStr(c.ejariFeeFils));
         setInstallments(c.numberOfInstallments ? String(c.numberOfInstallments) : '1');
         setModeOfPayment(c.modeOfPayment || 'cheque');
         setClauses(Array.isArray(c.customClauses) ? c.customClauses : []);
