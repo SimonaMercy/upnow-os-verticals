@@ -589,6 +589,25 @@ interface StepContent {
   node: React.ReactNode;
 }
 
+/** Resolved action capabilities for the current actor. For an RP owner every
+ *  field is `true`; for a manager each is the per-landlord permission value.
+ *  Computed once in the page component (mirroring the Edit gate) and threaded
+ *  into the child components that render gated affordances. */
+interface ActorPerms {
+  /** Propose / manage renewals → canManageRenewals. */
+  renewals: boolean;
+  /** Terminate / request termination + addenda → canManageAgreements. */
+  agreements: boolean;
+  /** Sign the LANDLORD signature — needs signing rights AND power of attorney. */
+  signLandlord: boolean;
+  /** Sign tenant / witness / manager signatures → canSignDocuments. */
+  signDocuments: boolean;
+  /** Deposit edit + settlement → canManageDeposits OR canManageCollections. */
+  deposits: boolean;
+  /** Record / edit payments, fees, cheque-status, confirm PDC → canManageCollections. */
+  collections: boolean;
+}
+
 interface StepHandlers {
   contract: ContractDetail;
   state: DerivedState;
@@ -618,6 +637,11 @@ interface StepHandlers {
   printUrl: string;
   /** Role-aware contracts list base (RP vs manager) for child/parent links. */
   contractsBase: string;
+  /** Manager-permission gates for the action affordances in this step. RP
+   *  owners get `true` for every flag; a manager gets the per-landlord flag
+   *  value. The backend already 403s a manager without the flag — this just
+   *  hides the button so they never see an action they can't take. */
+  perms: ActorPerms;
   /** When true, all workflow rollback / re-do affordances are hidden:
    *  the "Update" / "Re-upload" / "Revert to draft" buttons on completed
    *  steps and the ChkRow undo toggles on the Sign step. Set to true
@@ -714,8 +738,8 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                 on={st.landlordSigned}
                 label="Landlord signed (you)"
                 onToggle={() => h.setState({ landlordSigned: !st.landlordSigned })}
-                actionLabel="Sign now"
-                onAction={() => h.openModal('sign')}
+                actionLabel={h.perms.signLandlord ? 'Sign now' : undefined}
+                onAction={h.perms.signLandlord ? () => h.openModal('sign') : undefined}
               />
             </div>
           ),
@@ -877,9 +901,11 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             </div>
           </div>
           <p className="note" style={{ marginTop: 8 }}>Optional — you can proceed to settlement.</p>
-          <Link href={h.settlementUrl} className="btn btn-jade btn-block">
-            <Wallet size={14} /> Proceed to settlement
-          </Link>
+          {h.perms.deposits && (
+            <Link href={h.settlementUrl} className="btn btn-jade btn-block">
+              <Wallet size={14} /> Proceed to settlement
+            </Link>
+          )}
         </>
       ),
     };
@@ -912,16 +938,20 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                agrees; once agreed the figures are committed, so it locks.
                This is live wind-down management (like recording a payment), so
                it is NOT gated by readOnlyWorkflow — the lease stays active
-               through settlement, which would otherwise lock it permanently. */}
+               through settlement, which would otherwise lock it permanently.
+               A manager without the deposits/collections permission sees it
+               locked (read-only). */}
             <ChkRow on={ss === 'sent' || ss === 'agreed'} label="Settlement sent to customer"
-              onToggle={h.onUnsendSettlement} locked={ss === 'agreed'} />
+              onToggle={h.onUnsendSettlement} locked={ss === 'agreed' || !h.perms.deposits} />
             {/* The customer's agreement and the payout are not the RP's to undo here. */}
             <ChkRow on={ss === 'agreed'} label={`${TEN} agreed`} onToggle={() => {}} locked />
             <ChkRow on={false} label="Refund marked paid" onToggle={() => {}} locked />
           </div>
-          <Link href={h.settlementUrl} className="btn btn-jade btn-block">
-            <Wallet size={14} /> Open settlement workspace
-          </Link>
+          {h.perms.deposits && (
+            <Link href={h.settlementUrl} className="btn btn-jade btn-block">
+              <Wallet size={14} /> Open settlement workspace
+            </Link>
+          )}
         </>
       ),
     };
@@ -1045,13 +1075,15 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       timing: null,
       node: (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            className="btn btn-ghost"
-            style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
-            onClick={() => h.openModal('direct-terminate')}
-          >
-            <X size={14} /> Terminate directly
-          </button>
+          {h.perms.agreements && (
+            <button
+              className="btn btn-ghost"
+              style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
+              onClick={() => h.openModal('direct-terminate')}
+            >
+              <X size={14} /> Terminate directly
+            </button>
+          )}
         </div>
       ),
     };
@@ -1129,22 +1161,26 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-jade" onClick={() => h.openDrawer('payments')}>
-              <CreditCard size={14} /> Record payment
-            </button>
+            {h.perms.collections && (
+              <button className="btn btn-jade" onClick={() => h.openDrawer('payments')}>
+                <CreditCard size={14} /> Record payment
+              </button>
+            )}
             {h.contract.renewalAccepted === 'accepted' && h.contract.renewalChild && (
               <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} className="btn btn-jade">
                 <RotateCcw size={14} /> Open renewal contract · CID-{h.contract.renewalChild.id}
               </Link>
             )}
-            {mode !== 'renewal' && !h.contract.renewalAccepted && (
+            {mode !== 'renewal' && !h.contract.renewalAccepted && h.perms.renewals && (
               <button className="btn btn-ghost" onClick={() => h.openModal('renew')}>
                 <RotateCcw size={14} /> Propose renewal
               </button>
             )}
-            <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('direct-terminate')}>
-              <X size={14} /> Terminate directly
-            </button>
+            {h.perms.agreements && (
+              <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('direct-terminate')}>
+                <X size={14} /> Terminate directly
+              </button>
+            )}
           </div>
         </>
       ),
@@ -1301,7 +1337,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote,
+  notes, onAddNote, perms,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
@@ -1341,6 +1377,10 @@ function DetailsDrawer({
   notes: ContractNote[];
   /** POST /api/contracts/:id/notes — append a note to the tenancy log. */
   onAddNote: (body: string) => Promise<void>;
+  /** Manager-permission gates for the editing affordances in this drawer
+   *  (fees/payments/PDC → collections, deposit → deposits, notes → agreements).
+   *  RP owners get `true` for every field. */
+  perms: ActorPerms;
 }) {
   const depositRow = payments.find(p => p.paymentType === 'security_deposit');
   // Receipt links must respect the portal (RP vs manager) — derive the base
@@ -1756,9 +1796,11 @@ function DetailsDrawer({
                 <div className="sech">
                   <span className="si"><CreditCard size={16} /></span>
                   <span className="st">Payments</span>
-                  <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
-                    {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
-                  </button>
+                  {perms.collections && (
+                    <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
+                      {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
+                    </button>
+                  )}
                 </div>
                 <div className="secb">
                   <table className="ptable">
@@ -1779,26 +1821,34 @@ function DetailsDrawer({
                             <td>{fmtDate(depositRow.transactionDate)}</td>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <select
-                                  className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}
-                                  style={{ cursor: 'pointer' }}
-                                  value={depositRow.chequeStatus ?? 'cleared'}
-                                  disabled={statusBusy === depositRow.id}
-                                  onChange={e => void changeStatus(depositRow.id, e.target.value)}
-                                >
-                                  <option value="pending">Pending</option>
-                                  <option value="cleared">Cleared</option>
-                                  <option value="bounced">Bounced</option>
-                                  <option value="cancelled">Cancelled</option>
-                                </select>
-                                <button
-                                  type="button"
-                                  className="mini-btn view"
-                                  title="Edit amount / reference / description"
-                                  onClick={() => editingId === depositRow.id ? setEditingId(null) : startEdit(depositRow)}
-                                >
-                                  <Pencil size={12} /> Edit
-                                </button>
+                                {perms.deposits ? (
+                                  <select
+                                    className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}
+                                    style={{ cursor: 'pointer' }}
+                                    value={depositRow.chequeStatus ?? 'cleared'}
+                                    disabled={statusBusy === depositRow.id}
+                                    onChange={e => void changeStatus(depositRow.id, e.target.value)}
+                                  >
+                                    <option value="pending">Pending</option>
+                                    <option value="cleared">Cleared</option>
+                                    <option value="bounced">Bounced</option>
+                                    <option value="cancelled">Cancelled</option>
+                                  </select>
+                                ) : (
+                                  <span className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')} style={{ textTransform: 'capitalize' }}>
+                                    {depositRow.chequeStatus ?? 'cleared'}
+                                  </span>
+                                )}
+                                {perms.deposits && (
+                                  <button
+                                    type="button"
+                                    className="mini-btn view"
+                                    title="Edit amount / reference / description"
+                                    onClick={() => editingId === depositRow.id ? setEditingId(null) : startEdit(depositRow)}
+                                  >
+                                    <Pencil size={12} /> Edit
+                                  </button>
+                                )}
                                 <Link
                                   href={`${receiptBase}?pid=${depositRow.id}`}
                                   target="_blank"
@@ -1853,7 +1903,9 @@ function DetailsDrawer({
                           read-only ("carried"). */}
                       {!depositRow && contract.securityDeposit && (() => {
                         const sd = contract.securityDeposit!;
-                        const editable = !sd.isCarried && sd.depositId != null;
+                        // A manager without the deposit permission sees the held
+                        // deposit read-only — no status change / edit / settle / set.
+                        const editable = !sd.isCarried && sd.depositId != null && perms.deposits;
                         return (
                           <Fragment>
                             <tr style={sd.isCarried ? { opacity: 0.6 } : undefined}>
@@ -1994,26 +2046,34 @@ function DetailsDrawer({
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <select
-                                className={'cstat ' + (p.chequeStatus ?? 'pending')}
-                                style={{ cursor: 'pointer' }}
-                                value={p.chequeStatus ?? 'pending'}
-                                disabled={statusBusy === p.id}
-                                onChange={e => void changeStatus(p.id, e.target.value)}
-                              >
-                                <option value="pending">Pending</option>
-                                <option value="cleared">Cleared</option>
-                                <option value="bounced">Bounced</option>
-                                <option value="cancelled">Cancelled</option>
-                              </select>
-                              <button
-                                type="button"
-                                className="mini-btn view"
-                                title="Edit amount / reference / description"
-                                onClick={() => editingId === p.id ? setEditingId(null) : startEdit(p)}
-                              >
-                                <Pencil size={12} /> Edit
-                              </button>
+                              {perms.collections ? (
+                                <select
+                                  className={'cstat ' + (p.chequeStatus ?? 'pending')}
+                                  style={{ cursor: 'pointer' }}
+                                  value={p.chequeStatus ?? 'pending'}
+                                  disabled={statusBusy === p.id}
+                                  onChange={e => void changeStatus(p.id, e.target.value)}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="cleared">Cleared</option>
+                                  <option value="bounced">Bounced</option>
+                                  <option value="cancelled">Cancelled</option>
+                                </select>
+                              ) : (
+                                <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
+                                  {p.chequeStatus ?? 'pending'}
+                                </span>
+                              )}
+                              {perms.collections && (
+                                <button
+                                  type="button"
+                                  className="mini-btn view"
+                                  title="Edit amount / reference / description"
+                                  onClick={() => editingId === p.id ? setEditingId(null) : startEdit(p)}
+                                >
+                                  <Pencil size={12} /> Edit
+                                </button>
+                              )}
                               <Link
                                 href={`${receiptBase}?pid=${p.id}`}
                                 target="_blank"
@@ -2102,14 +2162,16 @@ function DetailsDrawer({
                       <p className="subhead" style={{ margin: 0 }}>
                         Fees <span className="note" style={{ fontWeight: 400 }}>· one-off charges, separate from rent</span>
                       </p>
-                      <button
-                        type="button"
-                        className="mini-btn view"
-                        title="Add a fee line"
-                        onClick={() => { setShowAddFee(v => !v); setFeeAddErr(null); }}
-                      >
-                        <Plus size={12} /> Add fee
-                      </button>
+                      {perms.collections && (
+                        <button
+                          type="button"
+                          className="mini-btn view"
+                          title="Add a fee line"
+                          onClick={() => { setShowAddFee(v => !v); setFeeAddErr(null); }}
+                        >
+                          <Plus size={12} /> Add fee
+                        </button>
+                      )}
                     </div>
                     <table className="ptable">
                       <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Due date</th><th>Status</th><th></th></tr></thead>
@@ -2125,40 +2187,48 @@ function DetailsDrawer({
                             </td>
                             <td>{fmtDate(f.transactionDate)}</td>
                             <td>
-                              <select
-                                className={'cstat ' + (f.chequeStatus ?? 'pending')}
-                                style={{ cursor: 'pointer' }}
-                                value={f.chequeStatus ?? 'pending'}
-                                disabled={statusBusy === f.id}
-                                onChange={e => void changeStatus(f.id, e.target.value)}
-                              >
-                                <option value="pending">Pending</option>
-                                <option value="cleared">Cleared</option>
-                                <option value="bounced">Bounced</option>
-                                <option value="cancelled">Cancelled</option>
-                              </select>
+                              {perms.collections ? (
+                                <select
+                                  className={'cstat ' + (f.chequeStatus ?? 'pending')}
+                                  style={{ cursor: 'pointer' }}
+                                  value={f.chequeStatus ?? 'pending'}
+                                  disabled={statusBusy === f.id}
+                                  onChange={e => void changeStatus(f.id, e.target.value)}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="cleared">Cleared</option>
+                                  <option value="bounced">Bounced</option>
+                                  <option value="cancelled">Cancelled</option>
+                                </select>
+                              ) : (
+                                <span className={'cstat ' + (f.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
+                                  {f.chequeStatus ?? 'pending'}
+                                </span>
+                              )}
                             </td>
                             <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <button
-                                  type="button"
-                                  className="mini-btn view"
-                                  title="Edit fee amount / VAT / date"
-                                  onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
-                                >
-                                  <Pencil size={12} /> Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mini-btn"
-                                  title="Remove this fee"
-                                  disabled={feeDeleteBusy === f.id}
-                                  onClick={() => void deleteFee(f.id)}
-                                  style={{ color: 'var(--brick)' }}
-                                >
-                                  <Trash2 size={12} /> {feeDeleteBusy === f.id ? '…' : 'Delete'}
-                                </button>
-                              </div>
+                              {perms.collections && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <button
+                                    type="button"
+                                    className="mini-btn view"
+                                    title="Edit fee amount / VAT / date"
+                                    onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
+                                  >
+                                    <Pencil size={12} /> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="mini-btn"
+                                    title="Remove this fee"
+                                    disabled={feeDeleteBusy === f.id}
+                                    onClick={() => void deleteFee(f.id)}
+                                    style={{ color: 'var(--brick)' }}
+                                  >
+                                    <Trash2 size={12} /> {feeDeleteBusy === f.id ? '…' : 'Delete'}
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                           {feeEditId === f.id && (
@@ -2781,22 +2851,26 @@ function DetailsDrawer({
                 <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
                   An internal log for your team — record what is going on with this tenant so the next person to handle it is up to speed. Shared across this lease and its renewals. Not visible to the customer.
                 </p>
-                <div className="field" style={{ marginBottom: 6 }}>
-                  <textarea
-                    className="input"
-                    value={noteDraft}
-                    placeholder="Add a note about this tenancy…"
-                    rows={2}
-                    onChange={e => setNoteDraft(e.target.value)}
-                    onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNote(); } }}
-                  />
-                </div>
-                {noteErr && <p className="note" style={{ color: 'var(--brick)' }}>{noteErr}</p>}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                  <button className="btn btn-jade btn-sm" disabled={noteBusy || !noteDraft.trim()} onClick={() => void submitNote()}>
-                    <Check size={14} /> {noteBusy ? 'Saving…' : 'Add note'}
-                  </button>
-                </div>
+                {perms.agreements && (
+                  <>
+                    <div className="field" style={{ marginBottom: 6 }}>
+                      <textarea
+                        className="input"
+                        value={noteDraft}
+                        placeholder="Add a note about this tenancy…"
+                        rows={2}
+                        onChange={e => setNoteDraft(e.target.value)}
+                        onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNote(); } }}
+                      />
+                    </div>
+                    {noteErr && <p className="note" style={{ color: 'var(--brick)' }}>{noteErr}</p>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                      <button className="btn btn-jade btn-sm" disabled={noteBusy || !noteDraft.trim()} onClick={() => void submitNote()}>
+                        <Check size={14} /> {noteBusy ? 'Saving…' : 'Add note'}
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 {notes.length === 0 ? (
                   <p className="note">No notes yet. Add the first one above.</p>
@@ -3920,6 +3994,27 @@ export default function ContractV2Page() {
   // renewal, request termination) are unaffected.
   const readOnlyWorkflow = contract.status === 'active' || contract.status === 'expired' || contract.status === 'terminated';
 
+  // Manager permission gates — RP owners always see every affordance; a manager
+  // only sees one they hold the relevant flag for, for THIS contract's landlord.
+  // Mirrors the Edit gate's exact mechanism (isManagerView + managerCanForRp +
+  // the rp scope from ?rp= falling back to the contract's landlord id). The
+  // backend already 403s a manager who lacks the flag — this just hides the
+  // button so they never see an action they can't take.
+  const rpScope = searchParams.get('rp') ?? (contract.landlord?.id != null ? String(contract.landlord.id) : '');
+  const mgrCan = (flag: Parameters<typeof managerCanForRp>[0]) =>
+    !isManagerView || (rpScope !== '' && managerCanForRp(flag, Number(rpScope)));
+  const perms: ActorPerms = {
+    renewals:      mgrCan('canManageRenewals'),
+    agreements:    mgrCan('canManageAgreements'),
+    // "Sign as Landlord" needs POA in addition to signing rights (a manager may
+    // only sign the landlord's signature with power of attorney).
+    signLandlord:  mgrCan('canSignDocuments') && mgrCan('canActAsPoa'),
+    signDocuments: mgrCan('canSignDocuments'),
+    // Deposit edit / settlement: either deposits OR collections permission.
+    deposits:      mgrCan('canManageDeposits') || mgrCan('canManageCollections'),
+    collections:   mgrCan('canManageCollections'),
+  };
+
   // Step content + jump-to-step handler
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of 6`;
   const handlers: StepHandlers = {
@@ -3937,6 +4032,7 @@ export default function ContractV2Page() {
     settlementUrl: `${contractsBase}/${contract.id}/settlement`,
     printUrl: `${contractsBase}/${contract.id}/print`,
     contractsBase,
+    perms,
     readOnlyWorkflow,
   };
 
@@ -4021,11 +4117,11 @@ export default function ContractV2Page() {
             <Link href={`${contractsBase}/${contract.parentContractId}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={15} /> Open original lease to re-propose
             </Link>
-          ) : (
+          ) : perms.renewals ? (
             <button className="btn btn-jade" style={{ alignSelf: 'flex-start' }} onClick={() => setModal('renew')}>
               <RotateCcw size={15} /> Propose new renewal
             </button>
-          )}
+          ) : null}
         </>
       ),
     };
@@ -4165,7 +4261,8 @@ export default function ContractV2Page() {
             {contract.status === 'active'
               && contract.renewalAccepted !== 'pending'
               && contract.renewalAccepted !== 'accepted'
-              && contract.termination?.response !== 'accepted' && (
+              && contract.termination?.response !== 'accepted'
+              && perms.renewals && (
               <button className="btn btn-ghost btn-sm" onClick={() => setModal('renew')}>
                 <RotateCcw size={14} /> Propose renewal
               </button>
@@ -4176,7 +4273,8 @@ export default function ContractV2Page() {
                 accepted/direct (wind-down in progress) and on draft/terminated
                 rows where it doesn't apply. */}
             {(contract.status === 'active' || contract.status === 'expired')
-              && contract.termination?.response !== 'accepted' && (
+              && contract.termination?.response !== 'accepted'
+              && perms.agreements && (
               <button
                 className="btn btn-ghost btn-sm"
                 style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
@@ -4281,9 +4379,11 @@ export default function ContractV2Page() {
                 deposit settlement. The lease stays active until you mark the settlement paid.
               </p>
             </div>
-            <button className="btn btn-brick btn-sm" style={{ alignSelf: 'center' }} onClick={() => setModal('direct-terminate')}>
-              Terminate directly
-            </button>
+            {perms.agreements && (
+              <button className="btn btn-brick btn-sm" style={{ alignSelf: 'center' }} onClick={() => setModal('direct-terminate')}>
+                Terminate directly
+              </button>
+            )}
           </div>
         )}
 
@@ -4337,7 +4437,7 @@ export default function ContractV2Page() {
             {/* Inline landlord signature pad — placed after the customer signing
                  link so the step reads top-to-bottom: statuses → send link →
                  countersign here. */}
-            {selStep.key === 'sign' && canLandlordSign && (
+            {selStep.key === 'sign' && canLandlordSign && perms.signLandlord && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <InlineLandlordSign contract={contract} onSigned={() => void reload()} />
               </div>
@@ -4361,7 +4461,7 @@ export default function ContractV2Page() {
             )}
             {/* Inline RP counter-signature — appears once the customer has signed
                  the move-in inspection, so it can be completed right here. */}
-            {selStep.key === 'movein' && derived.moveIn.rpSubmitted && derived.moveIn.tenantSig && !derived.moveIn.rpCounterSig && (
+            {selStep.key === 'movein' && derived.moveIn.rpSubmitted && derived.moveIn.tenantSig && !derived.moveIn.rpCounterSig && perms.signDocuments && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <InlineInspectionCounterSign contractId={contract.id} type="move_in" onSigned={() => void reload()} />
               </div>
@@ -4426,14 +4526,15 @@ export default function ContractV2Page() {
             onRequestDoc={onRequestDoc}
             notes={notes}
             onAddNote={onAddNote}
+            perms={perms}
           />
         </div>
       </div>
 
-      {modal === 'sign' && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
-      {modal === 'terminate' && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
-      {modal === 'direct-terminate' && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); }} />}
-      {modal === 'renew' && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+      {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
+      {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+      {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); }} />}
+      {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
       {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
       <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" style={{ display: 'none' }}
