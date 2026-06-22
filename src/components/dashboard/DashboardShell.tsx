@@ -111,6 +111,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Ended Leases',     href: '/dashboard/manager/ended-leases', icon: Archive, requirePerm: 'canManageAgreements' },
     { divider: true },
     { section: 'More' },
+    { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageAgreements' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance' },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },

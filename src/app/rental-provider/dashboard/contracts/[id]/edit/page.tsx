@@ -13,7 +13,7 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
@@ -24,9 +24,12 @@ interface Tenant {
   user: { name: string; email: string };
 }
 
-/** Inline "create a new customer" form — mirrors the new-contract wizard. */
-function NewCustomerForm({ onCreated, onCancel }: {
-  onCreated: (t: { id: number; name: string }) => void; onCancel: () => void;
+/** Inline "create a new customer" form — mirrors the new-contract wizard.
+ *  `createTenantUrl` is context-aware: RP posts to /contracts/tenants, a manager
+ *  posts to /manager/tenants?rp=<landlord> so the customer lands under the
+ *  managed landlord (not the manager). */
+function NewCustomerForm({ createTenantUrl, onCreated, onCancel }: {
+  createTenantUrl: string; onCreated: (t: { id: number; name: string }) => void; onCancel: () => void;
 }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -41,7 +44,7 @@ function NewCustomerForm({ onCreated, onCancel }: {
     if (!email.trim()) { setErr('Email is required'); return; }
     setBusy(true); setErr(null);
     try {
-      const res = await fetch('/api/contracts/tenants', {
+      const res = await fetch(createTenantUrl, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(), email: email.trim(), phone: phone.trim() || undefined,
@@ -154,6 +157,24 @@ export default function EditContractPage() {
   const params = useParams();
   const id = Number(Array.isArray(params.id) ? params.id[0] : params.id);
 
+  // Context-aware scoping — this page is reused by the manager route
+  // (/dashboard/manager/contracts/[id]/edit) via re-export. The contract load +
+  // PATCH save are already manager-capable on the backend (resolveContractActor
+  // accepts an authorised manager, no ?rp needed). Only the customer picker
+  // (tenant list / search / create) + RP-profile read are RP-only, so for a
+  // manager they must go through the /manager/tenants/*?rp=<landlord> proxy.
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isManager = (pathname ?? '').startsWith('/dashboard/manager');
+  const rpParam = searchParams.get('rp') ?? '';
+  const contractsBase = isManager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
+  const tenantsListPath = isManager ? `/manager/tenants/list?rp=${rpParam}` : '/contracts/tenants/list';
+  const tenantSearchPath = (q: string) => isManager
+    ? `/manager/tenants/search?rp=${rpParam}&q=${encodeURIComponent(q)}`
+    : `/contracts/tenants/search?q=${encodeURIComponent(q)}`;
+  // POST goes through the raw /api proxy (NewCustomerForm uses fetch).
+  const createTenantUrl = isManager ? `/api/manager/tenants?rp=${rpParam}` : '/api/contracts/tenants';
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,12 +217,16 @@ export default function EditContractPage() {
     apiGet<{ role: string }[]>(`/contracts/${id}/signatures`)
       .then((sigs) => { if (!cancelled) setCustomerEditable(Array.isArray(sigs) && sigs.length === 0); })
       .catch(() => { if (!cancelled) setCustomerEditable(false); });
-    apiGet<Tenant[]>(`/contracts/tenants/list`)
+    apiGet<Tenant[]>(tenantsListPath)
       .then((rows) => { if (!cancelled) setActiveTenants(Array.isArray(rows) ? rows : []); })
       .catch(() => undefined);
-    apiGet<{ profile?: { allowedInstallments?: number[] | null } }>(`/profiles/rental-provider/me`)
-      .then((d) => { if (!cancelled && Array.isArray(d?.profile?.allowedInstallments)) setAllowedInstallments(d!.profile!.allowedInstallments!); })
-      .catch(() => undefined);
+    // Allowed installment plans come from the RP profile — managers have no RP
+    // profile, so they just fall back to the full set (a non-blocking nicety).
+    if (!isManager) {
+      apiGet<{ profile?: { allowedInstallments?: number[] | null } }>(`/profiles/rental-provider/me`)
+        .then((d) => { if (!cancelled && Array.isArray(d?.profile?.allowedInstallments)) setAllowedInstallments(d!.profile!.allowedInstallments!); })
+        .catch(() => undefined);
+    }
     apiGet<ContractDetail>(`/contracts/${id}`)
       .then((c) => {
         if (cancelled) return;
@@ -258,7 +283,7 @@ export default function EditContractPage() {
     if (!val.trim()) { setTenantResults([]); setTenantDropdownOpen(false); return; }
     searchTimer.current = setTimeout(async () => {
       try {
-        const rows = await apiGet<Tenant[]>(`/contracts/tenants/search?q=${encodeURIComponent(val)}`);
+        const rows = await apiGet<Tenant[]>(tenantSearchPath(val));
         setTenantResults(Array.isArray(rows) ? rows : []);
         setTenantDropdownOpen(true);
       } catch { setTenantResults([]); }
@@ -313,7 +338,7 @@ export default function EditContractPage() {
         customClauses: clauses,
         notes: notes.trim(),
       });
-      router.push(`/rental-provider/dashboard/contracts/${id}/v2`);
+      router.push(`${contractsBase}/${id}/v2`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the contract.');
       setSaving(false);
@@ -429,7 +454,7 @@ export default function EditContractPage() {
                     <p className="mt-2 text-xs text-[#2e9f82] font-medium">✓ {tenantName || '—'}</p>
 
                     {showNewCustomer ? (
-                      <NewCustomerForm onCancel={() => setShowNewCustomer(false)}
+                      <NewCustomerForm createTenantUrl={createTenantUrl} onCancel={() => setShowNewCustomer(false)}
                         onCreated={(t) => selectTenant({ id: t.id, user: { name: t.name, email: '' } })} />
                     ) : (
                       <button type="button" onClick={() => setShowNewCustomer(true)}
@@ -674,7 +699,7 @@ export default function EditContractPage() {
                 className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold py-2.5 hover:bg-[#267a65] disabled:opacity-50">
                 {saving ? 'Saving…' : 'Save changes'}
               </button>
-              <Link href={`/rental-provider/dashboard/contracts/${id}/v2`}
+              <Link href={`${contractsBase}/${id}/v2`}
                 className="block text-center text-xs text-[#6b6860] hover:underline">
                 Cancel
               </Link>

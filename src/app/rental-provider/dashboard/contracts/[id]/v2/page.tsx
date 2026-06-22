@@ -29,7 +29,7 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
-import { useParams, useRouter, usePathname } from 'next/navigation';
+import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
 import { KYC_DOCS, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
@@ -45,6 +45,7 @@ import {
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { openDocViewer } from '@/lib/docViewer';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -3388,10 +3389,14 @@ export default function ContractV2Page() {
   // internal contract links must stay within the manager area instead of the
   // landlord (rental-provider) area. Backend endpoints are already role-aware.
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isManagerView = pathname.startsWith('/dashboard/manager');
   const contractsBase = pathname.startsWith('/dashboard/manager')
     ? '/dashboard/manager/contracts'
     : '/rental-provider/dashboard/contracts';
+  // Manager permission gate for the Edit affordance — RP owners always see it,
+  // managers only when they hold canManageAgreements for this contract's landlord.
+  const { canForRp: managerCanForRp } = useManagerPermissions();
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
   const [notes, setNotes] = useState<ContractNote[]>([]);
@@ -4127,6 +4132,24 @@ export default function ContractV2Page() {
             </div>
           </div>
           <div className="rhs">
+            {/* Edit terms — RP owners always; managers only with canManageAgreements
+                for this landlord. Hidden on terminated leases (backend rejects edits
+                there). For a manager the rp scope is carried so the edit page's
+                customer picker reads /manager/tenants/*?rp=. */}
+            {contract.status !== 'terminated' && (() => {
+              const rpForEdit = searchParams.get('rp') ?? (contract.landlord?.id != null ? String(contract.landlord.id) : '');
+              const canEdit = !isManagerView
+                || (rpForEdit !== '' && managerCanForRp('canManageAgreements', Number(rpForEdit)));
+              if (!canEdit) return null;
+              const editHref = isManagerView && rpForEdit
+                ? `${contractsBase}/${contract.id}/edit?rp=${rpForEdit}`
+                : `${contractsBase}/${contract.id}/edit`;
+              return (
+                <Link href={editHref} className="btn btn-ghost btn-sm">
+                  <Pencil size={14} /> Edit
+                </Link>
+              );
+            })()}
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Eye size={14} /> Preview
             </Link>
