@@ -52,11 +52,11 @@ export interface EjariContractData {
   annualRent: number; contractValue: number | null; securityDepositAmount: number | null;
   // Rent discount (rent line only). listedRent − discountAmount = annualRent.
   listedRent?: number | null; discountType?: 'percent' | 'fixed' | null; discountAmount?: number | null;
-  modeOfPayment: string | null; customClauses?: string[]; notes?: string | null;
+  modeOfPayment: string | null; numberOfInstallments?: number | null; customClauses?: string[]; notes?: string | null;
   landlord: EjariParty;
   tenant: EjariParty;
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
-  unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null };
+  unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
   signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string; method?: string }[];
 }
 export interface EjariAddendum { id: number; name: string; fileUrl: string; mimeType: string; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null; /** Extracted text lines (DOCX), rendered inline across pages. */ lines?: string[] }
@@ -69,17 +69,6 @@ const fmtDate = (d?: string | null) => {
   return `${p(dt.getDate())}-${p(dt.getMonth() + 1)}-${dt.getFullYear()}`;
 };
 const fmtAed = (v?: number | null) => (v == null ? '' : `AED ${Number(v).toLocaleString('en-US')}`);
-function numWords(n: number): string {
-  const o = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-  const t = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-  n = Math.round(n);
-  if (n === 0) return 'Zero';
-  if (n < 20) return o[n];
-  if (n < 100) return t[Math.floor(n / 10)] + (n % 10 ? '-' + o[n % 10] : '');
-  if (n < 1000) return o[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numWords(n % 100) : '');
-  if (n < 1e6) return numWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numWords(n % 1000) : '');
-  return numWords(Math.floor(n / 1e6)) + ' Million' + (n % 1e6 ? ' ' + numWords(n % 1e6) : '');
-}
 
 /** Treat short ALL-CAPS lines as section headings in extracted addendum text. */
 const isHeading = (s: string) => s.length < 46 && s === s.toUpperCase() && /[A-Z]/.test(s);
@@ -344,7 +333,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
             <Field label="Property No." ar="رقم العقار" value={data.unit.number || data.unit.name} half />
           </View>
           <View style={{ flexDirection: 'row' }}>
-            <Field label="Property Type" ar="نوع الوحدة" value={data.unit.type ? data.unit.type[0].toUpperCase() + data.unit.type.slice(1) : ''} half />
+            <Field label="Property Type" ar="نوع الوحدة" value={data.unit.type ? `${data.unit.bedrooms ? `${data.unit.bedrooms} Bedroom ` : ''}${data.unit.type[0].toUpperCase() + data.unit.type.slice(1)}` : ''} half />
             <Field label="Property Area (s.m)" ar="مساحة العقار (متر مربع)" value={data.unit.sizeSqm ? String(data.unit.sizeSqm) : ''} half />
           </View>
           <View style={{ flexDirection: 'row' }}>
@@ -359,13 +348,13 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
             <Text style={{ fontSize: 7.5 }}>To <Text style={{ fontFamily: AR }}>الى</Text></Text>
             <Text style={{ width: 60, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{fmtDate(data.endDate)}</Text>
             <Text style={{ fontSize: 7.5, marginLeft: 8 }}>Contract Value <Text style={{ fontFamily: AR }}>قيمة العقد</Text></Text>
-            <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{cval > 0 ? `${fmtAed(cval)} (${numWords(cval)})` : ''}</Text>
+            <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{cval > 0 ? `${fmtAed(cval)}/- Only` : ''}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4 }}>
             <Text style={{ fontSize: 7.5 }}>Annual Rent <Text style={{ fontFamily: AR }}>الإيجار السنوي</Text></Text>
-            <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{listed > 0 ? `${fmtAed(listed)} (${numWords(listed)})` : ''}</Text>
+            <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{listed > 0 ? `${fmtAed(listed)}/- Only` : ''}</Text>
             <Text style={{ fontSize: 7.5, marginLeft: 8 }}>Security Deposit <Text style={{ fontFamily: AR }}>مبلغ التأمين</Text></Text>
-            <Text style={{ width: 90, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{dep > 0 ? fmtAed(dep) : ''}</Text>
+            <Text style={{ width: 130, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>{dep > 0 ? `${fmtAed(dep)}/- Only` : ''}</Text>
           </View>
           {discount > 0 && (
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 4 }}>
@@ -375,7 +364,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
               <Text style={{ flexGrow: 1, fontSize: 7.5, borderBottomWidth: 1, borderBottomColor: '#888', borderBottomStyle: 'dashed', marginHorizontal: 3 }}>− {fmtAed(discount)}{data.discountType === 'percent' && listed > 0 ? ` (${((discount / listed) * 100).toFixed(1)}%)` : ''} → Contract Value {fmtAed(cval)}</Text>
             </View>
           )}
-          <Field label="Mode of Payment" ar="طريقة الدفع" value={data.modeOfPayment || ''} />
+          <Field label="Mode of Payment" ar="طريقة الدفع" value={data.numberOfInstallments ? `${data.numberOfInstallments} Installment${data.numberOfInstallments === 1 ? '' : 's'}` : (data.modeOfPayment || '')} />
         </Section>
         <View style={{ flexGrow: 1 }} />
         {sigs}

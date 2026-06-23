@@ -135,6 +135,8 @@ interface Contract {
   contractActive: boolean;
   renewalStatus: string | null;
   createdAt: string;
+  /** Operations vs Leases split: NULL = still in the Operations worklist. */
+  lockedAt: string | null;
   tenant: { id: number | null; name: string | null; email: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
@@ -265,14 +267,26 @@ export default function ManagerContractsPage() {
   useEffect(() => {
     if (effectiveRp == null || !allowed) { setContracts([]); setLoading(false); return; }
     setLoading(true);
-    apiGet<Contract[]>(`/manager/contracts?rp=${effectiveRp}`)
-      .then(data => {
+    Promise.all([
+      apiGet<Contract[]>(`/manager/contracts?rp=${effectiveRp}`).catch(() => null),
+      apiGet<{ id: number }[]>(`/manager/contracts/operations?rp=${effectiveRp}`).catch(() => null),
+    ])
+      .then(([data, ops]) => {
         if (!Array.isArray(data)) return;
         // Active tenants only — drop fully-ended customers (all their leases have
         // ended); they live under Ended Leases. Active customers keep their full
         // history, including expired/terminated rows.
         const live = liveTenantIdSet(data);
-        setContracts(data.filter(c => c.tenant?.id == null || live.has(c.tenant.id)));
+        // Operations vs Leases split: the Leases register is the COMPLEMENT of the
+        // Operations worklist. Hide any contract still in Operations (drafts +
+        // active-but-incomplete) — they show here only once their pipeline is
+        // complete and they leave Operations. Ended history stays.
+        const opsIds = new Set((Array.isArray(ops) ? ops : []).map(c => c.id));
+        setContracts(data.filter(c =>
+          (c.tenant?.id == null || live.has(c.tenant.id)) &&
+          !opsIds.has(c.id) &&
+          (c.lockedAt != null || c.status === 'expired' || c.status === 'terminated')
+        ));
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));

@@ -28,12 +28,6 @@ const EjariContractViewer = dynamic(() => import('@/components/contract/EjariCon
   loading: () => <FullScreenLoader />,
 });
 
-// Friendly cheque-count fallback when modeOfPayment isn't set.
-function instalmentLabel(n: number | null): string {
-  const map: Record<number, string> = { 1: '1 - (Single Payment)', 2: '2 - (Two Payments)', 3: '3 - (Three Payments)', 4: '4 - (Four Payments)', 6: '6 - (Six Payments)', 12: '12 - (Twelve Payments)' };
-  return n ? (map[n] || `${n} Cheques`) : '';
-}
-
 /** Map the RP-side contract detail (+ separate signatures) into the shared EjariContractData. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toEjari(c: any, signatures: any[]): EjariContractData {
@@ -47,8 +41,10 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
     listedRent: c.listedRent ?? null,
     discountType: c.discountType ?? null,
     discountAmount: c.discountAmount ?? null,
-    securityDepositAmount: c.securityDepositAmount ?? null,
-    modeOfPayment: c.modeOfPayment || instalmentLabel(c.numberOfInstallments ?? null),
+    // Effective held deposit (chain-resolved on renewals) → falls back to the field.
+    securityDepositAmount: c.securityDepositHeld ?? c.securityDepositAmount ?? null,
+    modeOfPayment: c.modeOfPayment ?? null,
+    numberOfInstallments: c.numberOfInstallments ?? null,
     customClauses: c.customClauses ?? [],
     notes: c.notes ?? null,
     landlord: {
@@ -84,6 +80,7 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
       type: c.unit?.type ?? null,
       sizeSqm: c.unit?.sizeSqm ?? null,
       dewaPremiseNumber: c.unit?.dewaPremiseNumber ?? null,
+      bedrooms: c.unit?.bedrooms ?? null,
     },
     signatures: (Array.isArray(signatures) ? signatures : []).map((s) => ({
       role: s.role,

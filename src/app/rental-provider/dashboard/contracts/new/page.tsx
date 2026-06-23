@@ -586,8 +586,11 @@ export default function NewContractPage() {
       const created = await res.json() as { id: number };
 
       setSuccess(true);
-      const doneBase = isManager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
-      setTimeout(() => router.push(`${doneBase}/${created.id}/v2`), 1500);
+      // A new contract is a draft → it belongs in the Operations setup pipeline
+      // (the read-only contract "record" page has no workflow actions). Land the
+      // user straight on the pipeline so they can issue / send / sign / activate.
+      const opsBase = isManager ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations';
+      setTimeout(() => router.push(`${opsBase}/${created.id}`), 1500);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

@@ -498,6 +498,101 @@ const newBankAccount = (): BankAccount => ({
 
 const EMIRATES_LIST = ['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','Fujairah','Umm Al Quwain'] as const;
 
+// ── Penalty Rules engine (SCRUM-578) ────────────────────────────────────────
+// Five RP-configurable penalties (alongside the bounced-cheque rule) surfaced as
+// suggested settlement deductions + cross-verify flags. Each mirrors the
+// bounced-cheque rule: a toggle plus a flat AED fee and/or a % — the seeded line
+// is the greater of the two. Amounts are applied literally; the % resolves
+// against the contract's annual rent.
+type PenaltyRuleKey =
+  | 'chequeHoldPenalty'
+  | 'lateRenewalPenalty'
+  | 'earlyTerminationPenalty'
+  | 'lateMoveoutPenalty'
+  | 'unauthorizedSharingPenalty';
+
+type PenaltyRuleCfg = { key: PenaltyRuleKey; title: string; description: string; flatPlaceholder: string; pctPlaceholder: string };
+
+const PENALTY_RULES: PenaltyRuleCfg[] = [
+  { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-suggested as an editable deduction at move-out settlement.', flatPlaceholder: 'e.g. 500', pctPlaceholder: 'e.g. 2' },
+  { key: 'lateRenewalPenalty', title: 'Late Renewal', description: 'Charge when the tenant renews after the renewal window. The % is of the annual rent.', flatPlaceholder: 'e.g. 0', pctPlaceholder: 'e.g. 5' },
+  { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early. The % is of the annual rent.', flatPlaceholder: 'e.g. 0', pctPlaceholder: 'e.g. 25' },
+  { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant moves out after the lease end date. Enter a flat amount (e.g. a per-day rate you total yourself).', flatPlaceholder: 'e.g. 200', pctPlaceholder: 'e.g. 0' },
+  { key: 'unauthorizedSharingPenalty', title: 'Sharing without notice / NOC', description: 'Charge when the unit is shared without notice or an NOC. The % is of the annual rent.', flatPlaceholder: 'e.g. 0', pctPlaceholder: 'e.g. 10' },
+];
+
+type PenaltyState = { enabled: boolean; fee: string; pct: string };
+const EMPTY_PENALTY: PenaltyState = { enabled: false, fee: '', pct: '' };
+
+function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }: {
+  cfg: PenaltyRuleCfg;
+  state: PenaltyState;
+  saving: boolean;
+  saved: boolean;
+  error: string | null;
+  onChange: (s: PenaltyState) => void;
+  onSave: () => void;
+}) {
+  const { enabled, fee, pct } = state;
+  return (
+    <div className="bg-white rounded-2xl p-6 shadow-sm">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 className="font-semibold text-base text-[#1a1916]">{cfg.title}</h2>
+          <p className="text-xs text-[#9b9890] mt-0.5">{cfg.description}</p>
+        </div>
+        <Toggle value={enabled} onChange={(v) => onChange({ ...state, enabled: v })} />
+      </div>
+
+      {enabled && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+            <label className="block">
+              <span className="text-xs font-medium text-[#3d3b35]">Flat fee (AED)</span>
+              <input
+                type="number" min={0} step="1" inputMode="decimal"
+                value={fee}
+                onChange={(e) => onChange({ ...state, fee: e.target.value })}
+                placeholder={cfg.flatPlaceholder}
+                className="mt-1 w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2e9f82] tabular-nums"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-[#3d3b35]">…or % of annual rent</span>
+              <div className="mt-1 flex items-center border border-[#e8e6e0] rounded-lg px-3 focus-within:border-[#2e9f82]">
+                <input
+                  type="number" min={0} max={100} step="0.1" inputMode="decimal"
+                  value={pct}
+                  onChange={(e) => onChange({ ...state, pct: e.target.value })}
+                  placeholder={cfg.pctPlaceholder}
+                  className="w-full py-2 text-sm outline-none bg-transparent tabular-nums"
+                />
+                <span className="text-sm text-[#9b9890]">%</span>
+              </div>
+            </label>
+          </div>
+          <p className="text-[11px] text-[#6b7a74] mb-3">
+            We suggest the <b className="text-[#3d3b35]">greater</b> of the flat fee and the percentage as an editable deduction. Leave one blank to use only the other.
+          </p>
+        </>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        {error && <p className="text-xs text-red-600 flex-1">{error}</p>}
+        {saved && !saving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+        <button
+          type="button" onClick={onSave} disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
+          style={{ background: '#2e9f82' }}
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          {saving ? 'Saving…' : 'Save Rule'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user, refresh } = useAuth();
   const [mainTab, setMainTab] = useState<MainTab>('general');
@@ -575,6 +670,21 @@ export default function SettingsPage() {
   const [bcSaving,    setBcSaving]    = useState(false);
   const [bcSaved,     setBcSaved]     = useState(false);
   const [bcError,     setBcError]     = useState<string | null>(null);
+
+  // ── Penalty Rules engine (Rules, SCRUM-578) ─────────────────
+  // Five more configurable penalties alongside the bounced-cheque rule. One
+  // save at a time (savingKey/savedKey/errorKey track which card is active).
+  const [penalties, setPenalties] = useState<Record<PenaltyRuleKey, PenaltyState>>({
+    chequeHoldPenalty:          { ...EMPTY_PENALTY },
+    lateRenewalPenalty:         { ...EMPTY_PENALTY },
+    earlyTerminationPenalty:    { ...EMPTY_PENALTY },
+    lateMoveoutPenalty:         { ...EMPTY_PENALTY },
+    unauthorizedSharingPenalty: { ...EMPTY_PENALTY },
+  });
+  const [penaltySavingKey, setPenaltySavingKey] = useState<PenaltyRuleKey | null>(null);
+  const [penaltySavedKey,  setPenaltySavedKey]  = useState<PenaltyRuleKey | null>(null);
+  const [penaltyErrorKey,  setPenaltyErrorKey]  = useState<PenaltyRuleKey | null>(null);
+  const [penaltyErrorMsg,  setPenaltyErrorMsg]  = useState<string | null>(null);
 
   // ── Allowed installment plans (Rules) ───────────────────────
   // Subset of [1,2,3,4,6,12] cheque counts this RP offers. Empty = all allowed.
@@ -654,6 +764,19 @@ export default function SettingsPage() {
         setBcEnabled(Boolean(p.bouncedChequePenaltyEnabled));
         if (p.bouncedChequePenaltyFee != null) setBcFee(String(p.bouncedChequePenaltyFee));
         if (p.bouncedChequePenaltyPct != null) setBcPct(String(p.bouncedChequePenaltyPct));
+        // Penalty Rules engine — round-trip each rule's enabled/fee/pct.
+        const seedPenalty = (key: PenaltyRuleKey): PenaltyState => ({
+          enabled: Boolean(p[`${key}Enabled`]),
+          fee: p[`${key}Fee`] != null ? String(p[`${key}Fee`]) : '',
+          pct: p[`${key}Pct`] != null ? String(p[`${key}Pct`]) : '',
+        });
+        setPenalties({
+          chequeHoldPenalty:          seedPenalty('chequeHoldPenalty'),
+          lateRenewalPenalty:         seedPenalty('lateRenewalPenalty'),
+          earlyTerminationPenalty:    seedPenalty('earlyTerminationPenalty'),
+          lateMoveoutPenalty:         seedPenalty('lateMoveoutPenalty'),
+          unauthorizedSharingPenalty: seedPenalty('unauthorizedSharingPenalty'),
+        });
         if (Array.isArray(p.allowedInstallments)) setAllowedInst(p.allowedInstallments as number[]);
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
@@ -999,6 +1122,45 @@ export default function SettingsPage() {
       setBcError('Failed to save. Please try again.');
     } finally {
       setBcSaving(false);
+    }
+  }
+
+  const updatePenalty = (key: PenaltyRuleKey, s: PenaltyState) => {
+    setPenalties(prev => ({ ...prev, [key]: s }));
+    setPenaltySavedKey(k => (k === key ? null : k));
+    setPenaltyErrorKey(k => (k === key ? null : k));
+  };
+
+  async function savePenaltyRule(key: PenaltyRuleKey) {
+    const st = penalties[key];
+    setPenaltyErrorKey(null);
+    setPenaltyErrorMsg(null);
+    setPenaltySavedKey(null);
+    const fee = st.fee.trim() === '' ? null : Number(st.fee);
+    const pct = st.pct.trim() === '' ? null : Number(st.pct);
+    if (fee !== null && (Number.isNaN(fee) || fee < 0)) {
+      setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a valid flat fee (0 or more).'); return;
+    }
+    if (pct !== null && (Number.isNaN(pct) || pct < 0 || pct > 100)) {
+      setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a percentage between 0 and 100.'); return;
+    }
+    if (st.enabled && (fee == null || fee <= 0) && (pct == null || pct <= 0)) {
+      setPenaltyErrorKey(key); setPenaltyErrorMsg('Set a flat fee, a percentage, or both before enabling.'); return;
+    }
+    setPenaltySavingKey(key);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [`${key}Enabled`]: st.enabled, [`${key}Fee`]: fee, [`${key}Pct`]: pct }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setPenaltySavedKey(key);
+    } catch {
+      setPenaltyErrorKey(key); setPenaltyErrorMsg('Failed to save. Please try again.');
+    } finally {
+      setPenaltySavingKey(null);
     }
   }
 
@@ -1723,6 +1885,20 @@ export default function SettingsPage() {
                 </button>
               </div>
             </div>
+
+            {/* Penalty Rules engine (SCRUM-578) — five more configurable penalties */}
+            {PENALTY_RULES.map(cfg => (
+              <PenaltyRuleCard
+                key={cfg.key}
+                cfg={cfg}
+                state={penalties[cfg.key]}
+                saving={penaltySavingKey === cfg.key}
+                saved={penaltySavedKey === cfg.key}
+                error={penaltyErrorKey === cfg.key ? penaltyErrorMsg : null}
+                onChange={(s) => updatePenalty(cfg.key, s)}
+                onSave={() => savePenaltyRule(cfg.key)}
+              />
+            ))}
 
             {/* Payment Installment Plans */}
             <div className="bg-white rounded-2xl p-6 shadow-sm">

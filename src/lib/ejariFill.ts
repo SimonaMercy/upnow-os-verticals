@@ -61,19 +61,13 @@ const fmtDate = (d?: string | null) => {
   return `${p(t.getDate())}-${p(t.getMonth() + 1)}-${t.getFullYear()}`;
 };
 const fmtAed = (v?: number | null) => (v == null ? '' : `AED ${Number(v).toLocaleString('en-US')}`);
-function numWords(n: number): string {
-  const o = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-  const t = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-  n = Math.round(n);
-  if (n === 0) return 'Zero';
-  if (n < 20) return o[n];
-  if (n < 100) return t[Math.floor(n / 10)] + (n % 10 ? '-' + o[n % 10] : '');
-  if (n < 1000) return o[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numWords(n % 100) : '');
-  if (n < 1e6) return numWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numWords(n % 1000) : '');
-  return numWords(Math.floor(n / 1e6)) + ' Million' + (n % 1e6 ? ' ' + numWords(n % 1e6) : '');
-}
 const cap = (s?: string | null) => (s ? s[0].toUpperCase() + s.slice(1) : '');
-const aedWords = (v?: number | null) => (v && v > 0 ? `${fmtAed(v)} (${numWords(v)})` : '');
+// Money is shown as digits only (no spelled-out words), with the standard
+// "/- Only" suffix → e.g. "AED 57,500/- Only".
+const aedOnly = (v?: number | null) => (v && v > 0 ? `${fmtAed(v)}/- Only` : '');
+// Mode of Payment shows the number of installments (+ method), not the raw method.
+const payMode = (n?: number | null, mode?: string | null) =>
+  (n ? `${n} Installment${n === 1 ? '' : 's'}` : (mode ? cap(mode) : ''));
 
 async function bytesFrom(url: string): Promise<ArrayBuffer> {
   const r = await fetch(url);
@@ -115,17 +109,17 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
   put('tenant_email', ten.email); put('tenant_phone', ten.phone);
   put('plot_no', prop.plotNumber); put('makani_no', prop.makaniNumber);
   put('building_name', prop.buildingName); put('property_no', unit.number || unit.name);
-  put('property_type', cap(unit.type)); put('property_area', unit.sizeSqm != null ? String(unit.sizeSqm) : '');
+  put('property_type', [unit.bedrooms ? `${unit.bedrooms} Bedroom` : '', cap(unit.type)].filter(Boolean).join(' ')); put('property_area', unit.sizeSqm != null ? String(unit.sizeSqm) : '');
   put('location', prop.fullAddress || prop.community || prop.emirate);
   put('dewa_no', unit.dewaPremiseNumber || prop.premisesNumber);
   put('period_from', fmtDate(data.startDate)); put('period_to', fmtDate(data.endDate));
   // Contract Value = the net the contract is actually for (drives cheques/VAT).
   // Annual Rent = the LISTED (pre-discount) rent; the gap between the two boxes
   // is the rent discount (the official DLD form has no separate discount field).
-  put('contract_value', aedWords(data.contractValue != null ? data.contractValue : data.annualRent));
-  put('annual_rent', aedWords(data.listedRent != null ? data.listedRent : data.annualRent));
-  put('security_deposit', fmtAed(data.securityDepositAmount));
-  put('mode_of_payment', data.modeOfPayment);
+  put('contract_value', aedOnly(data.contractValue != null ? data.contractValue : data.annualRent));
+  put('annual_rent', aedOnly(data.listedRent != null ? data.listedRent : data.annualRent));
+  put('security_deposit', aedOnly(data.securityDepositAmount));
+  put('mode_of_payment', payMode(data.numberOfInstallments, data.modeOfPayment));
 
   // Additional terms (page 3)
   const clauses = [...(data.customClauses || []), ...(data.notes ? [data.notes] : [])].filter(Boolean).slice(0, 5);

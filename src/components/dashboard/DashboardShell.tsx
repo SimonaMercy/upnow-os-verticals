@@ -9,7 +9,7 @@ import {
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle, Archive,
+  Heart, HelpCircle, Archive, ClipboardList,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
@@ -55,7 +55,7 @@ function useManagerNavPerms(role: UserRole): Record<string, boolean> {
    Nav definitions per role
 ───────────────────────────────────────────── */
 /** Keys for the cheap sidebar count badges (GET /api/properties/nav-counts). */
-type NavBadgeKey = 'leads' | 'properties' | 'units' | 'leases';
+type NavBadgeKey = 'leads' | 'properties' | 'units' | 'leases' | 'operations';
 type NavCounts = Partial<Record<NavBadgeKey, number>>;
 
 type NavItem =
@@ -78,7 +78,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Properties',       href: '/rental-provider/dashboard/portfolio',      icon: Building2, badgeKey: 'properties' },
     { label: 'Units',            href: '/rental-provider/dashboard/units',          icon: Home, badgeKey: 'units' },
     { label: 'Customers',        href: '/rental-provider/dashboard/tenants',        icon: UserCheck },
-    { label: 'Security Deposits', href: '/rental-provider/dashboard/deposits',      icon: Wallet },
+    { label: 'Payments',         href: '/rental-provider/dashboard/payments',       icon: Wallet, match: ['/rental-provider/dashboard/deposits'] },
+    { label: 'Operations',       href: '/rental-provider/dashboard/operations',     icon: ClipboardList, badgeKey: 'operations' },
     { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, badgeKey: 'leases', match: ['/rental-provider/dashboard/contracts'] },
     { label: 'Ended Leases',     href: '/rental-provider/dashboard/ended-leases',   icon: Archive },
     { divider: true },
@@ -106,7 +107,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Properties',       href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
     { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties' },
     { label: 'Customers',        href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
-    { label: 'Security Deposits', href: '/dashboard/manager/deposits',  icon: Wallet,  requirePerm: 'canManageDeposits' },
+    { label: 'Payments',         href: '/dashboard/manager/payments',  icon: Wallet,  requirePerm: 'canManageDeposits', match: ['/dashboard/manager/deposits'] },
+    { label: 'Operations',       href: '/dashboard/manager/operations', icon: ClipboardList, requirePerm: 'canManageAgreements' },
     { label: 'Leases',           href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
     { label: 'Ended Leases',     href: '/dashboard/manager/ended-leases', icon: Archive, requirePerm: 'canManageAgreements' },
     { divider: true },
@@ -128,6 +130,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Users',            href: '/dashboard/admin/users',               icon: Users },
     { label: 'KYC Queue',        href: '/dashboard/admin/kyc',                 icon: ShieldCheck },
     { label: 'Listings',         href: '/dashboard/admin/listings',            icon: Building2 },
+    { label: 'Properties',       href: '/dashboard/admin/properties',          icon: Home },
     { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert },
     { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
     { divider: true },
@@ -140,6 +143,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Users',            href: '/dashboard/admin/users',               icon: Users },
     { label: 'KYC Queue',        href: '/dashboard/admin/kyc',                 icon: ShieldCheck },
     { label: 'Listings',         href: '/dashboard/admin/listings',            icon: Building2 },
+    { label: 'Properties',       href: '/dashboard/admin/properties',          icon: Home },
     { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert },
     { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
     { divider: true },
@@ -172,15 +176,21 @@ function useNavBadgeCounts(role: UserRole): NavCounts {
     let last = 0;
     const load = () => {
       last = Date.now();
-      fetch('/api/properties/nav-counts', { credentials: 'include' })
-        .then(r => (r.ok ? r.json() : null))
-        .then((d: NavCounts | null) => {
-          if (cancelled || !d) return;
+      // properties/nav-counts → leads/properties/units; contracts/nav-counts →
+      // leases + operations, computed off the same logic as those pages so the
+      // badges never drift from the page counts.
+      Promise.all([
+        fetch('/api/properties/nav-counts', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+        fetch('/api/contracts/nav-counts', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+      ])
+        .then(([p, c]: [NavCounts | null, { leases?: number; operations?: number } | null]) => {
+          if (cancelled || (!p && !c)) return;
           setCounts({
-            leads:      Number(d.leads ?? 0),
-            properties: Number(d.properties ?? 0),
-            units:      Number(d.units ?? 0),
-            leases:     Number(d.leases ?? 0),
+            leads:      Number(p?.leads ?? 0),
+            properties: Number(p?.properties ?? 0),
+            units:      Number(p?.units ?? 0),
+            leases:     Number(c?.leases ?? p?.leases ?? 0),
+            operations: Number(c?.operations ?? 0),
           });
         })
         .catch(() => { /* keep last-known / empty */ });

@@ -1337,7 +1337,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms,
+  notes, onAddNote, perms, showExtras = true,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
@@ -1346,6 +1346,10 @@ function DetailsDrawer({
    *  instead of duplicating them) and clauses stay hidden (addendums are the
    *  mechanism). */
   inline?: boolean;
+  /** When false, the Clauses & Notes sections are hidden — used by the read-only
+   *  Leases "record" view (Summary + Payments + Documents only). Defaults to true
+   *  (the Operations full view keeps them). */
+  showExtras?: boolean;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
   onApproveDoc: (id: number) => void; onRejectDoc: (id: number) => void;
   /** POST /api/contracts/:id/payments — record a new instalment / payment / fee. */
@@ -2844,7 +2848,7 @@ function DetailsDrawer({
               A running, append-only journal staff keep about this tenancy so
               whoever picks it up next sees the full history. Shared across the
               whole renewal chain, and never locks (unlike the clauses note). */}
-          {(inline || tab === 'notes') && (
+          {(inline || tab === 'notes') && showExtras && (
             <div className="sec" id="sec-notes">
               <div className="sech"><span className="si"><StickyNote size={16} /></span><span className="st">Notes</span></div>
               <div className="secb">
@@ -3455,8 +3459,96 @@ function RenewalProposeModal({
 // Main page
 // ────────────────────────────────────────────────────────────────────────────
 
-export default function ContractV2Page() {
+/** One labelled field on the boarding-pass (Tenant / Landlord / unit type). */
+function PassField({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>{label}</p>
+      <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: '3px 0 0' }}>{value}</p>
+    </div>
+  );
+}
+
+/**
+ * ContractPass — the boarding-pass style contract summary shown at the top of the
+ * read-only "record" view (mirrors the customer space page's tenancy pass). Left
+ * = property / unit / parties; right stub = period + annual rent. Payment + KYC
+ * detail render below it (the DetailsDrawer).
+ */
+function ContractPass({ contract }: { contract: ContractDetail }) {
+  const isRenewal = contract.contractType === 'renewal';
+  const winding = contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
+  const building = contract.property.buildingName ?? 'Property';
+  const unitLabel = contract.unit.name ?? (contract.unit.number ? `Unit ${contract.unit.number}` : '—');
+  const location = [contract.property.community, contract.property.emirate].filter(Boolean).join(' , ')
+    || contract.property.fullAddress || '—';
+  const landlordName = contract.landlord.name ?? contract.landlord.companyName ?? '—';
+  const months = contract.durationYears ? contract.durationYears * 12 : 12;
+  const badge = winding ? { bg: 'var(--brick)', label: 'Move-out scheduled' }
+    : contract.status === 'active' ? { bg: 'var(--jade-deep)', label: 'Active tenancy' }
+    : contract.status === 'expired' ? { bg: 'var(--mute)', label: 'Lease ended' }
+    : contract.status === 'terminated' ? { bg: 'var(--brick-deep)', label: 'Terminated' }
+    : { bg: 'var(--saffron-deep)', label: 'In setup' };
+  return (
+    <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1.6fr 24px 1fr', background: 'var(--surface)', borderRadius: 22, border: '1px solid var(--mist-strong)', boxShadow: 'var(--sh-hero)', overflow: 'hidden', marginBottom: 22 }}>
+      {/* LEFT: identity */}
+      <div style={{ padding: '24px 28px', display: 'grid', gap: 14, gridTemplateRows: 'auto 1fr auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, fontWeight: 600, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.15em', padding: '3px 7px', border: '1px solid var(--jade)', borderRadius: 4 }}>{isRenewal ? 'Renewal pass' : 'Tenancy pass'}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mute)', letterSpacing: '0.08em' }}>{contract.ref}</span>
+          </div>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, background: badge.bg, color: '#fff', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{badge.label}</span>
+        </div>
+        <div>
+          <p style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Your place · {isRenewal ? 'Renewing' : 'Leased'}</p>
+          <p style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: '5px 0 2px', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{building}</p>
+          <p style={{ fontSize: 30, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 10px', letterSpacing: '-0.025em', lineHeight: 1 }}>{unitLabel}</p>
+          <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}><MapPin size={12} /> {location}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          {contract.tenant.name && <PassField label="Tenant" value={contract.tenant.name} />}
+          <PassField label="Landlord" value={landlordName} />
+          {contract.unit.type && <PassField label={contract.unit.type.replace(/_/g, ' ')} value={contract.unit.bedrooms ? `${contract.unit.bedrooms} BR` : '—'} />}
+        </div>
+      </div>
+      {/* PERFORATION */}
+      <div style={{ position: 'relative', display: 'grid', placeItems: 'center', borderLeft: '1px dashed var(--mist-strong)', borderRight: '1px dashed var(--mist-strong)' }}>
+        <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', width: 24, height: 24, background: 'var(--surface)', borderRadius: '50%', border: '1px solid var(--mist-strong)' }} />
+        <div style={{ position: 'absolute', bottom: -12, left: '50%', transform: 'translateX(-50%)', width: 24, height: 24, background: 'var(--surface)', borderRadius: '50%', border: '1px solid var(--mist-strong)' }} />
+      </div>
+      {/* RIGHT: stub */}
+      <div style={{ padding: '24px 22px', background: '#f4efe8', display: 'grid', gap: 14, gridAutoRows: 'min-content' }}>
+        <div>
+          <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0 }}>{isRenewal ? 'Renewal period' : 'Lease period'}</p>
+          <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', margin: '4px 0 0', letterSpacing: '-0.015em' }}>{fmtDate(contract.startDate)}</p>
+          <p style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--mute)', margin: '2px 0' }}>↓ {months} months</p>
+          <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.015em' }}>{fmtDate(contract.endDate)}</p>
+        </div>
+        <div style={{ borderTop: '1px dashed var(--mist-strong)', paddingTop: 12 }}>
+          <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0 }}>Annual rent</p>
+          <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--jade-deep)', margin: '4px 0 0', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{contract.annualRent ? `AED ${contract.annualRent.toLocaleString('en-AE')}` : '—'}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The contract detail component, rendered in one of three VIEWS:
+ *   - 'full'     — the legacy whole page (default; unchanged behaviour).
+ *   - 'pipeline' — the setup workflow only (stepper + step actions + modals).
+ *                  Mounted INLINE inside the Operations worklist card.
+ *   - 'record'   — the read-only contract record: header, summary, Payments,
+ *                  Documents. This is what the standalone contract page shows.
+ * `contractId` lets it be mounted outside its own route (e.g. in Operations);
+ * it falls back to the route param on its own page.
+ */
+export function ContractV2View({ contractId: cidProp, view = 'full' }: { contractId?: number; view?: 'full' | 'pipeline' | 'record' }) {
   const params = useParams<{ id: string }>();
+  const id = cidProp != null ? String(cidProp) : params?.id;
+  const showPipeline = view !== 'record';
+  const showRecord = view !== 'pipeline';
   const router = useRouter();
   // Context-aware navigation base: this page is reused by the manager route
   // (/dashboard/manager/contracts/[id]) via re-export. When loaded there, all
@@ -3493,22 +3585,22 @@ export default function ContractV2Page() {
   const [windDownUploading, setWindDownUploading] = useState(false);
 
   const reload = useCallback(() => {
-    if (!params?.id) return;
+    if (!id) return;
     setLoading(true);
     const ctrl = new AbortController();
     Promise.all([
-      fetch(`/api/contracts/${params.id}`, { credentials: 'include', signal: ctrl.signal }).then(r => {
+      fetch(`/api/contracts/${id}`, { credentials: 'include', signal: ctrl.signal }).then(r => {
         if (!r.ok) throw new Error(`Error ${r.status}`);
         return r.json() as Promise<ContractDetail>;
       }),
-      fetch(`/api/contracts/${params.id}/signatures`, { credentials: 'include', signal: ctrl.signal }).then(r =>
+      fetch(`/api/contracts/${id}/signatures`, { credentials: 'include', signal: ctrl.signal }).then(r =>
         r.ok ? r.json() : []
       ),
     ])
       .then(([data, sigs]) => {
         setContract(data);
         setSignatures(Array.isArray(sigs) ? sigs : []);
-        fetch(`/api/contracts/${params.id}/inspection?type=move_in`, { credentials: 'include', signal: ctrl.signal })
+        fetch(`/api/contracts/${id}/inspection?type=move_in`, { credentials: 'include', signal: ctrl.signal })
           .then(r => (r.ok ? r.json() : null))
           .then((insp: MoveInInsp | null) => setMoveInInsp(insp ?? null))
           .catch(() => null);
@@ -3524,7 +3616,7 @@ export default function ContractV2Page() {
         // renewal can show "declined → move-out → settlement" in one place.
         const isArchivedVacateChild = !!data.vacateAtEnd
           && data.contractActive === false && !!data.parentContractId;
-        const windDownId = isArchivedVacateChild ? data.parentContractId : params.id;
+        const windDownId = isArchivedVacateChild ? data.parentContractId : id;
         if (winding) {
           fetch(`/api/contracts/${windDownId}/inspection?type=move_out`, { credentials: 'include', signal: ctrl.signal })
             .then(r => (r.ok ? r.json() : null))
@@ -3547,23 +3639,23 @@ export default function ContractV2Page() {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [params?.id]);
+  }, [id]);
 
   useEffect(() => { void reload(); }, [reload]);
 
   // Tenancy notes log — loaded independently of the main contract fetch so the
   // journal renders even if a sub-fetch hiccups.
   const loadNotes = useCallback(() => {
-    if (!params?.id) return;
-    fetch(`/api/contracts/${params.id}/notes`, { credentials: 'include' })
+    if (!id) return;
+    fetch(`/api/contracts/${id}/notes`, { credentials: 'include' })
       .then(r => (r.ok ? r.json() : []))
       .then((rows: ContractNote[]) => setNotes(Array.isArray(rows) ? rows : []))
       .catch(() => undefined);
-  }, [params?.id]);
+  }, [id]);
   useEffect(() => { loadNotes(); }, [loadNotes]);
 
   const onAddNote = async (body: string) => {
-    const res = await fetch(`/api/contracts/${params.id}/notes`, {
+    const res = await fetch(`/api/contracts/${id}/notes`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -4232,7 +4324,7 @@ export default function ContractV2Page() {
                 for this landlord. Hidden on terminated leases (backend rejects edits
                 there). For a manager the rp scope is carried so the edit page's
                 customer picker reads /manager/tenants/*?rp=. */}
-            {contract.status !== 'terminated' && (() => {
+            {showPipeline && contract.status !== 'terminated' && (() => {
               const rpForEdit = searchParams.get('rp') ?? (contract.landlord?.id != null ? String(contract.landlord.id) : '');
               const canEdit = !isManagerView
                 || (rpForEdit !== '' && managerCanForRp('canManageAgreements', Number(rpForEdit)));
@@ -4252,13 +4344,25 @@ export default function ContractV2Page() {
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Download size={14} /> PDF
             </Link>
+            {/* Record view bridge — the read-only contract page has no workflow
+                actions; this is the one-click path into the Operations pipeline
+                so landing here (from a report/deposit/unit link) is never a dead
+                end. Hidden on terminated leases (nothing left to do). */}
+            {!showPipeline && contract.status !== 'terminated' && (
+              <Link
+                href={`${isManagerView ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}/${contract.id}`}
+                className="btn btn-jade btn-sm"
+              >
+                <ClipboardList size={14} /> Manage in Operations
+              </Link>
+            )}
             {/* Always-available renewal entry — surfaces the existing renewal
                 feature on any live lease (incl. active renewal children, for
                 chained renewals) without hunting inside the Active step. Hidden
                 when a renewal is already in flight or the lease is terminating.
                 The backend (proposeRenewal) requires status=active, so it is not
                 shown on expired/terminated/draft rows. */}
-            {contract.status === 'active'
+            {showPipeline && contract.status === 'active'
               && contract.renewalAccepted !== 'pending'
               && contract.renewalAccepted !== 'accepted'
               && contract.termination?.response !== 'accepted'
@@ -4272,7 +4376,7 @@ export default function ContractV2Page() {
                 it inside a journey step. Hidden once a termination is already
                 accepted/direct (wind-down in progress) and on draft/terminated
                 rows where it doesn't apply. */}
-            {(contract.status === 'active' || contract.status === 'expired')
+            {showPipeline && (contract.status === 'active' || contract.status === 'expired')
               && contract.termination?.response !== 'accepted'
               && perms.agreements && (
               <button
@@ -4291,8 +4395,14 @@ export default function ContractV2Page() {
           </div>
         </div>
 
+        {/* Record view: boarding-pass contract summary (Unit + parties + term +
+            rent). Payment + document detail render below. The full/pipeline view
+            keeps the compact info row instead. */}
+        {view === 'record' && <ContractPass contract={contract} />}
+
         {/* Customer + rental period — ONE info row under the header (replaces
             the old Parties and Rental period sections). */}
+        {view !== 'record' && (
         <div className="infobar">
           <span className="pitem">
             <span className="pk">Customer</span>
@@ -4319,10 +4429,11 @@ export default function ContractV2Page() {
           <span className="pitem"><span className="pk">Instalments</span><span className="pv">{contract.numberOfInstallments ? `${contract.numberOfInstallments} payments` : '—'}</span></span>
           <span className="pitem"><span className="pk">Mode</span><span className="pv">{contract.modeOfPayment ? contract.modeOfPayment.charAt(0).toUpperCase() + contract.modeOfPayment.slice(1) : '—'}</span></span>
         </div>
+        )}
 
         {/* Vacate-on-renewal-decline — customer won't renew and is moving out.
             The move-out inspection + deposit settlement steps are surfaced below. */}
-        {contract.vacateAtEnd && (
+        {showPipeline && contract.vacateAtEnd && (
           <div className="qbanner waiting" style={{ marginBottom: 4 }}>
             <span className="bic"><Key size={18} /></span>
             <div style={{ flex: 1 }}>
@@ -4340,7 +4451,7 @@ export default function ContractV2Page() {
         {/* Running-but-never-activated lease (imported/synced records land like
             this). The list calls it "Needs Activation" — give the RP the fix
             right here instead of a journey step that contradicts reality. */}
-        {isRunningPending && (
+        {showPipeline && isRunningPending && (
           <div className="qbanner waiting" style={{ marginBottom: 4 }}>
             <span className="bic"><RotateCcw size={18} /></span>
             <div style={{ flex: 1 }}>
@@ -4361,7 +4472,7 @@ export default function ContractV2Page() {
             already have vacated (outdated/imported data). Offer a direct
             termination + wind-down (move-out, utility closeout, settlement)
             right here, mirroring the "needs activation" fix above. */}
-        {(contract.status === 'expired' || (contract.status === 'active' && !!endIso && endIso < todayIso))
+        {showPipeline && (contract.status === 'expired' || (contract.status === 'active' && !!endIso && endIso < todayIso))
           && contract.termination?.method !== 'direct'
           && contract.termination?.response !== 'accepted'
           && !contract.vacateAtEnd
@@ -4388,7 +4499,7 @@ export default function ContractV2Page() {
         )}
 
         {/* Missing strip */}
-        {!isSuperseded && !isDeclinedRenewal && (
+        {showPipeline && !isSuperseded && !isDeclinedRenewal && (
           <MissingStrip
             missing={missingSteps}
             allActive={allActive}
@@ -4396,6 +4507,7 @@ export default function ContractV2Page() {
           />
         )}
 
+        {showPipeline && (
         <div className="quest">
           {!isSuperseded && !isDeclinedRenewal && (
             <QuestMap
@@ -4494,12 +4606,14 @@ export default function ContractV2Page() {
             )}
           </div>
         </div>
+        )}
 
         {/* Contract details — ALL sections visible on the page (CEO doctrine:
             no small tabs / slide-in drawer hiding information). Parties,
             Period, Payments (incl. payment documents) and Documents render
             stacked; property info is NOT duplicated here — the header chain
             links to the property / unit detail pages instead. */}
+        {showRecord && (
         <div className="details-wrap">
           <div className="section-eyebrow">
             <span className="se-t">Contract details</span>
@@ -4527,8 +4641,10 @@ export default function ContractV2Page() {
             notes={notes}
             onAddNote={onAddNote}
             perms={perms}
+            showExtras={view !== 'record'}
           />
         </div>
+        )}
       </div>
 
       {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
@@ -4553,6 +4669,16 @@ export default function ContractV2Page() {
       <GlobalStyle />
     </div>
   );
+}
+
+/**
+ * The standalone contract page (reached from the Leases register). Renders the
+ * RECORD view — header + summary + Payments + Documents, read-only. The setup
+ * pipeline + workflow actions live in Operations now (which mounts this same
+ * component with view="full"). The manager contract route re-exports this default.
+ */
+export default function ContractV2Page() {
+  return <ContractV2View view="record" />;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

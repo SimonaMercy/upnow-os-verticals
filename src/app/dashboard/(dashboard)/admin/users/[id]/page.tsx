@@ -23,6 +23,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet } from '@/lib/api';
+import { openDocViewer } from '@/lib/docViewer';
 
 const roleLabel: Record<string, string> = {
   customer: 'Customer',
@@ -52,8 +53,9 @@ interface UserDetail {
       properties: number; units: number; occupiedUnits: number;
       customers: number; leases: number; activeLeases: number;
     };
-    properties: { id: number; buildingName: string; spaceCategory: string; fullAddress: string | null; unitCount: number; occupiedCount: number }[];
+    properties: { id: number; buildingName: string; spaceCategory: string; fullAddress: string | null; unitCount: number; occupiedCount: number; units: { id: number; unitNumber: string; unitName: string | null; unitType: string; availability: string; rentalPrice: number | null }[] }[];
     units: { id: number; unitNumber: string; unitName: string | null; unitType: string; availability: string; rentalPrice: number | null; propertyId: number; propertyName: string | null }[];
+    documents: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null }[];
     customers: { tenantId: number; userId: number; name: string; email: string | null; phone: string | null; hasLease: boolean }[];
     leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; tenantName: string; unitNumber: string | null }[];
     insights: {
@@ -777,34 +779,59 @@ export default function AdminUserDetailPage() {
 
               {/* Breakdown — two per row, each scrolls internally */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <Section title="Properties" count={L.properties.length}>
+                {/* Buildings & units — hierarchy: each building (clickable → property
+                    detail) with its units nested + clickable → unit detail (SCRUM-587/588). */}
+                <Section title="Buildings & units" count={L.properties.length}>
                   {L.properties.map((p) => (
-                    <div key={p.id} className={ROW} style={ROW_STYLE}>
-                      <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.buildingName}</p>
-                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{p.fullAddress ?? '—'}</p>
-                      </div>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{titleCase(p.spaceCategory)}</span>
-                      <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-500)' }}>{p.occupiedCount}/{p.unitCount}</span>
+                    <div key={p.id} className="mb-2">
+                      <Link href={`/dashboard/admin/properties/${p.id}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+                        <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.buildingName}</p>
+                          <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{p.fullAddress ?? '—'}</p>
+                        </div>
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{titleCase(p.spaceCategory)}</span>
+                        <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-500)' }}>{p.occupiedCount}/{p.unitCount}</span>
+                        <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+                      </Link>
+                      {p.units.length > 0 && (
+                        <div className="ml-4 pl-3 mt-1 space-y-1" style={{ borderLeft: '1px solid var(--color-base-200, #e8e6e0)' }}>
+                          {p.units.map((un) => (
+                            <Link key={un.id} href={`/dashboard/admin/units/${un.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors hover:brightness-95" style={ROW_STYLE}>
+                              <Home size={13} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                              <span className="text-xs font-medium truncate flex-1" style={{ color: 'var(--color-neutral-800)' }}>{un.unitName || `Unit ${un.unitNumber}`}</span>
+                              <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>{titleCase(un.unitType)}{un.rentalPrice != null ? ` · ${aed(un.rentalPrice)}` : ''}</span>
+                              <Pill value={un.availability} />
+                            </Link>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </Section>
 
-                <Section title="Units" count={L.units.length}>
-                  {L.units.map((un) => (
-                    <div key={un.id} className={ROW} style={ROW_STYLE}>
-                      <Home size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
-                          {un.unitName || `Unit ${un.unitNumber}`}
-                          <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · {un.propertyName}</span>
-                        </p>
-                        <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{titleCase(un.unitType)} · {aed(un.rentalPrice)}/yr</p>
+                {/* RP-owned documents — inline view-only; empty file_url = requested/missing. */}
+                <Section title="Documents" count={L.documents.length}>
+                  {L.documents.length === 0 ? (
+                    <p className="text-sm py-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents on file for this rental provider.</p>
+                  ) : L.documents.map((d) => {
+                    const label = d.displayName || titleCase((d.documentKey || '').replace(/_/g, ' '));
+                    const hasFile = !!d.fileUrl;
+                    return (
+                      <div key={d.id} className={ROW} style={ROW_STYLE}>
+                        <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{label}</p>
+                          <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}</p>
+                        </div>
+                        {hasFile ? (
+                          <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
+                        ) : (
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Requested</span>
+                        )}
                       </div>
-                      <Pill value={un.availability} />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </Section>
 
                 <Section title="Customers" count={L.customers.length}>

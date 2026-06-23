@@ -49,15 +49,12 @@ interface Inspection {
 }
 
 const API = (token: string, path: string) => `/api/portal/${token}${path}`;
-function instalmentLabel(n: number | null): string {
-  const map: Record<number, string> = { 1: '1 - (Single Payment)', 2: '2 - (Two Payments)', 3: '3 - (Three Payments)', 4: '4 - (Four Payments)', 6: '6 - (Six Payments)', 12: '12 - (Twelve Payments)' };
-  return n ? (map[n] || `${n} Cheques`) : '';
-}
-/** Backend already returns the EjariContractData-shaped nested object — just fold in signatures + payment label. */
+/** Backend already returns the EjariContractData-shaped nested object (incl.
+ *  numberOfInstallments + unit.bedrooms) — just fold in signatures. The shared
+ *  renderer formats Mode of Payment from the installment count. */
 function toEjari(c: Detail['contract'], signatures: Sig[]): EjariContractData {
   return {
     ...c,
-    modeOfPayment: c.modeOfPayment || instalmentLabel((c as { numberOfInstallments?: number | null }).numberOfInstallments ?? null),
     signatures: (signatures ?? []).map(s => ({ role: s.role as 'landlord' | 'tenant', signatureImage: s.signatureImage ?? null, signedAt: s.signedAt, method: s.method })),
   };
 }

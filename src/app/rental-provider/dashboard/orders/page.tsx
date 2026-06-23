@@ -26,7 +26,6 @@
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
-import { liveTenantIdSet } from '@/lib/activeCustomer';
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -42,7 +41,7 @@ import {
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
 type DisplayStatus = ContractStatus | 'declined' | 'needs_activation' | 'starts_later' | 'superseded' | 'terminating';
-type TabKey = 'all' | 'active' | 'expiring' | 'renewals' | 'expired';
+type TabKey = 'all' | 'active' | 'expiring';
 
 /** Expiring window for the renewal-attention bucket. */
 const EXPIRING_DAYS = 90;
@@ -60,15 +59,14 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   terminating:      'Terminating',
 };
 
-// Four buckets only. All = current leases (one in-force lease per unit);
-// Active = current leases not expiring soon; Expiring = current leases ending
-// within EXPIRING_DAYS; Expired = ended/terminated history (year-scoped).
+// Leases register = LOCKED in-force leases only. All = one locked lease per
+// unit; Active = not expiring soon; Expiring = ending within EXPIRING_DAYS
+// (the renewal workload). Drafts / in-setup / un-reviewed leases live in
+// Operations; ended/terminated history lives under Ended Leases.
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all',      label: 'All' },
   { key: 'active',   label: 'Active' },
   { key: 'expiring', label: `Expiring < ${EXPIRING_DAYS}d` },
-  { key: 'renewals', label: 'Renewals' },
-  { key: 'expired',  label: 'Expired' },
 ];
 
 /** Local YYYY-MM-DD (no UTC shift) — the page's "today" for term-state checks. */
@@ -144,6 +142,9 @@ interface Contract {
   contractActive: boolean;
   renewalStatus: string | null;
   createdAt: string;
+  /** Operations vs Leases split: NULL = still in the Operations worklist;
+   *  set = blessed → shows here in the Leases register. */
+  lockedAt: string | null;
   tenant: { id: number | null; name: string | null; email: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
@@ -272,6 +273,10 @@ function Row({
 
 export default function OrdersPage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
+  // Ids of contracts still in the Operations worklist (drafts + active-but-
+  // incomplete). The Leases register is the EXACT COMPLEMENT: a lease shows here
+  // only once its full pipeline is complete and it has left Operations.
+  const [opsIds, setOpsIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAsset, setFilterAsset] = useState('all');
@@ -281,10 +286,14 @@ export default function OrdersPage() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch('/api/contracts', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setContracts(data); })
-      .catch(() => undefined)
+    Promise.all([
+      fetch('/api/contracts', { credentials: 'include' }).then(r => r.json()).catch(() => null),
+      fetch('/api/contracts/operations', { credentials: 'include' }).then(r => r.json()).catch(() => null),
+    ])
+      .then(([list, ops]) => {
+        if (Array.isArray(list)) setContracts(list);
+        if (Array.isArray(ops)) setOpsIds(new Set(ops.map((c: { id: number }) => c.id)));
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -338,6 +347,12 @@ export default function OrdersPage() {
     const byUnit = new Map<number | string, Contract>();
     for (const c of yearScoped) {
       if (!isInForce(c)) continue;
+      // Leases register = COMPLETED live leases only. A lease still in the
+      // Operations worklist (unlocked draft, or active-but-incomplete pipeline)
+      // is excluded — it shows here only once its setup is complete and it has
+      // dropped out of Operations. (opsIds = the live Operations worklist.)
+      if (c.lockedAt == null) continue;
+      if (opsIds.has(c.id)) continue;
       const key = c.unit.id ?? `c${c.id}`;
       const prev = byUnit.get(key);
       if (!prev) { byUnit.set(key, c); continue; }
@@ -350,50 +365,24 @@ export default function OrdersPage() {
       if (curLive === prevLive && (c.endDate ?? '') > (prev.endDate ?? '')) byUnit.set(key, c);
     }
     return [...byUnit.values()];
-  }, [yearScoped]);
+  }, [yearScoped, opsIds]);
 
   const expiringLeases = useMemo(() => currentLeases.filter(c => endsSoon(c, soonBy)), [currentLeases, soonBy]);
   const activeLeases   = useMemo(() => currentLeases.filter(c => !endsSoon(c, soonBy)), [currentLeases, soonBy]);
-
-  // Active tenants only: the customers who still have a live/upcoming lease
-  // somewhere (shared definition, exact inverse of the Ended Leases nav). Fully-
-  // ended customers are dropped from the Expired tab — they live under Ended
-  // Leases. An active customer's own expired history still shows.
-  const liveTenantIds = useMemo(() => liveTenantIdSet(contracts), [contracts]);
-
-  // Expired = ended/terminated leases within the selected year scope, limited to
-  // customers who are still active.
-  const expiredRows = useMemo(
-    () => yearScoped.filter(c =>
-      (displayStatusOf(c) === 'expired' || c.status === 'terminated')
-      && c.tenant.id != null && liveTenantIds.has(c.tenant.id)),
-    [yearScoped, liveTenantIds],
-  );
-
-  // Forward renewals already signed ahead (pending/issued, term not yet begun).
-  // Their expiring parent still represents the unit in Expiring, but the RP also
-  // needs to open the renewal itself — so they get their own visible Upcoming
-  // tab (previously an issued forward renewal showed in NO tab at all).
-  const upcomingRenewals = useMemo(() => yearScoped.filter(c => displayStatusOf(c) === 'starts_later'), [yearScoped]);
-  const signedAhead = upcomingRenewals.length;
 
   const tabCounts = useMemo<Record<TabKey, number>>(() => ({
     all: currentLeases.length,
     active: activeLeases.length,
     expiring: expiringLeases.length,
-    renewals: upcomingRenewals.length,
-    expired: expiredRows.length,
-  }), [currentLeases, activeLeases, expiringLeases, upcomingRenewals, expiredRows]);
+  }), [currentLeases, activeLeases, expiringLeases]);
 
   const baseList = useMemo(() => {
     switch (activeTab) {
       case 'active':   return activeLeases;
       case 'expiring': return expiringLeases;
-      case 'renewals': return upcomingRenewals;
-      case 'expired':  return expiredRows;
       default:         return currentLeases;
     }
-  }, [activeTab, currentLeases, activeLeases, expiringLeases, upcomingRenewals, expiredRows]);
+  }, [activeTab, currentLeases, activeLeases, expiringLeases]);
 
   const filtered = useMemo(() => {
     const list = baseList.filter(c => {
@@ -406,11 +395,9 @@ export default function OrdersPage() {
       }
       return true;
     });
-    // Live tabs: soonest-ending first (renewal urgency). Expired: most recent first.
-    return [...list].sort((a, b) => activeTab === 'expired'
-      ? (b.endDate ?? '').localeCompare(a.endDate ?? '')
-      : (a.endDate ?? '').localeCompare(b.endDate ?? ''));
-  }, [baseList, activeTab, filterAsset, search]);
+    // Soonest-ending first (renewal urgency).
+    return [...list].sort((a, b) => (a.endDate ?? '').localeCompare(b.endDate ?? ''));
+  }, [baseList, filterAsset, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -431,7 +418,7 @@ export default function OrdersPage() {
   return (
     <div className="orders-page">
       <header className="topbar">
-        <div className="crumbs">Workspace / Leasing / <b>Contracts</b></div>
+        <div className="crumbs">Workspace / Leasing / <b>Leases</b></div>
         <div className="right">
           <button className="icon-btn" aria-label="Notifications"><Bell size={18} /><span className="dot" /></button>
           <button className="av-btn" aria-label="Profile">A</button>
@@ -443,8 +430,8 @@ export default function OrdersPage() {
         <div className="hero">
           <div className="left">
             <div className="eyebrow"><FileText size={12} /> Leasing</div>
-            <h1>Tenancy <span className="accent">contracts</span></h1>
-            <p>Every agreement across your portfolio and where it sits in its lifecycle — from draft to Ejari, renewal and termination.</p>
+            <h1>Active <span className="accent">leases</span></h1>
+            <p>Your locked, in-force leases — one per unit. Drafts and contracts still being set up live in Operations; ended tenancies in Ended Leases.</p>
           </div>
           <div className="right">
             <div className="year-global" title="Scope the whole page by lease year">
@@ -474,8 +461,8 @@ export default function OrdersPage() {
         {/* Context — the year filter scopes the whole page; the Total is
             deduped per unit so it reflects real tenancies, not raw rows. */}
         <div className="today-strip">
-          <b>{currentLeases.length}</b> current leases{filterYear === 'all' ? '' : ` in ${filterYear}`} — one per unit
-          {signedAhead > 0 && <> · <b>{signedAhead}</b> renewals signed ahead (shown via their expiring lease)</>}
+          <b>{currentLeases.length}</b> locked leases{filterYear === 'all' ? '' : ` in ${filterYear}`} — one per unit ·
+          {' '}contracts still being set up live in <Link href="/rental-provider/dashboard/operations" className="ops-link">Operations →</Link>
         </div>
 
         {/* Tabs */}
@@ -760,6 +747,8 @@ function GlobalStyle() {
         border-radius: 10px; padding: 8px 12px;
       }
       .orders-page .today-strip b { color: var(--ink-1); font-weight: 700; }
+      .orders-page .today-strip .ops-link { color: var(--green-d); font-weight: 600; text-decoration: none; }
+      .orders-page .today-strip .ops-link:hover { text-decoration: underline; }
       .orders-page .rangetabs {
         display: flex; align-items: center; justify-content: space-between;
         gap: 18px; margin: 22px 0 16px;

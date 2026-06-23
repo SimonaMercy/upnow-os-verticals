@@ -1,12 +1,14 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
+import Link from 'next/link';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Building2, RefreshCw, Eye, EyeOff,
   CheckCircle2, XCircle, Clock, AlertCircle,
   ChevronLeft, ChevronRight, ImageOff,
   MapPin, DollarSign, Info, Tag, MousePointerClick, TrendingUp,
+  Wrench, Briefcase,
 } from 'lucide-react';
 import { DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
@@ -107,9 +109,50 @@ interface UnitDetail {
   };
 }
 
+interface ServiceListing {
+  id: number;
+  name: string;
+  description: string | null;
+  category: string;
+  basePrice: number | null;
+  priceUnit: string | null;
+  estimatedDuration: number | null;
+  isAvailable: boolean;
+  imageUrl: string | null;
+  createdAt: string;
+  provider: {
+    id: number;
+    userId: number;
+    name: string | null;
+    complianceStatus: string;
+  } | null;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
+
+// Service-Provider catalogue categories (mirrors the backend ServiceCategory enum).
+const SERVICE_CATEGORIES: { id: string; label: string }[] = [
+  { id: 'cleaning',          label: 'Cleaning' },
+  { id: 'maintenance',       label: 'Maintenance' },
+  { id: 'security',          label: 'Security' },
+  { id: 'elevator',          label: 'Elevator' },
+  { id: 'fire_safety',       label: 'Fire Safety' },
+  { id: 'pest_control',      label: 'Pest Control' },
+  { id: 'landscaping',       label: 'Landscaping' },
+  { id: 'waste',             label: 'Waste' },
+  { id: 'electricity_water', label: 'Electricity & Water' },
+  { id: 'insurance',         label: 'Insurance' },
+  { id: 'renovation',        label: 'Renovation' },
+  { id: 'government',        label: 'Government' },
+  { id: 'other',             label: 'Other' },
+];
+
+function serviceCategoryLabel(id: string): string {
+  return SERVICE_CATEGORIES.find((c) => c.id === id)?.label
+    ?? id.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+}
 
 // Category display labels come from the shared SPACE_CATEGORIES / categoryDisplayLabel
 // helper (PropertyFormModal) so all 5 canonical types + legacy buckets stay in sync.
@@ -169,6 +212,68 @@ function CategoryFilters({ value, onChange }: { value: string; onChange: (c: str
       ))}
     </div>
   );
+}
+
+// Service-category filter — same pill styling as CategoryFilters, SP categories.
+function ServiceCategoryFilters({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {[{ id: '', label: 'All' }, ...SERVICE_CATEGORIES].map((cat) => (
+        <button key={cat.id || 'all'} onClick={() => onChange(cat.id)}
+          className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+          style={value === cat.id
+            ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+            : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>
+          {cat.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// A single service/SKU row — drills through to the owning provider's admin detail.
+function ServiceListingRow({ s }: { s: ServiceListing }) {
+  const price = s.basePrice != null
+    ? `${aed(s.basePrice)}${s.priceUnit ? ` · ${s.priceUnit}` : ''}`
+    : 'Price on request';
+
+  const body = (
+    <>
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+        style={{ backgroundColor: '#ecfeff' }}>
+        <Wrench size={18} style={{ color: '#0891b2' }} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{s.name}</p>
+        {s.description && <p className="text-xs truncate mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>{s.description}</p>}
+        <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>
+          {s.provider?.name ?? 'Unknown provider'}{s.provider ? ` · SP #${s.provider.id}` : ''}
+        </p>
+      </div>
+      <span className="text-xs font-medium px-2.5 py-1 rounded-full shrink-0"
+        style={{ backgroundColor: '#ecfeff', color: '#0891b2' }}>
+        {serviceCategoryLabel(s.category)}
+      </span>
+      <span className="text-sm font-semibold shrink-0" style={{ color: 'var(--color-neutral-800)' }}>{price}</span>
+      <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full shrink-0 font-medium"
+        style={s.isAvailable
+          ? { backgroundColor: '#f0fdf4', color: '#16a34a' }
+          : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>
+        {s.isAvailable ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+        {s.isAvailable ? 'Available' : 'Unavailable'}
+      </span>
+    </>
+  );
+
+  if (s.provider?.userId) {
+    return (
+      <Link href={`/dashboard/admin/users/${s.provider.userId}`}
+        className="p-5 flex flex-wrap items-center gap-4 hover:bg-stone-50 transition">
+        {body}
+      </Link>
+    );
+  }
+  return <div className="p-5 flex flex-wrap items-center gap-4">{body}</div>;
 }
 
 function Pagination({ page, total, pageSize, onChange }: { page: number; total: number; pageSize: number; onChange: (p: number) => void }) {
@@ -662,8 +767,10 @@ function indexDeviation(unit: PendingUnit): number | null {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 type Tab = 'queue' | 'all';
+type Section = 'rp' | 'sp';
 
 export default function AdminListingsPage() {
+  const [section, setSection] = useState<Section>('rp');
   const [tab, setTab] = useState<Tab>('queue');
 
   // Queue state
@@ -682,6 +789,14 @@ export default function AdminListingsPage() {
   const [propsCategory, setPropsCategory] = useState('');
   const [propsLoading, setPropsLoading] = useState(false);
 
+  // Service-Provider listings state
+  const [svcData, setSvcData]         = useState<ServiceListing[]>([]);
+  const [svcTotal, setSvcTotal]       = useState(0);
+  const [svcPage, setSvcPage]         = useState(0);
+  const [svcCategory, setSvcCategory] = useState('');
+  const [svcLoading, setSvcLoading]   = useState(false);
+  const [svcLoaded, setSvcLoaded]     = useState(false);
+
   const [error, setError]   = useState<string | null>(null);
   const [acting, setActing] = useState(false);
 
@@ -690,6 +805,7 @@ export default function AdminListingsPage() {
   const [summaryUnits,   setSummaryUnits]   = useState(0);
   const [summaryListed,  setSummaryListed]  = useState(0);
   const [summaryPending, setSummaryPending] = useState(0);
+  const [summarySvc,     setSummarySvc]     = useState(0);
 
   const fetchQueue = useCallback(async (page: number, category: string) => {
     setQueueLoading(true);
@@ -721,15 +837,34 @@ export default function AdminListingsPage() {
     finally { setPropsLoading(false); }
   }, []);
 
+  const fetchServices = useCallback(async (page: number, category: string) => {
+    setSvcLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE), ...(category ? { category } : {}) });
+      const resp = await apiGet<{ data: ServiceListing[]; total: number }>(`/admin/service-listings?${params}`);
+      setSvcData(resp.data ?? []);
+      setSvcTotal(resp.total ?? 0);
+      if (!category) setSummarySvc(resp.total ?? 0);
+    } catch (err) { setError((err as Error).message); }
+    finally { setSvcLoading(false); setSvcLoaded(true); }
+  }, []);
+
   useEffect(() => { void fetchQueue(0, ''); void fetchProps(0, ''); }, [fetchQueue, fetchProps]);
   useEffect(() => { void fetchQueue(queuePage, queueCategory); }, [queuePage, queueCategory, fetchQueue]);
   useEffect(() => { void fetchProps(propsPage, propsCategory); }, [propsPage, propsCategory, fetchProps]);
+  // SP listings load lazily once the section is first opened, then on page/filter change.
+  useEffect(() => { if (section === 'sp') void fetchServices(svcPage, svcCategory); }, [section, svcPage, svcCategory, fetchServices]);
+  // Clear the shared error banner when switching sections so an error from one
+  // section doesn't bleed into (or get mis-attributed to) the other.
+  useEffect(() => { setError(null); }, [section]);
 
   const visibleQueue = queueOverIndex ? queueData.filter((u) => indexDeviation(u) !== null) : queueData;
   const overIndexCount = queueData.filter((u) => indexDeviation(u) !== null).length;
 
   function handleQueueCategory(cat: string) { setQueueCategory(cat); setQueuePage(0); setSelectedUnit(null); setQueueOverIndex(false); }
   function handlePropsCategory(cat: string) { setPropsCategory(cat); setPropsPage(0); }
+  function handleSvcCategory(cat: string) { setSvcCategory(cat); setSvcPage(0); }
   function handleToggleOverIndex() { setQueueOverIndex((v) => !v); setSelectedUnit(null); }
 
   async function handleApprove(unit: PendingUnit) {
@@ -765,19 +900,47 @@ export default function AdminListingsPage() {
     finally { setActing(false); }
   }
 
-  const loading = queueLoading || propsLoading;
+  const loading = section === 'sp' ? svcLoading : (queueLoading || propsLoading);
+
+  const rpStats = [
+    { label: 'Properties', value: summaryProps },
+    { label: 'Units',      value: summaryUnits },
+    { label: 'Listed',     value: summaryListed },
+    { label: 'Pending',    value: summaryPending, highlight: true },
+  ];
+
+  function refreshActiveSection() {
+    if (section === 'sp') void fetchServices(svcPage, svcCategory);
+    else { void fetchQueue(queuePage, queueCategory); void fetchProps(propsPage, propsCategory); }
+  }
 
   return (
     <div className="flex flex-col h-full" style={{ padding: '12px 20px 16px' }}>
 
-      {/* Single header row: title · tabs · stats · refresh */}
+      {/* Single header row: title · section toggle · RP tabs · stats · refresh */}
       <div className="flex items-center gap-1 pb-2 border-b flex-shrink-0" style={{ borderColor: 'var(--color-base-200)' }}>
 
         {/* Page title */}
         <span className="text-sm font-bold mr-3 shrink-0" style={{ color: 'var(--color-neutral-900)' }}>Listings</span>
 
-        {/* Tabs */}
-        {([
+        {/* Top-level section toggle: Rental Providers vs Service Providers */}
+        <div className="flex items-center gap-0.5 p-0.5 rounded-lg shrink-0 mr-3" style={{ backgroundColor: 'var(--color-base-100)' }}>
+          {([
+            { id: 'rp' as Section, label: 'Rental Providers', Icon: Building2 },
+            { id: 'sp' as Section, label: 'Service Providers', Icon: Briefcase },
+          ]).map(({ id, label, Icon }) => (
+            <button key={id} onClick={() => setSection(id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+              style={section === id
+                ? { backgroundColor: '#fff', color: 'var(--color-primary)', boxShadow: 'var(--shadow-sm)' }
+                : { backgroundColor: 'transparent', color: 'var(--color-neutral-500)' }}>
+              <Icon size={13} />{label}
+            </button>
+          ))}
+        </div>
+
+        {/* RP sub-tabs — only within the Rental Providers section */}
+        {section === 'rp' && ([
           { id: 'queue' as Tab, label: 'Approval Queue', count: summaryPending },
           { id: 'all'   as Tab, label: 'All Properties', count: summaryProps },
         ]).map(({ id, label, count }) => (
@@ -796,14 +959,12 @@ export default function AdminListingsPage() {
           </button>
         ))}
 
-        {/* Compact stats strip */}
+        {/* Compact stats strip — adapts to the active section */}
         <div className="ml-auto flex items-center gap-3 mr-2">
-          {[
-            { label: 'Properties', value: summaryProps },
-            { label: 'Units',      value: summaryUnits },
-            { label: 'Listed',     value: summaryListed },
-            { label: 'Pending',    value: summaryPending, highlight: true },
-          ].map(({ label, value, highlight }, i, arr) => (
+          {(section === 'sp'
+            ? [{ label: 'Services', value: summarySvc, highlight: true }]
+            : rpStats
+          ).map(({ label, value, highlight }, i, arr) => (
             <span key={label} className="flex items-center gap-2">
               <span className="flex items-center gap-1 text-xs">
                 <span className="font-semibold" style={{ color: highlight ? 'var(--color-primary)' : 'var(--color-neutral-700)' }}>{value}</span>
@@ -814,7 +975,7 @@ export default function AdminListingsPage() {
           ))}
         </div>
 
-        <button onClick={() => { void fetchQueue(queuePage, queueCategory); void fetchProps(propsPage, propsCategory); }}
+        <button onClick={refreshActiveSection}
           disabled={loading}
           className="p-1.5 rounded-lg transition-colors hover:bg-base-100"
           style={{ border: '1px solid var(--color-base-200)' }} title="Refresh">
@@ -827,7 +988,7 @@ export default function AdminListingsPage() {
       )}
 
       {/* ── Approval Queue — split panel ──────────────────── */}
-      {tab === 'queue' && (
+      {section === 'rp' && tab === 'queue' && (
         <div className="flex flex-col flex-1 min-h-0 mt-2">
           {/* Filters row */}
           <div className="flex items-center justify-between mb-2 flex-shrink-0">
@@ -915,7 +1076,7 @@ export default function AdminListingsPage() {
       )}
 
       {/* ── All Properties ────────────────────────────────── */}
-      {tab === 'all' && (
+      {section === 'rp' && tab === 'all' && (
         <div className="flex flex-col flex-1 min-h-0 mt-2 overflow-y-auto">
           <div className="mb-2 flex-shrink-0">
             <CategoryFilters value={propsCategory} onChange={handlePropsCategory} />
@@ -935,7 +1096,7 @@ export default function AdminListingsPage() {
                 {propsData.map((p) => {
                   const cc = categoryColor[p.spaceCategory] ?? { bg: 'var(--color-base-100)', color: 'var(--color-neutral-600)' };
                   return (
-                    <div key={p.id} className="p-5 flex flex-wrap items-center gap-4">
+                    <Link key={p.id} href={`/dashboard/admin/properties/${p.id}`} className="p-5 flex flex-wrap items-center gap-4 hover:bg-stone-50 transition">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: cc.bg }}>
                         <Building2 size={18} style={{ color: cc.color }} />
                       </div>
@@ -958,11 +1119,43 @@ export default function AdminListingsPage() {
                           <EyeOff size={13} /> {p.unitCount - p.listedCount} unlisted
                         </span>
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
               <Pagination page={propsPage} total={propsTotal} pageSize={PAGE_SIZE} onChange={setPropsPage} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Service Provider Listings ─────────────────────── */}
+      {section === 'sp' && (
+        <div className="flex flex-col flex-1 min-h-0 mt-2 overflow-y-auto">
+          <div className="mb-2 flex-shrink-0">
+            <ServiceCategoryFilters value={svcCategory} onChange={handleSvcCategory} />
+          </div>
+
+          {svcLoading && (
+            <div className="rounded-2xl p-8 bg-white text-center text-sm" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
+              Loading…
+            </div>
+          )}
+          {!svcLoading && svcLoaded && !error && svcData.length === 0 && (
+            <DashboardEmpty message={
+              svcCategory
+                ? `No ${serviceCategoryLabel(svcCategory).toLowerCase()} services listed yet.`
+                : 'No service listings yet — service providers haven\'t published any catalogue services.'
+            } />
+          )}
+          {!svcLoading && svcData.length > 0 && (
+            <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
+              <div className="divide-y" style={{ borderColor: 'var(--color-base-100)' }}>
+                {svcData.map((s) => (
+                  <ServiceListingRow key={s.id} s={s} />
+                ))}
+              </div>
+              <Pagination page={svcPage} total={svcTotal} pageSize={PAGE_SIZE} onChange={setSvcPage} />
             </div>
           )}
         </div>
