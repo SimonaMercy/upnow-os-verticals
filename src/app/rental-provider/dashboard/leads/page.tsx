@@ -128,7 +128,7 @@ interface PaymentPlanItem {
   amountFils: number;
   dueDate: string;
   description?: string;
-  type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+  type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
   /** RP-assigned payment method for this installment (default cheque). */
   paymentMethod?: PaymentMethodKind | null;
   /** RP-entered reference for this installment (cheque #, transfer ID, auth code). */
@@ -698,7 +698,7 @@ function LeadRow({
     if (!plan) return;
     const sorted = plan.items.slice().sort((a, b) => {
       if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-      const order: Record<string, number> = { first_bundle: 0, installment: 1, extra_installment: 2, security_deposit: 3 };
+      const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
       return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
     });
     const firstDate = sorted[0]?.dueDate ?? null;
@@ -2232,7 +2232,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const plan = lead.paymentPlan;
         const sorted = plan.items.slice().sort((a, b) => {
           if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-          const order: Record<string, number> = { first_bundle: 0, installment: 1, extra_installment: 2, security_deposit: 3 };
+          const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
           return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
         });
         return (
@@ -2304,7 +2304,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const sortedItems = plan
           ? plan.items.slice().sort((a, b) => {
               if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-              const order: Record<string, number> = { first_bundle: 0, installment: 1, extra_installment: 2, security_deposit: 3 };
+              const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
               return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
             })
           : [];
