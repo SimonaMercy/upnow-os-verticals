@@ -38,8 +38,8 @@ interface UnitDetail {
 }
 
 const availCls: Record<string, string> = {
-  available: 'bg-emerald-100 text-emerald-700', occupied: 'bg-blue-100 text-blue-700',
-  maintenance: 'bg-amber-100 text-amber-700', reserved: 'bg-purple-100 text-purple-700',
+  available: 'bg-[#d8f2e8] text-[#1a7a5a]', occupied: 'bg-[#e8f0fb] text-[#1a5fb4]',
+  maintenance: 'bg-[#fef9eb] text-[#b45309]', reserved: 'bg-[#f3effb] text-[#7c3aed]',
 };
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const titleCase = (s: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
@@ -49,15 +49,15 @@ const isImg = (u: string) => /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(u);
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold">{label}</div>
-      <div className="text-sm font-semibold text-stone-800 mt-0.5">{value}</div>
+      <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{label}</div>
+      <div className="text-sm font-semibold text-[#3f3d39] mt-0.5">{value}</div>
     </div>
   );
 }
 function Card({ icon: Icon, title, children }: { icon: React.ElementType; title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-5 mb-5">
-      <div className="flex items-center gap-2 mb-4"><Icon size={15} className="text-stone-400" /><span className="text-sm font-semibold text-stone-700">{title}</span></div>
+    <div className="rounded-2xl border border-[#e8e6e0] bg-white p-5 mb-5">
+      <div className="flex items-center gap-2 mb-4"><Icon size={15} className="text-[#9b9890]" /><span className="text-sm font-semibold text-[#3f3d39]">{title}</span></div>
       {children}
     </div>
   );
@@ -76,11 +76,11 @@ export default function AdminUnitDetailPage() {
 
   if (err) return (
     <div className="p-8">
-      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4"><ArrowLeft size={16} /> Back</button>
-      <div className="rounded-xl border border-stone-200 bg-white p-10 text-center text-stone-500">Unit not found — {err}</div>
+      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4"><ArrowLeft size={16} /> Back</button>
+      <div className="rounded-xl border border-[#e8e6e0] bg-white p-10 text-center text-[#6b6860]">Unit not found — {err}</div>
     </div>
   );
-  if (!d) return <div className="p-8 text-stone-500">Loading…</div>;
+  if (!d) return <div className="p-8 text-[#6b6860]">Loading…</div>;
 
   const u = d.unit;
   const prop = u.property;
@@ -108,23 +108,23 @@ export default function AdminUnitDetailPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto">
-      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4"><ArrowLeft size={16} /> Back</button>
+      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4"><ArrowLeft size={16} /> Back</button>
 
       {/* Header + specs */}
-      <div className="rounded-2xl border border-stone-200 bg-white p-6 mb-5">
+      <div className="rounded-2xl border border-[#e8e6e0] bg-white p-6 mb-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-start gap-3 min-w-0">
-            <span className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 grid place-items-center shrink-0"><Home size={20} /></span>
+            <span className="w-11 h-11 rounded-xl bg-[#f0faf6] text-[#1a7a5a] grid place-items-center shrink-0"><Home size={20} /></span>
             <div className="min-w-0">
-              <h1 className="text-xl font-bold text-stone-900 leading-tight">{u.unitNumber ? `Unit ${u.unitNumber}` : (u.unitName ?? `Unit #${u.id}`)}</h1>
-              <Link href={`/dashboard/admin/properties/${u.propertyId}`} className="text-sm text-emerald-700 hover:underline inline-flex items-center gap-1.5 mt-1"><Building2 size={13} /> {prop?.buildingName ?? 'Property'} <ExternalLink size={11} /></Link>
-              <p className="text-xs text-stone-400 mt-0.5">{loc}{u.planLabel ? ` · Plan: ${u.planLabel}` : ''}</p>
+              <h1 className="text-xl font-bold text-[#1a1916] leading-tight">{u.unitNumber ? `Unit ${u.unitNumber}` : (u.unitName ?? `Unit #${u.id}`)}</h1>
+              <Link href={`/dashboard/admin/properties/${u.propertyId}`} className="text-sm text-[#1a7a5a] hover:underline inline-flex items-center gap-1.5 mt-1"><Building2 size={13} /> {prop?.buildingName ?? 'Property'} <ExternalLink size={11} /></Link>
+              <p className="text-xs text-[#9b9890] mt-0.5">{loc}{u.planLabel ? ` · Plan: ${u.planLabel}` : ''}</p>
             </div>
           </div>
-          {u.availability && <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${availCls[u.availability] ?? 'bg-stone-100 text-stone-600'}`}>{u.availability}</span>}
+          {u.availability && <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${availCls[u.availability] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>{u.availability}</span>}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-5 border-t border-stone-100">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-5 border-t border-[#f0ede8]">
           <Stat label="Type" value={titleCase(u.unitType)} />
           <Stat label="Tier" value={titleCase(u.unitTier)} />
           <Stat label="Bedrooms" value={u.bedrooms != null ? String(u.bedrooms) : '—'} />
@@ -137,7 +137,7 @@ export default function AdminUnitDetailPage() {
           <Stat label="Premise no." value={u.premiseNumber ?? '—'} />
           <Stat label="Rent / yr" value={aed(u.rentalPrice)} />
           <Stat label="Listing" value={titleCase(u.listingStatus)} />
-          {d.owner && <div><div className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold">Owner (RP)</div>{d.owner.userId ? <Link href={`/dashboard/admin/users/${d.owner.userId}`} className="text-sm font-semibold text-emerald-700 hover:underline mt-0.5 inline-block">{d.owner.name ?? 'RP'}</Link> : <div className="text-sm font-semibold text-stone-800 mt-0.5">{d.owner.name ?? '—'}</div>}</div>}
+          {d.owner && <div><div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Owner (RP)</div>{d.owner.userId ? <Link href={`/dashboard/admin/users/${d.owner.userId}`} className="text-sm font-semibold text-[#1a7a5a] hover:underline mt-0.5 inline-block">{d.owner.name ?? 'RP'}</Link> : <div className="text-sm font-semibold text-[#3f3d39] mt-0.5">{d.owner.name ?? '—'}</div>}</div>}
         </div>
       </div>
 
@@ -147,13 +147,13 @@ export default function AdminUnitDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {d.media.map((m) => (
               isImg(m.url) ? (
-                <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-stone-200 group">
+                <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-[#e8e6e0] group">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={m.url} alt={m.caption ?? 'Unit photo'} className="w-full h-32 object-cover group-hover:opacity-90 transition" />
-                  {m.caption && <p className="text-[11px] text-stone-500 px-2 py-1 truncate">{m.caption}</p>}
+                  {m.caption && <p className="text-[11px] text-[#6b6860] px-2 py-1 truncate">{m.caption}</p>}
                 </a>
               ) : (
-                <button key={m.id} onClick={() => openDocViewer({ fileUrl: m.url, caption: m.caption ?? 'Floor plan' })} className="rounded-xl border border-stone-200 h-32 grid place-items-center text-stone-400 hover:bg-stone-50">
+                <button key={m.id} onClick={() => openDocViewer({ fileUrl: m.url, caption: m.caption ?? 'Floor plan' })} className="rounded-xl border border-[#e8e6e0] h-32 grid place-items-center text-[#9b9890] hover:bg-[#faf9f7]">
                   <span className="flex flex-col items-center gap-1 text-xs"><FileText size={20} /> {m.mediaType === 'floor_plan' ? 'Floor plan' : 'View'}</span>
                 </button>
               )
@@ -167,28 +167,28 @@ export default function AdminUnitDetailPage() {
         <Card icon={Settings2} title="Leasing configuration">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Lease terms</p>
+              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Lease terms</p>
               {leaseRows.length ? (
                 <div className="grid grid-cols-2 gap-3">{leaseRows.map(([k, v]) => <Stat key={k} label={k} value={v} />)}</div>
-              ) : <p className="text-sm text-stone-400">No lease terms configured.</p>}
+              ) : <p className="text-sm text-[#9b9890]">No lease terms configured.</p>}
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Pricing & fees</p>
+              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Pricing & fees</p>
               {pricingRows.length ? (
                 <div className="grid grid-cols-2 gap-3">{pricingRows.map(([k, v]) => <Stat key={k} label={k} value={v} />)}</div>
-              ) : <p className="text-sm text-stone-400">No fees configured.</p>}
+              ) : <p className="text-sm text-[#9b9890]">No fees configured.</p>}
             </div>
           </div>
           {amenities.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-stone-100">
-              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Amenities</p>
-              <div className="flex flex-wrap gap-1.5">{amenities.map((a) => <span key={a} className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">{titleCase(a)}</span>)}</div>
+            <div className="mt-5 pt-4 border-t border-[#f0ede8]">
+              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Amenities</p>
+              <div className="flex flex-wrap gap-1.5">{amenities.map((a) => <span key={a} className="text-xs px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860]">{titleCase(a)}</span>)}</div>
             </div>
           )}
           {lt.specialConditions && (
-            <div className="mt-5 pt-4 border-t border-stone-100">
-              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-1">Special conditions</p>
-              <p className="text-sm text-stone-700 whitespace-pre-wrap">{lt.specialConditions}</p>
+            <div className="mt-5 pt-4 border-t border-[#f0ede8]">
+              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-1">Special conditions</p>
+              <p className="text-sm text-[#3f3d39] whitespace-pre-wrap">{lt.specialConditions}</p>
             </div>
           )}
         </Card>
@@ -199,11 +199,11 @@ export default function AdminUnitDetailPage() {
         <Card icon={ScrollText} title={`Plan agreement & addendum${d.planAddendum.versionNo ? ` · v${d.planAddendum.versionNo}` : ''}`}>
           {d.planAddendum.addendumFileUrl && (
             <button onClick={() => openDocViewer({ fileUrl: d.planAddendum!.addendumFileUrl!, caption: d.planAddendum!.addendumFileName ?? 'Agreement addendum' })}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-stone-200 text-sm text-stone-700 hover:bg-stone-50">
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#e8e6e0] text-sm text-[#3f3d39] hover:bg-[#faf9f7]">
               <Paperclip size={14} /> {d.planAddendum.addendumFileName ?? 'Agreement addendum'}
             </button>
           )}
-          {d.planAddendum.specialConditions && <p className="text-sm text-stone-700 whitespace-pre-wrap mt-3">{d.planAddendum.specialConditions}</p>}
+          {d.planAddendum.specialConditions && <p className="text-sm text-[#3f3d39] whitespace-pre-wrap mt-3">{d.planAddendum.specialConditions}</p>}
         </Card>
       )}
 
@@ -213,14 +213,14 @@ export default function AdminUnitDetailPage() {
           <div className="space-y-2">
             {d.documents.map((doc) => (
               <button key={doc.id} onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: (doc.displayName ?? doc.documentKey).replace(/_/g, ' ') })}
-                className="w-full flex items-center gap-3 p-3 rounded-xl border border-stone-200 hover:bg-stone-50 text-left">
-                <FileText size={15} className="text-stone-400 shrink-0" />
-                <span className="text-sm text-stone-800 flex-1 truncate">{(doc.displayName ?? doc.documentKey).replace(/_/g, ' ')}</span>
-                <span className="text-[11px] text-stone-400">{titleCase(doc.status)}</span>
+                className="w-full flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] hover:bg-[#faf9f7] text-left">
+                <FileText size={15} className="text-[#9b9890] shrink-0" />
+                <span className="text-sm text-[#3f3d39] flex-1 truncate">{(doc.displayName ?? doc.documentKey).replace(/_/g, ' ')}</span>
+                <span className="text-[11px] text-[#9b9890]">{titleCase(doc.status)}</span>
               </button>
             ))}
           </div>
-        ) : <p className="text-sm text-stone-400">No documents uploaded for this unit.</p>}
+        ) : <p className="text-sm text-[#9b9890]">No documents uploaded for this unit.</p>}
       </Card>
 
       {/* Current tenancy + its contract addendums */}
@@ -229,21 +229,21 @@ export default function AdminUnitDetailPage() {
           <>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <Link href={`/dashboard/admin/users/${d.currentTenancy.tenantUserId ?? ''}`} className={`text-sm font-semibold ${d.currentTenancy.tenantUserId ? 'text-emerald-700 hover:underline' : 'text-stone-800 pointer-events-none'}`}>{d.currentTenancy.tenantName ?? 'Tenant'}</Link>
-                <div className="text-xs text-stone-500 mt-0.5">{d.currentTenancy.ref} · {fmtDate(d.currentTenancy.startDate)} – {fmtDate(d.currentTenancy.endDate)}</div>
+                <Link href={`/dashboard/admin/users/${d.currentTenancy.tenantUserId ?? ''}`} className={`text-sm font-semibold ${d.currentTenancy.tenantUserId ? 'text-[#1a7a5a] hover:underline' : 'text-[#3f3d39] pointer-events-none'}`}>{d.currentTenancy.tenantName ?? 'Tenant'}</Link>
+                <div className="text-xs text-[#6b6860] mt-0.5">{d.currentTenancy.ref} · {fmtDate(d.currentTenancy.startDate)} – {fmtDate(d.currentTenancy.endDate)}</div>
               </div>
-              {d.currentTenancy.annualRent != null && <span className="text-sm font-medium text-stone-700 tabular-nums">{aed(d.currentTenancy.annualRent)}/yr</span>}
+              {d.currentTenancy.annualRent != null && <span className="text-sm font-medium text-[#3f3d39] tabular-nums">{aed(d.currentTenancy.annualRent)}/yr</span>}
             </div>
             {d.contractAddendums.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-stone-100">
-                <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Contract addendums</p>
+              <div className="mt-4 pt-4 border-t border-[#f0ede8]">
+                <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Contract addendums</p>
                 <div className="space-y-2">
                   {d.contractAddendums.map((a) => (
                     <button key={a.id} onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name })}
-                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-stone-200 hover:bg-stone-50 text-left">
-                      <Paperclip size={14} className="text-stone-400 shrink-0" />
-                      <span className="text-sm text-stone-800 flex-1 truncate">{a.name}</span>
-                      <span className="text-[11px] text-stone-400">{a.tenantSigned && a.landlordSigned ? 'Signed' : a.tenantSigned || a.landlordSigned ? 'Partially signed' : 'Unsigned'}</span>
+                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] hover:bg-[#faf9f7] text-left">
+                      <Paperclip size={14} className="text-[#9b9890] shrink-0" />
+                      <span className="text-sm text-[#3f3d39] flex-1 truncate">{a.name}</span>
+                      <span className="text-[11px] text-[#9b9890]">{a.tenantSigned && a.landlordSigned ? 'Signed' : a.tenantSigned || a.landlordSigned ? 'Partially signed' : 'Unsigned'}</span>
                     </button>
                   ))}
                 </div>
@@ -251,7 +251,7 @@ export default function AdminUnitDetailPage() {
             )}
           </>
         ) : (
-          <div className="text-sm text-stone-400">No active tenancy — unit is {u.availability ?? 'unoccupied'}.</div>
+          <div className="text-sm text-[#9b9890]">No active tenancy — unit is {u.availability ?? 'unoccupied'}.</div>
         )}
       </Card>
     </div>

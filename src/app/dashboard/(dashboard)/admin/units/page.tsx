@@ -65,55 +65,55 @@ export default function AdminUnitsBrowser() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto">
-      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4"><ArrowLeft size={16} /> Back</button>
+      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4"><ArrowLeft size={16} /> Back</button>
       <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-stone-900">All units</h1>
-          <p className="text-sm text-stone-500 mt-1">{filtered.length} units across every rental provider</p>
+          <h1 className="text-2xl font-bold text-[#1a1916]">All units</h1>
+          <p className="text-sm text-[#6b6860] mt-1">{filtered.length} units across every rental provider</p>
         </div>
       </div>
 
       <div className="relative max-w-md mb-5">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search unit, building, owner, tenant…"
-          className="w-full pl-9 pr-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:border-emerald-500" />
+          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] text-sm outline-none focus:border-[#2e9f82]" />
       </div>
 
       {activeDrill.length > 0 && (
         <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
-          <span className="text-stone-500">Filtered:</span>
+          <span className="text-[#6b6860]">Filtered:</span>
           {activeDrill.map((d) => (
-            <span key={d} className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium text-xs">{d}</span>
+            <span key={d} className="px-2.5 py-1 rounded-full bg-[#f0faf6] text-[#1a7a5a] font-medium text-xs">{d}</span>
           ))}
-          <Link href="/dashboard/admin/units" onClick={() => setDrill({})} className="text-xs font-semibold text-stone-500 hover:text-stone-800 underline">Clear</Link>
+          <Link href="/dashboard/admin/units" onClick={() => setDrill({})} className="text-xs font-semibold text-[#6b6860] hover:text-[#3f3d39] underline">Clear</Link>
         </div>
       )}
 
       {loading ? (
-        <div className="rounded-2xl border border-stone-200 bg-white p-12 text-center text-stone-400">Loading…</div>
+        <div className="rounded-2xl border border-[#e8e6e0] bg-white p-12 text-center text-[#9b9890]">Loading…</div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-stone-200 bg-white p-12 text-center text-stone-400">No units match.</div>
+        <div className="rounded-2xl border border-[#e8e6e0] bg-white p-12 text-center text-[#9b9890]">No units match.</div>
       ) : (
-        <div className="rounded-2xl border border-stone-200 bg-white divide-y divide-stone-100 overflow-hidden">
+        <div className="rounded-2xl border border-[#e8e6e0] bg-white divide-y divide-[#f0ede8] overflow-hidden">
           {filtered.map((u) => {
             const ac = availColor[u.availability ?? ''] ?? { bg: '#f5f4f0', color: '#6b6860' };
             return (
-              <Link key={u.id} href={`/dashboard/admin/units/${u.id}`} className="flex items-center gap-4 p-4 hover:bg-stone-50 transition">
-                <div className="w-11 h-11 rounded-xl bg-stone-100 grid place-items-center text-stone-400 shrink-0">
+              <Link key={u.id} href={`/dashboard/admin/units/${u.id}`} className="flex items-center gap-4 p-4 hover:bg-[#faf9f7] transition">
+                <div className="w-11 h-11 rounded-xl bg-[#f4f3ef] grid place-items-center text-[#9b9890] shrink-0">
                   <Home size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-stone-900 truncate">Unit {u.unitNumber ?? '—'}{u.unitName ? ` — ${u.unitName}` : ''}</p>
-                  <p className="text-xs text-stone-500 truncate flex items-center gap-1 mt-0.5"><Building2 size={11} /> {u.buildingName ?? '—'}{u.fullAddress ? ` · ${u.fullAddress}` : ''}</p>
-                  <p className="text-xs text-stone-400 mt-0.5 truncate">
+                  <p className="font-semibold text-[#1a1916] truncate">Unit {u.unitNumber ?? '—'}{u.unitName ? ` — ${u.unitName}` : ''}</p>
+                  <p className="text-xs text-[#6b6860] truncate flex items-center gap-1 mt-0.5"><Building2 size={11} /> {u.buildingName ?? '—'}{u.fullAddress ? ` · ${u.fullAddress}` : ''}</p>
+                  <p className="text-xs text-[#9b9890] mt-0.5 truncate">
                     {u.ownerName ?? `RP #${u.rentalProviderId ?? '—'}`}
                     {u.unitType ? ` · ${titleCase(u.unitType)}` : ''}
                     {u.tenantName ? ` · Tenant: ${u.tenantName}` : ''}
                   </p>
                 </div>
                 <span className="text-xs font-medium px-2.5 py-1 rounded-full shrink-0" style={{ backgroundColor: ac.bg, color: ac.color }}>{titleCase(u.availability)}</span>
-                <span className="text-sm font-semibold text-stone-700 shrink-0 w-28 text-right">{u.rentalPrice != null ? `${aed(u.rentalPrice)}/yr` : '—'}</span>
-                <ChevronRight size={16} className="text-stone-300 shrink-0" />
+                <span className="text-sm font-semibold text-[#3f3d39] shrink-0 w-28 text-right">{u.rentalPrice != null ? `${aed(u.rentalPrice)}/yr` : '—'}</span>
+                <ChevronRight size={16} className="text-[#c4c2bc] shrink-0" />
               </Link>
             );
           })}
