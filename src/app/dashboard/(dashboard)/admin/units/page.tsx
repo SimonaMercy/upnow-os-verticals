@@ -8,7 +8,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Home, Search, MapPin, ChevronRight, Building2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Home, Search, ChevronRight, Building2, ArrowLeft } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 
 interface AdminUnit {
@@ -27,6 +28,7 @@ const availColor: Record<string, { bg: string; color: string }> = {
 };
 
 export default function AdminUnitsBrowser() {
+  const router = useRouter();
   const [units, setUnits] = useState<AdminUnit[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -63,6 +65,7 @@ export default function AdminUnitsBrowser() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto">
+      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4"><ArrowLeft size={16} /> Back</button>
       <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
         <div>
           <h1 className="text-2xl font-bold text-stone-900">All units</h1>

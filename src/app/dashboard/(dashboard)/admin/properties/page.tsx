@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Rows3, LayoutGrid, Map as MapIcon, Building2, Search, MapPin, ExternalLink } from 'lucide-react';
+import { Rows3, LayoutGrid, Map as MapIcon, Building2, Search, MapPin, ExternalLink, ArrowLeft } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { PortfolioMapView } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 
@@ -68,6 +68,7 @@ export default function AdminPropertiesBrowser() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto">
+      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4"><ArrowLeft size={16} /> Back</button>
       <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
         <div>
           <h1 className="text-2xl font-bold text-stone-900">All properties</h1>
