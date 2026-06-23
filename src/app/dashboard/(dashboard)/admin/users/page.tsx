@@ -23,6 +23,14 @@ const ROLE_TABS: { key: string; label: string }[] = [
   { key: 'customer', label: 'Customers' },
 ];
 
+// Customer engagement split — rental tenancy vs service bookings vs both.
+const ENGAGEMENT_TABS: { key: string; label: string }[] = [
+  { key: '', label: 'All customers' },
+  { key: 'rental', label: 'Rental only' },
+  { key: 'service', label: 'Service only' },
+  { key: 'both', label: 'Both' },
+];
+
 interface AdminUser {
   id: number;
   email: string;
@@ -37,6 +45,8 @@ interface AdminUser {
   phoneVerified: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  rentalActive?: boolean;
+  serviceActive?: boolean;
 }
 
 const statusColor: Record<string, { bg: string; color: string }> = {
@@ -66,6 +76,7 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [engagementFilter, setEngagementFilter] = useState('');
   const [offset, setOffset] = useState(0);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const limit = 25;
@@ -78,6 +89,7 @@ export default function AdminUsersPage() {
       if (search) params.set('search', search);
       if (roleFilter) params.set('role', roleFilter);
       if (statusFilter) params.set('status', statusFilter);
+      if (roleFilter === 'customer' && engagementFilter) params.set('engagement', engagementFilter);
 
       const result = await apiGet<{ data: AdminUser[]; total: number }>(`/admin/users?${params}`);
       setUsers(result.data);
@@ -87,7 +99,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, roleFilter, statusFilter, offset]);
+  }, [search, roleFilter, statusFilter, engagementFilter, offset]);
 
   useEffect(() => { void fetchUsers(); }, [fetchUsers]);
 
@@ -95,10 +107,11 @@ export default function AdminUsersPage() {
   // mount, so Overview drill-downs can land here pre-filtered.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    const r = p.get('role'); const s = p.get('status'); const q = p.get('search');
+    const r = p.get('role'); const s = p.get('status'); const q = p.get('search'); const e = p.get('engagement');
     if (r != null) setRoleFilter(r);
     if (s != null) setStatusFilter(s);
     if (q != null) setSearch(q);
+    if (e != null) setEngagementFilter(e);
   }, []);
 
   async function updateStatus(userId: number, status: string) {
@@ -129,7 +142,7 @@ export default function AdminUsersPage() {
           return (
             <button
               key={t.key || 'all'}
-              onClick={() => { setRoleFilter(t.key); setOffset(0); }}
+              onClick={() => { setRoleFilter(t.key); setEngagementFilter(''); setOffset(0); }}
               className="px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors"
               style={
                 active
@@ -142,6 +155,30 @@ export default function AdminUsersPage() {
           );
         })}
       </div>
+
+      {/* Customer engagement split — only for the Customers tab */}
+      {roleFilter === 'customer' && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs font-semibold uppercase tracking-wide mr-1" style={{ color: 'var(--color-neutral-400)' }}>
+            Active in
+          </span>
+          {ENGAGEMENT_TABS.map((t) => {
+            const active = engagementFilter === t.key;
+            return (
+              <button
+                key={t.key || 'all'}
+                onClick={() => { setEngagementFilter(t.key); setOffset(0); }}
+                className="px-3 py-1 rounded-full text-xs font-medium transition-colors border"
+                style={active
+                  ? { backgroundColor: 'var(--color-neutral-800)', color: '#fff', borderColor: 'var(--color-neutral-800)' }
+                  : { backgroundColor: '#fff', color: 'var(--color-neutral-600)', borderColor: 'var(--color-base-200)' }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
@@ -242,6 +279,20 @@ export default function AdminUsersPage() {
                   >
                     {roleLabel[u.role] ?? u.role}
                   </span>
+
+                  {/* Engagement badges (customers only) */}
+                  {u.role === 'customer' && u.rentalActive && (
+                    <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: '#eff6ff', color: '#3b82f6' }}>
+                      Rental
+                    </span>
+                  )}
+                  {u.role === 'customer' && u.serviceActive && (
+                    <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: '#ecfeff', color: '#0891b2' }}>
+                      Service
+                    </span>
+                  )}
 
                   {/* Status */}
                   <span
