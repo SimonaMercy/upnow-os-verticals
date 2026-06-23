@@ -11,9 +11,11 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import Link from 'next/link';
 import {
   Wallet, AlertTriangle, Clock, Scissors, Copy, ShieldAlert, ChevronRight,
   ArrowLeft, RefreshCw, Banknote, TrendingUp, UserMinus, Loader2, Pause, Play, Ban,
+  Users, Trophy, Building2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -51,9 +53,46 @@ interface DepositAlerts { trap: TrapRow[]; slowRefund: SlowRefundRow[]; excessiv
 interface HikeRow { contractId: number; rpName: string; priorRent: number; newRent: number; hikePct: number; marketPrice: number | null; }
 interface EvictionRow { contractId: number; rpName: string; status: string; payingTenant: boolean; paidAed: number; terminationRequestedAt: string | null; }
 interface FairnessAlerts { renewalHikes: HikeRow[]; directEvictions: EvictionRow[]; }
+interface Flag {
+  id: number; actorName: string; ruleKey: string; severity: 'high' | 'medium' | 'low';
+  dimension: string; exposureAed: number; detail: Record<string, unknown>; status: string;
+}
+interface ManagerRow {
+  userId: number; name: string; email: string; lastLoginAt: string | null; landlordCount: number;
+  flags: { deposits: boolean; collections: boolean; financials: boolean; signDocs: boolean; poa: boolean; createContracts: boolean; inviteManager: boolean };
+  moneyPower: boolean; dormant: boolean; tier: Tier;
+}
+interface ManagerData { summary: Record<string, number>; managers: ManagerRow[] }
+interface LeadData {
+  totalLeads: number;
+  summary: { stale: number; ghosted: number; frtBreaches: number; poaching: number };
+  frtBreaches: { leadId: number; rpName: string; customerName: string | null; ageHours: number }[];
+  stale: { leadId: number; rpName: string; stage: string; customerName: string | null; staleDays: number }[];
+}
+interface PaymentData {
+  summary: { arrears: number; vatOvercharge: number; bounceClusters: number; orphanPayments: number };
+  arrears: { contractId: number; rpName: string; overdueCheques: number; overdueAed: number; oldestDays: number }[];
+}
+interface JourneyData {
+  funnel: { stage: string; count: number }[];
+  activeContracts: number;
+  stalls: { stuckPending: number; kycIncomplete: number; moveInMissing: number; noPortalLink: number };
+  byRp: { rpId: number; name: string; stuckPending: number; kycIncomplete: number; moveInMissing: number; noPortalLink: number; total: number }[];
+}
+interface ContribRow {
+  rpId: number; name: string; userId: number | null;
+  properties: number; units: number; activeLeases: number; contractsTotal: number;
+  rentRollAed: number; tenants: number; occupancyPct: number | null;
+  rentRollSharePct: number; unitsSharePct: number; leaseSharePct: number;
+}
+interface Contribution {
+  generatedAt: string;
+  totals: { rps: number; properties: number; units: number; activeLeases: number; contractsTotal: number; rentRollAed: number; tenants: number; occupancyPct: number | null };
+  rows: ContribRow[];
+}
 
 /* ── Style constants (match ExecutiveOverview) ── */
-const RED = '#dc2626', AMBER = '#d97706', PURPLE = '#7c3aed', GRAY = '#d4d2cc';
+const RED = '#dc2626', AMBER = '#d97706', PURPLE = '#7c3aed', GRAY = '#d4d2cc', GREEN = '#2e9f82';
 const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
 
 function fmtAED(aed: number | null | undefined): string {
@@ -136,6 +175,22 @@ function AlertList<T>({ title, icon: Icon, count, rows, emptyText, render, accen
   );
 }
 
+function Chip({ c, children }: { c: string; children: React.ReactNode }) {
+  return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `${c}1a`, color: c }}>{children}</span>;
+}
+function shortName(n: string): string {
+  const parts = n.trim().split(/\s+/);
+  return parts.length <= 2 ? n : `${parts[0]} ${parts[1]}`;
+}
+function flagDetailText(f: Flag): string {
+  const d = (f.detail || {}) as Record<string, unknown>;
+  if (f.ruleKey === 'deposit.trap') return `Contract #${d.contractId ?? '—'} · ${d.daysOverdue ?? '?'}d overdue`;
+  if (f.ruleKey === 'fairness.direct_eviction') return d.payingTenant ? 'paying tenant' : 'no payments';
+  if (f.ruleKey === 'fairness.renewal_hike') return `+${d.hikePct ?? '?'}%`;
+  if (f.ruleKey === 'deposit.excessive_deduction') return `${d.ratio ?? '?'}% of deposit`;
+  return f.dimension;
+}
+
 export default function AdminRiskPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
@@ -148,8 +203,15 @@ export default function AdminRiskPage() {
   const [history, setHistory] = useState<RpHistory | null>(null);
   const [loading, setLoading] = useState(true);
   const [recomputing, setRecomputing] = useState(false);
+  const [flags, setFlags] = useState<Flag[]>([]);
+  const [mgr, setMgr] = useState<ManagerData | null>(null);
+  const [leadData, setLeadData] = useState<LeadData | null>(null);
+  const [payData, setPayData] = useState<PaymentData | null>(null);
+  const [journey, setJourney] = useState<JourneyData | null>(null);
+  const [contrib, setContrib] = useState<Contribution | null>(null);
 
   const loadOverview = useCallback(() => { apiGet<Overview>('/admin/risk/overview').then(setOverview).catch(() => null); }, []);
+  const loadFlags = useCallback(() => { apiGet<{ flags: Flag[] }>('/admin/risk/flags').then((r) => setFlags(r.flags)).catch(() => null); }, []);
   const loadAllAlerts = useCallback(() => {
     apiGet<DepositAlerts>('/admin/risk/deposits').then(setDeposits).catch(() => null);
     apiGet<FairnessAlerts>('/admin/risk/fairness').then(setFairness).catch(() => null);
@@ -162,8 +224,20 @@ export default function AdminRiskPage() {
       apiGet<Overview>('/admin/risk/overview').then(setOverview).catch(() => null),
       apiGet<DepositAlerts>('/admin/risk/deposits').then(setDeposits).catch(() => null),
       apiGet<FairnessAlerts>('/admin/risk/fairness').then(setFairness).catch(() => null),
+      loadFlags(),
+      apiGet<ManagerData>('/admin/risk/managers').then(setMgr).catch(() => null),
+      apiGet<LeadData>('/admin/risk/leads').then(setLeadData).catch(() => null),
+      apiGet<PaymentData>('/admin/risk/payments').then(setPayData).catch(() => null),
+      apiGet<JourneyData>('/admin/risk/customer-journey').then(setJourney).catch(() => null),
+      apiGet<Contribution>('/admin/risk/contribution').then(setContrib).catch(() => null),
     ]).finally(() => setLoading(false));
-  }, [allowed]);
+  }, [allowed, loadFlags]);
+
+  async function resolveFlag(id: number, status: 'acknowledged' | 'resolved') {
+    setFlags((fs) => fs.filter((f) => f.id !== id)); // optimistic
+    try { await apiPatch(`/admin/risk/flags/${id}`, { status }); }
+    catch { loadFlags(); }
+  }
 
   const selectRp = useCallback((rpId: number, name: string) => {
     setSelected({ id: rpId, name });
@@ -220,6 +294,11 @@ export default function AdminRiskPage() {
       { name: 'Double-chg', value: k.doubleChargeCount, fill: PURPLE },
     ];
   }, [overview]);
+
+  const contribChart = useMemo(
+    () => (contrib?.rows ?? []).slice(0, 8).map((r) => ({ name: shortName(r.name), aed: r.rentRollAed })),
+    [contrib],
+  );
 
   if (!allowed) {
     return <div className="p-6 max-w-7xl mx-auto"><div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 text-center text-sm text-[#9b9890]">This dashboard is restricted to platform admins.</div></div>;
@@ -448,7 +527,310 @@ export default function AdminRiskPage() {
               )} />
           </div>
 
-          <p className="text-[11px] mt-5 text-[#9b9890]">Live dimensions: deposit + contract fairness. Manager-oversight and lead-responsiveness land next.</p>
+          {/* ════════ Oversight & operations ════════ */}
+          <div className="flex items-center gap-2 mt-7 mb-1">
+            <span className="h-px flex-1 bg-[#e8e6e0]" />
+            <span className="text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Oversight &amp; operations</span>
+            <span className="h-px flex-1 bg-[#e8e6e0]" />
+          </div>
+
+          {/* Customer-harm events */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Customer-harm events</h2>
+                <p className="text-[11px] text-[#9b9890]">The specific deposit &amp; fairness incidents behind the scores — Ack when reviewed, Resolve when handled.</p>
+              </div>
+              <span className="text-[11px] text-[#9b9890] flex-shrink-0 mt-0.5">{flags.length} open</span>
+            </div>
+            {flags.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No open risk flags. 🎉</p>
+            ) : (
+              <ul className="divide-y divide-[#f0ede8] max-h-96 overflow-y-auto">
+                {flags.map((f) => (
+                  <li key={f.id} className="px-4 py-2.5 flex items-center justify-between gap-3 text-[12px]">
+                    <div className="min-w-0">
+                      <div className="font-semibold truncate" style={{ color: sevColor(f.severity) }}>{RULE_LABEL[f.ruleKey] ?? f.ruleKey}</div>
+                      <div className="text-[11px] text-[#9b9890] truncate">{f.actorName} · {flagDetailText(f)}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {f.exposureAed > 0 && <span className="text-[11px] font-semibold text-[#3f3d39] mr-1">{fmtAED(f.exposureAed)}</span>}
+                      <button title="Acknowledge" onClick={() => resolveFlag(f.id, 'acknowledged')} className="px-2 py-1 rounded-md border border-[#e8e6e0] text-[10px] font-semibold text-[#6b6860] hover:bg-[#f5f4f0]">Ack</button>
+                      <button title="Resolve" onClick={() => resolveFlag(f.id, 'resolved')} className="px-2 py-1 rounded-md text-[10px] font-semibold text-white hover:opacity-90" style={{ backgroundColor: GREEN }}>Resolve</button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Manager oversight */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916] flex items-center gap-1.5"><Users size={14} className="text-[#2e9f82]" /> Manager oversight</h2>
+                <p className="text-[11px] text-[#9b9890]">Money/signature power each delegated manager holds — a dormant, escalating or POA manager raises that RP&apos;s score above.</p>
+              </div>
+              {mgr && (
+                <span className="text-[11px] text-[#9b9890] text-right flex-shrink-0 mt-0.5">
+                  {mgr.summary.total} managers · {mgr.summary.withMoneyPower} hold money/signature power · {mgr.summary.dormantWithMoney} dormant-with-power · {mgr.summary.escalations} escalations
+                </span>
+              )}
+            </div>
+            {!mgr || mgr.managers.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No delegated managers.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                      <th className="text-left font-semibold px-4 py-2">Manager</th>
+                      <th className="text-center font-semibold px-3 py-2">RPs</th>
+                      <th className="text-left font-semibold px-3 py-2">Powers held</th>
+                      <th className="text-right font-semibold px-3 py-2">Last login</th>
+                      <th className="text-center font-semibold px-3 py-2">Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mgr.managers.map((m) => (
+                      <tr key={m.userId} className="border-t border-[#f0ede8]">
+                        <td className="px-4 py-2.5"><div className="font-semibold text-[#1a1916]">{m.name}</div><div className="text-[11px] text-[#9b9890]">{m.email}</div></td>
+                        <td className="px-3 py-2.5 text-center text-[#3f3d39]">{m.landlordCount}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            {m.flags.poa && <Chip c={RED}>POA</Chip>}
+                            {m.flags.signDocs && <Chip c={RED}>Sign</Chip>}
+                            {m.flags.deposits && <Chip c={AMBER}>Deposits</Chip>}
+                            {m.flags.collections && <Chip c={AMBER}>Collections</Chip>}
+                            {m.flags.financials && <Chip c="#6b6860">Financials</Chip>}
+                            {m.flags.createContracts && <Chip c="#6b6860">Contracts</Chip>}
+                            {m.flags.inviteManager && <Chip c={PURPLE}>Invite</Chip>}
+                            {!m.moneyPower && <span className="text-[11px] text-[#9b9890]">view-only</span>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-[11px]" style={{ color: m.dormant ? RED : '#9b9890' }}>{m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE }) : 'never'}</td>
+                        <td className="px-3 py-2.5 text-center"><TierBadge tier={m.tier} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Lead responsiveness */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Lead responsiveness</h2>
+                <p className="text-[11px] text-[#9b9890]">How quickly leads are attended &amp; followed up — slow/ghosted leads and poaching raise that RP&apos;s score above.</p>
+              </div>
+              {leadData && <span className="text-[11px] text-[#9b9890] flex-shrink-0 mt-0.5">{leadData.totalLeads} leads tracked</span>}
+            </div>
+            {!leadData || leadData.totalLeads === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No leads in the system yet — slow first-response, stale-lead, ghosting and lead-poaching detectors activate automatically once leads start flowing.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4">
+                  {[
+                    { label: 'Slow first response', value: leadData.summary.frtBreaches, tone: 'bad' as const },
+                    { label: 'Stale leads', value: leadData.summary.stale, tone: 'warn' as const },
+                    { label: 'Ghosted warm leads', value: leadData.summary.ghosted, tone: 'warn' as const },
+                    { label: 'Possible poaching', value: leadData.summary.poaching, tone: 'bad' as const },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border border-[#e8e6e0] px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{s.label}</div>
+                      <div className="text-lg font-bold mt-1" style={{ color: s.value > 0 ? (s.tone === 'bad' ? '#b91c1c' : '#b45309') : '#1a7a5a' }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {leadData.frtBreaches.length > 0 && (
+                  <ul className="divide-y divide-[#f0ede8] border-t border-[#f0ede8] max-h-60 overflow-y-auto">
+                    {leadData.frtBreaches.slice(0, 8).map((l) => (
+                      <li key={l.leadId} className="px-4 py-2 flex items-center justify-between text-[12px]">
+                        <span className="truncate"><span className="font-semibold text-[#1a1916]">{l.customerName || `Lead #${l.leadId}`}</span> <span className="text-[#9b9890]">· {l.rpName}</span></span>
+                        <span className="text-[11px] font-semibold text-[#b91c1c] flex-shrink-0">no response · {Math.round(l.ageHours)}h</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Payment & financial integrity */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Payment &amp; financial integrity</h2>
+                <p className="text-[11px] text-[#9b9890]">Rent arrears on active leases, residential VAT overcharge, bounced-cheque clustering, orphan payments — feeds each RP&apos;s score.</p>
+              </div>
+              {payData && (
+                <span className="text-[11px] text-[#9b9890] text-right flex-shrink-0 mt-0.5">
+                  {payData.summary.arrears} in arrears · {payData.summary.vatOvercharge} VAT · {payData.summary.bounceClusters} bounce · {payData.summary.orphanPayments} orphan
+                </span>
+              )}
+            </div>
+            {!payData || payData.arrears.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No payment-integrity issues detected (no arrears, VAT overcharge, bounce clusters or orphan payments).</p>
+            ) : (
+              <ul className="divide-y divide-[#f0ede8] max-h-72 overflow-y-auto">
+                {payData.arrears.map((a) => (
+                  <li key={a.contractId} className="px-4 py-2.5 flex items-center justify-between gap-3 text-[12px]">
+                    <div className="min-w-0">
+                      <div className="font-semibold truncate text-[#b91c1c]">Rent arrears (lease still active)</div>
+                      <div className="text-[11px] text-[#9b9890] truncate">{a.rpName} · Contract #{a.contractId} · {a.overdueCheques} overdue cheque{a.overdueCheques === 1 ? '' : 's'}</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-bold text-[#b91c1c]">{fmtAED(a.overdueAed)}</div>
+                      <div className="text-[11px] text-[#9b9890]">{a.oldestDays}d overdue</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Rental-provider contribution */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916] flex items-center gap-1.5"><Trophy size={14} className="text-[#2e9f82]" /> Rental-provider contribution</h2>
+                <p className="text-[11px] text-[#9b9890]">Who brings the most volume to the platform — properties, units, active leases, rent roll, tenants. Ranks on signed footprint.</p>
+              </div>
+              {contrib && (
+                <span className="text-[11px] text-[#9b9890] text-right flex-shrink-0 mt-0.5">
+                  {contrib.totals.rps} active providers · {contrib.totals.units} units · {fmtAED(contrib.totals.rentRollAed)} rent roll · {contrib.totals.occupancyPct ?? '—'}% occupied
+                </span>
+              )}
+            </div>
+            {!contrib || contrib.rows.length === 0 ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">No rental providers with a footprint yet.</p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
+                <div className="lg:col-span-1">
+                  <p className="text-[11px] font-semibold text-[#6b6860] mb-1">Rent roll by provider</p>
+                  <ResponsiveContainer width="100%" height={Math.max(150, contribChart.length * 34)}>
+                    <BarChart layout="vertical" data={contribChart} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" horizontal={false} />
+                      <XAxis type="number" tickFormatter={aedAxis} tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={92} tick={{ fontSize: 10, fill: '#6b6860' }} axisLine={false} tickLine={false} />
+                      <Tooltip formatter={(v: unknown) => [fmtAED(Number(v)), 'Rent roll'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                      <Bar dataKey="aed" radius={[0, 4, 4, 0]} fill={GREEN} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="lg:col-span-2 overflow-x-auto">
+                  <table className="w-full text-[12px]">
+                    <thead>
+                      <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                        <th className="text-left font-semibold px-3 py-2">#</th>
+                        <th className="text-left font-semibold px-3 py-2">Provider</th>
+                        <th className="text-right font-semibold px-3 py-2">Units</th>
+                        <th className="text-right font-semibold px-3 py-2">Active</th>
+                        <th className="text-right font-semibold px-3 py-2">Occ.</th>
+                        <th className="text-right font-semibold px-3 py-2">Tenants</th>
+                        <th className="text-right font-semibold px-3 py-2">Rent roll</th>
+                        <th className="text-left font-semibold px-3 py-2 w-28">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contrib.rows.map((r, i) => (
+                        <tr key={r.rpId} className="border-t border-[#f0ede8]">
+                          <td className="px-3 py-2.5 text-[#9b9890] font-semibold">{i + 1}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-semibold text-[#1a1916]">{r.name}</div>
+                            <div className="text-[11px] text-[#9b9890] flex items-center gap-1"><Building2 size={10} /> {r.properties} {r.properties === 1 ? 'property' : 'properties'}</div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.units}</td>
+                          <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.activeLeases}</td>
+                          <td className="px-3 py-2.5 text-right" style={{ color: r.occupancyPct != null && r.occupancyPct < 60 ? '#b45309' : '#3f3d39' }}>{r.occupancyPct == null ? '—' : `${r.occupancyPct}%`}</td>
+                          <td className="px-3 py-2.5 text-right text-[#3f3d39]">{r.tenants}</td>
+                          <td className="px-3 py-2.5 text-right font-bold text-[#1a1916]">{fmtAED(r.rentRollAed)}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <div className="flex-1 h-1.5 rounded-full bg-[#f0ede8] overflow-hidden min-w-[40px]"><div className="h-full rounded-full" style={{ width: `${r.rentRollSharePct}%`, backgroundColor: GREEN }} /></div>
+                              <span className="text-[11px] font-semibold text-[#6b6860] tabular-nums w-9 text-right">{r.rentRollSharePct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Customer journey — the support side */}
+          <div className="rounded-2xl bg-white border border-[#e8e6e0] overflow-hidden mt-4">
+            <div className="flex items-start justify-between px-4 py-2.5 border-b border-[#f0ede8] gap-3">
+              <div>
+                <h2 className="text-[13px] font-bold text-[#1a1916]">Customer journey — are customers being supported through the process?</h2>
+                <p className="text-[11px] text-[#9b9890]">Where customers get stuck: contract issued but never sent, KYC unverified, no portal link, move-in not done. Platform-wide (not in the RP score).</p>
+              </div>
+            </div>
+            {!journey ? (
+              <p className="px-4 py-6 text-[12px] text-center text-[#9b9890]">Loading…</p>
+            ) : (
+              <div className="p-4">
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {journey.funnel.map((fn, i) => {
+                    const max = journey.funnel[0]?.count || 1;
+                    const pct = max ? Math.round((fn.count / max) * 100) : 0;
+                    return (
+                      <div key={fn.stage} className="rounded-xl border border-[#e8e6e0] px-3 py-2.5">
+                        <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{fn.stage}</div>
+                        <div className="text-lg font-bold mt-1" style={{ color: i > 0 && fn.count === 0 ? '#b91c1c' : '#1a1916' }}>{fn.count}</div>
+                        <div className="h-1.5 rounded-full mt-1.5 bg-[#f0ede8] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: i > 0 && fn.count === 0 ? RED : GREEN }} /></div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: 'Contract not issued/sent', value: journey.stalls.stuckPending },
+                    { label: 'No portal link sent', value: journey.stalls.noPortalLink },
+                    { label: 'KYC incomplete', value: journey.stalls.kycIncomplete },
+                    { label: 'Move-in not done', value: journey.stalls.moveInMissing },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border border-[#e8e6e0] px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{s.label}</div>
+                      <div className="text-lg font-bold mt-1" style={{ color: s.value > 0 ? '#b45309' : '#1a7a5a' }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {journey.byRp.length > 0 && (
+                  <table className="w-full text-[12px]">
+                    <thead>
+                      <tr className="text-[#9b9890] bg-[#faf9f7] text-[11px]">
+                        <th className="text-left font-semibold px-3 py-2">Provider</th>
+                        <th className="text-right font-semibold px-3 py-2">Not issued</th>
+                        <th className="text-right font-semibold px-3 py-2">No link</th>
+                        <th className="text-right font-semibold px-3 py-2">KYC</th>
+                        <th className="text-right font-semibold px-3 py-2">Move-in</th>
+                        <th className="text-right font-semibold px-3 py-2">Stuck</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {journey.byRp.map((r) => (
+                        <tr key={r.rpId} className="border-t border-[#f0ede8]">
+                          <td className="px-3 py-2 font-medium text-[#1a1916]">{r.name}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.stuckPending || '—'}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.noPortalLink || '—'}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.kycIncomplete || '—'}</td>
+                          <td className="px-3 py-2 text-right text-[#3f3d39]">{r.moveInMissing || '—'}</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#b45309]">{r.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+
+          <p className="text-[11px] mt-5 text-[#9b9890]">Composite dimensions: deposit · contract fairness · manager · lead · payment — plus the platform-wide customer-journey view. <Link href="/dashboard/admin" className="text-[#2e9f82] font-semibold">← Back to Platform Overview</Link></p>
         </>
       )}
     </div>
