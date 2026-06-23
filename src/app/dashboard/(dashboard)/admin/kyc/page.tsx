@@ -10,6 +10,7 @@ import {
   CreditCard, MousePointerClick, ExternalLink, UserCheck,
 } from "lucide-react";
 import Link from "next/link";
+import { BackLink } from "@/components/dashboard/DashboardWidgets";
 import { CustomerDocsModal, type CustomerDoc } from "@/components/upnow/CustomerDocsModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1151,6 +1152,7 @@ export default function AdminKycPage() {
 
   return (
     <div className="flex flex-col h-full" style={{ padding: "12px 20px 16px" }}>
+      <BackLink />
 
       {/* ── Header row ────────────────────────────────────── */}
       <div className="flex items-center gap-1 pb-2 border-b flex-shrink-0"

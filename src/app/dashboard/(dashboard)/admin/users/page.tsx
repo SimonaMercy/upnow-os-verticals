@@ -118,6 +118,7 @@ export default function AdminUsersPage() {
 
   return (
     <DashboardPage
+      back
       title="User Management"
       subtitle={`${total} users on the platform`}
     >

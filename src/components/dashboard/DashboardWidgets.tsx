@@ -1,8 +1,23 @@
 'use client';
 
 import { ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LucideIcon } from 'lucide-react';
+import { LucideIcon, ArrowLeft } from 'lucide-react';
+
+/* ── Back link (returns to the previous page) ── */
+export function BackLink({ className }: { className?: string }) {
+  const router = useRouter();
+  return (
+    <button
+      type="button"
+      onClick={() => router.back()}
+      className={cn('inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4', className)}
+    >
+      <ArrowLeft size={16} /> Back
+    </button>
+  );
+}
 
 /* ── StatCard ── */
 export function StatCard({
@@ -52,14 +67,18 @@ export function DashboardPage({
   subtitle,
   actions,
   children,
+  back,
 }: {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
   children: ReactNode;
+  /** Show a "Back" link above the title (returns to the previous page). */
+  back?: boolean;
 }) {
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {back && <BackLink />}
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--color-neutral-900)' }}>{title}</h1>

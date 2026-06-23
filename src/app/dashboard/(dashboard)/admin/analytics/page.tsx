@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { Users, Home, Building2, Wrench, Star, MapPin, TrendingUp, ChevronRight } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { BackLink } from '@/components/dashboard/DashboardWidgets';
 
 interface NV { name: string; value: number }
 interface RpAnalytics {
@@ -79,6 +80,7 @@ export default function AdminAnalyticsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8">
+      <BackLink />
       {/* ── RP analytics ── */}
       <section>
         <h2 className="text-lg font-bold text-stone-900 mb-3">Rental Provider analytics</h2>

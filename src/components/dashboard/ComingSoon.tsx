@@ -1,9 +1,12 @@
 'use client';
 
 import { Construction } from 'lucide-react';
+import { BackLink } from './DashboardWidgets';
 
-export function ComingSoon({ title, description }: { title: string; description?: string }) {
+export function ComingSoon({ title, description, back }: { title: string; description?: string; back?: boolean }) {
   return (
+    <>
+      {back && <div className="px-6 pt-6"><BackLink /></div>}
     <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6">
       <div
         className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
@@ -25,5 +28,6 @@ export function ComingSoon({ title, description }: { title: string; description?
         In Development
       </span>
     </div>
+    </>
   );
 }

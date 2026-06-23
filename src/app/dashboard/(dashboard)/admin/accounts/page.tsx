@@ -40,6 +40,7 @@ export default function AdminAccountsPage() {
       </DashboardPage>
     }>
       <DashboardPage
+        back
         title="Admin Accounts"
         subtitle="Manage delegated admin accounts on the platform."
         actions={

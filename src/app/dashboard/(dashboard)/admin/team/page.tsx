@@ -59,6 +59,7 @@ export default function AdminTeamPage() {
 
   return (
     <DashboardPage
+      back
       title="Team"
       subtitle="Managers and technicians delegated by landlords and service providers"
       actions={
