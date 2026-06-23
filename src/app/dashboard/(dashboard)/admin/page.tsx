@@ -15,8 +15,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  Building2, Home, Users, UserCog, ShieldCheck, Wallet, Banknote, TrendingUp, Loader2,
-  ArrowUpRight, ShieldAlert, Wrench, HardHat, ListChecks, Globe, Scale, Star, CalendarClock, Gauge,
+  Building2, Home, Users, UserCog, ShieldCheck, TrendingUp, Loader2,
+  ArrowUpRight, ShieldAlert, Wrench, HardHat, ListChecks, Globe, Scale, Star, Gauge,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie,
@@ -176,7 +176,6 @@ export default function AdminPlatformOverview() {
 
   const usersByRole = useMemo(() => (ov?.usersByRole ?? []).map((r) => ({ name: ROLE_LABEL[r.name] ?? r.name, value: r.value })), [ov]);
   const kycData = useMemo(() => (ov?.customerKyc ?? []).map((r) => ({ name: r.name.replace(/_/g, ' '), value: r.value })), [ov]);
-  const collections = useMemo(() => (ov?.collections ?? []).map((r) => ({ name: (r.name || 'unknown').replace(/_/g, ' '), value: r.value })), [ov]);
   const disputesOpen = (ov?.disputes ?? []).filter((d) => !/resolved|closed/i.test(d.name)).reduce((s, d) => s + d.value, 0);
   const disputesTotal = (ov?.disputes ?? []).reduce((s, d) => s + d.value, 0);
 
@@ -218,20 +217,13 @@ export default function AdminPlatformOverview() {
           {/* ════════ RENTAL ════════ */}
           <SectionHeader icon={Building2} title="Rental marketplace" sub="Properties, units, active customers and the rental book." />
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
             <KpiTile icon={Building2} label="Properties" value={c ? String(c.properties) : '—'} sub={c ? `${c.units} units` : ''} href="/dashboard/admin/properties" />
             <KpiTile icon={Home} label="Units" value={c ? String(c.units) : '—'} sub={c ? `${c.listedUnits} listed` : ''} href="/dashboard/admin/properties" />
             <KpiTile icon={Users} label="Active customers" value={c ? String(c.activeCustomers) : '—'} sub={c ? `of ${c.totalTenants} total` : ''} tone="good" />
             <KpiTile icon={UserCog} label="Rental providers" value={c ? String(c.rentalProviders) : '—'} sub="landlords" />
             <KpiTile icon={ShieldCheck} label="Managers" value={c ? String(c.managers) : '—'} sub="delegated" />
-          </div>
-
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
             <KpiTile icon={Gauge} label="Occupancy" value={f ? `${f.occupancyPct}%` : '—'} sub={c ? `${c.occupiedUnits}/${c.units} occupied` : ''} tone={f && f.occupancyPct < 60 ? 'warn' : 'neutral'} />
-            <KpiTile icon={Wallet} label="Annual rent roll" value={f ? fmtAED(f.arr) : '—'} sub="active leases" tone="good" />
-            <KpiTile icon={Banknote} label="Deposits held" value={f ? fmtAED(f.depositsHeld) : '—'} sub="liability" />
-            <KpiTile icon={ListChecks} label="Active leases" value={ov ? String(ov.leases.active) : '—'} sub={ov ? `${ov.leases.expiring90} expiring ≤90d` : ''} />
-            <KpiTile icon={CalendarClock} label="Renewal backlog" value={ov ? String(ov.leases.renewalBacklog) : '—'} sub="active but past end-date" tone={ov && ov.leases.renewalBacklog > 0 ? 'warn' : 'good'} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
@@ -278,10 +270,7 @@ export default function AdminPlatformOverview() {
             </ChartCard>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Cheque collections" sub="rent cheques by status">
-              <CatBar data={collections} color={AMBER} empty="No payment records yet." />
-            </ChartCard>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
             <ChartCard title="Customer KYC" sub="tenants by verification status">
               <CatBar data={kycData} color={BLUE} empty="No customers yet." />
             </ChartCard>
