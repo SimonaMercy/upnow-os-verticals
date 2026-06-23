@@ -232,11 +232,11 @@ export default function AdminPlatformOverview() {
 
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
             <KpiTile icon={Building2} label="Properties" value={c ? String(c.properties) : '—'} sub={c ? `${c.units} units` : ''} href="/dashboard/admin/properties" />
-            <KpiTile icon={Home} label="Units" value={c ? String(c.units) : '—'} sub={c ? `${c.listedUnits} listed` : ''} href="/dashboard/admin/properties" />
+            <KpiTile icon={Home} label="Units" value={c ? String(c.units) : '—'} sub={c ? `${c.listedUnits} listed` : ''} href="/dashboard/admin/units" />
             <KpiTile icon={Users} label="Active customers" value={c ? String(c.activeCustomers) : '—'} sub={c ? `of ${c.totalTenants} total` : ''} tone="good" href="/dashboard/admin/users?role=customer&status=active" />
             <KpiTile icon={UserCog} label="Rental providers" value={c ? String(c.rentalProviders) : '—'} sub="landlords" href="/dashboard/admin/users?role=rental_provider" />
             <KpiTile icon={ShieldCheck} label="Managers" value={c ? String(c.managers) : '—'} sub="delegated" href="/dashboard/admin/users?role=manager" />
-            <KpiTile icon={Gauge} label="Occupancy" value={f ? `${f.occupancyPct}%` : '—'} sub={c ? `${c.occupiedUnits}/${c.units} occupied` : ''} tone={f && f.occupancyPct < 60 ? 'warn' : 'neutral'} href="/dashboard/admin/properties?availability=occupied" />
+            <KpiTile icon={Gauge} label="Occupancy" value={f ? `${f.occupancyPct}%` : '—'} sub={c ? `${c.occupiedUnits}/${c.units} occupied` : ''} tone={f && f.occupancyPct < 60 ? 'warn' : 'neutral'} href="/dashboard/admin/units?availability=occupied" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
@@ -253,8 +253,9 @@ export default function AdminPlatformOverview() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Unit mix" sub="units by type" href="/dashboard/admin/properties">
-              <CatBar data={rp?.unitMix ?? []} color={TEAL} empty="No units yet." />
+            <ChartCard title="Unit mix" sub="units by type" hint="Click a bar">
+              <CatBar data={rp?.unitMix ?? []} color={TEAL} empty="No units yet."
+                onBarClick={(n) => router.push(`/dashboard/admin/units?unitType=${encodeURIComponent(n)}`)} />
             </ChartCard>
             <ChartCard title="Property categories" sub="properties by category" hint="Click a slice">
               {(ov?.categorySplit ?? []).length ? (

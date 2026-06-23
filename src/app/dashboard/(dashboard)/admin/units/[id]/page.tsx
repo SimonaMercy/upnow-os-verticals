@@ -1,24 +1,40 @@
 /**
  * Admin unit detail (read-only) — SCRUM-588 click-through target.
- * Unit terms / rent / availability + parent property + owning RP + current tenancy.
+ * Full parity with the RP unit view: photos, specs, leasing configuration +
+ * pricing, plan agreement/addendum, unit documents, and the current tenancy's
+ * contract addendums. Documents/addendums open inline (view-only) per policy.
  */
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Home, Building2, ExternalLink, FileText } from 'lucide-react';
+import { ArrowLeft, Home, Building2, ExternalLink, FileText, ImageIcon, Settings2, ScrollText, Paperclip } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { openDocViewer } from '@/lib/docViewer';
+import { leaseTermsFromUnit } from '@/lib/unitForm';
 
+interface UnitFull {
+  id: number; unitNumber: string | null; unitName: string | null; unitType: string | null;
+  availability: string | null; rentalPrice: number | null; bedrooms: number | null; bathrooms: number | null;
+  floor: string | null; listingStatus: string | null; unitSizeSqm: number | null; unitSizeSqft: number | null;
+  propertyId: number; planLabel: string | null; unitTier: string | null; premiseNumber: string | null;
+  parkingSpaces: number | null; furnishing: string | null; view: string | null; facilities: string | null;
+  serviceCharges: number | null; securityDeposit: number | null; adminFee: number | null; ejariFeeFils: number | null; commission: number | null;
+  property?: { id: number; buildingName: string | null; fullAddress: string | null; emirate?: { nameEn?: string | null } | null; community?: { nameEn?: string | null } | null } | null;
+}
+interface Media { id: number; url: string; caption: string | null; mediaType: string | null }
+interface PlanAddendum { id: number; versionNo: number; planLabel: string; specialConditions: string | null; addendumFileUrl: string | null; addendumFileName: string | null; addendumMimeType: string | null; leaseTerms: Record<string, unknown> | null }
+interface Doc { id: number; documentKey: string; displayName: string | null; fileUrl: string; mimeType: string | null; status: string }
+interface Addendum { id: number; name: string; fileUrl: string; mimeType: string | null; tenantSigned: boolean; landlordSigned: boolean }
 interface UnitDetail {
-  unit: {
-    id: number; unitNumber: string | null; unitName: string | null; unitType: string | null;
-    availability: string | null; rentalPrice: number | null; bedrooms: number | null; bathrooms: number | null;
-    floor: string | null; listingStatus: string | null; unitSizeSqm: number | null; propertyId: number;
-    property?: { id: number; buildingName: string | null; fullAddress: string | null; emirate?: { nameEn?: string | null } | null; community?: { nameEn?: string | null } | null } | null;
-  };
+  unit: UnitFull;
+  media: Media[];
   owner: { rentalProviderId: number; userId: number | null; name: string | null } | null;
   currentTenancy: { id: number; ref: string; tenantName: string | null; tenantUserId: number | null; startDate: string | null; endDate: string | null; annualRent: number | null; status: string } | null;
+  planAddendum: PlanAddendum | null;
+  documents: Doc[];
+  contractAddendums: Addendum[];
 }
 
 const availCls: Record<string, string> = {
@@ -26,12 +42,23 @@ const availCls: Record<string, string> = {
   maintenance: 'bg-amber-100 text-amber-700', reserved: 'bg-purple-100 text-purple-700',
 };
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const titleCase = (s: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
+const aed = (v: number | null | undefined) => (v == null ? '—' : `AED ${Number(v).toLocaleString('en-AE')}`);
+const isImg = (u: string) => /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(u);
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold">{label}</div>
       <div className="text-sm font-semibold text-stone-800 mt-0.5">{value}</div>
+    </div>
+  );
+}
+function Card({ icon: Icon, title, children }: { icon: React.ElementType; title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white p-5 mb-5">
+      <div className="flex items-center gap-2 mb-4"><Icon size={15} className="text-stone-400" /><span className="text-sm font-semibold text-stone-700">{title}</span></div>
+      {children}
     </div>
   );
 }
@@ -58,11 +85,32 @@ export default function AdminUnitDetailPage() {
   const u = d.unit;
   const prop = u.property;
   const loc = [prop?.community?.nameEn, prop?.emirate?.nameEn].filter(Boolean).join(', ') || prop?.fullAddress || '—';
+  const lt = leaseTermsFromUnit({ facilities: u.facilities });
+  let amenities: string[] = [];
+  try { const f = u.facilities ? JSON.parse(u.facilities) : null; if (f && Array.isArray(f.amenities)) amenities = f.amenities as string[]; } catch { /* ignore */ }
+  const leaseRows: [string, string][] = [
+    ['Min lease', lt.minLeaseMonths ? `${lt.minLeaseMonths} months` : ''],
+    ['Notice period', lt.noticePeriodDays ? `${lt.noticePeriodDays} days` : ''],
+    ['Rent escalation', lt.rentEscalationPct ? `${lt.rentEscalationPct}%` : ''],
+    ['Rental type', lt.rentalType && lt.rentalType !== 'yearly' ? titleCase(lt.rentalType) : lt.rentalType ? 'Yearly' : ''],
+    ['Installments', lt.numberOfPayments || ''],
+    ['Advance payment', lt.advancePayment ? aed(Number(lt.advancePayment)) : ''],
+    ['Grace period', lt.gracePeriodDays ? `${lt.gracePeriodDays} days` : ''],
+    ['Late-payment fee', lt.latePaymentFee ? aed(Number(lt.latePaymentFee)) : ''],
+  ].filter(([, v]) => v) as [string, string][];
+  const pricingRows: [string, string][] = [
+    ['Security deposit', u.securityDeposit != null ? aed(u.securityDeposit) : ''],
+    ['Admin fee', u.adminFee != null ? aed(u.adminFee) : ''],
+    ['Ejari fee', u.ejariFeeFils != null ? aed(u.ejariFeeFils / 100) : ''],
+    ['Commission', u.commission != null ? aed(u.commission) : ''],
+    ['Service charges', u.serviceCharges != null ? aed(u.serviceCharges) : ''],
+  ].filter(([, v]) => v) as [string, string][];
 
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto">
       <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-stone-600 hover:text-stone-900 mb-4"><ArrowLeft size={16} /> Back</button>
 
+      {/* Header + specs */}
       <div className="rounded-2xl border border-stone-200 bg-white p-6 mb-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-start gap-3 min-w-0">
@@ -70,38 +118,142 @@ export default function AdminUnitDetailPage() {
             <div className="min-w-0">
               <h1 className="text-xl font-bold text-stone-900 leading-tight">{u.unitNumber ? `Unit ${u.unitNumber}` : (u.unitName ?? `Unit #${u.id}`)}</h1>
               <Link href={`/dashboard/admin/properties/${u.propertyId}`} className="text-sm text-emerald-700 hover:underline inline-flex items-center gap-1.5 mt-1"><Building2 size={13} /> {prop?.buildingName ?? 'Property'} <ExternalLink size={11} /></Link>
-              <p className="text-xs text-stone-400 mt-0.5">{loc}</p>
+              <p className="text-xs text-stone-400 mt-0.5">{loc}{u.planLabel ? ` · Plan: ${u.planLabel}` : ''}</p>
             </div>
           </div>
           {u.availability && <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${availCls[u.availability] ?? 'bg-stone-100 text-stone-600'}`}>{u.availability}</span>}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-5 border-t border-stone-100">
-          <Stat label="Type" value={u.unitType ?? '—'} />
+          <Stat label="Type" value={titleCase(u.unitType)} />
+          <Stat label="Tier" value={titleCase(u.unitTier)} />
           <Stat label="Bedrooms" value={u.bedrooms != null ? String(u.bedrooms) : '—'} />
           <Stat label="Bathrooms" value={u.bathrooms != null ? String(u.bathrooms) : '—'} />
-          <Stat label="Size (sqm)" value={u.unitSizeSqm != null ? String(u.unitSizeSqm) : '—'} />
+          <Stat label="Parking" value={u.parkingSpaces != null ? String(u.parkingSpaces) : '—'} />
+          <Stat label="Furnishing" value={titleCase(u.furnishing)} />
+          <Stat label="Size" value={u.unitSizeSqm != null ? `${u.unitSizeSqm} sqm` : (u.unitSizeSqft != null ? `${u.unitSizeSqft} sqft` : '—')} />
           <Stat label="Floor" value={u.floor ?? '—'} />
-          <Stat label="Rent / yr" value={u.rentalPrice != null ? `AED ${u.rentalPrice.toLocaleString('en-AE')}` : '—'} />
-          <Stat label="Listing" value={u.listingStatus ?? '—'} />
+          <Stat label="View" value={u.view ?? '—'} />
+          <Stat label="Premise no." value={u.premiseNumber ?? '—'} />
+          <Stat label="Rent / yr" value={aed(u.rentalPrice)} />
+          <Stat label="Listing" value={titleCase(u.listingStatus)} />
           {d.owner && <div><div className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold">Owner (RP)</div>{d.owner.userId ? <Link href={`/dashboard/admin/users/${d.owner.userId}`} className="text-sm font-semibold text-emerald-700 hover:underline mt-0.5 inline-block">{d.owner.name ?? 'RP'}</Link> : <div className="text-sm font-semibold text-stone-800 mt-0.5">{d.owner.name ?? '—'}</div>}</div>}
         </div>
       </div>
 
-      <div className="rounded-2xl border border-stone-200 bg-white p-5">
-        <div className="flex items-center gap-2 mb-3"><FileText size={15} className="text-stone-400" /><span className="text-sm font-semibold text-stone-700">Current tenancy</span></div>
-        {d.currentTenancy ? (
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <Link href={`/dashboard/admin/users/${d.currentTenancy.tenantUserId ?? ''}`} className={`text-sm font-semibold ${d.currentTenancy.tenantUserId ? 'text-emerald-700 hover:underline' : 'text-stone-800 pointer-events-none'}`}>{d.currentTenancy.tenantName ?? 'Tenant'}</Link>
-              <div className="text-xs text-stone-500 mt-0.5">{d.currentTenancy.ref} · {fmtDate(d.currentTenancy.startDate)} – {fmtDate(d.currentTenancy.endDate)}</div>
-            </div>
-            {d.currentTenancy.annualRent != null && <span className="text-sm font-medium text-stone-700 tabular-nums">AED {d.currentTenancy.annualRent.toLocaleString('en-AE')}/yr</span>}
+      {/* Photos */}
+      {d.media.length > 0 && (
+        <Card icon={ImageIcon} title={`Photos (${d.media.length})`}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {d.media.map((m) => (
+              isImg(m.url) ? (
+                <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-stone-200 group">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.url} alt={m.caption ?? 'Unit photo'} className="w-full h-32 object-cover group-hover:opacity-90 transition" />
+                  {m.caption && <p className="text-[11px] text-stone-500 px-2 py-1 truncate">{m.caption}</p>}
+                </a>
+              ) : (
+                <button key={m.id} onClick={() => openDocViewer({ fileUrl: m.url, caption: m.caption ?? 'Floor plan' })} className="rounded-xl border border-stone-200 h-32 grid place-items-center text-stone-400 hover:bg-stone-50">
+                  <span className="flex flex-col items-center gap-1 text-xs"><FileText size={20} /> {m.mediaType === 'floor_plan' ? 'Floor plan' : 'View'}</span>
+                </button>
+              )
+            ))}
           </div>
+        </Card>
+      )}
+
+      {/* Leasing configuration + pricing + amenities */}
+      {(leaseRows.length > 0 || pricingRows.length > 0 || amenities.length > 0) && (
+        <Card icon={Settings2} title="Leasing configuration">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Lease terms</p>
+              {leaseRows.length ? (
+                <div className="grid grid-cols-2 gap-3">{leaseRows.map(([k, v]) => <Stat key={k} label={k} value={v} />)}</div>
+              ) : <p className="text-sm text-stone-400">No lease terms configured.</p>}
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Pricing & fees</p>
+              {pricingRows.length ? (
+                <div className="grid grid-cols-2 gap-3">{pricingRows.map(([k, v]) => <Stat key={k} label={k} value={v} />)}</div>
+              ) : <p className="text-sm text-stone-400">No fees configured.</p>}
+            </div>
+          </div>
+          {amenities.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-stone-100">
+              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Amenities</p>
+              <div className="flex flex-wrap gap-1.5">{amenities.map((a) => <span key={a} className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">{titleCase(a)}</span>)}</div>
+            </div>
+          )}
+          {lt.specialConditions && (
+            <div className="mt-5 pt-4 border-t border-stone-100">
+              <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-1">Special conditions</p>
+              <p className="text-sm text-stone-700 whitespace-pre-wrap">{lt.specialConditions}</p>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Plan agreement / addendum */}
+      {d.planAddendum && (d.planAddendum.addendumFileUrl || d.planAddendum.specialConditions) && (
+        <Card icon={ScrollText} title={`Plan agreement & addendum${d.planAddendum.versionNo ? ` · v${d.planAddendum.versionNo}` : ''}`}>
+          {d.planAddendum.addendumFileUrl && (
+            <button onClick={() => openDocViewer({ fileUrl: d.planAddendum!.addendumFileUrl!, caption: d.planAddendum!.addendumFileName ?? 'Agreement addendum' })}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-stone-200 text-sm text-stone-700 hover:bg-stone-50">
+              <Paperclip size={14} /> {d.planAddendum.addendumFileName ?? 'Agreement addendum'}
+            </button>
+          )}
+          {d.planAddendum.specialConditions && <p className="text-sm text-stone-700 whitespace-pre-wrap mt-3">{d.planAddendum.specialConditions}</p>}
+        </Card>
+      )}
+
+      {/* Unit documents */}
+      <Card icon={FileText} title={`Unit documents (${d.documents.length})`}>
+        {d.documents.length ? (
+          <div className="space-y-2">
+            {d.documents.map((doc) => (
+              <button key={doc.id} onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: (doc.displayName ?? doc.documentKey).replace(/_/g, ' ') })}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border border-stone-200 hover:bg-stone-50 text-left">
+                <FileText size={15} className="text-stone-400 shrink-0" />
+                <span className="text-sm text-stone-800 flex-1 truncate">{(doc.displayName ?? doc.documentKey).replace(/_/g, ' ')}</span>
+                <span className="text-[11px] text-stone-400">{titleCase(doc.status)}</span>
+              </button>
+            ))}
+          </div>
+        ) : <p className="text-sm text-stone-400">No documents uploaded for this unit.</p>}
+      </Card>
+
+      {/* Current tenancy + its contract addendums */}
+      <Card icon={FileText} title="Current tenancy">
+        {d.currentTenancy ? (
+          <>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <Link href={`/dashboard/admin/users/${d.currentTenancy.tenantUserId ?? ''}`} className={`text-sm font-semibold ${d.currentTenancy.tenantUserId ? 'text-emerald-700 hover:underline' : 'text-stone-800 pointer-events-none'}`}>{d.currentTenancy.tenantName ?? 'Tenant'}</Link>
+                <div className="text-xs text-stone-500 mt-0.5">{d.currentTenancy.ref} · {fmtDate(d.currentTenancy.startDate)} – {fmtDate(d.currentTenancy.endDate)}</div>
+              </div>
+              {d.currentTenancy.annualRent != null && <span className="text-sm font-medium text-stone-700 tabular-nums">{aed(d.currentTenancy.annualRent)}/yr</span>}
+            </div>
+            {d.contractAddendums.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-stone-100">
+                <p className="text-[11px] uppercase tracking-wide text-stone-400 font-semibold mb-2">Contract addendums</p>
+                <div className="space-y-2">
+                  {d.contractAddendums.map((a) => (
+                    <button key={a.id} onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name })}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-stone-200 hover:bg-stone-50 text-left">
+                      <Paperclip size={14} className="text-stone-400 shrink-0" />
+                      <span className="text-sm text-stone-800 flex-1 truncate">{a.name}</span>
+                      <span className="text-[11px] text-stone-400">{a.tenantSigned && a.landlordSigned ? 'Signed' : a.tenantSigned || a.landlordSigned ? 'Partially signed' : 'Unsigned'}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <div className="text-sm text-stone-400">No active tenancy — unit is {u.availability ?? 'unoccupied'}.</div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
