@@ -253,6 +253,14 @@ function RpContentPanel({
   const poaDocs = allDocs.filter((d) => d.documentKey.startsWith("poa_"));
   const docs = allDocs.filter((d) => !d.documentKey.startsWith("poa_"));
 
+  // Required-document checklist — what an admin must see before approving. Drives
+  // the approval-checklist card + the "Mark Compliant" missing-docs gate.
+  const checklist = detail?.checklist ?? [];
+  const isVerifiedStatus = (s: string | null | undefined) => ["processed", "complete", "verified"].includes(String(s).toLowerCase());
+  const requiredItems = checklist.filter((c) => c.required);
+  const providedRequired = requiredItems.filter((c) => c.uploaded);
+  const missingRequired = requiredItems.filter((c) => !c.uploaded);
+
   async function act(status: ComplianceStatus) {
     if (!profile) return;
     setActing(true);
@@ -312,6 +320,41 @@ function RpContentPanel({
 
         {profile && !loading && (
           <div className="space-y-3">
+
+            {/* Approval checklist — required documents, with what's still missing */}
+            {requiredItems.length > 0 && (
+              <div className="rounded-xl p-3" style={{ backgroundColor: missingRequired.length ? "#fef2f2" : "#f0fdf4", border: `1px solid ${missingRequired.length ? "#fecaca" : "#bbf7d0"}` }}>
+                <div className="flex items-center gap-1.5 mb-2">
+                  {missingRequired.length ? <AlertCircle size={12} style={{ color: "#dc2626" }} /> : <CheckCircle2 size={12} style={{ color: "#16a34a" }} />}
+                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-600)" }}>
+                    Approval checklist — {providedRequired.length}/{requiredItems.length} required provided
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {requiredItems.map((c) => {
+                    const ok = c.uploaded;
+                    const verified = ok && isVerifiedStatus(c.status);
+                    const color = ok ? (verified ? "#16a34a" : "#b45309") : "#dc2626";
+                    return (
+                      <div key={c.key} className="flex items-center justify-between gap-2 text-xs py-0.5">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {ok ? <CheckCircle2 size={12} style={{ color }} /> : <XCircle size={12} style={{ color }} />}
+                          <span className="truncate" style={{ color: ok ? "var(--color-neutral-700)" : "#dc2626", fontWeight: ok ? 400 : 600 }}>{c.displayName}</span>
+                        </span>
+                        <span className="shrink-0 font-semibold" style={{ color }}>
+                          {ok ? (verified ? "Verified" : "Pending review") : "Missing"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {missingRequired.length > 0 && (
+                  <p className="text-[11px] mt-2 pt-2 border-t" style={{ borderColor: "#fecaca", color: "#b91c1c" }}>
+                    {missingRequired.length} required item{missingRequired.length === 1 ? "" : "s"} missing — provide {missingRequired.length === 1 ? "it" : "these"} before marking compliant.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Identity */}
             <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
@@ -528,7 +571,16 @@ function RpContentPanel({
             style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-800)" }}
           />
           <div className="flex gap-2">
-            <button onClick={() => void act("compliant")} disabled={acting || loading}
+            <button
+              onClick={() => {
+                if (missingRequired.length > 0 && !window.confirm(
+                  `${missingRequired.length} required document${missingRequired.length === 1 ? "" : "s"} still missing:\n\n` +
+                  missingRequired.map((c) => `• ${c.displayName}`).join("\n") +
+                  `\n\nApprove (Mark Compliant) anyway?`,
+                )) return;
+                void act("compliant");
+              }}
+              disabled={acting || loading}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
               style={{ backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}>
               <CheckCircle2 size={13} /> Mark Compliant
