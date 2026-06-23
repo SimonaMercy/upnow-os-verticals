@@ -1460,7 +1460,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <Loader2 size={12} className="animate-spin" /> Loading…
             </p>
           ) : (() => {
-            const KYC_1 = new Set(['emirates_id', 'passport', 'uae_visa']);
+            const KYC_1 = new Set(['emirates_id', 'passport']);
             const RENTAL = new Set(['employment_letter', 'bank_statement', 'marriage_certificate', 'rental_history', 'credit_report', 'utility_clearance', 'trade_license', 'tax_registration', 'moa', 'business_license', 'utility_proof_of_payment']);
             const docs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
 
@@ -2778,7 +2778,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
       {/* ── Document viewer modal ── */}
       {(() => {
-        const KYC_1  = new Set(['emirates_id', 'passport', 'uae_visa']);
+        const KYC_1  = new Set(['emirates_id', 'passport']);
         const RENTAL = new Set(['employment_letter','bank_statement','marriage_certificate','rental_history','credit_report','utility_clearance','trade_license','tax_registration','moa','business_license','utility_proof_of_payment']);
         const allDocs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
 

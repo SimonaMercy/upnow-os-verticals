@@ -505,24 +505,31 @@ const EMIRATES_LIST = ['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','F
 // is the greater of the two. Amounts are applied literally; the % resolves
 // against the contract's annual rent.
 type PenaltyRuleKey =
+  | 'bouncedChequePenalty'
   | 'chequeHoldPenalty'
   | 'lateRenewalPenalty'
   | 'earlyTerminationPenalty'
   | 'lateMoveoutPenalty'
   | 'unauthorizedSharingPenalty';
 
-type PenaltyRuleCfg = { key: PenaltyRuleKey; title: string; description: string; flatPlaceholder: string; pctPlaceholder: string };
+// pctLabel = what a % is taken of (annual rent for most; the cheque's face value
+// for the bounced-cheque rule).
+type PenaltyRuleCfg = { key: PenaltyRuleKey; title: string; description: string; pctLabel?: string };
 
 const PENALTY_RULES: PenaltyRuleCfg[] = [
-  { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-suggested as an editable deduction at move-out settlement.', flatPlaceholder: 'e.g. 500', pctPlaceholder: 'e.g. 2' },
-  { key: 'lateRenewalPenalty', title: 'Late Renewal', description: 'Charge when the tenant renews after the renewal window. The % is of the annual rent.', flatPlaceholder: 'e.g. 0', pctPlaceholder: 'e.g. 5' },
-  { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early. The % is of the annual rent.', flatPlaceholder: 'e.g. 0', pctPlaceholder: 'e.g. 25' },
-  { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant moves out after the lease end date. Enter a flat amount (e.g. a per-day rate you total yourself).', flatPlaceholder: 'e.g. 200', pctPlaceholder: 'e.g. 0' },
-  { key: 'unauthorizedSharingPenalty', title: 'Sharing without notice / NOC', description: 'Charge when the unit is shared without notice or an NOC. The % is of the annual rent.', flatPlaceholder: 'e.g. 0', pctPlaceholder: 'e.g. 10' },
+  { key: 'bouncedChequePenalty', title: 'Bounced Cheque Penalty', description: 'Charge for each bounced rent cheque. Auto-added as an editable deduction at move-out settlement.', pctLabel: '% of cheque' },
+  { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-added as an editable deduction at move-out settlement.' },
+  { key: 'lateRenewalPenalty', title: 'Late Renewal', description: 'Charge when the tenant renews after the renewal window.' },
+  { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early.' },
+  { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant moves out after the lease end date.' },
+  { key: 'unauthorizedSharingPenalty', title: 'Sharing without notice / NOC', description: 'Charge when the unit is shared without notice or an NOC.' },
 ];
 
-type PenaltyState = { enabled: boolean; fee: string; pct: string };
-const EMPTY_PENALTY: PenaltyState = { enabled: false, fee: '', pct: '' };
+// A rule is either a flat AED amount or a percentage (single value + type), like
+// the fee rows. The backend keeps separate _fee / _pct columns; we map one of
+// them and null the other on save.
+type PenaltyState = { enabled: boolean; valueType: 'aed' | 'pct'; value: string };
+const EMPTY_PENALTY: PenaltyState = { enabled: false, valueType: 'aed', value: '' };
 
 function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }: {
   cfg: PenaltyRuleCfg;
@@ -533,7 +540,9 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
   onChange: (s: PenaltyState) => void;
   onSave: () => void;
 }) {
-  const { enabled, fee, pct } = state;
+  const { enabled, valueType, value } = state;
+  const pctLabel = cfg.pctLabel ?? '% of rent';
+  const setVal = (patch: Partial<PenaltyState>) => onChange({ ...state, ...patch });
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4 mb-4">
@@ -541,40 +550,28 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
           <h2 className="font-semibold text-base text-[#1a1916]">{cfg.title}</h2>
           <p className="text-xs text-[#9b9890] mt-0.5">{cfg.description}</p>
         </div>
-        <Toggle value={enabled} onChange={(v) => onChange({ ...state, enabled: v })} />
+        <Toggle value={enabled} onChange={(v) => setVal({ enabled: v })} />
       </div>
 
       {enabled && (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
-            <label className="block">
-              <span className="text-xs font-medium text-[#3d3b35]">Flat fee (AED)</span>
-              <input
-                type="number" min={0} step="1" inputMode="decimal"
-                value={fee}
-                onChange={(e) => onChange({ ...state, fee: e.target.value })}
-                placeholder={cfg.flatPlaceholder}
-                className="mt-1 w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2e9f82] tabular-nums"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-[#3d3b35]">…or % of annual rent</span>
-              <div className="mt-1 flex items-center border border-[#e8e6e0] rounded-lg px-3 focus-within:border-[#2e9f82]">
-                <input
-                  type="number" min={0} max={100} step="0.1" inputMode="decimal"
-                  value={pct}
-                  onChange={(e) => onChange({ ...state, pct: e.target.value })}
-                  placeholder={cfg.pctPlaceholder}
-                  className="w-full py-2 text-sm outline-none bg-transparent tabular-nums"
-                />
-                <span className="text-sm text-[#9b9890]">%</span>
-              </div>
-            </label>
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          {/* Type pill — AED or % (matches the fee rows) */}
+          <div className="inline-flex bg-[#f6f7f4] rounded-[9px] p-[3px] border border-[#e6ebe7]">
+            <button type="button" onClick={() => setVal({ valueType: 'aed' })}
+              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${valueType === 'aed' ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'}`}>Fixed</button>
+            <button type="button" onClick={() => setVal({ valueType: 'pct' })}
+              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${valueType === 'pct' ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'}`}>{pctLabel}</button>
           </div>
-          <p className="text-[11px] text-[#6b7a74] mb-3">
-            We suggest the <b className="text-[#3d3b35]">greater</b> of the flat fee and the percentage as an editable deduction. Leave one blank to use only the other.
-          </p>
-        </>
+          {/* Value input */}
+          <div className="inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white">
+            {valueType === 'aed' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">AED</span>}
+            <input type="text" inputMode="decimal" value={value}
+              onChange={(e) => setVal({ value: e.target.value.replace(/[^0-9.]/g, '') })}
+              placeholder="0"
+              className="w-24 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent tabular-nums" />
+            {valueType === 'pct' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">%</span>}
+          </div>
+        </div>
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -586,7 +583,7 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
           style={{ background: '#2e9f82' }}
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          {saving ? 'Saving…' : 'Save Rule'}
+          {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </div>
@@ -661,20 +658,11 @@ export default function SettingsPage() {
   const [renewalIncSaved,  setRenewalIncSaved]  = useState(false);
   const [renewalIncError,  setRenewalIncError]  = useState<string | null>(null);
 
-  // ── Bounced-cheque penalty (Rules) ──────────────────────────
-  // Charged per bounced rent cheque; auto-suggested as a deduction at move-out
-  // settlement. Per cheque = greater of a flat AED fee and a % of the cheque value.
-  const [bcEnabled,   setBcEnabled]   = useState(false);
-  const [bcFee,       setBcFee]       = useState<string>('');
-  const [bcPct,       setBcPct]       = useState<string>('');
-  const [bcSaving,    setBcSaving]    = useState(false);
-  const [bcSaved,     setBcSaved]     = useState(false);
-  const [bcError,     setBcError]     = useState<string | null>(null);
-
   // ── Penalty Rules engine (Rules, SCRUM-578) ─────────────────
-  // Five more configurable penalties alongside the bounced-cheque rule. One
-  // save at a time (savingKey/savedKey/errorKey track which card is active).
+  // Six configurable penalties (Bounced Cheque + five more). One save at a time
+  // (savingKey/savedKey/errorKey track which card is active).
   const [penalties, setPenalties] = useState<Record<PenaltyRuleKey, PenaltyState>>({
+    bouncedChequePenalty:       { ...EMPTY_PENALTY },
     chequeHoldPenalty:          { ...EMPTY_PENALTY },
     lateRenewalPenalty:         { ...EMPTY_PENALTY },
     earlyTerminationPenalty:    { ...EMPTY_PENALTY },
@@ -761,16 +749,19 @@ export default function SettingsPage() {
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
-        setBcEnabled(Boolean(p.bouncedChequePenaltyEnabled));
-        if (p.bouncedChequePenaltyFee != null) setBcFee(String(p.bouncedChequePenaltyFee));
-        if (p.bouncedChequePenaltyPct != null) setBcPct(String(p.bouncedChequePenaltyPct));
-        // Penalty Rules engine — round-trip each rule's enabled/fee/pct.
-        const seedPenalty = (key: PenaltyRuleKey): PenaltyState => ({
-          enabled: Boolean(p[`${key}Enabled`]),
-          fee: p[`${key}Fee`] != null ? String(p[`${key}Fee`]) : '',
-          pct: p[`${key}Pct`] != null ? String(p[`${key}Pct`]) : '',
-        });
+        // Penalty Rules engine — round-trip each rule. A rule stored as a % maps
+        // to valueType 'pct'; otherwise (flat fee, or nothing yet) to 'aed'.
+        const seedPenalty = (key: PenaltyRuleKey): PenaltyState => {
+          const fee = p[`${key}Fee`];
+          const pct = p[`${key}Pct`];
+          const enabled = Boolean(p[`${key}Enabled`]);
+          if (pct != null && (fee == null || Number(fee) <= 0)) {
+            return { enabled, valueType: 'pct', value: String(pct) };
+          }
+          return { enabled, valueType: 'aed', value: fee != null ? String(fee) : '' };
+        };
         setPenalties({
+          bouncedChequePenalty:       seedPenalty('bouncedChequePenalty'),
           chequeHoldPenalty:          seedPenalty('chequeHoldPenalty'),
           lateRenewalPenalty:         seedPenalty('lateRenewalPenalty'),
           earlyTerminationPenalty:    seedPenalty('earlyTerminationPenalty'),
@@ -1090,41 +1081,6 @@ export default function SettingsPage() {
     }
   };
 
-  async function saveBouncedPenalty() {
-    setBcSaving(true);
-    setBcError(null);
-    setBcSaved(false);
-    try {
-      const fee = bcFee.trim() === '' ? null : Number(bcFee);
-      const pct = bcPct.trim() === '' ? null : Number(bcPct);
-      if (fee !== null && (Number.isNaN(fee) || fee < 0)) {
-        setBcError('Enter a valid flat fee (0 or more).'); return;
-      }
-      if (pct !== null && (Number.isNaN(pct) || pct < 0 || pct > 100)) {
-        setBcError('Enter a percentage between 0 and 100.'); return;
-      }
-      if (bcEnabled && (fee == null || fee <= 0) && (pct == null || pct <= 0)) {
-        setBcError('Set a flat fee, a percentage, or both before enabling.'); return;
-      }
-      const res = await fetch('/api/profiles/rental-provider/me', {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bouncedChequePenaltyEnabled: bcEnabled,
-          bouncedChequePenaltyFee: fee,
-          bouncedChequePenaltyPct: pct,
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      setBcSaved(true);
-    } catch {
-      setBcError('Failed to save. Please try again.');
-    } finally {
-      setBcSaving(false);
-    }
-  }
-
   const updatePenalty = (key: PenaltyRuleKey, s: PenaltyState) => {
     setPenalties(prev => ({ ...prev, [key]: s }));
     setPenaltySavedKey(k => (k === key ? null : k));
@@ -1136,17 +1092,19 @@ export default function SettingsPage() {
     setPenaltyErrorKey(null);
     setPenaltyErrorMsg(null);
     setPenaltySavedKey(null);
-    const fee = st.fee.trim() === '' ? null : Number(st.fee);
-    const pct = st.pct.trim() === '' ? null : Number(st.pct);
-    if (fee !== null && (Number.isNaN(fee) || fee < 0)) {
-      setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a valid flat fee (0 or more).'); return;
+    const num = st.value.trim() === '' ? null : Number(st.value);
+    if (num !== null && (Number.isNaN(num) || num < 0)) {
+      setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a valid amount (0 or more).'); return;
     }
-    if (pct !== null && (Number.isNaN(pct) || pct < 0 || pct > 100)) {
+    if (st.valueType === 'pct' && num !== null && num > 100) {
       setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a percentage between 0 and 100.'); return;
     }
-    if (st.enabled && (fee == null || fee <= 0) && (pct == null || pct <= 0)) {
-      setPenaltyErrorKey(key); setPenaltyErrorMsg('Set a flat fee, a percentage, or both before enabling.'); return;
+    if (st.enabled && (num == null || num <= 0)) {
+      setPenaltyErrorKey(key); setPenaltyErrorMsg('Set an amount before enabling.'); return;
     }
+    // Map the single value onto the backend's _fee / _pct columns.
+    const fee = st.valueType === 'aed' ? num : null;
+    const pct = st.valueType === 'pct' ? num : null;
     setPenaltySavingKey(key);
     try {
       const res = await fetch('/api/profiles/rental-provider/me', {
@@ -1818,75 +1776,9 @@ export default function SettingsPage() {
               </div>
             </form>
 
-            {/* Bounced Cheque Penalty */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div>
-                  <h2 className="font-semibold text-base text-[#1a1916]">Bounced Cheque Penalty</h2>
-                  <p className="text-xs text-[#9b9890] mt-0.5">
-                    Charge a penalty for each bounced rent cheque. When you open a move-out settlement,
-                    we auto-add this as an editable deduction — you can adjust or remove it before sending.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={bcEnabled}
-                  onClick={() => { setBcEnabled(v => !v); setBcSaved(false); }}
-                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 cursor-pointer ${bcEnabled ? 'bg-[#2e9f82]' : 'bg-[#d9d6cf]'}`}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${bcEnabled ? 'translate-x-5' : ''}`} />
-                </button>
-              </div>
-
-              {bcEnabled && (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
-                    <label className="block">
-                      <span className="text-xs font-medium text-[#3d3b35]">Flat fee per cheque (AED)</span>
-                      <input
-                        type="number" min={0} step="1" inputMode="decimal"
-                        value={bcFee}
-                        onChange={e => { setBcFee(e.target.value); setBcSaved(false); }}
-                        placeholder="e.g. 250"
-                        className="mt-1 w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2e9f82] tabular-nums"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs font-medium text-[#3d3b35]">…or % of cheque value</span>
-                      <div className="mt-1 flex items-center border border-[#e8e6e0] rounded-lg px-3 focus-within:border-[#2e9f82]">
-                        <input
-                          type="number" min={0} max={100} step="0.1" inputMode="decimal"
-                          value={bcPct}
-                          onChange={e => { setBcPct(e.target.value); setBcSaved(false); }}
-                          placeholder="e.g. 5"
-                          className="w-full py-2 text-sm outline-none bg-transparent tabular-nums"
-                        />
-                        <span className="text-sm text-[#9b9890]">%</span>
-                      </div>
-                    </label>
-                  </div>
-                  <p className="text-[11px] text-[#6b7a74] mb-3">
-                    Per bounced cheque we charge the <b className="text-[#3d3b35]">greater</b> of the flat fee and the percentage. Leave one blank to use only the other.
-                  </p>
-                </>
-              )}
-
-              <div className="flex items-center gap-3 flex-wrap">
-                {bcError && <p className="text-xs text-red-600 flex-1">{bcError}</p>}
-                {bcSaved && !bcSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-                <button
-                  type="button" onClick={saveBouncedPenalty} disabled={bcSaving}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
-                  style={{ background: '#2e9f82' }}
-                >
-                  {bcSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  {bcSaving ? 'Saving…' : 'Save Penalty'}
-                </button>
-              </div>
-            </div>
-
-            {/* Penalty Rules engine (SCRUM-578) — five more configurable penalties */}
+            {/* Penalty rules — 2 configurations per row (Bounced Cheque · Cheque Hold · Late Renewal · Early Termination · Late Move-out · Sharing) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* All six penalty rules (Bounced Cheque + five) render via the unified easy-design card */}
             {PENALTY_RULES.map(cfg => (
               <PenaltyRuleCard
                 key={cfg.key}
@@ -1899,6 +1791,7 @@ export default function SettingsPage() {
                 onSave={() => savePenaltyRule(cfg.key)}
               />
             ))}
+            </div>
 
             {/* Payment Installment Plans */}
             <div className="bg-white rounded-2xl p-6 shadow-sm">

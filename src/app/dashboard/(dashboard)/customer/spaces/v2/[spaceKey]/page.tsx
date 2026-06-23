@@ -98,7 +98,7 @@ interface ApiPaymentPlanItem {
   amountFils: number;
   dueDate: string;
   description?: string;
-  type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+  type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
 }
 /** Method classifier for an individual payment (per-cheque on the RP side
  *  in Phase 5b). The customer never picks this — they just attach the
@@ -610,7 +610,7 @@ function fmtDateShort(iso: string) {
   return new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE });
 }
 
-const PLAN_TYPE_ORDER: Record<string, number> = { first_bundle: 0, installment: 1, extra_installment: 2, security_deposit: 3 };
+const PLAN_TYPE_ORDER: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
 function sortPlanItems(items: ApiPaymentPlanItem[]): ApiPaymentPlanItem[] {
   return [...items].sort((a, b) => {
     if (!a.dueDate && !b.dueDate) return a.index - b.index;
@@ -2601,6 +2601,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const items = sortPlanItems(plan.items ?? []);
   const firstDue = items.find(i => i.dueDate)?.dueDate ?? null;
   const typeMeta = (t?: string) => {
+    if (t === 'fee')              return { label: 'Fee',           bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
     if (t === 'security_deposit') return { label: 'Before move-in',  bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
     if (t === 'first_bundle')     return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
     if (t === 'extra_installment')return { label: 'Extra',    bg: 'var(--jade-soft)',    fg: 'var(--jade-deep)' };

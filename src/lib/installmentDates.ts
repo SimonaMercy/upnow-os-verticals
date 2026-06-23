@@ -5,8 +5,9 @@
 // the SAME dates the backend will stamp, otherwise the RP sees one schedule and
 // the tenant receives another. Keep this in lock-step with the backend helper:
 //   • spread evenly over the ACTUAL term (start→end), not a hardcoded 12 months;
-//   • snap each due date to the RP's configured `preferredChequeDays` (nearest to
-//     the start day-of-month), clamped to the target month's length;
+//   • snap each due date BACK to the RP's configured `preferredChequeDays` on/before
+//     it (so cheques land before each period; the first before move-in), walking
+//     into the prior month when needed, clamped to the target month's length;
 //   • pure string/UTC math so a YYYY-MM-DD never shifts a day by timezone.
 
 const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
@@ -25,13 +26,38 @@ export function addMonthsIso(iso: string, months: number): string {
 }
 
 /**
+ * Snap a YYYY-MM-DD date BACK to the latest configured cheque day on/before it,
+ * walking into the prior month when none in the current month qualifies — so a
+ * cheque is always collected before its period (the first one before the lease
+ * start). For a 1st-of-month start with days [10, 25] the result is the 25th of
+ * the PRIOR month. No-op (keeps the date's own day-of-month) when no cheque days.
+ */
+export function snapBackToChequeDay(iso: string | Date, chequeDays?: number[] | null): string {
+  const base = toIsoDate(iso);
+  const days = Array.isArray(chequeDays)
+    ? [...chequeDays].filter((d) => d >= 1 && d <= 31).sort((a, b) => a - b)
+    : [];
+  if (days.length === 0) return base;
+  const [y, m, d] = base.split('-').map(Number); // m is 1..12
+  const onOrBefore = days.filter((x) => x <= d);
+  if (onOrBefore.length) {
+    return `${y}-${pad(m)}-${pad(onOrBefore[onOrBefore.length - 1])}`;
+  }
+  const py = m === 1 ? y - 1 : y;
+  const pm = m === 1 ? 12 : m - 1;
+  const lastOfMonth = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+  return `${py}-${pad(pm)}-${pad(Math.min(days[days.length - 1], lastOfMonth))}`;
+}
+
+/**
  * Even-month installment due dates over the real term, as 'YYYY-MM-DD' strings.
  *
  * @param startIso   contract start (string or Date)
  * @param endIso     contract end = inclusive last day (null → 12-month fallback)
  * @param n          number of installments (>= 1)
  * @param chequeDays RP.preferredChequeDays, e.g. [1, 10, 25]; each due date snaps
- *                   to the configured day nearest the start day (clamped to month).
+ *                   BACK to the configured day on/before it (so cheques land
+ *                   before each period). No config ⇒ keeps the start day-of-month.
  */
 export function buildInstallmentDueDates(
   startIso: string | Date,
@@ -41,7 +67,7 @@ export function buildInstallmentDueDates(
 ): string[] {
   if (!startIso || !(n > 0)) return [];
   const start = toIsoDate(startIso);
-  const [sy, sm, sd] = start.split('-').map(Number);
+  const [sy, sm] = start.split('-').map(Number);
 
   let termMonths = 12;
   if (endIso) {
@@ -52,14 +78,8 @@ export function buildInstallmentDueDates(
   if (!(termMonths > 0)) termMonths = 12;
 
   const interval = termMonths / n;
-  const day = Array.isArray(chequeDays) && chequeDays.length
-    ? chequeDays.reduce((best, c) => (Math.abs(c - sd) < Math.abs(best - sd) ? c : best), chequeDays[0])
-    : sd;
-
   return Array.from({ length: n }, (_, k) => {
     const raw = addMonthsIso(start, Math.round(k * interval)); // keeps start day-of-month
-    const [ry, rm] = raw.split('-').map(Number);
-    const lastOfMonth = new Date(Date.UTC(ry, rm, 0)).getUTCDate();
-    return `${ry}-${pad(rm)}-${pad(Math.min(day, lastOfMonth))}`;
+    return snapBackToChequeDay(raw, chequeDays);
   });
 }

@@ -256,7 +256,7 @@ export default function NewContractPage() {
     amountFils: number;
     dueDate: string;
     description?: string;
-    type?: 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+    type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
   };
   const [planFromLead, setPlanFromLead] = useState<null | {
     rentFils: number;
@@ -1148,7 +1148,7 @@ export default function NewContractPage() {
               {/* Cheque schedule — mirrors the lead's issued plan when available (covers bundle, all installments,
                   extras and the security deposit). Falls back to a simple even split when no plan is present. */}
               {planFromLead ? (() => {
-                const order: Record<string, number> = { first_bundle: 0, installment: 1, extra_installment: 2, security_deposit: 3 };
+                const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
                 const sorted = planFromLead.items.slice().sort((a, b) => {
                   if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
                   return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);

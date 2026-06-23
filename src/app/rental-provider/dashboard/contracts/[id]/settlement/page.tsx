@@ -42,6 +42,7 @@ interface ApiSettlement {
   agreedAt: string | null;
   paidAt: string | null;
   updatedAt: string | null;
+  availablePenalties?: { key: string; label: string; amount: number }[];
 }
 
 interface ContractMeta {
@@ -81,6 +82,7 @@ export default function SettlementPage() {
   const [deposit, setDeposit] = useState('0');
   const [notes, setNotes] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
+  const [available, setAvailable] = useState<{ key: string; label: string; amount: number }[]>([]);
   const [payRows, setPayRows] = useState<PayRow[]>([]);
   const [stamps, setStamps] = useState<{ sentAt: string | null; agreedAt: string | null; paidAt: string | null }>({ sentAt: null, agreedAt: null, paidAt: null });
 
@@ -106,6 +108,7 @@ export default function SettlementPage() {
     setDeposit(String(s.depositHeld ?? 0));
     setNotes(s.notes ?? '');
     setRows((s.lines ?? []).map(l => ({ key: uid(), label: l.label, amount: String(l.amount), type: l.type })));
+    setAvailable(s.availablePenalties ?? []);
     setPayRows((s.payments ?? []).map(p => ({ key: uid(), amount: String(p.amount), method: p.method, reference: p.reference ?? '', receivedOn: p.receivedOn ?? '' })));
     setStamps({ sentAt: s.sentAt, agreedAt: s.agreedAt, paidAt: s.paidAt });
   }, []);
@@ -146,6 +149,7 @@ export default function SettlementPage() {
   const balance = Math.round((depositNum - sumLines + sumPayments) * 100) / 100;
 
   function addRow(type: LineType) { setRows(r => [...r, { key: uid(), label: '', amount: '', type }]); }
+  function addPenalty(label: string, amount: number) { setRows(r => [...r, { key: uid(), label, amount: String(amount), type: 'deduction' }]); }
   function updateRow(key: string, patch: Partial<Row>) { setRows(r => r.map(x => x.key === key ? { ...x, ...patch } : x)); }
   function removeRow(key: string) { setRows(r => r.filter(x => x.key !== key)); }
 
@@ -325,6 +329,20 @@ export default function SettlementPage() {
           <div className="flex gap-2 pt-1">
             <button type="button" onClick={() => addRow('deduction')} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75"><Plus size={13} /> Add deduction</button>
             <button type="button" onClick={() => addRow('due')} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75"><Plus size={13} /> Add due</button>
+          </div>
+        )}
+
+        {!locked && available.filter(p => !rows.some(r => r.label === p.label)).length > 0 && (
+          <div className="pt-2 mt-2 border-t border-[#f0ede8]">
+            <p className="text-[11px] text-[#9b9890] mb-1.5">Add a configured penalty (Settings → Rules):</p>
+            <div className="flex flex-wrap gap-1.5">
+              {available.filter(p => !rows.some(r => r.label === p.label)).map(p => (
+                <button key={p.key} type="button" onClick={() => addPenalty(p.label, p.amount)}
+                  className="flex items-center gap-1 text-[11px] font-medium text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-1 hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors">
+                  <Plus size={11} /> {p.label} · AED {p.amount.toLocaleString('en-AE')}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {rows.length === 0 && locked && <p className="text-xs text-[#9b9890]">No deductions — full deposit refunded.</p>}

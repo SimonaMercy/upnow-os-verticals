@@ -22,7 +22,7 @@ export const KYC_DOCS: DocReq[] = [
   { key: 'emirates_id_front', label: 'Emirates ID — Front', category: 'identity', required: true, hint: 'Clear photo or scan of the FRONT of your Emirates ID' },
   { key: 'emirates_id_back',  label: 'Emirates ID — Back',  category: 'identity', required: true, hint: 'Clear photo or scan of the BACK of your Emirates ID' },
   { key: 'passport',          label: 'Passport',            category: 'identity', required: true, hint: 'Bio-data page of your valid passport' },
-  { key: 'uae_visa',          label: 'UAE Visa / Residency', category: 'identity', required: true, hint: 'UAE residence visa page (not required for UAE nationals)' },
+  { key: 'uae_visa',          label: 'UAE Visa / Residency', category: 'identity', required: false, hint: 'UAE residence visa page (optional — provide if available)' },
 ];
 
 export const KYC_DOC_KEYS = new Set(KYC_DOCS.map(d => d.key));

@@ -52,8 +52,9 @@ export default function TenantContractPrintPage() {
         // For DOCX addendums, extract the text so it renders inline in the PDF.
         const enriched = await Promise.all(
           adds.map(async (a) => {
+            // Text addendums (in-app terms) have no file — render via a.terms; skip mammoth.
             const isDocx = (a.mimeType || '').includes('word') || /\.docx?$/i.test(a.fileUrl || '');
-            if (!isDocx) return a;
+            if (!isDocx || !a.fileUrl) return a;
             try {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const mod: any = await import('mammoth/mammoth.browser');

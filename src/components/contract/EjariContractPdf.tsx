@@ -15,6 +15,7 @@ import {
 import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
 import { isDubaiContract } from '@/lib/ejariFill';
 import { useFilledEjari } from './useFilledEjari';
+import { addendumTermsToLines, type AddendumTerms } from '@/lib/addendumTerms';
 
 Font.register({
   family: 'Amiri',
@@ -59,7 +60,7 @@ export interface EjariContractData {
   unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
   signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string; method?: string }[];
 }
-export interface EjariAddendum { id: number; name: string; fileUrl: string; mimeType: string; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null; /** Extracted text lines (DOCX), rendered inline across pages. */ lines?: string[] }
+export interface EjariAddendum { id: number; name: string; fileUrl?: string | null; mimeType?: string | null; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null; /** Extracted text lines (DOCX), rendered inline across pages. */ lines?: string[]; /** In-app bilingual terms (the new authoring path); rendered EN then AR. */ terms?: AddendumTerms | null }
 
 const fmtDate = (d?: string | null) => {
   if (!d) return '';
@@ -437,15 +438,23 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
  *  standalone AddendumDoc that the template-fill flow appends. */
 function addendumPages(addendums: EjariAddendum[], j: TenancyJurisdiction, date: string) {
   return addendums.map((a, idx) => {
-    const hasText = !!(a.lines && a.lines.length);
+    // In-app text terms take precedence; else legacy extracted DOCX lines.
+    const lines = (a.lines && a.lines.length) ? a.lines : addendumTermsToLines(a.terms);
+    const hasText = lines.length > 0;
     const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
+    const sig = (
+      <Signatures
+        tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
+        landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
+    );
     return (
-      <Page key={a.id} size="A4" style={S.page}>
+      // Extra bottom padding reserves room for the fixed per-page signature footer.
+      <Page key={a.id} size="A4" style={{ ...S.page, paddingBottom: 96 }}>
         <Header date={date} j={j} />
         <Bar en={`Addendum ${idx + 1} of ${addendums.length}`} ar={`ملحق العقد — ${a.name}`} />
         {hasText ? (
           <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
-            {a.lines!.map((l, i) => (
+            {lines.map((l, i) => (
               isHeading(l)
                 ? <Text key={i} style={{ fontSize: 9, fontFamily: isArabic(l) ? AR : 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -455,13 +464,15 @@ function addendumPages(addendums: EjariAddendum[], j: TenancyJurisdiction, date:
         ) : (
           <View wrap={false} style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 12, minHeight: 320, alignItems: 'center' }}>
             {isImg
-              ? <Image src={a.fileUrl} style={{ maxHeight: 460, objectFit: 'contain' }} />
+              ? <Image src={a.fileUrl || ''} style={{ maxHeight: 460, objectFit: 'contain' }} />
               : <Text style={{ fontSize: 9, color: '#333' }}>Attached document: {a.fileUrl}</Text>}
           </View>
         )}
-        <Signatures
-          tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
-          landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
+        {/* Signature block fixed to the bottom of EVERY page (matches the official
+            DLD form, which carries a signatures block on all pages). */}
+        <View fixed style={{ position: 'absolute', left: 24, right: 24, bottom: 14 }}>
+          {sig}
+        </View>
       </Page>
     );
   });

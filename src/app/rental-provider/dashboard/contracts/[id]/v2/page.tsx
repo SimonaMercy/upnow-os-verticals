@@ -630,6 +630,8 @@ interface StepHandlers {
   onMarkUtility: () => Promise<void>;
   onVerifyUtility: () => Promise<void>;
   onRevertToDraft: () => Promise<void>;
+  /** Send the saved renewal draft to the customer, or discard it. */
+  onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
   /** Undo a sent settlement — pulls it back to draft so the figures can be
    *  corrected and re-sent (only while the customer hasn't agreed yet). */
   onUnsendSettlement: () => Promise<void>;
@@ -1158,6 +1160,18 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               )}
             </div>
           )}
+          {/* Renewal DRAFT — saved for RP review; the customer has NOT been
+              notified yet (gated on renewalAccepted='pending'). RP reviews then
+              sends or discards. */}
+          {h.contract.renewalStatus === 'draft' && h.contract.renewalAccepted !== 'pending' && h.contract.renewalChild && (
+            <div className="flag" style={{ alignSelf: 'flex-start', background: '#fdf7ea', borderColor: '#e7d8a8', color: '#8a6d1f' }}>
+              <RotateCcw size={13} /> Renewal draft ready — not yet sent to {TEN}
+              {' · '}
+              <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
+                Review draft · CID-{h.contract.renewalChild.id}
+              </Link>
+            </div>
+          )}
           {/* Customer accepted — the renewal now lives in its own contract.
               Without this block the renewal VANISHED from the parent page the
               moment it was accepted/issued. */}
@@ -1178,7 +1192,21 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                 <RotateCcw size={14} /> Open renewal contract · CID-{h.contract.renewalChild.id}
               </Link>
             )}
-            {mode !== 'renewal' && !h.contract.renewalAccepted && h.perms.renewals && (
+            {/* Draft review actions — send to the customer, edit the terms, or discard. */}
+            {h.contract.renewalStatus === 'draft' && h.contract.renewalAccepted !== 'pending' && h.perms.renewals && (
+              <>
+                <button className="btn btn-jade" onClick={() => void h.onRenewalDraft('send')}>
+                  <RotateCcw size={14} /> Send to {TEN}
+                </button>
+                <button className="btn btn-ghost" onClick={() => h.openModal('renew')}>
+                  <RotateCcw size={14} /> Edit draft
+                </button>
+                <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => void h.onRenewalDraft('discard')}>
+                  Discard draft
+                </button>
+              </>
+            )}
+            {mode !== 'renewal' && !h.contract.renewalAccepted && h.contract.renewalStatus !== 'draft' && h.perms.renewals && (
               <button className="btn btn-ghost" onClick={() => h.openModal('renew')}>
                 <RotateCcw size={14} /> Propose renewal
               </button>
@@ -3555,11 +3583,14 @@ function RenewalProposeModal({
             </>
           )}
           {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+          <p className="note mut" style={{ marginTop: 10 }}>
+            This saves a draft for your review — the customer is <b>not</b> notified until you press <b>Send</b> on the contract page.
+          </p>
         </div>
         <div className="mf">
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-jade btn-sm" disabled={busy} onClick={submit}>
-            <RotateCcw size={14} /> Propose renewal
+            <RotateCcw size={14} /> Save renewal draft
           </button>
         </div>
       </div>
@@ -3887,6 +3918,24 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       if (res.ok) void reload();
       else setLocalState({ status: 'pending' });
     } catch { setLocalState({ status: 'pending' }); }
+  };
+
+  // Send the saved renewal draft to the customer (notifies them) or discard it.
+  const onRenewalDraft = async (action: 'send' | 'discard') => {
+    if (action === 'discard' && !window.confirm('Discard this renewal draft? Its planned cheques will be voided.')) return;
+    try {
+      const res = action === 'send'
+        ? await fetch(`/api/contracts/${contract.id}/renewal/send`, { method: 'PATCH', credentials: 'include' })
+        : await fetch(`/api/contracts/${contract.id}/renewal/draft`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        window.alert(body?.message ?? `Could not ${action} the renewal (${res.status}).`);
+        return;
+      }
+      void reload();
+    } catch {
+      window.alert(`Could not ${action} the renewal.`);
+    }
   };
   // Undo "settlement sent": pull the settlement back to draft so the figures can
   // be corrected and re-sent. Backend rejects once the customer has agreed/paid.
@@ -4228,6 +4277,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
+    onRenewalDraft,
     onUnsendSettlement,
     onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
     signActionUrl: `${contractsBase}/${contract.id}`,
@@ -4477,6 +4527,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             {showPipeline && contract.status === 'active'
               && contract.renewalAccepted !== 'pending'
               && contract.renewalAccepted !== 'accepted'
+              && contract.renewalStatus !== 'draft'
               && contract.termination?.response !== 'accepted'
               && perms.renewals && (
               <button className="btn btn-ghost btn-sm" onClick={() => setModal('renew')}>

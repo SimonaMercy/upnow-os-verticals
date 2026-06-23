@@ -22,11 +22,13 @@ import Link from 'next/link';
 import {
   BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
   ArrowRight, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
-  LayoutGrid, Rows3, Search, Plus, Eye, Trash2,
+  LayoutGrid, Rows3, Search, Plus, Eye, Trash2, Star,
 } from 'lucide-react';
-import { apiGet, apiPatch, apiDelete } from '@/lib/api';
-import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
-import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { apiGet, apiPatch, apiPost, apiDelete } from '@/lib/api';
+import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
+import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
+import { UnitFormModal, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
+import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { saveUnit, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 
@@ -54,6 +56,7 @@ interface Plan {
   termsVersion: {
     id: number; versionNo: number; effectiveAt: string; versionsCount: number;
     addendumUrl: string | null; addendumFileName: string | null;
+    addendumTerms?: AddendumTerms | null;
   } | null;
   unpricedCount: number;
   unitCount: number;
@@ -69,6 +72,16 @@ interface LeaseTerms {
 interface TermsVersion {
   id: number; versionNo: number; effectiveAt: string; contractsCount: number;
   addendumUrl: string | null; addendumFileName: string | null;
+}
+// The RP's default addendum template suggested for a layout with no addendum yet.
+interface AddendumDefault {
+  id: number; name: string; fileName: string; fileUrl: string | null;
+  mimeType: string; source: 'subcategory' | 'category';
+}
+interface AddendumDefaultResp {
+  template: AddendumDefault | null;
+  category: string | null;
+  unitType: string | null;
 }
 interface PropOpt { id: number; buildingName: string }
 interface FeeRuleLite { feeType: string; valueType: string; value: number; isActive: boolean }
@@ -1160,24 +1173,59 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
     return seed;
   });
   const [rentalType, setRentalType] = useState<string>(lt.rentalType || 'yearly');
-  // Agreement addendum — a staged .docx to upload (mints a new version on save),
-  // plus the version timeline.
-  const [addendumFile, setAddendumFile] = useState<File | null>(null);
+  // Agreement addendum — authored IN-APP as bilingual terms (mints a new version
+  // on save), seeded from the layout's current text version. File uploads retired.
+  const seededTermsJson = JSON.stringify(plan.termsVersion?.addendumTerms ?? emptyAddendumTerms());
+  const [addendumTerms, setAddendumTerms] = useState<AddendumTerms>(
+    () => plan.termsVersion?.addendumTerms ?? emptyAddendumTerms(),
+  );
   const [addendumErr, setAddendumErr] = useState<string | null>(null);
-  const [addendumChecking, setAddendumChecking] = useState(false);
-  const addendumInputRef = useRef<HTMLInputElement>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<TermsVersion[] | null>(null);
   const [verLoading, setVerLoading] = useState(false);
 
-  const onAddendumPick = async (f: File | undefined) => {
-    if (!f) return;
-    setAddendumErr(null); setAddendumChecking(true);
+  // Pre-fill suggestion: when the layout has no addendum yet, offer the RP's
+  // default template for this property category / unit type (sub-category first,
+  // else category). The RP can accept it or upload their own instead.
+  const hasAddendum = !!(plan.termsVersion?.addendumUrl
+    || (plan.termsVersion?.addendumTerms && hasAddendumTerms(plan.termsVersion.addendumTerms)));
+  const [defaultResp, setDefaultResp] = useState<AddendumDefaultResp | null>(null);
+  const suggested = defaultResp?.template ?? null;
+  const [applying, setApplying] = useState(false);
+  useEffect(() => {
+    if (hasAddendum) return;
+    let live = true;
+    const qs = new URLSearchParams({ propertyId: String(plan.propertyId), planLabel: plan.planLabel });
+    const url = manager
+      ? `/manager/units/addendum-default?${[rpQ, qs.toString()].filter(Boolean).join('&')}`
+      : `/properties/floor-plans/addendum-default?${qs.toString()}`;
+    apiGet<AddendumDefaultResp>(url)
+      .then(r => { if (live) setDefaultResp(r); })
+      .catch(() => { if (live) setDefaultResp(null); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // "Commercial › Retail Shop" / "Commercial" — the category/sub-category this default matched.
+  const suggestedScope = defaultResp && (() => {
+    const cat = categoryDisplayLabel(defaultResp.category);
+    return defaultResp.unitType ? `${cat} › ${UNIT_TYPE_LABELS[defaultResp.unitType] ?? defaultResp.unitType}` : cat;
+  })();
+
+  const useDefault = async () => {
+    if (!suggested) return;
+    setApplying(true); setAddendumErr(null);
     try {
-      const res = await validateAddendumFile(f);
-      if (res.ok) setAddendumFile(f);
-      else setAddendumErr(res.error ?? 'Invalid addendum file.');
-    } finally { setAddendumChecking(false); }
+      const url = manager
+        ? `/manager/units/addendum/from-template?${rpQ}`
+        : '/properties/floor-plans/addendum/from-template';
+      await apiPost(url, { propertyId: plan.propertyId, planLabel: plan.planLabel, templateId: suggested.id });
+      onSaved();
+    } catch (e) {
+      setAddendumErr(e instanceof Error ? e.message : 'Could not apply the default');
+      setApplying(false);
+    }
   };
 
   const toggleHistory = async () => {
@@ -1264,15 +1312,10 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
       }
       await apiPatch(manager ? `/manager/units/financials?${rpQ}` : '/properties/floor-plans/financials', finBody);
       await apiPatch(manager ? `/manager/units/lease-terms?${rpQ}` : '/properties/floor-plans/lease-terms', leaseBody);
-      // A staged addendum mints a new version (multipart, like the floor-plan image).
-      if (addendumFile) {
-        const fd = new FormData();
-        fd.append('file', addendumFile);
-        fd.append('propertyId', String(plan.propertyId));
-        fd.append('planLabel', plan.planLabel);
-        const r = await fetch(manager ? `/api/manager/units/addendum?${rpQ}` : '/api/properties/floor-plans/addendum',
-          { method: 'POST', credentials: 'include', body: fd });
-        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j as { message?: string }).message ?? 'Addendum upload failed'); }
+      // In-app addendum terms — mint a new version only when they have content and changed.
+      if (hasAddendumTerms(addendumTerms) && JSON.stringify(addendumTerms) !== seededTermsJson) {
+        await apiPatch(manager ? `/manager/units/addendum-terms?${rpQ}` : '/properties/floor-plans/addendum-terms',
+          { propertyId: plan.propertyId, planLabel: plan.planLabel, terms: addendumTerms });
       }
       onSaved();
     } catch (e) {
@@ -1367,52 +1410,69 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
             </div>
           </div>
 
-          {/* Agreement — Addendum (versioned FILE). Upload a .docx (with the
-              signature block); each upload mints a new version. The latest flows
-              into new contracts; signed contracts keep the version they used. */}
+          {/* Agreement — Addendum, authored IN-APP as bilingual terms. The
+              signature block is system-managed (rendered into the contract PDF)
+              and shown locked in the editor — it can never be missing. Saving
+              changes mints a new version; signed contracts keep theirs. */}
           <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Addendum</p>
-              <a href={ADDENDUM_SAMPLE_URL} download className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
-                <Download size={11} /> Download sample
-              </a>
-            </div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Addendum</p>
             <p className="text-[10px] text-[#a16207]">
               {plan.termsVersion
-                ? `Current v${plan.termsVersion.versionNo} · uploaded ${fmtDate(plan.termsVersion.effectiveAt)}. New contracts use the latest; signed contracts keep their version.`
-                : 'Attach the addendum that new contracts from this layout will carry.'}
+                ? `Current v${plan.termsVersion.versionNo} · updated ${fmtDate(plan.termsVersion.effectiveAt)}. Saving changes mints a new version; new contracts use the latest, signed contracts keep theirs.`
+                : 'Write the addendum terms new contracts from this layout will carry. A tenant & landlord signature block is added automatically.'}
             </p>
 
-            <input ref={addendumInputRef} type="file" accept={ADDENDUM_ACCEPT} className="sr-only"
-              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void onAddendumPick(f); }} />
-
-            {/* Current addendum on file (latest version). */}
-            {plan.termsVersion?.addendumUrl && !addendumFile && (
-              <a href={plan.termsVersion.addendumUrl} target="_blank" rel="noreferrer"
-                className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 text-[#1a1916] hover:bg-[#fdf6e3]">
-                <Upload size={14} className="text-[#b45309] shrink-0" />
-                <span className="text-sm truncate flex-1">{plan.termsVersion.addendumFileName ?? 'Addendum'}</span>
-                <span className="text-[11px] text-[#9b9890]">on file</span>
-              </a>
-            )}
-
-            {/* Staged replacement, pending save. */}
-            {addendumFile && (
-              <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
-                <Upload size={14} className="text-[#2e9f82] shrink-0" />
-                <span className="text-sm text-[#1a1916] truncate flex-1">{addendumFile.name}</span>
-                <button type="button" onClick={() => { setAddendumFile(null); setAddendumErr(null); }}
-                  className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+            {/* Pre-fill suggestion — the RP's default template for this category /
+                unit type, offered when the layout has no addendum yet. */}
+            {!hasAddendum && suggested && (
+              <div className="rounded-lg border border-[#fcd34d] bg-white p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <Star size={14} className="text-[#b45309] fill-[#b45309] mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-[#1a1916] truncate">Suggested default · {suggested.name}</p>
+                    <p className="text-[10px] text-[#a16207] mt-0.5">
+                      Your {suggested.source === 'subcategory' ? 'sub-category' : 'category'} default
+                      {suggestedScope ? ` for ${suggestedScope}` : ''}. Apply it as a starting point, or write the terms below.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={useDefault} disabled={applying}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] disabled:opacity-60 cursor-pointer">
+                    {applying ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Use this default
+                  </button>
+                  {suggested.fileUrl && (
+                    <a href={suggested.fileUrl} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
+                      <Eye size={12} /> Preview
+                    </a>
+                  )}
+                </div>
               </div>
             )}
 
-            <button type="button" onClick={() => addendumInputRef.current?.click()} disabled={addendumChecking}
-              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-2.5 text-xs text-[#9b9890] hover:border-[#b45309] hover:bg-[#fffbeb] transition-colors cursor-pointer disabled:opacity-50">
-              {addendumChecking ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className="text-[#c8c6c0]" />}
-              {addendumChecking ? 'Checking signature fields…'
-                : plan.termsVersion?.addendumUrl ? 'Replace addendum (Word .docx)' : 'Attach addendum (Word .docx)'}
-            </button>
+            {/* Compact summary + open the big document editor (write + live preview). */}
+            {(() => {
+              const n = (addendumTerms.en?.filter(l => l.trim()).length ?? 0) + (addendumTerms.ar?.filter(l => l.trim()).length ?? 0);
+              return (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-[#e8e6e0] bg-white px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#1a1916] truncate">
+                      {addendumTerms.name?.trim() || 'Agreement Addendum'}
+                    </p>
+                    <p className="text-[11px] text-[#9b9890]">{n ? `${n} term${n === 1 ? '' : 's'} written` : 'No terms yet'}</p>
+                  </div>
+                  <button type="button" onClick={() => setEditorOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] cursor-pointer shrink-0">
+                    <Pencil size={13} /> {n ? 'Edit addendum' : 'Write addendum'}
+                  </button>
+                </div>
+              );
+            })()}
             {addendumErr && <p className="text-[11px] text-red-600">{addendumErr}</p>}
+            {editorOpen && (
+              <AddendumEditorModal value={addendumTerms} onChange={setAddendumTerms} onClose={() => setEditorOpen(false)} />
+            )}
 
             {plan.termsVersion && (
               <button type="button" onClick={toggleHistory} className="text-[11px] font-semibold text-[#b45309] underline">
@@ -1427,14 +1487,14 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
                   </div>
                 )}
                 {!verLoading && versions && versions.length === 0 && (
-                  <p className="text-xs text-[#9b9890]">No versions yet — uploading an addendum creates v1.</p>
+                  <p className="text-xs text-[#9b9890]">No versions yet — saving terms creates v1.</p>
                 )}
                 {!verLoading && versions?.map(v => (
                   <div key={v.id} className="flex items-center justify-between gap-3 text-xs">
                     <span className="font-semibold text-[#1a1916] shrink-0">v{v.versionNo}</span>
                     {v.addendumUrl
                       ? <a href={v.addendumUrl} target="_blank" rel="noreferrer" className="text-[#b45309] truncate flex-1 hover:underline">{v.addendumFileName ?? 'Addendum'}</a>
-                      : <span className="italic text-[#bdbab2] flex-1">No file</span>}
+                      : <span className="text-[#6b6860] flex-1">Addendum terms</span>}
                     <span className="text-[#9b9890] shrink-0">{fmtDate(v.effectiveAt)}</span>
                     <span className="text-[#9b9890] shrink-0">· {v.contractsCount} contract{v.contractsCount === 1 ? '' : 's'}</span>
                   </div>

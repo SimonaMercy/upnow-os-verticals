@@ -22,9 +22,11 @@ interface AddendumTemplate {
   id: number;
   name: string;
   description: string | null;
-  fileUrl: string;
-  fileKey: string;
-  mimeType: string;
+  fileUrl: string | null;
+  fileKey: string | null;
+  mimeType: string | null;
+  // In-app text template (authored on the RP Templates page) — no file.
+  terms: unknown | null;
   originalFilename: string | null;
   createdAt: string;
 }
@@ -156,16 +158,18 @@ export default function ManagerAddendumTemplatesPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-[#6b6860]">{mimeLabel(t.mimeType)}</td>
+                  <td className="px-4 py-3 text-xs text-[#6b6860]">{t.terms ? 'Terms' : mimeLabel(t.mimeType ?? '')}</td>
                   <td className="px-4 py-3 text-xs text-[#6b6860]">
                     {new Date(t.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      <a href={t.fileUrl} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
-                        <ExternalLink size={12} /> Preview
-                      </a>
+                      {t.fileUrl && (
+                        <a href={t.fileUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
+                          <ExternalLink size={12} /> Preview
+                        </a>
+                      )}
                       <button onClick={() => handleDelete(t.id)}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#dc2626] hover:bg-red-50">
                         <Trash2 size={12} /> Remove

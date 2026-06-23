@@ -41,7 +41,7 @@ import {
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
 type DisplayStatus = ContractStatus | 'declined' | 'needs_activation' | 'starts_later' | 'superseded' | 'terminating';
-type TabKey = 'all' | 'active' | 'expiring';
+type TabKey = 'all' | 'active' | 'expiring' | 'expired';
 
 /** Expiring window for the renewal-attention bucket. */
 const EXPIRING_DAYS = 90;
@@ -59,14 +59,16 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   terminating:      'Terminating',
 };
 
-// Leases register = LOCKED in-force leases only. All = one locked lease per
-// unit; Active = not expiring soon; Expiring = ending within EXPIRING_DAYS
-// (the renewal workload). Drafts / in-setup / un-reviewed leases live in
-// Operations; ended/terminated history lives under Ended Leases.
+// Leases register. All / Active / Expiring show LOCKED in-force leases (All =
+// one locked lease per unit; Expiring = ending within EXPIRING_DAYS — the
+// renewal workload). Expired surfaces ended leases on this RP (e.g. the prior
+// term of a renewed lease). Drafts / in-setup leases live in Operations; the
+// fully-ended CUSTOMER view lives under Ended Leases.
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all',      label: 'All' },
   { key: 'active',   label: 'Active' },
   { key: 'expiring', label: `Expiring < ${EXPIRING_DAYS}d` },
+  { key: 'expired',  label: 'Expired' },
 ];
 
 /** Local YYYY-MM-DD (no UTC shift) — the page's "today" for term-state checks. */
@@ -369,20 +371,27 @@ export default function OrdersPage() {
 
   const expiringLeases = useMemo(() => currentLeases.filter(c => endsSoon(c, soonBy)), [currentLeases, soonBy]);
   const activeLeases   = useMemo(() => currentLeases.filter(c => !endsSoon(c, soonBy)), [currentLeases, soonBy]);
+  // Expired/ended leases — e.g. the prior term of a renewed lease (an expired
+  // original whose renewal is still active). Each ended term is its own history
+  // row (no per-unit collapse); superseded duplicates map to a 'superseded'
+  // display status, so filtering on 'expired' keeps them out.
+  const expiredLeases  = useMemo(() => yearScoped.filter(c => displayStatusOf(c) === 'expired'), [yearScoped]);
 
   const tabCounts = useMemo<Record<TabKey, number>>(() => ({
     all: currentLeases.length,
     active: activeLeases.length,
     expiring: expiringLeases.length,
-  }), [currentLeases, activeLeases, expiringLeases]);
+    expired: expiredLeases.length,
+  }), [currentLeases, activeLeases, expiringLeases, expiredLeases]);
 
   const baseList = useMemo(() => {
     switch (activeTab) {
       case 'active':   return activeLeases;
       case 'expiring': return expiringLeases;
+      case 'expired':  return expiredLeases;
       default:         return currentLeases;
     }
-  }, [activeTab, currentLeases, activeLeases, expiringLeases]);
+  }, [activeTab, currentLeases, activeLeases, expiringLeases, expiredLeases]);
 
   const filtered = useMemo(() => {
     const list = baseList.filter(c => {

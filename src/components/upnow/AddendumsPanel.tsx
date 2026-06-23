@@ -22,18 +22,28 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { FileText, UploadCloud, Trash2, Loader2, AlertCircle, Plus, X, ExternalLink, CheckCircle2, FileSignature, RotateCcw, Lock } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { FileText, UploadCloud, Trash2, Loader2, AlertCircle, Plus, X, ExternalLink, CheckCircle2, FileSignature, RotateCcw, Lock, FileType2 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
+import { type AddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
+
+const AddendumTermsPreview = dynamic(() => import('@/components/contract/AddendumTermsPreview'), {
+  ssr: false,
+  loading: () => <div className="h-[420px] grid place-items-center text-[#9b9890] text-sm"><Loader2 size={15} className="animate-spin" /></div>,
+});
 
 interface Addendum {
   id: number;
   tenancyContractId: number;
   templateId: number | null;
   name: string;
-  fileUrl: string;
-  fileKey: string;
-  mimeType: string;
+  // File path (legacy/advanced) — null for in-app text addendums.
+  fileUrl: string | null;
+  fileKey: string | null;
+  mimeType: string | null;
+  // In-app bilingual terms — null for file addendums.
+  terms: AddendumTerms | null;
   tenantSig: string | null;
   tenantSignedAt: string | null;
   landlordSig: string | null;
@@ -188,15 +198,17 @@ function AddendumRow({
   onDelete: () => void;
 }) {
   const [showSig, setShowSig] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
   const mySig = role === 'tenant' ? a.tenantSig : a.landlordSig;
   const theirSig = role === 'tenant' ? a.landlordSig : a.tenantSig;
-  const fileTypeLabel = a.mimeType === 'application/pdf' ? 'PDF' : a.mimeType.includes('word') ? 'DOCX' : 'File';
+  const isText = !!(a.terms && hasAddendumTerms(a.terms));
+  const fileTypeLabel = isText ? 'Terms' : a.mimeType === 'application/pdf' ? 'PDF' : (a.mimeType || '').includes('word') ? 'DOCX' : 'File';
 
   return (
     <div className="px-5 py-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-start gap-2.5 min-w-0 flex-1">
-          <FileText size={18} className="text-[#2e9f82] mt-0.5 shrink-0" />
+          {isText ? <FileType2 size={18} className="text-[#2e9f82] mt-0.5 shrink-0" /> : <FileText size={18} className="text-[#2e9f82] mt-0.5 shrink-0" />}
           <div className="min-w-0">
             <p className="text-sm font-semibold text-[#1a1916]">{a.name}</p>
             <p className="text-[11px] text-[#9b9890] mt-0.5">
@@ -205,7 +217,8 @@ function AddendumRow({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button type="button" onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name, mimeType: a.mimeType })}
+          <button type="button"
+            onClick={() => isText ? setShowTerms(s => !s) : openDocViewer({ fileUrl: a.fileUrl || '', caption: a.name, mimeType: a.mimeType || undefined })}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#2e9f82] hover:bg-[#f0faf6] border border-[#c5e8df] cursor-pointer">
             <ExternalLink size={11} /> View
           </button>
@@ -232,6 +245,13 @@ function AddendumRow({
           signedAt={role === 'tenant' ? a.landlordSignedAt : a.tenantSignedAt}
         />
       </div>
+
+      {/* Inline preview of in-app text terms (with the system signature block). */}
+      {isText && showTerms && a.terms && (
+        <div className="mt-3">
+          <AddendumTermsPreview terms={a.terms} height={420} />
+        </div>
+      )}
 
       {showSig && (
         <SignAddendumModal
@@ -475,6 +495,8 @@ function SignAddendumModal({
   const [sig, setSig] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showTerms, setShowTerms] = useState(false);
+  const isText = !!(a.terms && hasAddendumTerms(a.terms));
 
   useEffect(() => {
     const cvs = canvasRef.current; if (!cvs) return;
@@ -521,10 +543,26 @@ function SignAddendumModal({
           <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] p-1"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3">
-          <button type="button" onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name, mimeType: a.mimeType })}
-            className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#c5e8df] bg-[#f0faf6] text-xs font-semibold text-[#2e9f82] hover:bg-[#e0f4ec] cursor-pointer">
-            <ExternalLink size={12} /> Open addendum to review
+          <button type="button"
+            onClick={() => isText ? setShowTerms(s => !s) : openDocViewer({ fileUrl: a.fileUrl || '', caption: a.name, mimeType: a.mimeType || undefined })}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#c5e8df] bg-[#f0faf6] text-xs font-semibold text-[#2e9f82] hover:bg-[#e0f4ec] cursor-pointer">
+            <ExternalLink size={12} /> {isText ? (showTerms ? 'Hide terms' : 'Review terms') : 'Open addendum to review'}
           </button>
+          {isText && showTerms && a.terms && (
+            <div className="rounded-xl border border-[#e8e6e0] bg-[#fafaf8] p-3 max-h-56 overflow-y-auto space-y-2">
+              {a.terms.en.length > 0 && (
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-[#3a3833]">
+                  {a.terms.en.map((l, i) => <li key={i}>{l}</li>)}
+                </ol>
+              )}
+              {a.terms.ar.length > 0 && (
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-[#3a3833]" dir="rtl">
+                  {a.terms.ar.map((l, i) => <li key={i}>{l}</li>)}
+                </ol>
+              )}
+              <p className="text-[10px] text-[#9b9890] pt-1 border-t border-[#e8e6e0]">A tenant &amp; landlord signature block is included in the final document.</p>
+            </div>
+          )}
           <p className="text-xs text-[#6b6860]">Draw your signature in the box below.</p>
           <canvas ref={canvasRef}
             className="w-full h-32 rounded-xl border-2 border-dashed border-[#d8d6d0] bg-[#fafaf8] touch-none cursor-crosshair"

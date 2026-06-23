@@ -59,7 +59,7 @@ interface RpProfile {
   id: number; entityType: string; accountTypeConfirmedAt: string | null;
   nationality: string | null; companyName: string | null;
   tradeLicenseNumber: string | null; tradeLicenseAuthority: string | null;
-  complianceStatus?: string; complianceNotes?: string | null;
+  complianceStatus?: string; complianceNotes?: string | null; compliancePausedAt?: string | null;
   companyType?: "landlord" | "brokerage" | "agents" | null;
   parentBrokerageName?: string | null;
   shareholders?: Shareholder[] | null;
@@ -82,7 +82,7 @@ export default function RentalProviderOnboardingPage() {
 
   const handleSignOut = () => { signOut(); };
 
-  const [loadState, setLoadState] = useState<"loading" | "form" | "submitted" | "action_required">("loading");
+  const [loadState, setLoadState] = useState<"loading" | "form" | "submitted" | "action_required" | "expired" | "paused">("loading");
   const [profile, setProfile] = useState<RpProfile | null>(null);
   const [profileId, setProfileId] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -149,7 +149,19 @@ export default function RentalProviderOnboardingPage() {
           router.replace("/rental-provider/dashboard");
           return;
         }
-        if (p.accountTypeConfirmedAt && p.complianceStatus !== "action_required") {
+        // Paused is an admin enforcement hold — a dedicated screen, no resubmit form.
+        if (p.complianceStatus === "paused") {
+          setLoadState("paused");
+          return;
+        }
+        // Submitted + simply waiting (pending_review) → the under-review timeline.
+        // action_required / expired fall through to the editable form so the RP
+        // can fix and resubmit.
+        if (
+          p.accountTypeConfirmedAt &&
+          p.complianceStatus !== "action_required" &&
+          p.complianceStatus !== "expired"
+        ) {
           setLoadState("submitted");
           return;
         }
@@ -199,7 +211,11 @@ export default function RentalProviderOnboardingPage() {
           if (Object.keys(map).length) setShDocs((prev) => ({ ...prev, ...map }));
         } catch { /* none yet */ }
 
-        setLoadState(p.complianceStatus === "action_required" ? "action_required" : "form");
+        setLoadState(
+          p.complianceStatus === "action_required" ? "action_required"
+          : p.complianceStatus === "expired" ? "expired"
+          : "form",
+        );
       } catch {
         setFullName(user.name ?? "");
         setPhone(user.phone ?? "");
@@ -259,6 +275,14 @@ export default function RentalProviderOnboardingPage() {
   }
 
   const docsForKind = checklistForKind();
+
+  // Documents to call out on the action-required / expired screen: required
+  // items the server says aren't uploaded yet. (The admin's free-text reason in
+  // complianceNotes is shown alongside this list.)
+  const flaggedDocs = useMemo(
+    () => checklist.filter((c) => c.required && !c.uploaded),
+    [checklist],
+  );
 
   const completion = useMemo(() => {
     const m: Record<string, boolean> = {};
@@ -587,6 +611,47 @@ export default function RentalProviderOnboardingPage() {
     );
   }
 
+  if (loadState === "paused") {
+    return (
+      <div className={cn(s.app, fontClass)}>
+        <div className={s.topbar}>
+          <div className={s.topbarRow}>
+            <div className={s.tbLeft}>
+              <div className={s.brand}><span className={s.brandMark}>U</span><span>UpNow</span></div>
+            </div>
+            <div className={s.tbRight}>
+              {user && (
+                <button type="button" className={cn(s.btn, s.btnGhost, s.btnSm)} onClick={handleSignOut} title={`Signed in as ${user.email}`}>
+                  <LogOut size={13} /> Sign out
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className={s.main} style={{ maxWidth: 560 }}>
+          <div className={s.success}>
+            <div className={s.successBadge} style={{ background: "var(--warn-bg)", color: "var(--warn-fg)" }}>
+              <AlertCircle size={34} strokeWidth={2.5} />
+            </div>
+            <h2 className={s.successH2}>Your account is <span className={s.serif}>paused</span></h2>
+            <p className={s.successDesc}>
+              An administrator has placed your rental account on hold, so dashboard access is temporarily disabled. This is a manual review action and can&rsquo;t be cleared from here.
+            </p>
+            {profile?.complianceNotes && (
+              <div className={s.successRef} style={{ background: "var(--warn-bg)", color: "var(--warn-fg)" }}>
+                <AlertCircle size={14} /> <span>{profile.complianceNotes}</span>
+              </div>
+            )}
+            <p style={{ fontSize: 12, color: "var(--mute)", marginTop: 8 }}>
+              Please contact <a href="mailto:support@upnow.ae" style={{ color: "var(--green-d)", fontWeight: 600 }}>support@upnow.ae</a> to resolve this.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn(s.app, fontClass)}>
       <input
@@ -653,7 +718,13 @@ export default function RentalProviderOnboardingPage() {
       <div className={s.main}>
         <div className={s.hero}>
           <div className={s.heroEyebrow}><ShieldCheck size={12} /> Account Verification</div>
-          <h1 className={s.heroTitle}>Set up your <span className={s.serif}>rental account</span></h1>
+          <h1 className={s.heroTitle}>
+            {loadState === "action_required"
+              ? <>Resolve &amp; <span className={s.serif}>resubmit</span></>
+              : loadState === "expired"
+                ? <>Renew your <span className={s.serif}>verification</span></>
+                : <>Set up your <span className={s.serif}>rental account</span></>}
+          </h1>
           <p className={s.heroDesc}>Get verified to start collecting rent through UpNow. We&apos;ll guide you step by step — most providers finish in under 10 minutes.</p>
           <div className={s.metaStrip}>
             <span className={s.metaIc}><Sparkles size={14} /></span>
@@ -663,12 +734,25 @@ export default function RentalProviderOnboardingPage() {
           </div>
         </div>
 
-        {loadState === "action_required" && profile?.complianceNotes && (
+        {(loadState === "action_required" || loadState === "expired") && (
           <div className={cn(s.shSummary, s.warn)}>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <AlertCircle size={14} /> Action required
+              <AlertCircle size={14} /> {loadState === "expired" ? "Verification expired" : "Action required"}
             </span>
-            <b>{profile.complianceNotes}</b>
+            <b>
+              {profile?.complianceNotes?.trim()
+                ? profile.complianceNotes
+                : loadState === "expired"
+                  ? "Your verification has expired — please review and resubmit the items below."
+                  : "Our team needs a few things fixed before we can approve your account. Please review and resubmit the items below."}
+            </b>
+            {flaggedDocs.length > 0 && (
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontWeight: 500 }}>
+                {flaggedDocs.map((d) => (
+                  <li key={d.key} style={{ marginTop: 2 }}>{d.displayName}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
