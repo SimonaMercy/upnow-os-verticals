@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Building2, Home, Users, UserCog, ShieldCheck, TrendingUp, Loader2,
@@ -42,7 +43,7 @@ interface Overview {
   customerKyc: { name: string; value: number }[];
   usersByRole: { name: string; value: number }[];
   disputes: { name: string; value: number }[];
-  topRps: { rpId: number; name: string; units: number }[];
+  topRps: { rpId: number; ownerUserId: number | null; name: string; units: number }[];
 }
 interface RpAnalytics {
   unitMix: { name: string; value: number }[];
@@ -95,13 +96,21 @@ function KpiTile({ icon: Icon, label, value, sub, tone = 'neutral', href }: {
   );
   return href ? <Link href={href}>{body}</Link> : body;
 }
-function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-      <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
+function ChartCard({ title, sub, children, href, hint }: { title: string; sub?: string; children: React.ReactNode; href?: string; hint?: string }) {
+  const inner = (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
+        {(href || hint) && <span className="flex items-center gap-0.5 text-[10px] font-semibold text-[#9b9890] whitespace-nowrap">{hint ?? 'View'} <ArrowUpRight size={12} /></span>}
+      </div>
       {sub && <p className="text-[11px] text-[#9b9890] mt-0.5 mb-1">{sub}</p>}
       <div className="mt-2">{children}</div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className="block bg-white rounded-2xl border border-[#e8e6e0] p-4 hover:border-[#d4d2cc] transition-colors">{inner}</Link>
+  ) : (
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">{inner}</div>
   );
 }
 function SectionHeader({ icon: Icon, title, sub }: { icon: React.ComponentType<{ size?: number; className?: string }>; title: string; sub?: string }) {
@@ -119,7 +128,7 @@ function EmptyChart({ text }: { text: string }) {
   return <div className="h-[190px] flex items-center justify-center text-center text-[12px] text-[#9b9890] px-4">{text}</div>;
 }
 /** Simple categorical bar chart (name/value). */
-function CatBar({ data, color = GREEN, empty, fmt }: { data: { name: string; value: number }[]; color?: string; empty: string; fmt?: (v: number) => string }) {
+function CatBar({ data, color = GREEN, empty, fmt, onBarClick }: { data: { name: string; value: number }[]; color?: string; empty: string; fmt?: (v: number) => string; onBarClick?: (name: string) => void }) {
   if (!data.length || data.every((d) => !d.value)) return <EmptyChart text={empty} />;
   return (
     <ResponsiveContainer width="100%" height={190}>
@@ -128,7 +137,10 @@ function CatBar({ data, color = GREEN, empty, fmt }: { data: { name: string; val
         <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} angle={data.length > 5 ? -20 : 0} textAnchor={data.length > 5 ? 'end' : 'middle'} height={data.length > 5 ? 44 : 24} />
         <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={30} tickFormatter={fmt ? (v) => fmt(Number(v)) : undefined} />
         <Tooltip formatter={(v: unknown) => [fmt ? fmt(Number(v)) : String(v), ''] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
-        <Bar dataKey="value" radius={[4, 4, 0, 0]}>{data.map((_, i) => <Cell key={i} fill={color} />)}</Bar>
+        <Bar dataKey="value" radius={[4, 4, 0, 0]} cursor={onBarClick ? 'pointer' : undefined}
+          onClick={onBarClick ? (d: unknown) => { const n = d as { payload?: { name?: string }; name?: string }; onBarClick(String(n?.payload?.name ?? n?.name ?? '')); } : undefined}>
+          {data.map((_, i) => <Cell key={i} fill={color} />)}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
@@ -136,6 +148,7 @@ function CatBar({ data, color = GREEN, empty, fmt }: { data: { name: string; val
 
 export default function AdminPlatformOverview() {
   const { user } = useAuth();
+  const router = useRouter();
   const isSuperAdmin = user?.role === 'super_admin';
 
   const [ov, setOv] = useState<Overview | null>(null);
@@ -174,7 +187,7 @@ export default function AdminPlatformOverview() {
     return { series, roles: [...roles] };
   }, [ov]);
 
-  const usersByRole = useMemo(() => (ov?.usersByRole ?? []).map((r) => ({ name: ROLE_LABEL[r.name] ?? r.name, value: r.value })), [ov]);
+  const usersByRole = useMemo(() => (ov?.usersByRole ?? []).map((r) => ({ name: ROLE_LABEL[r.name] ?? r.name, role: r.name, value: r.value })), [ov]);
   const kycData = useMemo(() => (ov?.customerKyc ?? []).map((r) => ({ name: r.name.replace(/_/g, ' '), value: r.value })), [ov]);
   const disputesOpen = (ov?.disputes ?? []).filter((d) => !/resolved|closed/i.test(d.name)).reduce((s, d) => s + d.value, 0);
   const disputesTotal = (ov?.disputes ?? []).reduce((s, d) => s + d.value, 0);
@@ -220,41 +233,43 @@ export default function AdminPlatformOverview() {
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
             <KpiTile icon={Building2} label="Properties" value={c ? String(c.properties) : '—'} sub={c ? `${c.units} units` : ''} href="/dashboard/admin/properties" />
             <KpiTile icon={Home} label="Units" value={c ? String(c.units) : '—'} sub={c ? `${c.listedUnits} listed` : ''} href="/dashboard/admin/properties" />
-            <KpiTile icon={Users} label="Active customers" value={c ? String(c.activeCustomers) : '—'} sub={c ? `of ${c.totalTenants} total` : ''} tone="good" />
-            <KpiTile icon={UserCog} label="Rental providers" value={c ? String(c.rentalProviders) : '—'} sub="landlords" />
-            <KpiTile icon={ShieldCheck} label="Managers" value={c ? String(c.managers) : '—'} sub="delegated" />
-            <KpiTile icon={Gauge} label="Occupancy" value={f ? `${f.occupancyPct}%` : '—'} sub={c ? `${c.occupiedUnits}/${c.units} occupied` : ''} tone={f && f.occupancyPct < 60 ? 'warn' : 'neutral'} />
+            <KpiTile icon={Users} label="Active customers" value={c ? String(c.activeCustomers) : '—'} sub={c ? `of ${c.totalTenants} total` : ''} tone="good" href="/dashboard/admin/users?role=customer&status=active" />
+            <KpiTile icon={UserCog} label="Rental providers" value={c ? String(c.rentalProviders) : '—'} sub="landlords" href="/dashboard/admin/users?role=rental_provider" />
+            <KpiTile icon={ShieldCheck} label="Managers" value={c ? String(c.managers) : '—'} sub="delegated" href="/dashboard/admin/users?role=manager" />
+            <KpiTile icon={Gauge} label="Occupancy" value={f ? `${f.occupancyPct}%` : '—'} sub={c ? `${c.occupiedUnits}/${c.units} occupied` : ''} tone={f && f.occupancyPct < 60 ? 'warn' : 'neutral'} href="/dashboard/admin/properties?availability=occupied" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Customer age" sub="tenants by age band (from KYC DOB)">
+            <ChartCard title="Customer age" sub="tenants by age band (from KYC DOB)" href="/dashboard/admin/users?role=customer&status=active">
               <CatBar data={rp?.ageMix ?? []} color={BLUE} empty="No tenant date-of-birth data yet." />
             </ChartCard>
-            <ChartCard title="Top nationalities" sub="tenants by nationality">
+            <ChartCard title="Top nationalities" sub="tenants by nationality" href="/dashboard/admin/users?role=customer&status=active">
               <CatBar data={nationalities} color={PURPLE} empty="No nationality data yet." />
             </ChartCard>
-            <ChartCard title="Properties by emirate" sub="geographic spread">
-              <CatBar data={ov?.geographic ?? []} color={GREEN} empty="No properties yet." />
+            <ChartCard title="Properties by emirate" sub="geographic spread" hint="Click a bar">
+              <CatBar data={ov?.geographic ?? []} color={GREEN} empty="No properties yet."
+                onBarClick={(n) => router.push(`/dashboard/admin/properties?emirate=${encodeURIComponent(n)}`)} />
             </ChartCard>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Unit mix" sub="units by type">
+            <ChartCard title="Unit mix" sub="units by type" href="/dashboard/admin/properties">
               <CatBar data={rp?.unitMix ?? []} color={TEAL} empty="No units yet." />
             </ChartCard>
-            <ChartCard title="Property categories" sub="properties by category">
+            <ChartCard title="Property categories" sub="properties by category" hint="Click a slice">
               {(ov?.categorySplit ?? []).length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <PieChart>
-                    <Pie data={ov!.categorySplit} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e) => `${e.name} (${e.value})`} labelLine={false} fontSize={10}>
-                      {ov!.categorySplit.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+                    <Pie data={ov!.categorySplit} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e) => `${e.name} (${e.value})`} labelLine={false} fontSize={10}
+                      onClick={(d: unknown) => { const n = d as { payload?: { name?: string }; name?: string }; const name = n?.payload?.name ?? n?.name; if (name) router.push(`/dashboard/admin/properties?category=${encodeURIComponent(name)}`); }}>
+                      {ov!.categorySplit.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} style={{ cursor: 'pointer' }} />)}
                     </Pie>
                     <Tooltip contentStyle={tooltipStyle} />
                   </PieChart>
                 </ResponsiveContainer>
               ) : <EmptyChart text="No properties yet." />}
             </ChartCard>
-            <ChartCard title="New leases" sub="leases started per month (12 mo)">
+            <ChartCard title="New leases" sub="leases started per month (12 mo)" href="/dashboard/admin/users?role=customer&status=active">
               {newLeases.length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <AreaChart data={newLeases} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -271,18 +286,21 @@ export default function AdminPlatformOverview() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            <ChartCard title="Customer KYC" sub="tenants by verification status">
+            <ChartCard title="Customer KYC" sub="tenants by verification status" href="/dashboard/admin/kyc?tab=tenants">
               <CatBar data={kycData} color={BLUE} empty="No customers yet." />
             </ChartCard>
             <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
               <h3 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5"><TrendingUp size={14} className="text-[#2e9f82]" /> Top rental providers</h3>
-              <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">by unit count</p>
+              <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">by unit count · click to open</p>
               {(ov?.topRps ?? []).length ? (
                 <ul className="divide-y divide-[#f0ede8]">
                   {ov!.topRps.map((r, i) => (
-                    <li key={r.rpId} className="flex items-center justify-between py-1.5 text-[12px]">
-                      <span className="truncate"><span className="text-[#9b9890] font-semibold mr-2">{i + 1}</span>{r.name}</span>
-                      <span className="font-bold text-[#1a1916] flex-shrink-0">{r.units} <span className="font-normal text-[#9b9890]">units</span></span>
+                    <li key={r.rpId}>
+                      <Link href={r.ownerUserId != null ? `/dashboard/admin/users/${r.ownerUserId}` : `/dashboard/admin/kyc/rental-provider/${r.rpId}`}
+                        className="flex items-center justify-between py-1.5 text-[12px] hover:text-[#1a7a5a] transition-colors">
+                        <span className="truncate"><span className="text-[#9b9890] font-semibold mr-2">{i + 1}</span>{r.name}</span>
+                        <span className="font-bold text-[#1a1916] flex-shrink-0 flex items-center gap-1">{r.units} <span className="font-normal text-[#9b9890]">units</span> <ArrowUpRight size={11} className="text-[#c4c2bc]" /></span>
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -294,20 +312,21 @@ export default function AdminPlatformOverview() {
           <SectionHeader icon={Wrench} title="Service-provider marketplace" sub="Home-services providers, technicians and the service catalogue. Some metrics populate as SP data lands." />
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <KpiTile icon={Wrench} label="Active service providers" value={c ? String(c.activeServiceProviders) : '—'} sub={c ? `of ${c.serviceProviders} total` : ''} tone={c && c.activeServiceProviders > 0 ? 'good' : 'neutral'} />
-            <KpiTile icon={HardHat} label="Active technicians" value={c ? String(c.activeTechnicians) : '—'} sub={c ? `of ${c.technicians} total` : ''} />
-            <KpiTile icon={ListChecks} label="Services offered" value={c ? String(c.servicesOffered) : '—'} sub="catalogue SKUs" />
-            <KpiTile icon={Star} label="Avg rating" value={sp?.ratings.average != null ? `${sp.ratings.average}★` : '—'} sub={sp ? `${sp.ratings.rated} rated · ${sp.ratings.unrated} unrated` : ''} />
+            <KpiTile icon={Wrench} label="Active service providers" value={c ? String(c.activeServiceProviders) : '—'} sub={c ? `of ${c.serviceProviders} total` : ''} tone={c && c.activeServiceProviders > 0 ? 'good' : 'neutral'} href="/dashboard/admin/kyc?tab=service&status=compliant" />
+            <KpiTile icon={HardHat} label="Active technicians" value={c ? String(c.activeTechnicians) : '—'} sub={c ? `of ${c.technicians} total` : ''} href="/dashboard/admin/kyc?tab=technicians" />
+            <KpiTile icon={ListChecks} label="Services offered" value={c ? String(c.servicesOffered) : '—'} sub="catalogue SKUs" href="/dashboard/admin/listings?section=sp" />
+            <KpiTile icon={Star} label="Avg rating" value={sp?.ratings.average != null ? `${sp.ratings.average}★` : '—'} sub={sp ? `${sp.ratings.rated} rated · ${sp.ratings.unrated} unrated` : ''} href="/dashboard/admin/analytics" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Services by category" sub="catalogue breakdown">
-              <CatBar data={sp?.services ?? []} color={TEAL} empty="No service catalogue yet — populates as SPs add services." />
+            <ChartCard title="Services by category" sub="catalogue breakdown" hint="Click a bar">
+              <CatBar data={sp?.services ?? []} color={TEAL} empty="No service catalogue yet — populates as SPs add services."
+                onBarClick={(n) => router.push(`/dashboard/admin/listings?section=sp&category=${encodeURIComponent(n)}`)} />
             </ChartCard>
-            <ChartCard title="Zones served" sub="emirates covered by SPs">
+            <ChartCard title="Zones served" sub="emirates covered by SPs" href="/dashboard/admin/analytics">
               <CatBar data={sp?.zones ?? []} color={PURPLE} empty="No coverage zones recorded yet." />
             </ChartCard>
-            <ChartCard title="Rating distribution" sub="SPs by star rating">
+            <ChartCard title="Rating distribution" sub="SPs by star rating" href="/dashboard/admin/analytics">
               <CatBar data={sp?.ratings.distribution ?? []} color={AMBER} empty="No SP ratings yet." />
             </ChartCard>
           </div>
@@ -316,12 +335,13 @@ export default function AdminPlatformOverview() {
           <SectionHeader icon={Globe} title="Platform" sub="Cross-marketplace — users, growth and disputes." />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Users by role" sub="all registered accounts">
+            <ChartCard title="Users by role" sub="all registered accounts" hint="Click a slice">
               {usersByRole.length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <PieChart>
-                    <Pie data={usersByRole} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={38} paddingAngle={2}>
-                      {usersByRole.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+                    <Pie data={usersByRole} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={38} paddingAngle={2}
+                      onClick={(d: unknown) => { const n = d as { payload?: { role?: string }; role?: string }; const role = n?.payload?.role ?? n?.role; if (role) router.push(`/dashboard/admin/users?role=${role}`); }}>
+                      {usersByRole.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} style={{ cursor: 'pointer' }} />)}
                     </Pie>
                     <Legend wrapperStyle={{ fontSize: 10 }} />
                     <Tooltip contentStyle={tooltipStyle} />
@@ -329,7 +349,7 @@ export default function AdminPlatformOverview() {
                 </ResponsiveContainer>
               ) : <EmptyChart text="No users yet." />}
             </ChartCard>
-            <ChartCard title="New signups" sub="accounts created per month (12 mo)">
+            <ChartCard title="New signups" sub="accounts created per month (12 mo)" href="/dashboard/admin/users">
               {signups.series.length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <BarChart data={signups.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -345,8 +365,8 @@ export default function AdminPlatformOverview() {
                 </ResponsiveContainer>
               ) : <EmptyChart text="No signups in the last 12 months." />}
             </ChartCard>
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-              <h3 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5"><Scale size={14} className="text-[#2e9f82]" /> Disputes</h3>
+            <Link href="/dashboard/admin/disputes" className="block bg-white rounded-2xl border border-[#e8e6e0] p-4 hover:border-[#d4d2cc] transition-colors">
+              <h3 className="text-sm font-bold text-[#1a1916] flex items-center justify-between gap-1.5"><span className="flex items-center gap-1.5"><Scale size={14} className="text-[#2e9f82]" /> Disputes</span><ArrowUpRight size={12} className="text-[#9b9890]" /></h3>
               <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">case load</p>
               {disputesTotal > 0 ? (
                 <div className="space-y-2">
@@ -362,7 +382,7 @@ export default function AdminPlatformOverview() {
                   </div>
                 </div>
               ) : <EmptyChart text="No disputes raised — nothing to action. 🎉" />}
-            </div>
+            </Link>
           </div>
         </>
       )}

@@ -91,6 +91,16 @@ export default function AdminUsersPage() {
 
   useEffect(() => { void fetchUsers(); }, [fetchUsers]);
 
+  // Deep-link support: seed filters from the URL query (?role=&status=&search=) on
+  // mount, so Overview drill-downs can land here pre-filtered.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const r = p.get('role'); const s = p.get('status'); const q = p.get('search');
+    if (r != null) setRoleFilter(r);
+    if (s != null) setStatusFilter(s);
+    if (q != null) setSearch(q);
+  }, []);
+
   async function updateStatus(userId: number, status: string) {
     setActionLoading(userId);
     try {

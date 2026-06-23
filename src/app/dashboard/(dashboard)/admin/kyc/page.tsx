@@ -993,6 +993,16 @@ export default function AdminKycPage() {
   const listScrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef   = useRef<HTMLDivElement>(null);
 
+  // Deep-link: seed the active tab + compliance-status filter from the URL
+  // (?tab=rental|service|tenants|managers|technicians, ?status=compliant|…) so
+  // Overview drill-downs land on the right queue.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const t = p.get("tab"); const s = p.get("status");
+    if (t && ["rental", "service", "tenants", "managers", "technicians"].includes(t)) setTab(t as Tab);
+    if (s && ["all", "pending_review", "action_required", "compliant", "expired"].includes(s)) setStatusFilter(s as StatusFilter);
+  }, []);
+
   // Paginated KYC tabs only — managers/technicians render via TeamOversight.
   const TAB_PATH: Record<"rental" | "service" | "tenants", string> = {
     rental:  "/admin/kyc/rental-providers",

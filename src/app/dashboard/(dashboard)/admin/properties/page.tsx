@@ -27,6 +27,8 @@ export default function AdminPropertiesBrowser() {
   const [view, setView] = useState<'row' | 'grid' | 'map'>('row');
   const [q, setQ] = useState('');
 
+  const [drill, setDrill] = useState<{ category?: string; emirate?: string; availability?: string }>({});
+
   useEffect(() => {
     apiGet<AdminProperty[]>('/admin/properties/browser')
       .then((d) => { if (Array.isArray(d)) setProps(d); })
@@ -34,11 +36,33 @@ export default function AdminPropertiesBrowser() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Deep-link drill filters from the Overview (?category=&emirate=&availability=occupied).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    setDrill({
+      category: p.get('category') ?? undefined,
+      emirate: p.get('emirate') ?? undefined,
+      availability: p.get('availability') ?? undefined,
+    });
+  }, []);
+
   const filtered = useMemo(() => {
-    if (!q.trim()) return props;
-    const s = q.trim().toLowerCase();
-    return props.filter((p) => [p.buildingName, p.fullAddress, p.ownerName, p.spaceCategory].filter(Boolean).join(' ').toLowerCase().includes(s));
-  }, [props, q]);
+    let list = props;
+    if (drill.category) list = list.filter((p) => (p.spaceCategory ?? '').toLowerCase() === drill.category!.toLowerCase());
+    if (drill.emirate) { const e = drill.emirate!.toLowerCase(); list = list.filter((p) => (p.fullAddress ?? '').toLowerCase().includes(e)); }
+    if (drill.availability === 'occupied') list = list.filter((p) => p.occupiedCount > 0);
+    if (q.trim()) {
+      const s = q.trim().toLowerCase();
+      list = list.filter((p) => [p.buildingName, p.fullAddress, p.ownerName, p.spaceCategory].filter(Boolean).join(' ').toLowerCase().includes(s));
+    }
+    return list;
+  }, [props, q, drill]);
+
+  const activeDrill = [
+    drill.category && titleCase(drill.category),
+    drill.emirate,
+    drill.availability === 'occupied' && 'Occupied only',
+  ].filter(Boolean) as string[];
 
   const withCoords = filtered.filter((p) => p.latitude != null && p.longitude != null).length;
 
@@ -64,6 +88,16 @@ export default function AdminPropertiesBrowser() {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search building, owner, address…"
           className="w-full pl-9 pr-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:border-emerald-500" />
       </div>
+
+      {activeDrill.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
+          <span className="text-stone-500">Filtered:</span>
+          {activeDrill.map((d) => (
+            <span key={d} className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium text-xs">{d}</span>
+          ))}
+          <button onClick={() => { setDrill({}); router.replace('/dashboard/admin/properties'); }} className="text-xs font-semibold text-stone-500 hover:text-stone-800 underline">Clear</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="rounded-2xl border border-stone-200 bg-white p-12 text-center text-stone-400">Loading…</div>

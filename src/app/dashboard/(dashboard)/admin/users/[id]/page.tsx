@@ -100,7 +100,7 @@ interface UserDetail {
     summary: { leases: number; activeLeases: number; landlords: number; annualRentActive: number; depositsHeld: number };
     payments: null | { byStatus: Record<string, { count: number; amount: number }>; paidAmount: number; pendingAmount: number; bouncedCount: number };
     documents: null | { total: number; verified: number; pending: number; requested: number };
-    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; unitNumber: string | null; rentalProviderId: number | null; companyName: string | null }[];
+    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; unitId: number | null; unitNumber: string | null; rentalProviderId: number | null; ownerUserId: number | null; companyName: string | null }[];
     landlords: { rentalProviderId: number; userId: number | null; companyName: string | null; ownerName: string | null; leases: number }[];
   };
   staff?: null | {
@@ -608,18 +608,26 @@ function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Section title="Tenancies" count={c.leases.length}>
-          {c.leases.map((l) => (
-            <div key={l.id} className={ROW} style={ROW_STYLE}>
-              <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
-                  {l.companyName || '—'}{l.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {l.unitNumber}</span>}
-                </p>
-                <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{fmtDate(l.contractStartDate)} → {fmtDate(l.contractEndDate)} · {aed(l.annualRent)}/yr</p>
-              </div>
-              <Pill value={l.status} />
-            </div>
-          ))}
+          {c.leases.map((l) => {
+            const inner = (
+              <>
+                <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                    {l.companyName || '—'}{l.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {l.unitNumber}</span>}
+                  </p>
+                  <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{fmtDate(l.contractStartDate)} → {fmtDate(l.contractEndDate)} · {aed(l.annualRent)}/yr</p>
+                </div>
+                <Pill value={l.status} />
+                {l.unitId != null && <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />}
+              </>
+            );
+            return l.unitId != null ? (
+              <Link key={l.id} href={`/dashboard/admin/units/${l.unitId}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>{inner}</Link>
+            ) : (
+              <div key={l.id} className={ROW} style={ROW_STYLE}>{inner}</div>
+            );
+          })}
         </Section>
 
         <Section title="Landlords" count={c.landlords.length}>
