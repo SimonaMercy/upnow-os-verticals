@@ -329,14 +329,11 @@ function RpContentPanel({
                     Missing for approval — {missingRequired.length} item{missingRequired.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {missingRequired.map((c) => (
-                    <div key={c.key} className="flex items-start gap-1.5 text-xs">
-                      <XCircle size={12} style={{ color: "#dc2626" }} className="mt-0.5 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="font-semibold" style={{ color: "#b91c1c" }}>{c.displayName}</p>
-                        {c.description && <p className="text-[11px]" style={{ color: "var(--color-neutral-500)" }}>{c.description}</p>}
-                      </div>
+                    <div key={c.key} className="flex items-center gap-1.5 text-[11px]">
+                      <XCircle size={11} style={{ color: "#dc2626" }} className="shrink-0" />
+                      <span className="font-medium truncate" style={{ color: "#b91c1c" }}>{c.displayName}</span>
                     </div>
                   ))}
                 </div>
