@@ -45,6 +45,7 @@ import {
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { openDocViewer } from '@/lib/docViewer';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -121,6 +122,12 @@ interface ContractDetail {
   } | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
+  /** Installment plans the owning RP offers (empty = all). Used by the renewal
+   *  modal so a manager (no own RP profile) still sees the RP's filtered list. */
+  allowedInstallments?: number[];
+  /** Owning RP's configured cheque days — lets the renewal preview snap due dates
+   *  to the same days the backend stamps (works for managers too). */
+  preferredChequeDays?: number[];
   adminFeeFils: number;
   ejariFeeFils: number;
   customClauses: string[];
@@ -3316,42 +3323,74 @@ function RenewalProposeModal({
     return v > 0 ? String(v) : '';
   };
   const [f, setF] = useState({
-    newAnnualRent: String(Math.round(contract.annualRent * 1.05)),
+    listedRent: String(Math.round(contract.annualRent * 1.05)),
+    discountType: 'none' as 'none' | 'percent' | 'fixed',
+    discountValue: '',
     newStartDate: iso(ns),
     newEndDate: iso(ne),
     numberOfInstallments: String(contract.numberOfInstallments ?? 4),
+    modeOfPayment: contract.modeOfPayment ?? 'cheque',
+    chequePayeeName: '',
     adminFee: parentFeeAmt('admin_fee', contract.adminFeeFils),
     ejariFee: parentFeeAmt('ejari_fee', contract.ejariFeeFils),
     commission: parentFeeAmt('commission'),
   });
+  // Extra one-off charge lines (Municipality Fee, parking add-on, etc.) — each a
+  // separate cheque on top of rent + fees. Posted as `extraCharges`.
+  const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
-  const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
-  useEffect(() => {
-    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { allowedInstallments?: number[] | null } } | null) => {
-        if (Array.isArray(data?.profile?.allowedInstallments)) setAllowedInstallments(data!.profile!.allowedInstallments!);
-      })
-      .catch(() => undefined);
-  }, []);
+  // Installment plans + cheque days come from the contract payload (the OWNING
+  // RP's config) so a manager — who has no RP profile of their own — still sees
+  // the right filtered list and the preview snaps dates the same way the backend does.
+  const allowedInstallments = contract.allowedInstallments ?? [];
+  const chequeDays = contract.preferredChequeDays ?? [];
+
   const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
+  const addExtra = () => setExtras(p => [...p, { description: '', amount: '', dueDate: '' }]);
+  const setExtra = (i: number, k: 'description' | 'amount' | 'dueDate', v: string) =>
+    setExtras(p => p.map((e, idx) => idx === i ? { ...e, [k]: v } : e));
+  const removeExtra = (i: number) => setExtras(p => p.filter((_, idx) => idx !== i));
+
   const n = parseInt(f.numberOfInstallments) || 0;
-  const rent = parseFloat(f.newAnnualRent) || 0;
+  const listed = parseFloat(f.listedRent) || 0;
+  const discVal = parseFloat(f.discountValue) || 0;
+  const discountAmt = f.discountType === 'percent'
+    ? Math.round(listed * discVal) / 100
+    : f.discountType === 'fixed' ? discVal : 0;
+  const rent = Math.max(0, listed - Math.min(discountAmt, listed)); // net rent
   const adminN = parseFloat(f.adminFee) || 0;
   const ejariN = parseFloat(f.ejariFee) || 0;
   const commN = parseFloat(f.commission) || 0;
-  const base = n ? Math.floor(rent / n) : 0;
-  const last = rent - base * (n - 1);
-  const rows: { i: number; d: string; a: number; b: boolean }[] = [];
+  // Rent VAT (commercial/industrial) carries on the cheque; rate is a whole % (e.g. 5).
+  const vatRate = Number(contract.rentVatRate) || 0;
+  const vatOf = (x: number) => vatRate ? Math.round(x * vatRate) / 100 : 0;
+  // Due dates — spread over the actual renewal term + snapped to the RP's cheque
+  // days, identical to what proposeRenewal stamps server-side.
+  const dueDates = buildInstallmentDueDates(f.newStartDate, f.newEndDate, n, chequeDays);
+
+  // Preview schedule: rent cheques (each pure rent + VAT), then separate fee rows,
+  // then any extra charges — mirrors the backend's de-bundled payment rows.
+  type Row = { key: string; d: string; date: string; net: number; vat: number };
+  const rows: Row[] = [];
   if (n && rent) {
-    const feeParts = [adminN > 0 && 'Admin', ejariN > 0 && 'Ejari', commN > 0 && 'Commission'].filter(Boolean);
-    const firstLabel = [...feeParts, `Installment 1 (1/${n})`].join(' + ');
-    rows.push({ i: 1, d: firstLabel, a: adminN + ejariN + commN + (n === 1 ? last : base), b: true });
-    for (let i = 1; i < n; i++) rows.push({ i: i + 1, d: `Rent — Payment ${i + 1}/${n}`, a: i === n - 1 ? last : base, b: false });
+    const base = Math.floor(rent / n);
+    const lastA = rent - base * (n - 1);
+    for (let i = 0; i < n; i++) {
+      const r = i === n - 1 ? lastA : base;
+      rows.push({ key: `r${i}`, d: n === 1 ? 'Annual Rent' : `Rental Instalment ${i + 1} of ${n}`, date: dueDates[i] ?? '', net: r, vat: vatOf(r) });
+    }
   }
-  const total = rows.reduce((s, r) => s + r.a, 0);
+  const feeDate = dueDates[0] ?? f.newStartDate;
+  if (adminN > 0) rows.push({ key: 'admin', d: 'Admin Fee', date: feeDate, net: adminN, vat: 0 });
+  if (ejariN > 0) rows.push({ key: 'ejari', d: 'Ejari Fee', date: feeDate, net: ejariN, vat: 0 });
+  if (commN > 0)  rows.push({ key: 'comm',  d: 'Commission', date: feeDate, net: commN, vat: 0 });
+  extras.forEach((e, i) => {
+    const amt = parseFloat(e.amount) || 0;
+    if (e.description.trim() && amt > 0) rows.push({ key: `x${i}`, d: e.description.trim(), date: e.dueDate || (dueDates[n - 1] ?? ''), net: amt, vat: 0 });
+  });
+  const totalVat = rows.reduce((s, r) => s + r.vat, 0);
+  const total = rows.reduce((s, r) => s + r.net + r.vat, 0);
 
   const submit = async () => {
     setBusy(true); setErr(null);
@@ -3361,16 +3400,27 @@ function RenewalProposeModal({
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          newAnnualRent: rent,
+          newAnnualRent: rent,                       // NET (listed − discount)
+          listedRent: listed,
+          discountType: f.discountType === 'none' ? undefined : f.discountType,
+          discountValue: f.discountType === 'none' ? undefined : discVal,
           newStartDate: f.newStartDate,
           newEndDate: f.newEndDate,
           numberOfInstallments: n,
+          modeOfPayment: f.modeOfPayment,
+          chequePayeeName: f.chequePayeeName.trim() || undefined,
           adminFee: adminN,
           ejariFee: ejariN,
           commission: commN,
+          extraCharges: extras
+            .map(e => ({ description: e.description.trim(), amount: parseFloat(e.amount) || 0, dueDate: e.dueDate || undefined }))
+            .filter(e => e.description && e.amount > 0),
         }),
       });
-      if (!res.ok) throw new Error(`Renewal propose failed: ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `Renewal propose failed: ${res.status}`);
+      }
       onSubmitted();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Renewal propose failed');
@@ -3412,11 +3462,49 @@ function RenewalProposeModal({
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>
-              <label>New annual rent (AED)</label>
-              <input type="number" className="input" value={f.newAnnualRent} onChange={e => set('newAnnualRent', e.target.value)} />
+              <label>Listed annual rent (AED)</label>
+              <input type="number" className="input" value={f.listedRent} onChange={e => set('listedRent', e.target.value)} />
             </div>
           </div>
-          <p className="subhead mut">Fees (AED) — bundle into payment 1</p>
+          <div className="grid2" style={{ marginBottom: 18 }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label>Discount</label>
+              <select className="input" value={f.discountType} onChange={e => set('discountType', e.target.value)}>
+                <option value="none">No discount</option>
+                <option value="percent">Percentage (%)</option>
+                <option value="fixed">Fixed (AED)</option>
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label>{f.discountType === 'percent' ? 'Discount %' : f.discountType === 'fixed' ? 'Discount (AED)' : 'Net annual rent (AED)'}</label>
+              {f.discountType === 'none'
+                ? <input className="input" value={fmtAed(rent)} disabled style={{ background: 'var(--surface)', color: 'var(--ink-3)' }} />
+                : <input type="number" className="input" value={f.discountValue} onChange={e => set('discountValue', e.target.value)} />}
+            </div>
+          </div>
+          {f.discountType !== 'none' && (
+            <p className="note mut" style={{ marginTop: -8, marginBottom: 16 }}>
+              Net annual rent after discount: <b style={{ color: 'var(--ink)' }}>{fmtAed(rent)}</b>
+              {discountAmt > 0 && <> (−{fmtAed(discountAmt)})</>}
+            </p>
+          )}
+          <div className="grid2" style={{ marginBottom: 18 }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label>Mode of payment</label>
+              <select className="input" value={f.modeOfPayment} onChange={e => set('modeOfPayment', e.target.value)}>
+                <option value="cheque">Cheque</option>
+                <option value="bank_transfer">Bank transfer</option>
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="online">Online</option>
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label>Cheques payable to (optional)</label>
+              <input className="input" value={f.chequePayeeName} placeholder={contract.landlord.companyName ?? contract.landlord.name ?? ''} onChange={e => set('chequePayeeName', e.target.value)} />
+            </div>
+          </div>
+          <p className="subhead mut">Fees (AED) — billed as their own cheques</p>
           <div className="grid2">
             <div className="field"><label>Admin fee</label><input type="number" className="input" value={f.adminFee} onChange={e => set('adminFee', e.target.value)} /></div>
             <div className="field"><label>Ejari fee</label><input type="number" className="input" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></div>
@@ -3425,21 +3513,45 @@ function RenewalProposeModal({
             <div className="field"><label>Commission</label><input type="number" className="input" value={f.commission} onChange={e => set('commission', e.target.value)} /></div>
             <div className="field"><label>Deposit (carries over)</label><input className="input" value={fmtAed(contract.securityDepositAmount)} disabled style={{ background: 'var(--surface)', color: 'var(--ink-3)' }} /></div>
           </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <p className="subhead mut" style={{ margin: 0 }}>Additional charges</p>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={addExtra}><Plus size={13} /> Add charge</button>
+          </div>
+          {extras.map((e, i) => (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 150px 32px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              <input className="input" placeholder="Description (e.g. Municipality Fee)" value={e.description} onChange={ev => setExtra(i, 'description', ev.target.value)} />
+              <input className="input" type="number" placeholder="Amount" value={e.amount} onChange={ev => setExtra(i, 'amount', ev.target.value)} />
+              <input className="input" type="date" value={e.dueDate} onChange={ev => setExtra(i, 'dueDate', ev.target.value)} />
+              <button type="button" className="x" onClick={() => removeExtra(i)} title="Remove"><Trash2 size={15} /></button>
+            </div>
+          ))}
+
           {rows.length > 0 && (
             <>
-              <p className="subhead mut">Planned installments</p>
+              <p className="subhead mut" style={{ marginTop: 14 }}>Planned schedule</p>
               <table className="ptable" style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, overflow: 'hidden' }}>
-                <thead><tr><th>#</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+                <thead><tr><th>#</th><th>Description</th><th>Due date</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
                 <tbody>
-                  {rows.map(r => (
-                    <tr key={r.i} style={r.b ? { background: '#fdf7ea' } : undefined}>
-                      <td>{r.i}</td><td>{r.d}</td>
-                      <td className="amt" style={{ textAlign: 'right' }}>{r.a.toLocaleString('en-AE')}</td>
+                  {rows.map((r, i) => (
+                    <tr key={r.key}>
+                      <td>{i + 1}</td>
+                      <td>{r.d}{r.vat > 0 && <span className="note mut"> · incl. VAT {r.vat.toLocaleString('en-AE')}</span>}</td>
+                      <td>{r.date ? fmtDate(r.date) : '—'}</td>
+                      <td className="amt" style={{ textAlign: 'right' }}>{(r.net + r.vat).toLocaleString('en-AE')}</td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot><tr><td colSpan={2}>Total</td><td className="tot" style={{ textAlign: 'right' }}>{total.toLocaleString('en-AE')}</td></tr></tfoot>
+                <tfoot>
+                  {totalVat > 0 && (
+                    <tr><td colSpan={3} style={{ color: 'var(--mute)' }}>of which VAT</td><td className="amt" style={{ textAlign: 'right', color: 'var(--mute)' }}>{totalVat.toLocaleString('en-AE')}</td></tr>
+                  )}
+                  <tr><td colSpan={3}>Total</td><td className="tot" style={{ textAlign: 'right' }}>{total.toLocaleString('en-AE')}</td></tr>
+                </tfoot>
               </table>
+              {chequeDays.length === 0 && (
+                <p className="note mut" style={{ marginTop: 6 }}>Tip: set preferred cheque days in Settings → Rules to standardise due dates.</p>
+              )}
             </>
           )}
           {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}

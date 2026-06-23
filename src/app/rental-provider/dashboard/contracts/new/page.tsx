@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2, Send } from 'lucide-react';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { buildInstallmentDueDates } from '@/lib/installmentDates';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,13 +94,12 @@ function addMonths(dateStr: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Date of cheque i (0-indexed), spaced evenly from startDate by 12/n months each. */
-function chequeDate(startDate: string, installments: number, i: number): string {
-  if (!startDate || !installments) return '';
-  const monthsPerCheque = 12 / installments;
-  const d = new Date(`${startDate}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + Math.round(i * monthsPerCheque));
-  return d.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
+/** Format a YYYY-MM-DD due date (from buildInstallmentDueDates) for display. */
+function fmtDueDate(iso: string): string {
+  if (!iso) return '';
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-AE', {
+    timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric',
+  });
 }
 
 function calcDurationLabel(start: string, end: string): string {
@@ -279,6 +279,9 @@ export default function NewContractPage() {
   const autoEndDateRef = useRef(true);
 
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
+  // RP's configured cheque days — the schedule preview snaps each due date to the
+  // nearest of these, matching what the backend stamps (Settings → Rules).
+  const [preferredChequeDays, setPreferredChequeDays] = useState<number[]>([]);
   // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
   const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -319,9 +322,12 @@ export default function NewContractPage() {
     if (isManager) return;
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { preferredStartDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
+      .then((data: { profile?: { preferredStartDays?: number[] | null; preferredChequeDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) {
           setPreferredStartDays(data!.profile!.preferredStartDays!);
+        }
+        if (Array.isArray(data?.profile?.preferredChequeDays)) {
+          setPreferredChequeDays(data!.profile!.preferredChequeDays!);
         }
         const allowed = data?.profile?.allowedInstallments;
         if (Array.isArray(allowed) && allowed.length) {
@@ -624,6 +630,11 @@ export default function NewContractPage() {
   const installments  = Number(form.numberOfInstallments) || 4;
   const chequeAmount  = installments > 0 ? annualRent / installments : 0;
   const durationLabel = calcDurationLabel(form.contractStartDate, form.contractEndDate);
+  // Cheque due dates for the preview — spread over the ACTUAL term and snapped to
+  // the RP's configured cheque days, exactly as the backend stamps them.
+  const previewDueDates = buildInstallmentDueDates(
+    form.contractStartDate, form.contractEndDate, installments, preferredChequeDays,
+  );
 
   // ─── Success screen ───────────────────────────────────────────────────────
 
@@ -1184,8 +1195,8 @@ export default function NewContractPage() {
                       <span className="text-xs text-[#9b9890]">{i + 1}</span>
                       <span className="text-xs text-[#6b6860]">Cheque {i + 1}</span>
                       <span className="text-xs text-[#6b6860]">
-                        {form.contractStartDate
-                          ? chequeDate(form.contractStartDate, installments, i)
+                        {form.contractStartDate && previewDueDates[i]
+                          ? fmtDueDate(previewDueDates[i])
                           : <span className="text-[#c0bdb8]">Set start date</span>}
                       </span>
                       <span className="text-sm font-bold text-[#2e9f82] text-right">{fmtAed(chequeAmount)}</span>
