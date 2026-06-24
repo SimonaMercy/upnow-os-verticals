@@ -247,14 +247,22 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
     round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
   const rentVat = round2(rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0));
 
-  let admin = 0, ejari = 0, commission = 0, rentNet: number;
+  // Per-fee NET + VAT. Real fee rows store the GROSS amount + their own vatAmount,
+  // so the receipt must show net / VAT / gross (not strip VAT to net — that
+  // undercounts the printed total by the fee VAT). Legacy/bundled contracts have
+  // no fee VAT tracked, so VAT stays 0 there.
+  const grossOf = (rows: ReceiptPayment[]) => round2(rows.reduce((s, p) => s + (p.amount || 0), 0));
+  const vatSumOf = (rows: ReceiptPayment[]) => round2(rows.reduce((s, p) => s + (p.vatAmount || 0), 0));
+  const feeOfType = (t: string) => feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === t);
+
+  let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commissionNet = 0, commissionVat = 0, rentNet: number;
 
   if (feeRows.length > 0) {
-    // Real fee rows — read each fee directly from its own row(s). No residual,
-    // no column reconstruction; commission is whatever the RP actually recorded.
-    admin = netOf(feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === 'admin_fee'));
-    ejari = netOf(feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === 'ejari_fee'));
-    commission = netOf(feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === 'commission'));
+    // Real fee rows — read each fee (gross + VAT) directly from its own row(s).
+    const a = feeOfType('admin_fee'), e = feeOfType('ejari_fee'), c = feeOfType('commission');
+    adminVat = vatSumOf(a); adminNet = round2(grossOf(a) - adminVat);
+    ejariVat = vatSumOf(e); ejariNet = round2(grossOf(e) - ejariVat);
+    commissionVat = vatSumOf(c); commissionNet = round2(grossOf(c) - commissionVat);
     rentNet = netOf(rentRows);
   } else {
     // Legacy / renewal: no separate fee rows — fees were bundled into the rent
@@ -264,14 +272,14 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
     const sumNet = netOf(rentRows);
     const feesPlusComm = round2(sumNet - (contract.annualRent ?? 0));
     const n = normalizeFees(contract.adminFeeFils ?? 0, contract.ejariFeeFils ?? 0, feesPlusComm);
-    admin = n.admin; ejari = n.ejari;
-    rentNet = Math.max(0, round2(sumNet - admin - ejari));
+    adminNet = n.admin; ejariNet = n.ejari;
+    rentNet = Math.max(0, round2(sumNet - adminNet - ejariNet));
   }
 
   const lines: LineItem[] = [];
-  if (admin > 0) lines.push({ desc: 'Administration Fee', net: admin, vat: 0, total: admin });
-  if (ejari > 0) lines.push({ desc: 'Ejari Registration Fee', net: ejari, vat: 0, total: ejari });
-  if (commission > 0) lines.push({ desc: 'Agency Commission', net: commission, vat: 0, total: commission });
+  if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat) });
+  if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat) });
+  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Agency Commission',      net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat) });
   lines.push({ desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) });
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT', titleAr: 'إيصال دفعات العقد',

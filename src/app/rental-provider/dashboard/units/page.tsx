@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete } from '@/lib/api';
 import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
+import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
+import AddendumTemplatePicker from '@/components/upnow/AddendumTemplatePicker';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 import { UnitFormModal, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
@@ -1181,6 +1183,7 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
   );
   const [addendumErr, setAddendumErr] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<TermsVersion[] | null>(null);
   const [verLoading, setVerLoading] = useState(false);
@@ -1462,16 +1465,30 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
                     </p>
                     <p className="text-[11px] text-[#9b9890]">{n ? `${n} term${n === 1 ? '' : 's'} written` : 'No terms yet'}</p>
                   </div>
-                  <button type="button" onClick={() => setEditorOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] cursor-pointer shrink-0">
-                    <Pencil size={13} /> {n ? 'Edit addendum' : 'Write addendum'}
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Choose from a saved template… */}
+                    <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} manager={manager} rpQ={rpQ} />
+                    {n > 0 && (
+                      <button type="button" onClick={() => setPreviewOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
+                        <Eye size={13} /> Preview
+                      </button>
+                    )}
+                    {/* …or add new / edit */}
+                    <button type="button" onClick={() => setEditorOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] cursor-pointer">
+                      <Pencil size={13} /> {n ? 'Edit addendum' : 'Write new'}
+                    </button>
+                  </div>
                 </div>
               );
             })()}
             {addendumErr && <p className="text-[11px] text-red-600">{addendumErr}</p>}
             {editorOpen && (
               <AddendumEditorModal value={addendumTerms} onChange={setAddendumTerms} onClose={() => setEditorOpen(false)} />
+            )}
+            {previewOpen && (
+              <AddendumPreviewModal terms={addendumTerms} title={addendumTerms.name?.trim() || 'Agreement Addendum'} onClose={() => setPreviewOpen(false)} />
             )}
 
             {plan.termsVersion && (

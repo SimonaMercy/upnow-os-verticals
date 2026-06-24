@@ -135,8 +135,18 @@ export default function RentalProviderOnboardingPage() {
   const [checklist, setChecklist] = useState<Array<{ key: string; displayName: string; description: string; required: boolean; category: string; uploaded: boolean; fileUrl: string | null; mimeType: string | null }>>([]);
 
   // ── Load profile ──
+  // Hydrate the form from the persisted profile EXACTLY ONCE. The effect keys
+  // on `user`, and AuthContext hands back a fresh `user` object on every
+  // refresh() (e.g. after phone-OTP verification calls refresh()). Without this
+  // guard each refresh re-ran the block below and clobbered in-progress edits —
+  // most visibly snapping the account type back to the persisted default
+  // ("Individual Landlord") right after the user picked, say, "Landlord Company"
+  // and verified their phone.
+  const hydratedRef = useRef(false);
   useEffect(() => {
     if (!user) return;
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
     (async () => {
       try {
         const res = await apiGet<{ profile: RpProfile; checklist: typeof checklist }>("/profiles/rental-provider/me");
@@ -489,15 +499,34 @@ export default function RentalProviderOnboardingPage() {
         payload.poaPersonName  = hasPoa ? poaPersonName.trim()  : null;
         payload.poaPersonPhone = hasPoa ? poaPersonPhone.trim() : null;
         payload.poaPersonEmail = hasPoa ? poaPersonEmail.trim() : null;
+        // Keep the two account types cleanly separate: an individual profile
+        // must not carry company details left over from a prior company
+        // submission (e.g. after an admin asked them to re-pick their type).
+        payload.companyName = null;
+        payload.companyType = null;
+        payload.tradeLicenseNumber = null;
+        payload.tradeLicenseAuthority = null;
+        payload.parentBrokerageName = null;
+        payload.shareholders = null;
       } else {
+        // Company details — these stay on the profile, the company name included.
         payload.companyName = companyName.trim() || null;
+        payload.companyType = kind.companyType;
         payload.tradeLicenseNumber = tradeLicenseNumber.trim() || null;
         payload.tradeLicenseAuthority = tradeLicenseAuthority.trim() || null;
+        payload.parentBrokerageName = kind.companyType === "agents" ? parentBrokerageName.trim() : null;
+        // Agents operate under a parent brokerage and have no shareholders.
+        payload.shareholders = kind.companyType === "agents" ? null : (shareholders.length ? shareholders : null);
+        // Signatory identity — shared columns, company-context labels.
         payload.emiratesIdNumber = emiratesIdNumber.trim() || null;
         payload.passportNumber = passportNumber.trim() || null;
-        payload.companyType = kind.companyType;
-        payload.parentBrokerageName = kind.companyType === "agents" ? parentBrokerageName.trim() : null;
-        payload.shareholders = shareholders.length ? shareholders : null;
+        // Drop individual-only fields left over from a prior individual submission.
+        payload.nationality = null;
+        payload.dateOfBirth = null;
+        payload.hasPoa = false;
+        payload.poaPersonName = null;
+        payload.poaPersonPhone = null;
+        payload.poaPersonEmail = null;
       }
       await apiPatch("/profiles/rental-provider/me", payload);
       await refresh();

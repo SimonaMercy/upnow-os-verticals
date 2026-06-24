@@ -14,13 +14,14 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useEffect, useState, useRef } from 'react';
-import { FileText, UploadCloud, Trash2, Loader2, AlertCircle, Plus, X, ExternalLink, Star, PenLine, FileType2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2 } from 'lucide-react';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { unitTypesForCategory, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
-import AddendumTermsEditor from '@/components/upnow/AddendumTermsEditor';
+import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
+import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 
 interface AddendumTemplate {
@@ -48,13 +49,12 @@ function defaultLabel(spaceCategory: string | null, unitType: string | null): st
   return unitType ? `${cat} › ${UNIT_TYPE_LABELS[unitType] ?? unitType}` : `${cat} (all)`;
 }
 
-const ALLOWED_MIME = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-
 export default function AddendumTemplatesPage() {
   const [templates, setTemplates] = useState<AddendumTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [previewTpl, setPreviewTpl] = useState<AddendumTemplate | null>(null);
 
   async function fetchAll() {
     setLoading(true); setErr(null);
@@ -83,7 +83,7 @@ export default function AddendumTemplatesPage() {
   return (
     <DashboardPage
       title="Addendum Templates"
-      subtitle="Upload reusable addendum files (PDF or DOCX). Mark one as the default for a property category or unit type and it pre-fills new layouts of that kind."
+      subtitle="Write reusable addendum templates. Mark one as the default for a property category or unit type and it pre-fills new layouts of that kind."
       actions={
         <button
           onClick={() => setShowForm(true)}
@@ -110,13 +110,13 @@ export default function AddendumTemplatesPage() {
           </div>
           <h3 className="font-semibold text-[#1a1916] mb-1">No templates yet</h3>
           <p className="text-sm text-[#6b6860] max-w-xs mb-4">
-            Upload an addendum file once and attach it to any contract going forward.
+            Write an addendum once and reuse it — set it as the default for a category and it pre-fills new layouts.
           </p>
           <button
             onClick={() => setShowForm(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
           >
-            <UploadCloud size={14} /> Upload your first template
+            <PenLine size={14} /> Write your first addendum
           </button>
         </div>
       ) : (
@@ -159,6 +159,12 @@ export default function AddendumTemplatesPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
+                      {t.terms && (
+                        <button onClick={() => setPreviewTpl(t)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
+                          <ExternalLink size={12} /> Preview
+                        </button>
+                      )}
                       {t.fileUrl && (
                         <a href={t.fileUrl} target="_blank" rel="noopener noreferrer"
                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
@@ -184,6 +190,10 @@ export default function AddendumTemplatesPage() {
           onCreated={() => { setShowForm(false); void fetchAll(); }}
         />
       )}
+
+      {previewTpl?.terms && (
+        <AddendumPreviewModal terms={previewTpl.terms} title={previewTpl.name} onClose={() => setPreviewTpl(null)} />
+      )}
     </DashboardPage>
   );
 }
@@ -199,173 +209,83 @@ function mimeLabel(mime: string): string {
 function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  // Authoring mode: in-app bilingual terms (default, friendly) vs upload a file.
-  const [mode, setMode] = useState<'terms' | 'file'>('terms');
   const [terms, setTerms] = useState<AddendumTerms>(emptyAddendumTerms());
-  const [file, setFile] = useState<File | null>(null);
-  // Optional default key: a category (and optional sub-category/unit type). Blank
-  // category = an ordinary library template (no auto pre-fill).
+  // Optional default key: a category (+ optional sub-category). Blank = library only.
   const [spaceCategory, setSpaceCategory] = useState('');
   const [unitType, setUnitType] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const subTypes = spaceCategory ? unitTypesForCategory(spaceCategory) : [];
-  const keyFields = {
-    spaceCategory: spaceCategory || undefined,
-    unitType: spaceCategory && unitType ? unitType : undefined,
-  };
 
   async function submit() {
-    if (!name.trim()) { setErr('Name is required'); return; }
+    if (!name.trim()) { setErr('Template name is required'); return; }
+    if (!hasAddendumTerms(terms)) { setErr('Write at least one addendum term'); return; }
     setBusy(true); setErr(null);
     try {
-      if (mode === 'terms') {
-        if (!hasAddendumTerms(terms)) { setErr('Add at least one addendum term'); setBusy(false); return; }
-        await apiPost('/addendum-templates', {
-          name: name.trim(),
-          description: description.trim() || undefined,
-          terms,
-          ...keyFields,
-        });
-        onCreated();
-        return;
-      }
-      // File mode — 3-step upload.
-      if (!file) { setErr('Please choose a file'); setBusy(false); return; }
-      if (!ALLOWED_MIME.includes(file.type)) { setErr('Only PDF and Word documents are supported'); setBusy(false); return; }
-      // 1. Get presigned URL
-      const presigned = await apiPost<{ uploadUrl: string; fileUrl: string; fileKey: string }>(
-        '/addendum-templates/upload-url',
-        { mimeType: file.type, originalName: file.name },
-      );
-      // 2. PUT binary to S3 (or local proxy)
-      // The local-dev URL points at /api/documents/_upload/... which is same-origin so no CORS hop.
-      const target = (() => {
-        try { const p = new URL(presigned.uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : presigned.uploadUrl; }
-        catch { return presigned.uploadUrl; }
-      })();
-      const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-      if (!putRes.ok) throw new Error(`Upload failed (status ${putRes.status})`);
-      // 3. Register the template
       await apiPost('/addendum-templates', {
         name: name.trim(),
         description: description.trim() || undefined,
-        fileUrl: presigned.fileUrl,
-        fileKey: presigned.fileKey,
-        mimeType: file.type,
-        originalFilename: file.name,
-        ...keyFields,
+        terms,
+        spaceCategory: spaceCategory || undefined,
+        unitType: spaceCategory && unitType ? unitType : undefined,
       });
       onCreated();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not save template');
-    } finally {
       setBusy(false);
     }
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className={`bg-white rounded-2xl w-full shadow-xl max-h-[94vh] flex flex-col ${mode === 'terms' ? 'max-w-5xl' : 'max-w-lg'}`} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6e0]">
-          <h3 className="text-base font-bold text-[#1a1916]">New addendum template</h3>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] p-1">
-            <X size={18} />
-          </button>
+  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]';
+  const LBL = 'text-[10px] font-semibold text-[#6b6860] block mb-1 uppercase tracking-wide';
+
+  // All template options live in the full-screen editor's options bar.
+  const options = (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className={LBL}>Template name</label>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Standard residential addendum" className={SELECT} />
         </div>
-        <div className="p-5 space-y-4 overflow-auto flex-1 min-h-0">
-          <div>
-            <label className="text-xs font-semibold text-[#6b6860] block mb-1.5">Template name</label>
-            <input type="text" value={name} onChange={e => setName(e.target.value)}
-              placeholder="e.g. Pet policy addendum"
-              className="w-full px-3 py-2 rounded-xl border border-[#e8e6e0] text-sm focus:outline-none focus:border-[#2e9f82]" />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-[#6b6860] block mb-1.5">Description (optional)</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
-              placeholder="What this addendum covers — for your team's reference."
-              className="w-full px-3 py-2 rounded-xl border border-[#e8e6e0] text-sm focus:outline-none focus:border-[#2e9f82] resize-none" />
-          </div>
-          {/* Authoring mode toggle — write terms in-app (default) or upload a file. */}
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setMode('terms')}
-              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border ${mode === 'terms' ? 'border-[#2e9f82] bg-[#f0faf6] text-[#2e9f82]' : 'border-[#e8e6e0] text-[#6b6860] hover:bg-[#fafaf8]'}`}>
-              <PenLine size={14} /> Write terms in-app
-            </button>
-            <button type="button" onClick={() => setMode('file')}
-              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border ${mode === 'file' ? 'border-[#2e9f82] bg-[#f0faf6] text-[#2e9f82]' : 'border-[#e8e6e0] text-[#6b6860] hover:bg-[#fafaf8]'}`}>
-              <UploadCloud size={14} /> Upload a file
-            </button>
-          </div>
-
-          {mode === 'terms' ? (
-            <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3">
-              <AddendumTermsEditor value={terms} onChange={setTerms} height={480} />
-            </div>
-          ) : (
-            <div>
-              <label className="text-xs font-semibold text-[#6b6860] block mb-1.5">File (PDF or DOCX)</label>
-              <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                className="hidden"
-                onChange={e => setFile(e.target.files?.[0] ?? null)} />
-              <button onClick={() => fileRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed border-[#e8e6e0] text-sm text-[#6b6860] hover:border-[#2e9f82] hover:bg-[#f0faf6]">
-                <UploadCloud size={16} />
-                {file ? file.name : 'Click to choose file'}
-              </button>
-            </div>
-          )}
-
-          {/* Optional: make this the default addendum for a category / unit type.
-              When set, new layouts of that kind pre-fill this template. */}
-          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3 space-y-3">
-            <div className="flex items-center gap-1.5">
-              <Star size={13} className="text-[#b45309]" />
-              <p className="text-xs font-semibold text-[#b45309]">Set as default for… <span className="font-normal text-[#a16207]">(optional)</span></p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[10px] font-semibold text-[#a16207] block mb-1 uppercase tracking-wide">Category</label>
-                <select value={spaceCategory}
-                  onChange={e => { setSpaceCategory(e.target.value); setUnitType(''); }}
-                  className="w-full px-2.5 py-2 rounded-lg border border-[#fde68a] bg-white text-sm focus:outline-none focus:border-[#b45309]">
-                  <option value="">No default (library only)</option>
-                  {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-semibold text-[#a16207] block mb-1 uppercase tracking-wide">Sub-category</label>
-                <select value={unitType} onChange={e => setUnitType(e.target.value)} disabled={!spaceCategory}
-                  className="w-full px-2.5 py-2 rounded-lg border border-[#fde68a] bg-white text-sm focus:outline-none focus:border-[#b45309] disabled:opacity-50 disabled:bg-[#faf7ef]">
-                  <option value="">All of this category</option>
-                  {subTypes.map(u => <option key={u} value={u}>{UNIT_TYPE_LABELS[u] ?? u}</option>)}
-                </select>
-              </div>
-            </div>
-            {spaceCategory && (
-              <p className="text-[10px] text-[#a16207]">
-                Replaces any current default for {defaultLabel(spaceCategory, unitType || null)}.
-              </p>
-            )}
-          </div>
-
-          {err && <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-2"><AlertCircle size={12} /> {err}</div>}
+        <div className="flex-1 min-w-[200px]">
+          <label className={LBL}>Description (optional)</label>
+          <input value={description} onChange={e => setDescription(e.target.value)} placeholder="For your team's reference" className={SELECT} />
         </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#e8e6e0] bg-[#fafaf8]">
-          <button onClick={onClose} disabled={busy}
-            className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-white">
-            Cancel
-          </button>
-          <button onClick={submit}
-            disabled={busy || !name.trim() || (mode === 'terms' ? !hasAddendumTerms(terms) : !file)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-50">
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
-            {busy ? 'Saving…' : 'Save template'}
-          </button>
+        <div className="w-44">
+          <label className={LBL}>Default for category</label>
+          <select value={spaceCategory} onChange={e => { setSpaceCategory(e.target.value); setUnitType(''); }} className={SELECT}>
+            <option value="">No default (library only)</option>
+            {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="w-44">
+          <label className={LBL}>Sub-category</label>
+          <select value={unitType} onChange={e => setUnitType(e.target.value)} disabled={!spaceCategory} className={`${SELECT} disabled:opacity-50 disabled:bg-[#faf7ef]`}>
+            <option value="">All of this category</option>
+            {subTypes.map(u => <option key={u} value={u}>{UNIT_TYPE_LABELS[u] ?? u}</option>)}
+          </select>
         </div>
       </div>
+      {spaceCategory && (
+        <p className="text-[10px] text-[#a16207]">Sets the default addendum for {defaultLabel(spaceCategory, unitType || null)} — replaces any current one.</p>
+      )}
+      {err && <p className="text-[11px] text-red-600 flex items-center gap-1"><AlertCircle size={12} /> {err}</p>}
     </div>
+  );
+
+  return (
+    <AddendumEditorModal
+      value={terms}
+      onChange={setTerms}
+      onClose={onClose}
+      title="New addendum template"
+      subtitle="Write the terms; set the name and (optional) category. The layout previews on the right."
+      options={options}
+      primaryLabel="Save template"
+      onPrimary={submit}
+      primaryDisabled={!name.trim() || !hasAddendumTerms(terms)}
+      busy={busy}
+    />
   );
 }

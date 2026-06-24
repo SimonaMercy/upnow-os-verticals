@@ -25,6 +25,8 @@ interface Detail {
   contract: EjariContractData & { id: number; status: string | null };
   documents: Doc[];
   signatures: Sig[];
+  /** Addendum(s) attached to the contract — rendered combined into the contract PDF. */
+  addendums?: EjariAddendum[];
   tenantSigned: boolean;
   moveInAvailable: boolean;
   purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
@@ -102,7 +104,8 @@ export default function ContractReviewPage() {
   );
 
   const ejari = toEjari(d.contract, d.signatures);
-  const addendums: EjariAddendum[] = [];
+  // Combine the addendum into the contract PDF the tenant reads/signs.
+  const addendums: EjariAddendum[] = d.addendums ?? [];
 
   // Each link is scoped to one action; 'all' = legacy link that shows everything.
   const purpose = d.purpose ?? 'all';

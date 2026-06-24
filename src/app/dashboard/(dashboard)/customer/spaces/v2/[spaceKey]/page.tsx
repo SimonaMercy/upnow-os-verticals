@@ -118,6 +118,12 @@ interface ApiPaymentPlan {
   adminFeeFils?: number;
   ejariFils?: number;
   commissionFils?: number;
+  /** Per-fee VAT (fils) — gross fee = net + this. Rent VAT too (residential = 0). */
+  adminFeeVatFils?: number;
+  ejariVatFils?: number;
+  commissionVatFils?: number;
+  rentVatFils?: number;
+  rentVatRate?: number;
   items?: ApiPaymentPlanItem[];
   notes?: string;
   rentalIndexReportUrl?: string;
@@ -1101,11 +1107,11 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           <ErrorBox msg={planError} />
         ) : plan ? (
           <div style={{ display: 'grid', gap: 6 }}>
-            <PaymentRow label="Annual rent" amountFils={plan.rentFils} />
+            <PaymentRow label={`Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={plan.rentFils + (plan.rentVatFils ?? 0)} />
             <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
-            <PaymentRow label="Admin fee" amountFils={plan.adminFeeFils ?? 0} />
-            <PaymentRow label="Ejari fee" amountFils={plan.ejariFils ?? 0} />
-            <PaymentRow label="Commission" amountFils={plan.commissionFils ?? 0} />
+            <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
+            <PaymentRow label={`Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
+            <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
             <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
             <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
             <p style={{ fontSize: 11, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
@@ -2395,11 +2401,11 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
 
   <h2>Rent &amp; Fees</h2>
   <div class="grid">
-    <div class="l">Annual Rent</div><div class="v">${aed(plan.rentFils)}</div>
+    <div class="l">Annual Rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed(plan.rentFils + (plan.rentVatFils ?? 0))}</div>
     ${plan.securityDepositFils ? `<div class="l">Security Deposit</div><div class="v">${aed(plan.securityDepositFils)}</div>` : ''}
-    ${plan.adminFeeFils ? `<div class="l">Admin Fee</div><div class="v">${aed(plan.adminFeeFils)}</div>` : ''}
-    ${plan.ejariFils ? `<div class="l">Ejari Fee</div><div class="v">${aed(plan.ejariFils)}</div>` : ''}
-    ${plan.commissionFils ? `<div class="l">Commission</div><div class="v">${aed(plan.commissionFils)}</div>` : ''}
+    ${plan.adminFeeFils ? `<div class="l">Admin Fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0))}</div>` : ''}
+    ${plan.ejariFils ? `<div class="l">Ejari Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0))}</div>` : ''}
+    ${plan.commissionFils ? `<div class="l">Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0))}</div>` : ''}
   </div>
 
   <h2>Cheque Schedule (${plan.chequeCount} cheques)</h2>
@@ -2453,11 +2459,11 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
       <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Payment plan summary</p>
 
       <div style={{ display: 'grid', gap: 6, marginBottom: items.length ? 14 : 0 }}>
-        <PaymentRow label="Annual rent" amountFils={plan.rentFils} />
+        <PaymentRow label={`Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={plan.rentFils + (plan.rentVatFils ?? 0)} />
         <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
-        <PaymentRow label="Admin fee" amountFils={plan.adminFeeFils ?? 0} />
-        <PaymentRow label="Ejari fee" amountFils={plan.ejariFils ?? 0} />
-        <PaymentRow label="Commission" amountFils={plan.commissionFils ?? 0} />
+        <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
+        <PaymentRow label={`Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
+        <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
         <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
         <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
       </div>

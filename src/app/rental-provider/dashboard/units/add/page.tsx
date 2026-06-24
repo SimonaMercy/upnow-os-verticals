@@ -6,9 +6,9 @@ import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Upload, Download, CheckCircle2,
   AlertCircle, Loader2, FileSpreadsheet, ChevronDown, ChevronUp,
-  ImagePlus, X, Camera, Copy, Building2,
+  ImagePlus, X, Camera, Copy, Building2, Eye, FileText,
 } from 'lucide-react';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import {
@@ -20,7 +20,10 @@ import {
   FURNISHING_OPTIONS, UNIT_TYPE_LABELS, getAmenitiesForCategory,
   UNIT_TIERS, RENTAL_TYPE_OPTIONS, sqftFromSqm, sqmFromSqft,
 } from '@/components/upnow/UnitFormModal';
-import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
+import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
+import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
+import AddendumTemplatePicker from '@/components/upnow/AddendumTemplatePicker';
+import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
 const INPUT  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
@@ -250,6 +253,11 @@ export default function AddListingPage() {
   /* save state */
   const [saving, setSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
+  // One in-app Agreement Addendum for the whole listing — applied to the new
+  // layout(s) on save (replaces the old per-unit .docx upload).
+  const [addendumTerms, setAddendumTerms] = useState<AddendumTerms>(emptyAddendumTerms());
+  const [addendumEditorOpen, setAddendumEditorOpen] = useState(false);
+  const [addendumPreviewOpen, setAddendumPreviewOpen] = useState(false);
   const [error, setError]   = useState<string | null>(null);
   const [done, setDone]     = useState(false);
   const [doneMsg, setDoneMsg] = useState('');
@@ -593,6 +601,20 @@ export default function AddListingPage() {
         }
       }
 
+      /* 6. Apply the listing's in-app Agreement addendum to the new layout(s).
+            The addendum lives per layout (property + plan_label), so we resolve
+            the just-created layouts and write the terms to each. */
+      if (hasAddendumTerms(addendumTerms) && unitIds.length) {
+        setSaveProgress({ phase: 'Saving addendum…', done: 0, total: 1 });
+        try {
+          const fp = await apiGet<{ plans: Array<{ planLabel: string | null }> }>(`/properties/floor-plans?propertyId=${propId}`);
+          const labels = Array.from(new Set((fp.plans ?? []).map(p => p.planLabel).filter((l): l is string => !!l)));
+          for (const planLabel of labels) {
+            await apiPatch('/properties/floor-plans/addendum-terms', { propertyId: propId, planLabel, terms: addendumTerms });
+          }
+        } catch { errs.push('Addendum: could not be saved to the new layout(s) — add it from the Units page.'); }
+      }
+
       setDoneErrs(errs);
       setDoneMsg(`${propName} + ${unitIds.length} unit${unitIds.length !== 1 ? 's' : ''} saved.`);
       setDone(true);
@@ -603,7 +625,7 @@ export default function AddListingPage() {
       setSaveProgress(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, pf, rows, selectedPropId, existingProps]);
+  }, [mode, pf, rows, selectedPropId, existingProps, addendumTerms]);
 
   /* ── CSV ── */
   const handleCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1102,6 +1124,41 @@ export default function AddListingPage() {
           </div>
         )}
 
+        {/* ── Agreement Addendum (one for the listing, applied to the new layout(s)) ── */}
+        {!done && mode !== 'import' && (!unitsOnly || selectedPropId) && (
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-6">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-3">
+              Agreement Addendum <span className="font-normal normal-case text-[#bdbab2]">· optional</span>
+            </p>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[#1a1916] truncate">{addendumTerms.name?.trim() || 'Agreement Addendum'}</p>
+                <p className="text-[11px] text-[#a16207]">
+                  {(() => {
+                    const n = (addendumTerms.en?.filter(l => l.trim()).length ?? 0) + (addendumTerms.ar?.filter(l => l.trim()).length ?? 0);
+                    return n ? `${n} term${n === 1 ? '' : 's'} written — added to the new layout(s)` : 'Write the addendum new contracts on these units will carry';
+                  })()}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Choose from a saved template… */}
+                <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} />
+                {hasAddendumTerms(addendumTerms) && (
+                  <button type="button" onClick={() => setAddendumPreviewOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
+                    <Eye size={13} /> Preview
+                  </button>
+                )}
+                {/* …or add new / edit */}
+                <button type="button" onClick={() => setAddendumEditorOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] cursor-pointer">
+                  <FileText size={13} /> {hasAddendumTerms(addendumTerms) ? 'Edit addendum' : 'Write new'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Save progress ── */}
         {saving && saveProgress && (
           <div className="bg-white rounded-xl border border-[#e8e6e0] p-4 space-y-2">
@@ -1151,6 +1208,14 @@ export default function AddListingPage() {
               </button>
             )}
           </div>
+        )}
+
+        {addendumEditorOpen && (
+          <AddendumEditorModal value={addendumTerms} onChange={setAddendumTerms} onClose={() => setAddendumEditorOpen(false)}
+            title="Agreement Addendum" subtitle="Write the terms; they're applied to the layout(s) you create. Preview on the right." />
+        )}
+        {addendumPreviewOpen && hasAddendumTerms(addendumTerms) && (
+          <AddendumPreviewModal terms={addendumTerms} title={addendumTerms.name?.trim() || 'Agreement Addendum'} onClose={() => setAddendumPreviewOpen(false)} />
         )}
       </div>
     </div>
@@ -1237,23 +1302,8 @@ function UnitCard({
 }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const floorPlanInputRef = useRef<HTMLInputElement>(null);
-  const addendumInputRef = useRef<HTMLInputElement>(null);
   const dragIdxRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
-  const [addendumErr, setAddendumErr] = useState<string | null>(null);
-  const [addendumChecking, setAddendumChecking] = useState(false);
-  const onAddendumFiles = async (selected: File[]) => {
-    setAddendumErr(null); setAddendumChecking(true);
-    try {
-      const accepted: File[] = [];
-      for (const f of selected) {
-        const res = await validateAddendumFile(f);
-        if (res.ok) accepted.push(f);
-        else { setAddendumErr(res.error ?? 'Invalid addendum file.'); break; }
-      }
-      if (accepted.length) onUpdate({ stagedAddendums: [...row.stagedAddendums, ...accepted] });
-    } finally { setAddendumChecking(false); }
-  };
   const showBedBath = !row.unitType || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
   const isResidentialUnit = propCategory === 'residential' || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
 
@@ -1538,32 +1588,8 @@ function UnitCard({
             </div>
           </div>
 
-          {/* Agreement — special conditions, attached as an addendum document.
-              Must be a .docx that keeps both signature fields (validated). */}
-          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="block text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Special Conditions</span>
-              <a href={ADDENDUM_SAMPLE_URL} download className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
-                <Download size={11} /> Download sample
-              </a>
-            </div>
-            <input ref={addendumInputRef} type="file" multiple accept={ADDENDUM_ACCEPT} className="sr-only"
-              onChange={e => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void onAddendumFiles(fs); }} />
-            {row.stagedAddendums.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5 bg-white">
-                <Upload size={14} className="text-[#2e9f82] shrink-0" />
-                <span className="text-sm text-[#1a1916] truncate flex-1">{f.name}</span>
-                <button type="button" onClick={() => onUpdate({ stagedAddendums: row.stagedAddendums.filter((_, x) => x !== i) })}
-                  className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
-              </div>
-            ))}
-            <button type="button" onClick={() => addendumInputRef.current?.click()} disabled={addendumChecking}
-              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-2.5 text-xs text-[#9b9890] hover:border-[#b45309] hover:bg-white transition-colors cursor-pointer disabled:opacity-50">
-              {addendumChecking ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className="text-[#c8c6c0]" />}
-              {addendumChecking ? 'Checking signature fields…' : 'Attach addendum / amendment (Word .docx)'}
-            </button>
-            {addendumErr && <p className="text-[11px] text-red-600 mt-1.5">{addendumErr}</p>}
-          </div>
+          {/* Agreement addendum is set once for the whole listing (below the units),
+              not per unit — see the "Agreement Addendum" section. */}
 
           {/* Amenities */}
           <div>

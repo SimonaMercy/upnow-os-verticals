@@ -182,8 +182,8 @@ const TermsBlock = ({ termsEn, termsAr, start, end, header }: { termsEn: string[
     </View>
   </View>
 );
-const SigBox = ({ label, ar, img, date, onFile }: { label: string; ar: string; img?: string | null; date?: string; onFile?: boolean }) => (
-  <View style={{ width: '50%', padding: 6 }}>
+const SigBox = ({ label, ar, img, date, onFile, hideAr }: { label: string; ar: string; img?: string | null; date?: string; onFile?: boolean; hideAr?: boolean }) => (
+  <View style={{ width: '100%', padding: 6 }}>
     <View style={{ height: 48, alignItems: 'center', justifyContent: 'center' }}>
       {img
         ? <Image src={img} style={{ maxHeight: 44, objectFit: 'contain' }} />
@@ -192,22 +192,26 @@ const SigBox = ({ label, ar, img, date, onFile }: { label: string; ar: string; i
           : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#bbb', paddingTop: 3 }}>
-      <Text style={{ fontSize: 7.5 }}>{label} <Text style={{ fontFamily: AR }}>{ar}</Text></Text>
-      <Text style={{ fontSize: 7.5 }}>{date || '____________'} <Text style={{ fontFamily: AR }}>التاريخ</Text></Text>
+      <Text style={{ fontSize: 7.5 }}>{label}{hideAr ? null : <Text style={{ fontFamily: AR }}> {ar}</Text>}</Text>
+      <Text style={{ fontSize: 7.5 }}>{hideAr ? 'Date ' : ''}{date || '____________'}{hideAr ? null : <Text style={{ fontFamily: AR }}> التاريخ</Text>}</Text>
     </View>
   </View>
 );
-const Signatures = ({ tenant, landlord }: { tenant?: { img?: string | null; date?: string; onFile?: boolean }; landlord?: { img?: string | null; date?: string; onFile?: boolean } }) => (
+// hideAr → English-only signature box (used by the addendum; the contract stays bilingual).
+const Signatures = ({ tenant, landlord, hideAr }: { tenant?: { img?: string | null; date?: string; onFile?: boolean }; landlord?: { img?: string | null; date?: string; onFile?: boolean }; hideAr?: boolean }) => (
   <View wrap={false} style={{ marginTop: 8 }}>
-    <Bar en="Signatures" ar="التوقيعات" />
+    <Bar en="Signatures" ar={hideAr ? '' : 'التوقيعات'} />
     <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, flexDirection: 'row' }}>
       <View style={{ width: '50%', borderRightWidth: 1, borderRightColor: '#bbb' }}>
-        <SigBox label="Tenant Signature" ar="توقيع المستأجر" img={tenant?.img} date={tenant?.date} onFile={tenant?.onFile} />
+        <SigBox label="Tenant Signature" ar="توقيع المستأجر" img={tenant?.img} date={tenant?.date} onFile={tenant?.onFile} hideAr={hideAr} />
       </View>
-      <SigBox label="Lessor's Signature" ar="توقيع المؤجر" img={landlord?.img} date={landlord?.date} onFile={landlord?.onFile} />
+      <View style={{ width: '50%' }}>
+        <SigBox label="Lessor's Signature" ar="توقيع المؤجر" img={landlord?.img} date={landlord?.date} onFile={landlord?.onFile} hideAr={hideAr} />
+      </View>
     </View>
   </View>
 );
+
 const Header = ({ date, j }: { date: string; j: TenancyJurisdiction }) => (
   <View style={{ marginBottom: 8 }}>
     {/* Row 1 — logos only, at the edges (matches the official DLD form). */}
@@ -429,61 +433,111 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         </View>
       </Page>
 
-      {addendumPages(addendums, j, date)}
+      {addendumPages(addendums, data.signatures)}
     </Document>
   );
 }
 
+// Split addendum lines into per-page chunks so EACH rendered page can carry the
+// title + a slice of terms + the signature block at its bottom. Conservative
+// estimate (chars→visual lines) keeps a chunk within one A4 page.
+function paginateAddendumLines(lines: string[]): string[][] {
+  const CHARS_PER_LINE = 105; // ~ at fontSize 8.5 across the A4 content width
+  const BUDGET = 44;          // visual lines per page (fills the page; leaves room for title + signature)
+  const pages: string[][] = [];
+  let cur: string[] = [];
+  let used = 0;
+  for (const l of lines) {
+    const vlines = Math.max(1, Math.ceil((l.trim().length || 1) / CHARS_PER_LINE)) + (isHeading(l) ? 1.5 : 0.4);
+    if (used + vlines > BUDGET && cur.length) { pages.push(cur); cur = []; used = 0; }
+    cur.push(l);
+    used += vlines;
+  }
+  if (cur.length) pages.push(cur);
+  return pages.length ? pages : [[]];
+}
+
 /** The addendum <Page> elements, shared by the full contract doc and the
- *  standalone AddendumDoc that the template-fill flow appends. */
-function addendumPages(addendums: EjariAddendum[], j: TenancyJurisdiction, date: string) {
-  return addendums.map((a, idx) => {
-    // In-app text terms take precedence; else legacy extracted DOCX lines.
+ *  standalone AddendumDoc that the template-fill flow appends. Each page carries
+ *  the title, its slice of terms, and the Tenant/Lessor signature block pinned to
+ *  the page bottom via a flex-grow spacer (in-flow — reliable, vs fixed/absolute
+ *  footers which react-pdf doesn't render dependably). */
+function addendumPages(
+  addendums: EjariAddendum[],
+  contractSigs?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[],
+) {
+  // The addendum is part of the contract — when its own signature fields aren't
+  // set, fall back to the CONTRACT's signatures so a signed contract shows the
+  // tenant/lessor signatures (and dates) on every addendum page too.
+  const cTenant = contractSigs?.find(s => s.role === 'tenant');
+  const cLandlord = contractSigs?.find(s => s.role === 'landlord');
+  return addendums.flatMap((a) => {
     const lines = (a.lines && a.lines.length) ? a.lines : addendumTermsToLines(a.terms);
-    const hasText = lines.length > 0;
     const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
-    const sig = (
-      <Signatures
-        tenant={a.tenantSig ? { img: a.tenantSig, date: fmtDate(a.tenantSignedAt) } : undefined}
-        landlord={a.landlordSig ? { img: a.landlordSig, date: fmtDate(a.landlordSignedAt) } : undefined} />
+    const title = ((a.name && a.name.trim()) || 'Addendum to Tenancy Contract').toUpperCase();
+    const titleAr = a.terms?.nameAr?.trim() || '';
+    const tenantImg = a.tenantSig ?? cTenant?.signatureImage ?? null;
+    const tenantDate = a.tenantSignedAt ? fmtDate(a.tenantSignedAt) : (cTenant?.signedAt ? fmtDate(cTenant.signedAt) : '');
+    const landlordImg = a.landlordSig ?? cLandlord?.signatureImage ?? null;
+    const landlordDate = a.landlordSignedAt ? fmtDate(a.landlordSignedAt) : (cLandlord?.signedAt ? fmtDate(cLandlord.signedAt) : '');
+    const pageStyle = { padding: 30, fontSize: 8, fontFamily: 'Helvetica', color: '#111', flexDirection: 'column' as const };
+
+    const titleBlock = (
+      <View style={{ marginBottom: 8 }}>
+        <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: NAVY, textAlign: 'center', letterSpacing: 0.5 }}>{title}</Text>
+        {titleAr ? <Text style={{ fontSize: 10, fontFamily: AR, color: NAVY, textAlign: 'center', marginTop: 1 }}>{titleAr}</Text> : null}
+        <View style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginTop: 5 }} />
+      </View>
     );
-    return (
-      // Extra bottom padding reserves room for the fixed per-page signature footer.
-      <Page key={a.id} size="A4" style={{ ...S.page, paddingBottom: 96 }}>
-        <Header date={date} j={j} />
-        <Bar en={`Addendum ${idx + 1} of ${addendums.length}`} ar={`ملحق العقد — ${a.name}`} />
-        {hasText ? (
-          <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 10 }}>
-            {lines.map((l, i) => (
-              isHeading(l)
-                ? <Text key={i} style={{ fontSize: 9, fontFamily: isArabic(l) ? AR : 'Helvetica-Bold', color: NAVY, marginTop: 6, marginBottom: 2 }}>{l}</Text>
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                : <Text key={i} style={{ fontSize: 8, marginBottom: 3, lineHeight: 1.3, ...(isArabic(l) ? { fontFamily: AR, textAlign: 'right' } : { textAlign: 'justify' }) } as any}>{l}</Text>
-            ))}
-          </View>
-        ) : (
-          <View wrap={false} style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, padding: 12, minHeight: 320, alignItems: 'center' }}>
+    // Tenant/Lessor signature block — the EXACT same component the tenancy
+    // contract uses (navy bar + bordered two-column box + bilingual labels), so
+    // the addendum's signature box matches the contract's. Signed image + date
+    // show once signed (inherited from the contract above).
+    const sigBlock = (
+      <Signatures hideAr
+        tenant={{ img: tenantImg, date: tenantDate }}
+        landlord={{ img: landlordImg, date: landlordDate }} />
+    );
+
+    if (!lines.length) {
+      return [(
+        <Page key={`${a.id}-file`} size="A4" style={pageStyle}>
+          {titleBlock}
+          <View wrap={false} style={{ alignItems: 'center', paddingVertical: 14 }}>
             {isImg
               ? <Image src={a.fileUrl || ''} style={{ maxHeight: 460, objectFit: 'contain' }} />
               : <Text style={{ fontSize: 9, color: '#333' }}>Attached document: {a.fileUrl}</Text>}
           </View>
-        )}
-        {/* Signature block fixed to the bottom of EVERY page (matches the official
-            DLD form, which carries a signatures block on all pages). */}
-        <View fixed style={{ position: 'absolute', left: 24, right: 24, bottom: 14 }}>
-          {sig}
+          <View style={{ flexGrow: 1 }} />
+          {sigBlock}
+        </Page>
+      )];
+    }
+
+    const chunks = paginateAddendumLines(lines);
+    return chunks.map((chunk, pi) => (
+      <Page key={`${a.id}-${pi}`} size="A4" style={pageStyle}>
+        {titleBlock}
+        <View>
+          {chunk.map((l, i) => (
+            isHeading(l)
+              ? <Text key={i} style={{ fontSize: 9.5, fontFamily: isArabic(l) ? AR : 'Helvetica-Bold', color: NAVY, marginTop: 9, marginBottom: 3, ...(isArabic(l) ? { textAlign: 'right' } : {}) }}>{l}</Text>
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              : <Text key={i} style={{ fontSize: 8.5, marginBottom: 4, lineHeight: 1.45, ...(isArabic(l) ? { fontFamily: AR, textAlign: 'right' } : { textAlign: 'justify' }) } as any}>{l}</Text>
+          ))}
         </View>
+        {/* Spacer pushes the signature block to the bottom of THIS page. */}
+        <View style={{ flexGrow: 1 }} />
+        {sigBlock}
       </Page>
-    );
+    ));
   });
 }
 
 /** Standalone document of just the addendum pages — appended after the filled
  *  official template (Dubai). @react-pdf shapes Arabic correctly. */
-export function AddendumDoc({ data, addendums }: { data: EjariContractData; addendums: EjariAddendum[] }) {
-  const j = jurisdictionForEmirate(data.property.emirate);
-  const date = fmtDate(data.createdAt) || fmtDate(new Date().toISOString());
-  return <Document>{addendumPages(addendums, j, date)}</Document>;
+export function AddendumDoc({ data, addendums }: { data?: EjariContractData; addendums: EjariAddendum[] }) {
+  return <Document>{addendumPages(addendums, data?.signatures)}</Document>;
 }
 
 /** Render the addendum pages to raw PDF bytes (for pdf-lib to append). */
