@@ -138,7 +138,7 @@ const RP_LANDLORD: DocReq[] = [...RP_COMPANY_BASE];
 
 const RP_BROKERAGE: DocReq[] = [
   ...RP_COMPANY_BASE,
-  { key: "brokerage_license", displayName: "Brokerage License", category: "license", required: true, description: "Valid real-estate brokerage license from the relevant emirate regulator (RERA/DLD for Dubai, DMT for Abu Dhabi, SRERD for Sharjah, or the local authority where you operate)." },
+  { key: "brokerage_license", displayName: "Property Management License", category: "license", required: true, description: "Valid real-estate brokerage license from the relevant emirate regulator (RERA/DLD for Dubai, DMT for Abu Dhabi, SRERD for Sharjah, or the local authority where you operate)." },
 ];
 
 // Agents Company operates under a parent brokerage's licence — so MOA / UBO
@@ -149,8 +149,8 @@ const RP_AGENTS: DocReq[] = [
   { key: "emirates_id",                displayName: "Emirates ID of Authorised Signatory",    category: "identity",   required: true,  description: "Emirates ID (both sides) of the person authorised to sign on behalf of the company." },
   { key: "passport",                   displayName: "Passport",                               category: "identity",   required: true, description: "Bio-data page of the authorised signatory's valid passport." },
   { key: "visa",                       displayName: "UAE Visa",                               category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
-  { key: "broker_registration",        displayName: "Broker Registration Number Certificate", category: "license",    required: true,  description: "Real-estate agent registration certificate issued by the relevant emirate regulator (BRN card or equivalent)." },
-  { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Brokerage", category: "compliance", required: true,  description: "Signed agreement authorising you to operate as an agent under the named parent brokerage firm." },
+  { key: "broker_registration",        displayName: "Agent Registration Certificate", category: "license",    required: true,  description: "Real-estate agent registration certificate issued by the relevant emirate regulator (BRN card or equivalent)." },
+  { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Firm", category: "compliance", required: true,  description: "Signed agreement authorising you to operate as an agent under the named parent brokerage firm." },
 ];
 
 const CLIENT_REQUIREMENTS: Partial<Record<string, Partial<Record<"individual" | "company", DocReq[]>>>> = {

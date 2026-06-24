@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BedDouble, Bath, Maximize2, ArrowRight } from 'lucide-react';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 const BACKEND = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
@@ -155,13 +156,13 @@ export async function FeaturedListings() {
 
                   {/* Stats row */}
                   <div className="flex items-center gap-4 mt-3 text-xs" style={{ color: 'var(--neutral-600)' }}>
-                    {unit.bedrooms != null && (
+                    {isResidentialUnitType(unit.unitType) && unit.bedrooms != null && (
                       <span className="flex items-center gap-1">
                         <BedDouble size={13} />
                         {unit.bedrooms === 0 ? 'Studio' : `${unit.bedrooms} BR`}
                       </span>
                     )}
-                    {unit.bathrooms != null && (
+                    {isResidentialUnitType(unit.unitType) && unit.bathrooms != null && (
                       <span className="flex items-center gap-1">
                         <Bath size={13} />
                         {unit.bathrooms} Bath

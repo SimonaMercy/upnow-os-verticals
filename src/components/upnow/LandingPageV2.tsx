@@ -9,6 +9,7 @@ import {
   User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain,
 } from 'lucide-react';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { HowItWorks } from '@/components/upnow/HowItWorks';
 import { TrustSignals } from '@/components/upnow/TrustSignals';
 import { Footer } from '@/components/upnow/Footer';
@@ -64,7 +65,7 @@ function mapToSpaceItem(item: ListingItem): SpaceItem {
   const community = property.community?.nameEn ?? '';
   const loc = [community, emirate].filter(Boolean).join(', ') || property.fullAddress || 'UAE';
   const tag = [
-    unit.bedrooms ? `${unit.bedrooms} bed` : null,
+    isResidentialUnitType(unit.unitType) && unit.bedrooms ? `${unit.bedrooms} bed` : null,
     unit.unitSizeSqft ? `${Number(unit.unitSizeSqft).toLocaleString('en-US', { maximumFractionDigits: 0 })} sqft` : null,
   ].filter(Boolean).join(' · ') || undefined;
   return {

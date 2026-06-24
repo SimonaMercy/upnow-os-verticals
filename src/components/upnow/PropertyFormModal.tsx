@@ -540,7 +540,7 @@ interface Props {
   onClose: () => void;
   /** titleDeed only travels for STANDALONE properties (one deed for the whole
    *  property); multi-unit buildings attach deeds per unit instead. */
-  onSave: (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) => Promise<void>;
+  onSave: (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>, photos?: File[]) => Promise<void>;
   title?: string;
   /** Edit only — the property whose existing documents (title deed + building
    *  drawings) we load so the form can show and remove them. */
@@ -1311,6 +1311,9 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
   const [titleDeed, setTitleDeed] = useState<File | null>(null);
   const [drawings, setDrawings] = useState<File[]>([]);
   const [extraDocs, setExtraDocs] = useState<Record<string, File[]>>({});
+  // Add flow only — staged building photos uploaded by the parent after the
+  // property is created (Edit uses the live in-modal uploader instead).
+  const [propertyPhotos, setPropertyPhotos] = useState<File[]>([]);
   const [existingDocs, setExistingDocs] = useState<PropertyDoc[]>([]);
   // Bumped each open so PropertyFields remounts and re-derives its cascade.
   const [openSeq, setOpenSeq] = useState(0);
@@ -1318,7 +1321,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
   useEffect(() => {
     if (!open) return;
     setForm({ ...EMPTY, ...initial });
-    setErrors({}); setTitleDeed(null); setDrawings([]); setExtraDocs({});
+    setErrors({}); setTitleDeed(null); setDrawings([]); setExtraDocs({}); setPropertyPhotos([]);
     setOpenSeq(s => s + 1);
     if (propertyId) {
       apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
@@ -1350,7 +1353,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     setSaving(true);
     // Title deed travels for directly-held properties (sub-leases carry a master
     // lease via extraDocs instead).
-    try { await onSave(form, form.leasingType === 'direct' ? titleDeed : null, drawings, extraDocs); onClose(); }
+    try { await onSave(form, form.leasingType === 'direct' ? titleDeed : null, drawings, extraDocs, propertyPhotos); onClose(); }
     finally { setSaving(false); }
   };
 
@@ -1384,15 +1387,18 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
             extraDocs={extraDocs} setExtraDocs={setExtraDocs}
           />
 
-          {/* Building photos — live gallery (edit only; the Add flow stages
-              photos on the dedicated add page before the property exists). */}
-          {propertyId && (
-            <div className="pt-1 border-t border-[#f0ede8]">
-              <div className="pt-4">
+          {/* Building photos. Edit → live gallery (immediate upload/delete/
+              reorder). Add → staged in the form; the parent uploads them after
+              the property is created. */}
+          <div className="pt-1 border-t border-[#f0ede8]">
+            <div className="pt-4">
+              {propertyId ? (
                 <PropertyPhotos propertyId={propertyId} />
-              </div>
+              ) : (
+                <PropertyPhotos value={propertyPhotos} onChange={setPropertyPhotos} />
+              )}
             </div>
-          )}
+          </div>
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

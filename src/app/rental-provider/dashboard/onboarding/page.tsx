@@ -46,8 +46,8 @@ const TRADE_AUTHORITIES = [
 const ACCOUNT_TYPES = [
   { id: "individual", title: "Individual Landlord", desc: "Private person owning properties under your own name.",                Icon: User,      docs: 1, entityType: "individual", companyType: null as null | "landlord" | "brokerage" | "agents" },
   { id: "landlord",   title: "Landlord Company",    desc: "Company that owns and lets its own properties.",                       Icon: Home,      docs: 2, entityType: "company",    companyType: "landlord" as const },
-  { id: "brokerage",  title: "Brokerage Company",   desc: "Licensed brokerage managing properties for owners.",                   Icon: Briefcase, docs: 3, entityType: "company",    companyType: "brokerage" as const },
-  { id: "agents",     title: "Agents Company",      desc: "Agents operating under a parent brokerage's licence.",                 Icon: Users,     docs: 4, entityType: "company",    companyType: "agents" as const },
+  { id: "brokerage",  title: "Property Management",       desc: "Licensed firm managing properties on behalf of owners.",               Icon: Briefcase, docs: 3, entityType: "company",    companyType: "brokerage" as const },
+  { id: "agents",     title: "Property Management Agent", desc: "Agent operating under a parent property-management firm's licence.",   Icon: Users,     docs: 4, entityType: "company",    companyType: "agents" as const },
 ] as const;
 
 const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
@@ -274,12 +274,12 @@ export default function RentalProviderOnboardingPage() {
     ];
     if (kind.id === "brokerage") return [
       ...COMPANY_BASE,
-      { key: "brokerage_license", displayName: "Brokerage License", required: true, description: "Valid real-estate brokerage licence from the relevant emirate regulator." },
+      { key: "brokerage_license", displayName: "Property Management License", required: true, description: "Valid real-estate brokerage licence from the relevant emirate regulator." },
     ];
     if (kind.id === "agents") return [
       ...COMPANY_BASE,
-      { key: "broker_registration",        displayName: "Broker Registration Number Certificate", required: true, description: "Real-estate agent registration certificate (BRN card or equivalent)." },
-      { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Brokerage", required: true, description: "Signed agreement authorising you to operate under the parent brokerage." },
+      { key: "broker_registration",        displayName: "Agent Registration Certificate", required: true, description: "Real-estate agent registration certificate (BRN card or equivalent)." },
+      { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Firm", required: true, description: "Signed agreement authorising you to operate under the parent brokerage." },
     ];
     return COMPANY_BASE;
   }
@@ -454,9 +454,9 @@ export default function RentalProviderOnboardingPage() {
         : suffix.includes("passport") ? "Passport"
         : suffix.includes("visa") ? "UAE Visa"
         : suffix.includes("moa") ? "MOA"
-        : suffix.includes("brokerage_license") ? "Brokerage License"
-        : suffix.includes("broker_registration") ? "Broker Registration Number Certificate"
-        : suffix.includes("parent_brokerage_agreement") ? "Agency Agreement with Parent Brokerage"
+        : suffix.includes("brokerage_license") ? "Property Management License"
+        : suffix.includes("broker_registration") ? "Agent Registration Certificate"
+        : suffix.includes("parent_brokerage_agreement") ? "Agency Agreement with Parent Firm"
         : suffix.includes("poa_document") ? "POA Document"
         : suffix.replace(/_/g, " ");
       const category = suffix.includes("license") || suffix.includes("registration") ? "license"

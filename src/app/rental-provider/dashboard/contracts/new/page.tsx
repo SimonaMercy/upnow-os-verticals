@@ -1148,7 +1148,7 @@ export default function NewContractPage() {
               {/* Cheque schedule — mirrors the lead's issued plan when available (covers bundle, all installments,
                   extras and the security deposit). Falls back to a simple even split when no plan is present. */}
               {planFromLead ? (() => {
-                const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
+                const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
                 const sorted = planFromLead.items.slice().sort((a, b) => {
                   if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
                   return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);

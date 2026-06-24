@@ -3,6 +3,7 @@ import { MapPin, BedDouble, Bath, Maximize2 } from 'lucide-react';
 import { Suspense } from 'react';
 import FilterBar, { ListingsSearchBar } from './FilterBar';
 import type { FilterBarProps } from './FilterBar';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import FilterSidebarWrapper from './FilterSidebarWrapper';
 import { Navbar } from '@/components/upnow/Navbar';
 import HeartButton from './HeartButton';
@@ -321,15 +322,15 @@ export default async function ListingsView({ country, emirate, searchParams }: P
                             </span>
                           </div>
 
-                          {/* Meta row */}
+                          {/* Meta row — beds/baths are residential-only */}
                           <div className="meta">
-                            {unit.bedrooms != null && (
+                            {isResidentialUnitType(unit.unitType) && unit.bedrooms != null && (
                               <span>
                                 <BedDouble size={13} />
                                 {unit.bedrooms === 0 ? 'Studio' : `${unit.bedrooms} Bed`}
                               </span>
                             )}
-                            {unit.bathrooms != null && (
+                            {isResidentialUnitType(unit.unitType) && unit.bathrooms != null && (
                               <span>
                                 <Bath size={13} />
                                 {unit.bathrooms} Bath

@@ -188,7 +188,7 @@ test.describe.serial('RP Onboarding — 4 account types', () => {
 
     // Sanity: no company-only docs visible
     await expect(page.getByText('Trade License')).not.toBeVisible();
-    await expect(page.getByText('Brokerage License')).not.toBeVisible();
+    await expect(page.getByText('Property Management License')).not.toBeVisible();
   });
 
   // ─── Test 2: Landlord Company ───────────────────────────────────────────────
@@ -226,8 +226,8 @@ test.describe.serial('RP Onboarding — 4 account types', () => {
     expect(tradeLicBadge).toContain('Required');
 
     // No brokerage-specific docs
-    await expect(page.getByText('Brokerage License', { exact: true })).not.toBeVisible();
-    await expect(page.getByText('Broker Registration Number Certificate')).not.toBeVisible();
+    await expect(page.getByText('Property Management License', { exact: true })).not.toBeVisible();
+    await expect(page.getByText('Agent Registration Certificate')).not.toBeVisible();
   });
 
   // ─── Test 3: Brokerage Company ──────────────────────────────────────────────
@@ -235,7 +235,7 @@ test.describe.serial('RP Onboarding — 4 account types', () => {
   test('03 — Brokerage Company: no removed fields; Emirates ID optional; brokerage licence required', async () => {
     await goOnboarding();
 
-    await page.getByText('Brokerage Company').first().click();
+    await page.getByText('Property Management', { exact: true }).first().click();
     await assertRemovedFields();
     await page.getByRole('button', { name: 'Continue' }).click();
 
@@ -254,14 +254,14 @@ test.describe.serial('RP Onboarding — 4 account types', () => {
     await assertEmiratesIdBadge('Optional');
 
     // Brokerage License must appear and be Required
-    const brokLicSpan = page.getByText('Brokerage License', { exact: true }).first();
+    const brokLicSpan = page.getByText('Property Management License', { exact: true }).first();
     await expect(brokLicSpan).toBeVisible();
     const brokLicBadge = await brokLicSpan.locator('..').textContent();
     expect(brokLicBadge).toContain('Required');
 
     // No Agents-only docs
-    await expect(page.getByText('Broker Registration Number Certificate')).not.toBeVisible();
-    await expect(page.getByText('Agency Agreement with Parent Brokerage')).not.toBeVisible();
+    await expect(page.getByText('Agent Registration Certificate')).not.toBeVisible();
+    await expect(page.getByText('Agency Agreement with Parent Firm')).not.toBeVisible();
   });
 
   // ─── Test 4: Agents Company ─────────────────────────────────────────────────
@@ -269,7 +269,7 @@ test.describe.serial('RP Onboarding — 4 account types', () => {
   test('04 — Agents Company: no removed fields; Emirates ID optional; BRN + agency agreement required', async () => {
     await goOnboarding();
 
-    await page.getByText('Agents Company').first().click();
+    await page.getByText('Property Management Agent').first().click();
     await assertRemovedFields();
     await page.getByRole('button', { name: 'Continue' }).click();
 
@@ -285,19 +285,19 @@ test.describe.serial('RP Onboarding — 4 account types', () => {
     await assertEmiratesIdBadge('Optional');
 
     // Broker Registration Number Certificate must be Required
-    const brnSpan = page.getByText('Broker Registration Number Certificate').first();
+    const brnSpan = page.getByText('Agent Registration Certificate').first();
     await expect(brnSpan).toBeVisible();
     const brnBadge = await brnSpan.locator('..').textContent();
     expect(brnBadge).toContain('Required');
 
     // Agency Agreement must be Required
-    const agencySpan = page.getByText('Agency Agreement with Parent Brokerage').first();
+    const agencySpan = page.getByText('Agency Agreement with Parent Firm').first();
     await expect(agencySpan).toBeVisible();
     const agencyBadge = await agencySpan.locator('..').textContent();
     expect(agencyBadge).toContain('Required');
 
     // No Brokerage License (that's for brokerage type, not agents)
-    await expect(page.getByText('Brokerage License', { exact: true })).not.toBeVisible();
+    await expect(page.getByText('Property Management License', { exact: true })).not.toBeVisible();
   });
 
 });

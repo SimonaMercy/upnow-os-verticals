@@ -57,28 +57,27 @@ export const RESIDENTIAL_RENTAL_DOCS: DocReq[] = [
 ];
 
 /**
- * Commercial rental docs. All optional in v1 — see comment on
- * RESIDENTIAL_RENTAL_DOCS above. Only KYC gates Step 2.
+ * Commercial rental docs. The licensing pack (Trade License, Tax Registration
+ * Certificate, MOA / MOM) is MANDATORY for any commercial lease — Ejari
+ * registration of a commercial tenancy needs it, and it applies regardless of
+ * whether the tenant is an individual or a company. Financial Statements /
+ * Rental History / Previous Utility Closing were removed from the checklist
+ * (Jun 2026); admin can still request them ad hoc via REQUESTABLE_DOCS.
  */
 export const COMMERCIAL_RENTAL_DOCS: DocReq[] = [
-  { key: 'trade_license',     label: 'Trade License',                     category: 'license', required: false, hint: 'Valid UAE trade license' },
-  { key: 'tax_registration',  label: 'Tax Registration Certificate',      category: 'license', required: false, hint: 'UAE VAT / tax registration certificate (if applicable)' },
-  { key: 'moa',               label: 'MOA / MOM',                         category: 'legal',   required: false, hint: 'Memorandum of Association or Minutes of Meeting' },
-  { key: 'bank_statement',    label: 'Financial Statements',              category: 'banking', required: false, hint: 'Latest 2 years audited financials or bank statements' },
-  { key: 'rental_history',    label: 'Rental History',                    category: 'legal',   required: false, hint: 'Previous landlord clearance' },
-  { key: 'utility_clearance', label: 'Previous Utility Closing',          category: 'legal',   required: false, hint: 'Utility clearance from previous premises' },
+  { key: 'trade_license',     label: 'Trade License',                     category: 'license', required: true,  hint: 'Valid UAE trade license' },
+  { key: 'tax_registration',  label: 'Tax Registration Certificate',      category: 'license', required: true,  hint: 'UAE VAT / tax registration certificate' },
+  { key: 'moa',               label: 'MOA / MOM',                         category: 'legal',   required: true,  hint: 'Memorandum of Association or Minutes of Meeting' },
 ];
 
 /**
- * Industrial rental docs. All optional in v1 — see comment on
- * RESIDENTIAL_RENTAL_DOCS above. Only KYC gates Step 2.
+ * Industrial rental docs. The licensing pack (Trade License + Business /
+ * Activity License) is MANDATORY for any industrial lease (same rationale as
+ * commercial). Financial / history docs stay optional.
  */
 export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
-  { key: 'trade_license',     label: 'Trade License',               category: 'license', required: false, hint: 'Valid UAE trade license' },
-  { key: 'business_license',  label: 'Business / Activity License', category: 'license', required: false, hint: 'License specific to warehouse / industrial activity' },
-  { key: 'bank_statement',    label: 'Financial Statements',        category: 'banking', required: false, hint: 'Latest audited financials or bank statements' },
-  { key: 'rental_history',    label: 'Rental History',              category: 'legal',   required: false, hint: 'Previous landlord clearance' },
-  { key: 'utility_clearance', label: 'Previous Utility Closing',    category: 'legal',   required: false, hint: 'Previous Utility clearance' },
+  { key: 'trade_license',     label: 'Trade License',               category: 'license', required: true,  hint: 'Valid UAE trade license' },
+  { key: 'business_license',  label: 'Business / Activity License', category: 'license', required: true,  hint: 'License specific to warehouse / industrial activity' },
 ];
 
 /**

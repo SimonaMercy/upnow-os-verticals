@@ -34,6 +34,7 @@ import {
   Search, Plus, X, FileText, ChevronLeft, ChevronRight,
   Bell, Download, Clock, Shield, Coins, Calendar, Pencil,
 } from 'lucide-react';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Status model (preserved from previous version)
@@ -147,7 +148,7 @@ interface Contract {
   /** Operations vs Leases split: NULL = still in the Operations worklist;
    *  set = blessed → shows here in the Leases register. */
   lockedAt: string | null;
-  tenant: { id: number | null; name: string | null; email: string | null };
+  tenant: { id: number | null; name: string | null; email: string | null; entityType: string | null; companyName: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
   /** Termination snapshot — only present when a request has been raised. */
@@ -222,16 +223,18 @@ function Row({
   // etc.) we'd otherwise duplicate inside the row.
   const href = `/rental-provider/dashboard/contracts/${c.id}/v2`;
 
+  const tenantLabel = tenantDisplayName(c.tenant);
+
   return (
     <Link href={href} className="row">
       <div className="col-ref">
-        <div className="av">{initials(c.tenant.name)}</div>
+        <div className="av">{initials(tenantLabel)}</div>
         <div className="info">
           <div className="ref">
             {c.ref}
             <span className={'type-chip ' + (isRenewal ? 'renewal' : '')}>{isRenewal ? 'Renewal' : 'New'}</span>
           </div>
-          <div className="tenant">{c.tenant.name ?? '—'}</div>
+          <div className="tenant">{tenantLabel ?? '—'}</div>
         </div>
       </div>
 
@@ -349,6 +352,12 @@ export default function OrdersPage() {
     const byUnit = new Map<number | string, Contract>();
     for (const c of yearScoped) {
       if (!isInForce(c)) continue;
+      // A lease whose termination is accepted is winding down (move-out +
+      // settlement) — it belongs on Operations, not Leases. The backend already
+      // routes it into the Operations worklist (so opsIds excludes it below), but
+      // guard here too so it never shows as a current lease even if /operations
+      // fails to load and opsIds is empty.
+      if (displayStatusOf(c) === 'terminating') continue;
       // Leases register = COMPLETED live leases only. A lease still in the
       // Operations worklist (unlocked draft, or active-but-incomplete pipeline)
       // is excluded — it shows here only once its setup is complete and it has
@@ -398,7 +407,7 @@ export default function OrdersPage() {
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const haystack = [c.ref, c.tenant.name, c.tenant.email, c.unit.number, c.property.buildingName]
+        const haystack = [c.ref, c.tenant.name, c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]
           .filter((s): s is string => Boolean(s)).join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }

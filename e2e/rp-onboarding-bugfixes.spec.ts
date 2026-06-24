@@ -183,11 +183,17 @@ test.describe.serial('RP onboarding — action_required can resubmit a new accou
     ).toBeTruthy();
     expect(body).not.toContain('Cannot change entity type');
 
-    // 4. Confirm it persisted as a company.
+    // 4. Confirm it persisted as a company WITH its company details (name
+    //    included) and that the stale individual nationality was cleared —
+    //    the two account types must stay cleanly separate.
     const after = await p2.request.get('/api/profiles/rental-provider/me');
-    const { profile } = (await after.json()) as { profile: { entityType: string; companyType: string } };
+    const { profile } = (await after.json()) as {
+      profile: { entityType: string; companyType: string; companyName: string; nationality: string | null };
+    };
     expect(profile.entityType).toBe('company');
     expect(profile.companyType).toBe('landlord');
+    expect(profile.companyName).toBe('Resubmit Holdings LLC');
+    expect(profile.nationality, 'individual nationality should be cleared on company switch').toBeNull();
   });
 
   test('once COMPLIANT, entity-type change is still locked', async () => {

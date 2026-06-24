@@ -5,9 +5,16 @@ import { X, Loader2, Upload, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
 import { openDocViewer } from '@/lib/docViewer';
+import { type AddendumTerms } from '@/lib/addendumTerms';
+import AddendumLayoutSection from './AddendumLayoutSection';
+import { RESIDENTIAL_UNIT_TYPES } from '@/lib/unitTaxonomy';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
-export const RESIDENTIAL_UNIT_TYPES = ['apartment', 'villa', 'villa_compound', 'townhouse', 'penthouse', 'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home'];
+// RESIDENTIAL_UNIT_TYPES lives in @/lib/unitTaxonomy (single source of truth,
+// also consumed by the public listing pages) and is re-exported here so the
+// many existing `import { RESIDENTIAL_UNIT_TYPES } from '.../UnitFormModal'`
+// call-sites keep working.
+export { RESIDENTIAL_UNIT_TYPES };
 export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
 export const INDUSTRIAL_UNIT_TYPES  = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
 export const WORKSPACES_UNIT_TYPES  = ['coworking_desk', 'private_office', 'meeting_room', 'day_office'];
@@ -209,6 +216,10 @@ export interface UnitFormData {
   gracePeriodDays: string;
   latePaymentFee: string;
   specialConditions: string;
+  /** RP-defined extra one-off charges (label + net AED + optional VAT AED). On
+   *  booking each is shown to the customer + added to the contract as an `other`
+   *  payment row. */
+  additionalPayments: Array<{ label: string; amount: string; vat: string }>;
   description: string;
 }
 
@@ -291,6 +302,7 @@ const EMPTY_UNIT: UnitFormData = {
   rentEscalationPct: '',
   rentalType: 'yearly', numberOfPayments: '', advancePayment: '',
   gracePeriodDays: '', latePaymentFee: '', specialConditions: '',
+  additionalPayments: [],
   description: '',
 };
 
@@ -310,6 +322,20 @@ interface Props {
   editingUnitId?: number;
   /** Addendum / amendment files already attached to this unit (edit mode). */
   existingAddendums?: { id: number; name: string; url: string }[];
+  /** Layout key — when provided (editing a unit in /units), the form shows the
+   *  NEW in-app addendum integration (template picker + preselected default +
+   *  bilingual editor) for this floor-plan at the END, replacing the legacy file
+   *  upload. The addendum is layout-level and saves itself, independent of the
+   *  unit save. Omit it (e.g. the create wizard) to keep the legacy upload. */
+  planLabel?: string | null;
+  manager?: { rp: number } | null;
+  rpQ?: string;
+  /** The layout's current addendum terms — seeds the in-app editor. */
+  seedAddendumTerms?: AddendumTerms | null;
+  /** True when the layout already has a file-based addendum (suppresses the default suggestion). */
+  hasAddendumFile?: boolean;
+  /** Called after the addendum is applied/saved so the caller can refresh. */
+  onAddendumApplied?: () => void;
   onClose: () => void;
   onSave: (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null, addendums?: File[]) => Promise<void>;
   title?: string;
@@ -518,7 +544,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, existingAddendums, onClose, onSave, title }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof UnitFormData, string>>>({});
   const [saving, setSaving] = useState(false);
@@ -795,15 +821,11 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">
-                  Ejari Fee {!isResidential && <span className="text-[#9b9890] font-normal">(residential only)</span>}
-                </label>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Ejari Fee</label>
                 <input type="number" min="0" step="any" className={INPUT}
-                  placeholder={isResidential ? '220' : 'N/A'}
-                  disabled={!isResidential}
+                  placeholder={isResidential ? '220' : 'e.g. 250'}
                   value={form.ejariFeeFils}
                   onChange={e => upd('ejariFeeFils', e.target.value)}
-                  style={!isResidential ? { background: '#f4f3ef', color: '#9b9890' } : undefined}
                 />
               </div>
               <div>
@@ -816,6 +838,55 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               <label className="block text-xs font-medium text-[#3d3b35] mb-1">Service Charges (AED/yr)</label>
               <input type="number" min="0" step="any" className={INPUT} placeholder="e.g. 8000"
                 value={form.serviceCharges} onChange={e => upd('serviceCharges', e.target.value)} />
+            </div>
+
+            {/* Additional Payments — RP-defined extra one-off charges. On booking
+                each is shown to the customer as its own line and added to the
+                contract as an "Others" payment row. */}
+            <div className="border-t border-[#a7f3d0] pt-3">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-[#3d3b35]">Additional Payments</label>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-[#1a7a5a] hover:underline"
+                  onClick={() => setForm(f => ({ ...f, additionalPayments: [...f.additionalPayments, { label: '', amount: '', vat: '' }] }))}
+                >+ Add payment</button>
+              </div>
+              <p className="text-[10px] text-[#6b6860] mb-2">Extra one-off charges (e.g. chiller deposit, move-in fee). The customer sees each as its own line when booking.</p>
+              {form.additionalPayments.length === 0 ? (
+                <p className="text-[11px] text-[#9b9890] italic">None — only rent, deposit and the fees above apply.</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[1fr_84px_84px_28px] gap-2 text-[10px] font-medium uppercase tracking-wider text-[#6b6860]">
+                    <span>Label</span><span>Net AED</span><span>VAT AED</span><span />
+                  </div>
+                  {form.additionalPayments.map((p, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_84px_84px_28px] gap-2 items-center">
+                      <input
+                        type="text" className={INPUT} placeholder="e.g. Chiller deposit"
+                        value={p.label}
+                        onChange={e => setForm(f => ({ ...f, additionalPayments: f.additionalPayments.map((r, j) => j === i ? { ...r, label: e.target.value } : r) }))}
+                      />
+                      <input
+                        type="number" min="0" step="any" className={INPUT} placeholder="0"
+                        value={p.amount}
+                        onChange={e => setForm(f => ({ ...f, additionalPayments: f.additionalPayments.map((r, j) => j === i ? { ...r, amount: e.target.value } : r) }))}
+                      />
+                      <input
+                        type="number" min="0" step="any" className={INPUT} placeholder="0"
+                        value={p.vat}
+                        onChange={e => setForm(f => ({ ...f, additionalPayments: f.additionalPayments.map((r, j) => j === i ? { ...r, vat: e.target.value } : r) }))}
+                      />
+                      <button
+                        type="button"
+                        className="text-[#b91c1c] hover:bg-[#fee2e2] rounded-md w-7 h-7 flex items-center justify-center text-base leading-none"
+                        title="Remove"
+                        onClick={() => setForm(f => ({ ...f, additionalPayments: f.additionalPayments.filter((_, j) => j !== i) }))}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -883,17 +954,20 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             </div>
           </div>
 
-          {/* Agreement — special conditions, attached as an addendum document
-              that flows into contracts created for this unit. */}
-          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Special Conditions</p>
-            <AddendumsSection
-              files={addendums}
-              onAdd={fs => setAddendums(prev => [...prev, ...fs])}
-              onRemove={i => setAddendums(prev => prev.filter((_, x) => x !== i))}
-              existing={existingAddendums}
-            />
-          </div>
+          {/* Legacy per-unit addendum FILE upload — kept only for the create wizard
+              (no layout key yet). When editing a unit in /units (planLabel present),
+              the new in-app addendum integration renders at the END instead. */}
+          {!planLabel && (
+            <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Special Conditions</p>
+              <AddendumsSection
+                files={addendums}
+                onAdd={fs => setAddendums(prev => [...prev, ...fs])}
+                onRemove={i => setAddendums(prev => prev.filter((_, x) => x !== i))}
+                existing={existingAddendums}
+              />
+            </div>
+          )}
 
           <SectionHeading>Amenities &amp; facilities</SectionHeading>
 
@@ -1022,6 +1096,21 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
           {/* Photos — manage inside Edit (existing units only) */}
           {propertyId != null && editingUnitId != null && (
             <PhotosSection propertyId={propertyId} unitId={editingUnitId} />
+          )}
+
+          {/* Agreement — Addendum (new in-app integration) at the END of the form.
+              Layout-level: template picker + the RP's preselected default-by-category
+              + bilingual editor/preview; saves itself to the floor-plan. */}
+          {planLabel && propertyId != null && (
+            <AddendumLayoutSection
+              propertyId={propertyId}
+              planLabel={planLabel}
+              seedTerms={seedAddendumTerms}
+              hasExistingFile={hasAddendumFile}
+              manager={manager}
+              rpQ={rpQ}
+              onApplied={onAddendumApplied}
+            />
           )}
 
           {/* Actions */}

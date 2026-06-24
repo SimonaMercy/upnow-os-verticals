@@ -7,6 +7,7 @@
  */
 import { apiPost, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { isResidentialUnitType, unitHasBathrooms } from '@/lib/unitTaxonomy';
 import type { UnitFormData } from '@/components/upnow/UnitFormModal';
 
 // Unit row as returned by GET /properties/:id/units (and units/all).
@@ -83,6 +84,23 @@ export function leaseTermsFromUnit(unit: { facilities: string | null }): {
   } catch { return empty; }
 }
 
+/** RP-defined extra one-off charges stored in the unit's facilities JSON, as the
+ *  form's string-rows. Empty / malformed ⇒ []. */
+export function additionalPaymentsFromUnit(unit: { facilities: string | null }): Array<{ label: string; amount: string; vat: string }> {
+  if (!unit.facilities) return [];
+  try {
+    const parsed = JSON.parse(unit.facilities);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return [];
+    const list = (parsed as { additionalPayments?: Array<{ label?: string; amount?: number; vat?: number }> }).additionalPayments;
+    if (!Array.isArray(list)) return [];
+    return list.map(p => ({
+      label: String(p?.label ?? ''),
+      amount: p?.amount != null ? String(p.amount) : '',
+      vat: p?.vat ? String(p.vat) : '',
+    }));
+  } catch { return []; }
+}
+
 // ─── form ↔ DTO ───────────────────────────────────────────
 export function unitFormToDto(data: UnitFormData) {
   // Empty string means "cleared" — PATCH an explicit null so the backend
@@ -93,6 +111,15 @@ export function unitFormToDto(data: UnitFormData) {
     const n = Number(v.replace('+', '')); // '6+' bedrooms / '5+' bathrooms
     return Number.isNaN(n) ? null : n;
   };
+  // The form HIDES residential-only fields for commercial / industrial / land
+  // units, but the EMPTY_UNIT defaults ('1' beds, '1' baths, 'Unfurnished')
+  // would otherwise still be submitted — silently writing phantom values on
+  // every non-residential unit. Force them out (explicit null so a PATCH also
+  // clears any legacy phantom value):
+  //  - bedrooms / furnishing → residential-only (a shop has neither)
+  //  - bathrooms → washrooms, kept for any built space, dropped only for land
+  const residential = isResidentialUnitType(data.unitType);
+  const hasBathrooms = unitHasBathrooms(data.unitType);
   return {
     unitNumber: data.unitNumber,
     unitName: clearable(data.unitName),
@@ -102,12 +129,14 @@ export function unitFormToDto(data: UnitFormData) {
     premiseNumber: clearable(data.premiseNumber),
     unitSizeSqft: num(data.unitSizeSqft) ?? undefined,
     unitSizeSqm: num(data.unitSizeSqm) ?? undefined,
-    bedrooms: data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
-    bathrooms: num(data.bathrooms) ?? undefined,
+    bedrooms: !residential ? null : data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
+    bathrooms: !hasBathrooms ? null : num(data.bathrooms) ?? undefined,
     parkingSpaces: num(data.parkingSpaces) ?? undefined,
     amenities: data.amenities, // empty array clears amenities (kept lease terms are merged server-side)
     view: clearable(data.view),
-    furnishing: clearable(data.furnishing),
+    // Furnished-state is residential-only — null it (not the 'Unfurnished'
+    // default) for a shop / warehouse / plot, which the form hides anyway.
+    furnishing: residential ? clearable(data.furnishing) : null,
     rentalPrice: data.rentalPrice ? Number(data.rentalPrice) : undefined,
     marketPrice: num(data.marketPrice),
     securityDeposit: data.securityDeposit ? Number(data.securityDeposit) : undefined,
@@ -124,6 +153,11 @@ export function unitFormToDto(data: UnitFormData) {
     gracePeriodDays: data.gracePeriodDays ? Number(data.gracePeriodDays) : undefined,
     latePaymentFee: data.latePaymentFee ? Number(data.latePaymentFee) : undefined,
     specialConditions: clearable(data.specialConditions),
+    // Always sent (even []) so the editor can add / edit / clear the list; the
+    // backend replaces the stored list with this one. Blank / zero rows dropped.
+    additionalPayments: (data.additionalPayments ?? [])
+      .map(p => ({ label: p.label.trim(), amount: Number(p.amount) || 0, vat: p.vat ? Number(p.vat) : 0 }))
+      .filter(p => p.label !== '' && p.amount > 0),
     description: clearable(data.description),
   };
 }
@@ -153,6 +187,7 @@ export function unitToFormInitial(u: UnitRecord): UnitFormData {
     commission:       u.commission != null ? String(u.commission) : '',
     serviceCharges:   u.serviceCharges != null ? String(u.serviceCharges) : '',
     ...leaseTermsFromUnit(u),
+    additionalPayments: additionalPaymentsFromUnit(u),
     description:      u.description ?? '',
   };
 }

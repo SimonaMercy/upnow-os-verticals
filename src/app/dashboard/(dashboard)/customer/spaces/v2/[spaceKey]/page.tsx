@@ -124,6 +124,9 @@ interface ApiPaymentPlan {
   commissionVatFils?: number;
   rentVatFils?: number;
   rentVatRate?: number;
+  /** RP-defined extra unit charges — each its own line. netFils + vatFils = gross. */
+  customFees?: Array<{ label: string; netFils: number; vatFils: number }>;
+  customFeesFils?: number;
   items?: ApiPaymentPlanItem[];
   notes?: string;
   rentalIndexReportUrl?: string;
@@ -186,7 +189,8 @@ interface ApiContractPayment {
   id: number;
   paymentType: string | null;
   description: string | null;
-  amountPaid: number;
+  amountPaid: number;       // GROSS (incl. VAT)
+  vatAmount?: number;       // VAT portion already inside amountPaid
   transactionDate: string | null;
   chequeStatus?: string | null;
 }
@@ -207,7 +211,8 @@ interface ApiContract {
   numberOfInstallments: number | null;
   startDate: string | null;
   endDate: string | null;
-  annualRent: number;
+  annualRent: number;           // NET annual rent
+  rentVatRate?: number;         // % VAT on rent (0 = residential/exempt)
   contractValue?: number | null;
   securityDepositAmount?: number | null;
   adminFeeFils?: number | null;
@@ -616,7 +621,7 @@ function fmtDateShort(iso: string) {
   return new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE });
 }
 
-const PLAN_TYPE_ORDER: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
+const PLAN_TYPE_ORDER: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
 function sortPlanItems(items: ApiPaymentPlanItem[]): ApiPaymentPlanItem[] {
   return [...items].sort((a, b) => {
     if (!a.dueDate && !b.dueDate) return a.index - b.index;
@@ -801,11 +806,12 @@ function SecondaryBtn({ onClick, href, children }: { onClick?: () => void; href?
   return <button type="button" onClick={onClick} style={style}>{children}</button>;
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Stat({ label, value, accent, sub }: { label: string; value: string; accent?: boolean; sub?: string }) {
   return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 6, alignContent: 'start' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 4, alignContent: 'start' }}>
       <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>{label}</p>
       <p style={{ fontSize: 20, fontWeight: 700, color: accent ? 'var(--jade-deep)' : 'var(--ink)', margin: 0, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+      {sub && <p style={{ fontSize: 11, color: 'var(--mute)', fontWeight: 500, margin: 0 }}>{sub}</p>}
     </div>
   );
 }
@@ -1112,6 +1118,9 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
             <PaymentRow label={`Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
             <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
+            {(plan.customFees ?? []).map((f, i) => (
+              <PaymentRow key={i} label={`${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`} amountFils={f.netFils + f.vatFils} />
+            ))}
             <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
             <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
             <p style={{ fontSize: 11, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
@@ -2406,6 +2415,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     ${plan.adminFeeFils ? `<div class="l">Admin Fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0))}</div>` : ''}
     ${plan.ejariFils ? `<div class="l">Ejari Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0))}</div>` : ''}
     ${plan.commissionFils ? `<div class="l">Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0))}</div>` : ''}
+    ${(plan.customFees ?? []).map(f => `<div class="l">${String(f.label).replace(/</g, '&lt;')}${f.vatFils > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed(f.netFils + f.vatFils)}</div>`).join('')}
   </div>
 
   <h2>Cheque Schedule (${plan.chequeCount} cheques)</h2>
@@ -2464,6 +2474,9 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
         <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
         <PaymentRow label={`Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
         <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
+        {(plan.customFees ?? []).map((f, i) => (
+          <PaymentRow key={i} label={`${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`} amountFils={f.netFils + f.vatFils} />
+        ))}
         <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
         <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
       </div>
@@ -2606,9 +2619,16 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   const items = sortPlanItems(plan.items ?? []);
   const firstDue = items.find(i => i.dueDate)?.dueDate ?? null;
+  // Everything in the first cheque (fees + deposit + installment 1) is collected
+  // before move-in — the customer's upfront total.
+  const beforeMoveInFils = items
+    .filter(ch => ch.type === 'fee' || ch.type === 'security_deposit' || ch.type === 'first_bundle')
+    .reduce((s, ch) => s + (ch.amountFils ?? 0), 0);
   const typeMeta = (t?: string) => {
-    if (t === 'fee')              return { label: 'Fee',           bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
-    if (t === 'security_deposit') return { label: 'Before move-in',  bg: 'var(--mist)',         fg: 'var(--ink-2)'     };
+    // Every component of the first cheque (fees, deposit, installment 1) is
+    // collected BEFORE move-in — all carry the same "Before move-in" badge.
+    if (t === 'fee')              return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
+    if (t === 'security_deposit') return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
     if (t === 'first_bundle')     return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
     if (t === 'extra_installment')return { label: 'Extra',    bg: 'var(--jade-soft)',    fg: 'var(--jade-deep)' };
     return                               { label: 'Rent',     bg: 'var(--surface)',      fg: 'var(--mute)'      };
@@ -2625,7 +2645,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
         <Stat label="Annual rent" value={fmtAedFils(plan.rentFils)} />
         <Stat label="Total contract value" value={fmtAedFils(plan.totalAmountFils)} accent />
-        <Stat label="First payment" value={firstDue ? fmtDateShort(firstDue) : '—'} />
+        <Stat label="Before move-in" value={fmtAedFils(beforeMoveInFils)} sub={firstDue ? `due ${fmtDateShort(firstDue)}` : undefined} />
       </div>
 
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
@@ -3313,7 +3333,15 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
     .map(it => ({ description: it.description ?? null, amountFils: it.amountFils ?? 0, dueDate: it.dueDate ?? null, status: null as string | null }));
   const chequeItems = realCheques.length ? realCheques : planCheques;
   const chequesTotalFils = chequeItems.reduce((s, it) => s + it.amountFils, 0);
-  const nextCheque = chequeItems.find(it => it.dueDate && new Date(it.dueDate + 'T00:00:00') >= today);
+  // "Next cheque" = the next upcoming RENT installment, NOT the before-move-in
+  // first cheque (fees + deposit + installment 1 all share the earliest due
+  // date). On an active pass that first cheque is the current/collected one, so
+  // skip its date and surface the 2nd installment. Falls back to any upcoming
+  // cheque when there's only the first one (e.g. a 1-installment plan).
+  const firstChequeDue = chequeItems.find(it => it.dueDate)?.dueDate ?? null;
+  const nextCheque =
+    chequeItems.find(it => it.dueDate && it.dueDate !== firstChequeDue && new Date(it.dueDate + 'T00:00:00') >= today)
+    ?? chequeItems.find(it => it.dueDate && new Date(it.dueDate + 'T00:00:00') >= today);
 
   const sections = [
     { k: 'payments'  as const, label: 'Payments',  sub: chequeItems.length ? `${chequeItems.length} cheques · ${aed(chequesTotalFils)}` : 'No schedule yet' },
@@ -3427,7 +3455,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
             {tenantName && <PassField label="Tenant"   value={tenantName} />}
             <PassField label="Landlord" value={landlordName} />
-            {u?.unitType && <PassField label={u.unitType.replace(/_/g, ' ')} value={u.bedrooms ? `${u.bedrooms} BR` : '—'} mono />}
+            {u?.unitType && <PassField label={u.unitType.replace(/_/g, ' ')} value={u.bedrooms ? `${u.bedrooms} BR` : (unitNum ? `No. ${unitNum}` : '—')} mono />}
           </div>
         </div>
 
@@ -3456,6 +3484,12 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--jade-deep)', margin: '4px 0 0', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
               {pp ? aed(pp.rentFils) : c.annualRent ? `AED ${c.annualRent.toLocaleString('en-AE')}` : '—'}
             </p>
+            {(() => {
+              const vatAed = pp ? (pp.rentVatFils ?? 0) / 100 : (c.annualRent ?? 0) * (c.rentVatRate ?? 0) / 100;
+              return vatAed > 0 ? (
+                <p style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mute)', margin: '3px 0 0' }}>+ AED {Math.round(vatAed).toLocaleString('en-AE')} VAT</p>
+              ) : null;
+            })()}
           </div>
 
           {/* Next cheque */}
@@ -3872,6 +3906,8 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
   const newRent = child?.annualRent ?? null;
   const rentDelta = newRent != null && currentRent ? newRent - currentRent : null;
   const rentDeltaPct = newRent != null && currentRent ? Math.round(((newRent - currentRent) / currentRent) * 1000) / 10 : null;
+  const rentVatRate = child?.rentVatRate ?? 0;
+  const newRentVat = newRent != null ? Math.round(newRent * rentVatRate) / 100 : 0;
 
   const newCheques = child?.numberOfInstallments ?? null;
   const newContractValue = child?.contractValue ?? null;
@@ -3937,6 +3973,9 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost breakdown</p>
         <div style={{ display: 'grid', gap: 6 }}>
           <PaymentRow label="Annual rent" amountFils={(newRent ?? 0) * 100} />
+          {newRentVat > 0 && (
+            <PaymentRow label={`VAT on rent (${rentVatRate}%)`} amountFils={newRentVat * 100} />
+          )}
           {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
             <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
           )}
@@ -3972,7 +4011,12 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
                   <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{p.description ?? (isDeposit ? 'Security deposit' : `Payment ${i + 1}`)}</p>
                   <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{p.transactionDate ? fmtDateLong(p.transactionDate) : 'No due date'}</p>
                 </div>
-                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
+                  {(p.vatAmount ?? 0) > 0 && (
+                    <p style={{ fontSize: 10, color: 'var(--mute)', margin: '2px 0 0' }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</p>
+                  )}
+                </div>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : 'Rent'}
                 </span>
@@ -4433,10 +4477,8 @@ function TopBar({ resolved }: { resolved: Resolved }) {
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0, fontWeight: 600 }}>{loc || 'Tenancy journey'}</p>
         <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{building}{unit ? `, ${unit}` : ''}</p>
       </div>
-      <Link href={`/dashboard/customer/spaces?space=${resolved.spaceKey}`}
-        style={{ fontSize: 12, color: 'var(--ink-2)', textDecoration: 'none', padding: '6px 12px', border: '1px solid var(--mist-strong)', borderRadius: 999, background: 'var(--surface)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-        Legacy view
-      </Link>
+      {/* Right-side spacer keeps the title centered (Legacy view link removed). */}
+      <div aria-hidden style={{ width: 88, flexShrink: 0 }} />
     </div>
   );
 }

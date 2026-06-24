@@ -15,6 +15,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 /* ---------- types ---------- */
 
@@ -109,6 +110,7 @@ const titleCase = (s: string) =>
 function parseFacilities(facilities: string | null): {
   amenities: string[];
   minLeaseMonths?: number; noticePeriodDays?: number; rentEscalationPct?: number;
+  additionalPayments?: Array<{ label: string; amount: number; vat: number }>;
 } {
   if (!facilities) return { amenities: [] };
   try {
@@ -116,9 +118,15 @@ function parseFacilities(facilities: string | null): {
     if (Array.isArray(parsed)) return { amenities: parsed as string[] };
     if (parsed && typeof parsed === 'object') {
       const lt = (parsed as { leaseTerms?: Record<string, number> }).leaseTerms ?? {};
+      const rawAp = (parsed as { additionalPayments?: Array<{ label?: string; amount?: number; vat?: number }> }).additionalPayments;
+      const additionalPayments = Array.isArray(rawAp)
+        ? rawAp.filter(p => p && p.label && Number(p.amount) > 0)
+               .map(p => ({ label: String(p.label), amount: Number(p.amount) || 0, vat: Number(p.vat) || 0 }))
+        : [];
       return {
         amenities: Array.isArray((parsed as { amenities?: string[] }).amenities) ? (parsed as { amenities: string[] }).amenities : [],
         minLeaseMonths: lt.minLeaseMonths, noticePeriodDays: lt.noticePeriodDays, rentEscalationPct: lt.rentEscalationPct,
+        additionalPayments,
       };
     }
     return { amenities: [] };
@@ -244,8 +252,8 @@ export function UnitPreviewModal({
     ['Plan', unit.planLabel ?? null],
     ['Floor', unit.floor],
     ['Premise no.', unit.premiseNumber],
-    ['Bedrooms', unit.bedrooms != null ? String(unit.bedrooms) : null],
-    ['Bathrooms', unit.bathrooms != null ? String(unit.bathrooms) : null],
+    ['Bedrooms', isResidentialUnitType(unit.unitType) && unit.bedrooms != null ? String(unit.bedrooms) : null],
+    ['Bathrooms', isResidentialUnitType(unit.unitType) && unit.bathrooms != null ? String(unit.bathrooms) : null],
     [
       'Size',
       unit.unitSizeSqft != null || unit.unitSizeSqm != null
@@ -265,7 +273,7 @@ export function UnitPreviewModal({
   );
 
   // Amenities + lease terms are packed into the facilities JSON column.
-  const { amenities, minLeaseMonths, noticePeriodDays, rentEscalationPct } = parseFacilities(unit.facilities);
+  const { amenities, minLeaseMonths, noticePeriodDays, rentEscalationPct, additionalPayments } = parseFacilities(unit.facilities);
   const leaseRows: Array<[string, string | null]> = [
     ['Min. lease', minLeaseMonths != null ? `${minLeaseMonths} month${minLeaseMonths === 1 ? '' : 's'}` : null],
     ['Notice period', noticePeriodDays != null ? `${noticePeriodDays} day${noticePeriodDays === 1 ? '' : 's'}` : null],
@@ -280,6 +288,9 @@ export function UnitPreviewModal({
     ['Ejari fee', aed(unit.ejariFeeFils)],
     ['Commission', aed(unit.commission)],
     ['Service charges', aed(unit.serviceCharges)],
+    // RP-defined extra one-off charges — shown GROSS (net + VAT) with an incl-VAT hint.
+    ...(additionalPayments ?? []).map(p =>
+      [p.vat > 0 ? `${p.label} (incl. VAT)` : p.label, aed(p.amount + p.vat)] as [string, string | null]),
   ];
   const visiblePricing = pricingRows.filter(([, v]) => v !== null);
 

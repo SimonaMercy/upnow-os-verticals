@@ -61,7 +61,9 @@ const fmtDate = (d?: string | null) => {
   return `${p(t.getDate())}-${p(t.getMonth() + 1)}-${t.getFullYear()}`;
 };
 const fmtAed = (v?: number | null) => (v == null ? '' : `AED ${Number(v).toLocaleString('en-US')}`);
-const cap = (s?: string | null) => (s ? s[0].toUpperCase() + s.slice(1) : '');
+// Humanize an enum/DB value for display: drop underscores + title-case each word
+// (e.g. 'retail_shop' → 'Retail Shop', 'bank_transfer' → 'Bank Transfer').
+const cap = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '');
 // Money is shown as digits only (no spelled-out words), with the standard
 // "/- Only" suffix → e.g. "AED 57,500/- Only".
 const aedOnly = (v?: number | null) => (v && v > 0 ? `${fmtAed(v)}/- Only` : '');

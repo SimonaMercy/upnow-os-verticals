@@ -7,7 +7,7 @@ import Link from 'next/link';
 import {
   Plus, Trash2, Save, Printer, ArrowLeft, CheckCircle, Loader2,
   AlertCircle, RotateCcw, UploadCloud, X, Camera, Paperclip, Images,
-  FileSignature, Send,
+  FileSignature, Send, Receipt, Check,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
 
@@ -46,6 +46,23 @@ interface InspectionPhoto {
   caption: string;
 }
 
+/** Move-out only — a single utility/DEWA account clearance row. */
+interface UtilityClearance {
+  id: string;
+  provider: string;
+  cleared: boolean;
+  /** Outstanding final-bill amount (AED) when not yet cleared. */
+  outstanding: string;
+  /** Account number / clearance reference. */
+  reference: string;
+}
+interface BillClearanceData {
+  items: UtilityClearance[];
+  /** Uploaded final clearance certificate (DEWA/cooling closing statement). */
+  certificateUrl?: string | null;
+  notes?: string;
+}
+
 interface InspectionData {
   reportGeneratedDate: string;
   inspectorName: string;
@@ -63,6 +80,8 @@ interface InspectionData {
   tenantSignedAt?: string | null;
   rpCounterSig?: string | null;
   rpCounterSignedAt?: string | null;
+  /** Move-out only — utility/DEWA bill clearance captured at handover. */
+  billClearance?: BillClearanceData;
 }
 
 interface ContractMeta {
@@ -167,6 +186,16 @@ function makeBlankData(): InspectionData {
     photos: [],
     tenantSig: null,
     landlordSig: null,
+  };
+}
+
+// Default UAE utility accounts a tenant must close/settle before deposit refund.
+const DEFAULT_UTILITIES = ['DEWA (Electricity & Water)', 'District Cooling', 'Gas', 'Internet / Telecom'];
+function makeDefaultBillClearance(): BillClearanceData {
+  return {
+    items: DEFAULT_UTILITIES.map(p => ({ id: uid(), provider: p, cleared: false, outstanding: '', reference: '' })),
+    certificateUrl: null,
+    notes: '',
   };
 }
 
@@ -678,6 +707,146 @@ function PhotoGallery({ areas, globalPhotos }: { areas: InspectionArea[]; global
   );
 }
 
+// ─── Bill & utility clearance (move-out only) ──────────────────────────────────
+
+function BillClearanceSection({
+  contractId, value, onChange, disabled, portalToken,
+}: {
+  contractId: number;
+  value: BillClearanceData;
+  onChange: (v: BillClearanceData) => void;
+  disabled?: boolean;
+  portalToken?: string | null;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const items = value.items ?? [];
+  const totalOutstanding = items.reduce((s, i) => s + (Number(i.outstanding) || 0), 0);
+  const allCleared = items.length > 0 && items.every(i => i.cleared);
+
+  function patchItem(id: string, patch: Partial<UtilityClearance>) {
+    onChange({ ...value, items: items.map(i => i.id === id ? { ...i, ...patch } : i) });
+  }
+  function addItem() {
+    onChange({ ...value, items: [...items, { id: uid(), provider: '', cleared: false, outstanding: '', reference: '' }] });
+  }
+  function removeItem(id: string) {
+    onChange({ ...value, items: items.filter(i => i.id !== id) });
+  }
+
+  async function uploadCert(file: File) {
+    setUploading(true); setErr(null);
+    try {
+      const docBody = { documentKey: `bill_clearance_${Date.now()}`, mimeType: file.type, originalName: file.name };
+      const urlRes = await fetch(portalToken
+        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/upload-url`
+        : '/api/documents/upload-url', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(portalToken ? docBody : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
+      });
+      if (!urlRes.ok) { setErr('Upload URL failed'); return; }
+      const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+      const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+      const put = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+      if (!put.ok) { setErr('Upload failed'); return; }
+      onChange({ ...value, certificateUrl: fileUrl });
+    } catch { setErr('Unexpected error'); }
+    finally { setUploading(false); }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
+            <Receipt size={14} className="text-[#2e9f82]" /> Bill &amp; Utility Clearance
+          </h2>
+          <p className="text-xs text-[#9b9890] mt-0.5">Confirm the tenant has closed / settled all utility accounts before the deposit is refunded. Any outstanding may be deducted at settlement.</p>
+        </div>
+        <span className={'shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ' + (allCleared ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef3c7] text-[#92400e]')}>
+          {allCleared ? 'All cleared' : 'Pending'}
+        </span>
+      </div>
+
+      <div className="hidden sm:grid gap-2 px-1 grid-cols-[1fr_auto_7rem_8rem_auto] text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">
+        <span>Provider</span><span className="text-center">Cleared</span><span>Outstanding (AED)</span><span>Account / ref</span><span className="w-5" />
+      </div>
+
+      <div className="space-y-2">
+        {items.map(it => (
+          <div key={it.id} className="grid gap-2 items-center grid-cols-[1fr_auto_7rem_8rem_auto]">
+            <input type="text" value={it.provider} disabled={disabled}
+              onChange={e => patchItem(it.id, { provider: e.target.value })}
+              placeholder="Utility provider"
+              className="text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5 disabled:opacity-70" />
+            <button type="button" disabled={disabled}
+              onClick={() => patchItem(it.id, { cleared: !it.cleared, outstanding: !it.cleared ? '' : it.outstanding })}
+              title={it.cleared ? 'Cleared' : 'Mark cleared'}
+              className={'w-7 h-7 rounded-md border flex items-center justify-center justify-self-center transition-colors ' + (it.cleared ? 'bg-[#2e9f82] border-transparent text-white' : 'border-[#e8e6e0] text-[#c8c6be] hover:border-[#2e9f82]')}>
+              <Check size={14} />
+            </button>
+            <input type="number" min="0" step="0.01" value={it.outstanding} disabled={disabled || it.cleared}
+              onChange={e => patchItem(it.id, { outstanding: e.target.value })}
+              placeholder="0.00"
+              className="text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:text-[#b0ae9a]" />
+            <input type="text" value={it.reference} disabled={disabled}
+              onChange={e => patchItem(it.id, { reference: e.target.value })}
+              placeholder="Acct / ref no."
+              className="text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:opacity-70" />
+            <div className="w-5 flex justify-center">
+              {!disabled && (
+                <button type="button" onClick={() => removeItem(it.id)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={12} /></button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!disabled && (
+        <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75 transition-opacity">
+          <Plus size={12} /> Add utility
+        </button>
+      )}
+
+      {totalOutstanding > 0 && (
+        <div className="flex items-center justify-between text-sm bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-3 py-2">
+          <span className="font-semibold text-[#9a3412]">Total outstanding (deductible at settlement)</span>
+          <span className="font-bold text-[#9a3412]">AED {totalOutstanding.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        {value.certificateUrl ? (
+          <button type="button" onClick={() => openDocViewer({ fileUrl: value.certificateUrl!, caption: 'Clearance certificate' })}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#f0faf6] border border-[#c5e8df] text-[#1a7a5a]">
+            <FileSignature size={12} /> View clearance certificate
+          </button>
+        ) : null}
+        {!disabled && (
+          <>
+            <input ref={inputRef} type="file" accept="image/*,application/pdf" className="hidden"
+              onChange={async e => { const f = e.target.files?.[0]; if (f) await uploadCert(f); if (inputRef.current) inputRef.current.value = ''; }} />
+            <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#2e9f82] text-[#2e9f82] disabled:opacity-60 print:hidden">
+              {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
+              {value.certificateUrl ? 'Replace certificate' : 'Upload clearance certificate'}
+            </button>
+          </>
+        )}
+        {err && <span className="text-[11px] text-red-500">{err}</span>}
+      </div>
+
+      <textarea value={value.notes ?? ''} disabled={disabled}
+        onChange={e => onChange({ ...value, notes: e.target.value })}
+        placeholder="Notes — final meter readings, pending closures, who will settle…"
+        rows={2}
+        className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] resize-none bg-[#fafaf8] disabled:opacity-70" />
+    </div>
+  );
+}
+
 // ─── Legend chip ──────────────────────────────────────────────────────────────
 
 function LegendChip({ letter, label, color }: { letter: string; label: string; color: string }) {
@@ -785,6 +954,9 @@ export default function InspectionPage() {
           setData({
             ...loaded,
             areas,
+            // Move-out always shows the bill-clearance section; seed the default
+            // UAE utility rows when the saved record doesn't carry them yet.
+            billClearance: loaded.billClearance ?? (inspType === 'move_out' ? makeDefaultBillClearance() : undefined),
             moveInDate: seedMoveOut ? defaultDate : (loaded.moveInDate || defaultDate),
             photos: Array.isArray(loaded.photos) ? loaded.photos : [],
             reportGeneratedDate: loaded.reportGeneratedDate ?? new Date().toISOString().split('T')[0],
@@ -1050,6 +1222,17 @@ export default function InspectionPage() {
             className="w-full text-sm border border-[#e8e6e0] rounded-xl px-4 py-3 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none"
           />
         </div>
+
+        {/* Bill & utility clearance — move-out only */}
+        {!isMoveIn && (
+          <BillClearanceSection
+            contractId={Number(contractId)}
+            value={data.billClearance ?? makeDefaultBillClearance()}
+            onChange={bc => setData(d => ({ ...d, billClearance: bc }))}
+            disabled={formLocked}
+            portalToken={portalToken}
+          />
+        )}
 
         {/* Bottom submit bar */}
         {!formLocked && (

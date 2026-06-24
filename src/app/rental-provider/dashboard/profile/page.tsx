@@ -416,8 +416,8 @@ export default function RentalProviderProfilePage() {
                   >
                     <option value="">Select type…</option>
                     <option value="landlord">Landlord — owns and lets its own properties</option>
-                    <option value="brokerage">Brokerage — licensed real-estate firm</option>
-                    <option value="agents">Agents — operating under a parent brokerage</option>
+                    <option value="brokerage">Property Management — manages properties for owners</option>
+                    <option value="agents">Property Management Agent — operates under a parent firm</option>
                   </select>
                 </div>
 

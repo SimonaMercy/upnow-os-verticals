@@ -4,6 +4,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import {
   Ban, AlertCircle, CheckCircle2, Clock,
   BedDouble, ChevronRight, RotateCcw,
@@ -350,7 +351,8 @@ export default function MySpacesPage() {
             const community = unit?.property?.community?.name ?? null;
             const emirate = unit?.property?.emirate?.name ?? null;
             const location = [community, emirate].filter(Boolean).join(', ') || null;
-            const bedrooms = unit?.bedrooms;
+            // Beds only apply to residential units — a leased shop/office shows "—".
+            const bedrooms = isResidentialUnitType(unit?.unitType) ? unit?.bedrooms : null;
             const annual = c?.annualRent ?? unit?.rentalPrice ?? unit?.marketPrice ?? null;
             const annualIsAsking = !c?.annualRent && annual != null;
             const periodLabel = c?.startDate && c?.endDate

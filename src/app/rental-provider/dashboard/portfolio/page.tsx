@@ -349,7 +349,7 @@ export default function PortfolioPage() {
     mutationFn: (id: number) => apiDelete<void>(`/properties/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['properties'] }),
   });
-  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) => {
+  const handleSaveProperty = useCallback(async (data: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>, photos?: File[]) => {
     const dto = formToCreateDto(data);
     let propertyId: number;
     if (propertyModal.editing) {
@@ -391,6 +391,20 @@ export default function PortfolioPage() {
     if (propertyId) {
       const errs = await uploadExtraPropertyDocs(propertyId, extraDocs);
       if (errs.length) alert(`The property was saved, but some documents failed to upload:\n${errs.join('\n')}`);
+    }
+    // Building photos → property media (public bucket). Only the Add flow stages
+    // photos here — Edit uploads live in the modal, so `photos` is empty there.
+    if (photos?.length && propertyId) {
+      const photoErrs: string[] = [];
+      for (let i = 0; i < photos.length; i++) {
+        try {
+          const fd = new FormData();
+          fd.append('file', photos[i]);
+          const res = await fetch(`/api/properties/${propertyId}/media`, { method: 'POST', body: fd, credentials: 'include' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (e) { photoErrs.push(`Property photo ${i + 1}: ${e instanceof Error ? e.message : 'upload failed'}`); }
+      }
+      if (photoErrs.length) alert(`The property was saved, but some photos failed to upload:\n${photoErrs.join('\n')}`);
     }
   }, [propertyModal.editing, createProperty, updateProperty]);
 

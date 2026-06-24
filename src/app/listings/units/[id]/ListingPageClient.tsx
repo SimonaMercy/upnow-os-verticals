@@ -11,6 +11,7 @@ import {
   Flame, AppWindow, DoorOpen, Ruler,
 } from 'lucide-react';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 export interface UnitMediaItem {
@@ -1438,9 +1439,14 @@ export default function ListingPageClient({ unit, property, media = [], preferre
   const avail = AVAIL_STYLE[unit.availability] ?? { bg: '#f4f3ef', text: '#6b6860', label: unit.availability };
   const unitLabel = unit.unitName ?? `Unit ${unit.unitNumber}`;
 
+  // Hide bedrooms (residential-only) and bathrooms on a non-residential listing:
+  // a retail shop showing "Bedrooms: 1 / Bathrooms: 1" is leftover phantom form
+  // data. (Washroom counts are kept in the DB for the move-in template, but not
+  // surfaced publicly until the form captures a real, RP-verified count.)
+  const residential = isResidentialUnitType(unit.unitType);
   const specs = [
-    unit.bedrooms != null && { icon: <BedDouble size={18} />, label: 'Bedrooms', value: unit.bedrooms === 0 ? 'Studio' : String(unit.bedrooms) },
-    unit.bathrooms != null && { icon: <Bath size={18} />, label: 'Bathrooms', value: String(unit.bathrooms) },
+    residential && unit.bedrooms != null && { icon: <BedDouble size={18} />, label: 'Bedrooms', value: unit.bedrooms === 0 ? 'Studio' : String(unit.bedrooms) },
+    residential && unit.bathrooms != null && { icon: <Bath size={18} />, label: 'Bathrooms', value: String(unit.bathrooms) },
     unit.unitSizeSqft && { icon: <Maximize2 size={18} />, label: 'Size (sqft)', value: `${fmt(Number(unit.unitSizeSqft))} sqft` },
     unit.unitSizeSqm && { icon: <Ruler size={18} />, label: 'Size (sqm)', value: `${fmt(Number(unit.unitSizeSqm))} sqm` },
     unit.floor && { icon: <Layers size={18} />, label: 'Floor', value: unit.floor },

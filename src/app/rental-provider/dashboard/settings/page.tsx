@@ -1280,8 +1280,8 @@ export default function SettingsPage() {
                 {(() => {
                   const label =
                     profileType === 'individual' ? 'Individual Landlord' :
-                    companyType === 'brokerage'  ? 'Brokerage Company'   :
-                    companyType === 'agents'     ? 'Agents Company'      :
+                    companyType === 'brokerage'  ? 'Property Management'       :
+                    companyType === 'agents'     ? 'Property Management Agent' :
                                                    'Landlord Company';
                   const Ico = profileType === 'individual' ? User : Building2;
                   return (

@@ -43,7 +43,9 @@ import {
   Trash2, Plus,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
+import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
+import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
@@ -139,6 +141,9 @@ interface ContractDetail {
   /** Customer declined the renewal with intent to leave → move-out wind-down. */
   vacateAtEnd?: boolean;
   parentContractId?: number | null;
+  /** The lead this contract was created from (migration 0098) — drives the
+   *  "Offer Receipt" row in the documents binder. NULL for renewals/manual. */
+  originLeadId?: number | null;
   /** Live renewal child of THIS contract (when viewing a parent) — the agreed
    *  or in-flight renewal lives in its own contract row. */
   renewalChild?: { id: number; status: string; startDate?: string | null; endDate?: string | null; annualRent?: number } | null;
@@ -163,7 +168,7 @@ interface ContractDetail {
      *  stays active until the settlement is marked paid. NULL/'mutual' = legacy. */
     method?: 'mutual' | 'direct' | null;
   } | null;
-  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null };
+  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
   property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
   unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
@@ -1588,7 +1593,10 @@ function DetailsDrawer({
       setNoteBusy(false);
     }
   };
-  const rentRows = payments.filter(p => p.paymentType !== 'security_deposit');
+  const rentRows = payments
+    .filter(p => p.paymentType !== 'security_deposit')
+    .slice()
+    .sort((a, b) => (a.transactionDate ?? '').localeCompare(b.transactionDate ?? ''));
   // One-off leasing fees (admin / ejari / commission) — their own line items,
   // kept out of the rent schedule and rent totals.
   const feeRows = contract.fees ?? [];
@@ -1878,7 +1886,7 @@ function DetailsDrawer({
                                     {depositRow.chequeStatus ?? 'cleared'}
                                   </span>
                                 )}
-                                {perms.deposits && (
+                                {perms.deposits && depositRow.chequeStatus !== 'cleared' && (
                                   <button
                                     type="button"
                                     className="mini-btn view"
@@ -1888,14 +1896,6 @@ function DetailsDrawer({
                                     <Pencil size={12} /> Edit
                                   </button>
                                 )}
-                                <Link
-                                  href={`${receiptBase}?pid=${depositRow.id}`}
-                                  target="_blank"
-                                  className="mini-btn view"
-                                  title="Generate receipt"
-                                >
-                                  <FileText size={12} /> Receipt
-                                </Link>
                               </div>
                             </td>
                           </tr>
@@ -1982,13 +1982,12 @@ function DetailsDrawer({
                                         <option value="bounced">Bounced</option>
                                         <option value="cancelled">Cancelled</option>
                                       </select>
-                                      <button type="button" className="mini-btn view" title="Edit deposit — method, due date, amount"
-                                        onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
-                                        <Pencil size={12} /> Edit
-                                      </button>
-                                      <Link href={`${receiptBase}?kind=deposit`} target="_blank" className="mini-btn view" title="Generate deposit receipt">
-                                        <FileText size={12} /> Receipt
-                                      </Link>
+                                      {sd.chequeStatus !== 'cleared' && (
+                                        <button type="button" className="mini-btn view" title="Edit deposit — method, due date, amount"
+                                          onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
+                                          <Pencil size={12} /> Edit
+                                        </button>
+                                      )}
                                       {(!sd.status || sd.status === 'held') && (
                                         <Link href={`${contractBase}/settlement`} className="mini-btn view" title="Settle the deposit (refund / deduction)">
                                           <Stamp size={12} /> Settle
@@ -2103,7 +2102,7 @@ function DetailsDrawer({
                                   {p.chequeStatus ?? 'pending'}
                                 </span>
                               )}
-                              {perms.collections && (
+                              {perms.collections && p.chequeStatus !== 'cleared' && (
                                 <button
                                   type="button"
                                   className="mini-btn view"
@@ -2113,14 +2112,6 @@ function DetailsDrawer({
                                   <Pencil size={12} /> Edit
                                 </button>
                               )}
-                              <Link
-                                href={`${receiptBase}?pid=${p.id}`}
-                                target="_blank"
-                                className="mini-btn view"
-                                title="Generate receipt"
-                              >
-                                <FileText size={12} /> Receipt
-                              </Link>
                             </div>
                           </td>
                         </tr>
@@ -2248,14 +2239,16 @@ function DetailsDrawer({
                             <td>
                               {perms.collections && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <button
-                                    type="button"
-                                    className="mini-btn view"
-                                    title="Edit fee amount / VAT / date"
-                                    onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
-                                  >
-                                    <Pencil size={12} /> Edit
-                                  </button>
+                                  {f.chequeStatus !== 'cleared' && (
+                                    <button
+                                      type="button"
+                                      className="mini-btn view"
+                                      title="Edit fee amount / VAT / date"
+                                      onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
+                                    >
+                                      <Pencil size={12} /> Edit
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     className="mini-btn"
@@ -2428,19 +2421,6 @@ function DetailsDrawer({
             // only the re-verification docs; the full pack lives on the original
             // lease. Slots match uploads so the gaps are what need requesting.
             const isRenewal = contract.contractType === 'renewal';
-            // Primary checklist:
-            //   • New lease → the unit category's full pack (KYC + commercial /
-            //     industrial / residential) PLUS the two universal contract docs
-            //     (Contract Registration / Ejari + Payment Advice).
-            //   • Renewal  → ONLY the two universal contract docs. The KYC +
-            //     financial / commercial pack lives on the original lease and is
-            //     not re-collected; the renewal just re-confirms the registration
-            //     and the rent cheques. (Previously a residential renewal showed
-            //     no checklist at all — that left the slots invisible.)
-            // Any other uploaded docs still surface under their group below.
-            const expected: DocReq[] = isRenewal
-              ? CONTRACT_DOCS
-              : [...fullPackDocs, ...CONTRACT_DOCS];
             const norm = (s: string | null | undefined) =>
               (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
             // Upload keys / display names that satisfy a slot without matching its
@@ -2463,76 +2443,24 @@ function DetailsDrawer({
               // landed first.
               ejari_certificate: ['ejari', 'ejari_certificate', 'contract_registration', 'tenancy_contract_registration', 'ejari_registration'],
               payment_advice: ['pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques'],
+              utility_registration: ['utility_proof_of_payment', 'utility_proof', 'utility_activation'],
             };
-            const matchDoc = (key: string): ContractDoc | undefined => {
+            // A slot can hold several files (e.g. Payment Advice = every cheque
+            // image the tenant uploaded). Newest first; RP uploads carry a
+            // `_<timestamp>` suffix on the key — strip it so a Replace supersedes.
+            const matchDocs = (key: string): ContractDoc[] => {
               const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
-              // RP uploads carry a `_<timestamp>` suffix on the key — strip it.
-              // Newest match wins, so a Replace upload takes over the slot.
               const baseKey = (d: ContractDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
               return all
                 .filter(d => accepted.includes(baseKey(d)) || accepted.includes(norm(d.displayName)))
-                .sort((a, b) => b.id - a.id)[0];
+                .sort((a, b) => b.id - a.id);
             };
             const askedNames = new Set(pendingAsks.map(d => norm(d.displayName ?? d.documentKey).replace(/_\d{10,}$/, '')));
             const askedFor = (req: DocReq) => askedNames.has(norm(req.label)) || askedNames.has(req.key);
-            const checklist = expected.map(req => ({ req, doc: matchDoc(req.key) }));
-            const onFile = checklist.filter(c => c.doc).length;
-            // One file can satisfy two slots (legacy combined EID covers Front +
-            // Back) — render it once so React keys stay unique.
-            const seenIds = new Set<number>();
-            const dedupeRows = (rows: { req: DocReq; doc: ContractDoc | undefined }[]) =>
-              rows.filter(({ doc }) => {
-                if (!doc) return true;
-                if (seenIds.has(doc.id)) return false;
-                seenIds.add(doc.id);
-                return true;
-              });
-            const checklistRows = dedupeRows(checklist);
-            const category = spaceCategoryFromUnitType(contract.unit.type);
-            const checklistTitle = isRenewal
-              ? 'Renewal documents'
-              : `Customer documents — ${category} set`;
-
-            const renderDoc = (d: ContractDoc, replaceReq?: DocReq) => {
-              const isKyc = d.ownerType === 'customer' || d.ownerType === 'tenant';
-              // Every document gets a Replace action: checklist rows pass their
-              // slot; standalone docs derive one from the doc itself so a newer
-              // upload supersedes it (matchDoc keeps the newest per key).
-              const replaceWith: DocReq = replaceReq ?? {
-                key: d.documentKey.replace(/_\d{10,}$/, ''),
-                label: d.displayName ?? d.documentKey.replace(/_/g, ' '),
-                category: d.category || 'other',
-                required: false,
-              };
-              const ok  = ['approved', 'processed', 'complete'].includes(d.status);
-              const stt = ok ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending';
-              const lbl = ok ? (d.status === 'approved' ? 'Approved' : 'On file')
-                : d.status === 'rejected' ? 'Rejected' : 'Pending review';
-              const exp = d.expiryDate ? ' · exp ' + new Date(d.expiryDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE }) : '';
-              return (
-                <div key={d.id} className={'docitem ' + stt}>
-                  <FileText size={14} />
-                  <div>
-                    <div className="dn">{d.displayName ?? d.documentKey.replace(/_/g, ' ')}</div>
-                    <div className="ds">{lbl}{exp}</div>
-                  </div>
-                  <div className="dacts">
-                    <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey.replace(/_/g, ' ') })} className="mini-btn view cursor-pointer"><ExternalLink size={12} /> View</button>
-                    <button type="button" className="mini-btn view" title={`Upload a newer ${replaceWith.label}`} onClick={() => prefillUpload(replaceWith)}>
-                      <UploadCloud size={12} /> Replace
-                    </button>
-                    {/* Review actions only while there's something to review —
-                        verified docs don't carry dummy tick/cross buttons. */}
-                    {isKyc && (stt === 'pending' || stt === 'rejected') && (
-                      <button className="mini-btn ok" title="Approve" onClick={() => onApproveDoc(d.id)}><Check size={12} /></button>
-                    )}
-                    {isKyc && stt === 'pending' && (
-                      <button className="mini-btn no" title="Reject" onClick={() => onRejectDoc(d.id)}><X size={12} /></button>
-                    )}
-                  </div>
-                </div>
-              );
-            };
+            // (Old intake checklist + renderDoc removed — the card body is now
+            // the document binder; KYC/licenses live behind "View customer
+            // documents". matchDoc / renderMissing below are reused by the
+            // binder's doc-slots.)
             // Missing slots use the SAME row pattern as on-file documents —
             // icon, name, status, actions right — dashed border marks the gap.
             const renderMissing = (req: DocReq) => {
@@ -2557,6 +2485,81 @@ function DetailsDrawer({
                 </div>
               );
             };
+            // ── The card body shows the contract documents BINDER in the fixed
+            // sequence. Upload-type slots reuse View/Replace/Upload; generated /
+            // print items are link rows. KYC/licenses live behind the
+            // "View customer documents" link.
+            type BinderSlot =
+              | { kind: 'doc'; key: string; label: string }
+              | { kind: 'link'; key: string; label: string; sub: string; href: string | null };
+            const moveOutShown = contract.status === 'terminated' || contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
+            const receiptsReady = contract.pdcConfirmed || contract.status === 'active' || contract.contractActive;
+            const offerHref = contract.originLeadId
+              ? `${contractBase.replace(/\/contracts\/[^/]+$/, '/leads')}?lead=${contract.originLeadId}`
+              : null;
+            const binderSeq: BinderSlot[] = [
+              { kind: 'link', key: 'offer',          label: 'Offer Receipt', sub: 'Offered during the lead phase', href: offerHref },
+              { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
+              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: 'Admin, Ejari, commission & rent', href: receiptsReady ? `${receiptBase}?kind=contract` : null },
+              { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
+              { kind: 'doc',  key: 'ejari_certificate', label: 'Ejari' },
+            ];
+            if (!isRenewal) {
+              binderSeq.push({ kind: 'doc',  key: 'utility_registration', label: 'Utility Proof of Payment' });
+              binderSeq.push({ kind: 'link', key: 'movein', label: 'Move-in', sub: 'Move-in inspection report', href: `${contractBase}/inspection?type=move_in` });
+            }
+            if (moveOutShown) {
+              binderSeq.push({ kind: 'link', key: 'moveout', label: 'Move-out', sub: 'Move-out inspection report', href: `${contractBase}/inspection?type=move_out` });
+              binderSeq.push({ kind: 'doc',  key: 'utility_final_bill', label: 'Utility Final Bill' });
+              binderSeq.push({ kind: 'link', key: 'settlement', label: 'Final Settlement', sub: 'Security deposit settlement', href: `${contractBase}/settlement` });
+            }
+            // "View all" previews the binder's uploaded docs IN SEQUENCE ORDER
+            // (generated/print rows aren't files, so they're skipped here).
+            const binderPreviewDocs = binderSeq.flatMap(s => s.kind === 'doc' ? matchDocs(s.key) : []);
+            // "View all" previews EVERY uploaded document, but ordered by the
+            // sequence first (Payment Advice / Ejari / Utility …), then the rest
+            // (KYC, licenses, etc.).
+            const seqDocIds = new Set(binderPreviewDocs.map(d => d.id));
+            const viewAllDocs = [...binderPreviewDocs, ...all.filter(d => !seqDocIds.has(d.id))];
+            const renderLinkSlot = (s: Extract<BinderSlot, { kind: 'link' }>) => (
+              <div key={s.key} className="docitem approved">
+                <FileText size={14} />
+                <div>
+                  <div className="dn">{s.label}</div>
+                  <div className="ds">{s.sub}</div>
+                </div>
+                <div className="dacts">
+                  {s.href
+                    ? <Link href={s.href} target="_blank" className="mini-btn view"><ExternalLink size={12} /> View</Link>
+                    : <span className="ds" style={{ color: '#b8b5ae' }}>Not yet available</span>}
+                </div>
+              </div>
+            );
+            const renderDocSlot = (s: Extract<BinderSlot, { kind: 'doc' }>) => {
+              const docs = matchDocs(s.key);
+              const req: DocReq = { key: s.key, label: s.label, category: 'contract', required: false };
+              if (docs.length === 0) return renderMissing(req);
+              const multi = docs.length > 1;
+              const doc = docs[0];
+              const ok  = ['approved', 'processed', 'complete'].includes(doc.status);
+              const stt = ok ? 'approved' : doc.status === 'rejected' ? 'rejected' : 'pending';
+              const lbl = multi
+                ? `${docs.length} files · on file`
+                : ok ? 'On file' : doc.status === 'rejected' ? 'Rejected' : 'Pending review';
+              return (
+                <div key={s.key} className={'docitem ' + stt}>
+                  <FileText size={14} />
+                  <div>
+                    <div className="dn">{s.label}</div>
+                    <div className="ds">{lbl}</div>
+                  </div>
+                  <div className="dacts">
+                    <button type="button" onClick={() => multi ? openDocsTogether(docs) : openDocViewer({ fileUrl: doc.fileUrl, caption: s.label })} className="mini-btn view cursor-pointer"><ExternalLink size={12} /> {multi ? 'View all' : 'View'}</button>
+                    <button type="button" className="mini-btn view" title={`Upload a newer ${s.label}`} onClick={() => prefillUpload(req)}><UploadCloud size={12} /> {multi ? 'Add' : 'Replace'}</button>
+                  </div>
+                </div>
+              );
+            };
             return (
               <>
               <div className="sec">
@@ -2564,8 +2567,8 @@ function DetailsDrawer({
                   <span className="si"><Paperclip size={16} /></span>
                   <span className="st">Documents ({all.length})</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    {all.length > 0 && (
-                      <button type="button" className="mini-btn view" onClick={() => setShowContractDocs(true)}>
+                    {viewAllDocs.length > 0 && (
+                      <button type="button" className="mini-btn view" onClick={() => openDocsTogether(viewAllDocs)}>
                         <ExternalLink size={12} /> View all
                       </button>
                     )}
@@ -2586,68 +2589,22 @@ function DetailsDrawer({
                     {/* Checklist — new lease: full pack + the two universal
                         contract docs; renewal: only Contract Registration +
                         Payment Advice. Always non-empty (CONTRACT_DOCS). */}
-                    {checklist.length > 0 && (
-                      <>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
-                          {checklistTitle} · {onFile} of {checklist.length} on file
-                        </div>
-                        {isRenewal && (
-                          <p className="note" style={{ margin: '0 0 8px' }}>
-                            Renewal re-confirms the registration and the rent cheques.
-                          </p>
-                        )}
-                        {/* One list, one pattern — on-file and missing rows share
-                            the same row anatomy and 5px rhythm. */}
-                        <div className="doclist">
-                          {checklistRows.map(({ req, doc }) => doc ? renderDoc(doc, req) : renderMissing(req))}
-                        </div>
-                      </>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                      Contract documents · in order
+                    </div>
+                    {isRenewal && (
+                      <p className="note" style={{ margin: '0 0 8px' }}>
+                        Renewal re-confirms the registration and the rent cheques.
+                      </p>
                     )}
-                    {/* Generated payment receipts — auto-available after payment
-                        is confirmed (PDCs collected) and once the contract is
-                        activated. Two by default: the consolidated contract
-                        payment receipt (admin + ejari + commission + rent) and the
-                        security-deposit receipt. Virtual /print links, not files. */}
-                    {(contract.pdcConfirmed || contract.status === 'active' || contract.contractActive) && (
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
-                          Payment receipts
-                        </div>
-                        <div className="doclist">
-                          <div className="docitem approved">
-                            <FileText size={14} />
-                            <div>
-                              <div className="dn">Contract Payment Receipt</div>
-                              <div className="ds">Admin, Ejari, commission &amp; rent instalments</div>
-                            </div>
-                            <div className="dacts">
-                              <Link href={`${receiptBase}?kind=contract`} target="_blank" className="mini-btn view"><ExternalLink size={12} /> View</Link>
-                            </div>
-                          </div>
-                          <div className="docitem approved">
-                            <FileText size={14} />
-                            <div>
-                              <div className="dn">Security Deposit Receipt</div>
-                              <div className="ds">Refundable security deposit</div>
-                            </div>
-                            <div className="dacts">
-                              <Link href={`${receiptBase}?kind=deposit`} target="_blank" className="mini-btn view"><ExternalLink size={12} /> View</Link>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className="doclist">
+                      {binderSeq.map(s => s.kind === 'link' ? renderLinkSlot(s) : renderDocSlot(s))}
+                    </div>
                     {/* Everything else on this contract — one link, no inline dump. */}
                     <p className="note" style={{ marginTop: 8 }}>
-                      {all.length > 0 && (
-                        <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowContractDocs(true)}>
-                          View all {all.length} document{all.length === 1 ? '' : 's'} on this contract
-                        </button>
-                      )}
-                      {all.length > 0 && contract.tenant.id != null && ' · '}
                       {contract.tenant.id != null && (
                         <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowDocsHistory(true)}>
-                          cross-lease history
+                          Document History
                         </button>
                       )}
                     </p>
@@ -3050,22 +3007,7 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
           <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button type="button" className={'btn btn-sm ' + (mode === 'canvas' ? 'btn-jade' : 'btn-ghost')} onClick={() => setMode('canvas')}>
-          Draw signature
-        </button>
-        <button type="button" className={'btn btn-sm ' + (mode === 'typed' ? 'btn-jade' : 'btn-ghost')} onClick={() => setMode('typed')}>
-          Type name
-        </button>
-      </div>
-      {mode === 'canvas' ? (
-        <SignaturePad onChange={setSig} />
-      ) : (
-        <div className="field">
-          <label>Typed name</label>
-          <input className="input" value={name} onChange={e => setName(e.target.value)} />
-        </div>
-      )}
+      <SignaturePad onChange={setSig} />
       {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
         <button className="btn btn-jade" disabled={!canSubmit || done} onClick={submit}>
@@ -3186,22 +3128,7 @@ function SignModal({
               <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <button type="button" className={'btn btn-sm ' + (mode === 'canvas' ? 'btn-jade' : 'btn-ghost')} onClick={() => setMode('canvas')}>
-              Draw signature
-            </button>
-            <button type="button" className={'btn btn-sm ' + (mode === 'typed' ? 'btn-jade' : 'btn-ghost')} onClick={() => setMode('typed')}>
-              Type name
-            </button>
-          </div>
-          {mode === 'canvas' ? (
-            <SignaturePad onChange={setSig} />
-          ) : (
-            <div className="field">
-              <label>Typed name</label>
-              <input className="input" value={name} onChange={e => setName(e.target.value)} />
-            </div>
-          )}
+          <SignaturePad onChange={setSig} />
           {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
         </div>
         <div className="mf">
@@ -3618,7 +3545,7 @@ function PassField({ label, value }: { label: string; value: string }) {
  * = property / unit / parties; right stub = period + annual rent. Payment + KYC
  * detail render below it (the DetailsDrawer).
  */
-function ContractPass({ contract }: { contract: ContractDetail }) {
+function ContractPass({ contract, payments }: { contract: ContractDetail; payments: ContractPayment[] }) {
   const isRenewal = contract.contractType === 'renewal';
   const winding = contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
   const building = contract.property.buildingName ?? 'Property';
@@ -3632,6 +3559,27 @@ function ContractPass({ contract }: { contract: ContractDetail }) {
     : contract.status === 'expired' ? { bg: 'var(--mute)', label: 'Lease ended' }
     : contract.status === 'terminated' ? { bg: 'var(--brick-deep)', label: 'Terminated' }
     : { bg: 'var(--saffron-deep)', label: 'In setup' };
+  // Accurate payment summary — sums the ACTUAL payment rows (gross incl. VAT):
+  // rent installments + any extra "other" charges + admin/ejari/commission fees +
+  // the security deposit. Falls back to the contract's net rent + computed VAT for
+  // a draft that has no rows yet, so the banner is never blank.
+  const aed = (n: number) => `AED ${Math.round(n || 0).toLocaleString('en-AE')}`;
+  const g = (arr: ContractPayment[]) => arr.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const v = (arr: ContractPayment[]) => arr.reduce((s, p) => s + (Number(p.vatAmount) || 0), 0);
+  const rows = payments ?? [];
+  const nonDeposit = rows.filter(p => p.paymentType !== 'security_deposit');
+  const otherItems = nonDeposit.filter(p => p.paymentType === 'other');
+  const rentItems = nonDeposit.filter(p => p.paymentType !== 'other');
+  const feeItems = contract.fees ?? [];
+  const computedRentVat = contract.rentVatRate ? Math.round((contract.annualRent || 0) * Number(contract.rentVatRate)) / 100 : 0;
+  const hasRentRows = rentItems.length > 0;
+  const rentGross = hasRentRows ? g(rentItems) : (contract.annualRent || 0) + computedRentVat;
+  const rentVat = hasRentRows ? v(rentItems) : computedRentVat;
+  const otherGross = g(otherItems);
+  const feesGross = g(feeItems);
+  const deposit = rows.find(p => p.paymentType === 'security_deposit')?.amount ?? contract.securityDeposit?.amount ?? 0;
+  const totalVat = rentVat + v(otherItems) + v(feeItems);
+  const totalPayable = rentGross + otherGross + feesGross + deposit;
   return (
     <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1.6fr 24px 1fr', background: 'var(--surface)', borderRadius: 22, border: '1px solid var(--mist-strong)', boxShadow: 'var(--sh-hero)', overflow: 'hidden', marginBottom: 22 }}>
       {/* LEFT: identity */}
@@ -3646,7 +3594,10 @@ function ContractPass({ contract }: { contract: ContractDetail }) {
         <div>
           <p style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Your place · {isRenewal ? 'Renewing' : 'Leased'}</p>
           <p style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: '5px 0 2px', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{building}</p>
-          <p style={{ fontSize: 30, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 10px', letterSpacing: '-0.025em', lineHeight: 1 }}>{unitLabel}</p>
+          <p style={{ fontSize: 30, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 2px', letterSpacing: '-0.025em', lineHeight: 1 }}>{unitLabel}</p>
+          {contract.unit.number && contract.unit.name && (
+            <p style={{ fontSize: 12, color: 'var(--mute)', margin: '0 0 8px', fontFamily: 'monospace', letterSpacing: '0.04em' }}>Unit {contract.unit.number}</p>
+          )}
           <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}><MapPin size={12} /> {location}</p>
         </div>
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
@@ -3669,8 +3620,15 @@ function ContractPass({ contract }: { contract: ContractDetail }) {
           <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.015em' }}>{fmtDate(contract.endDate)}</p>
         </div>
         <div style={{ borderTop: '1px dashed var(--mist-strong)', paddingTop: 12 }}>
-          <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0 }}>Annual rent</p>
-          <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--jade-deep)', margin: '4px 0 0', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{contract.annualRent ? `AED ${contract.annualRent.toLocaleString('en-AE')}` : '—'}</p>
+          <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0 }}>Payment summary</p>
+          <div style={{ display: 'grid', gap: 3, marginTop: 6, fontSize: 11, color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Rent{rentVat > 0 ? ' (incl. VAT)' : ''}</span><b style={{ color: 'var(--ink)' }}>{rentGross > 0 ? aed(rentGross) : '—'}</b></div>
+            {otherGross > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Other charges</span><b style={{ color: 'var(--ink)' }}>{aed(otherGross)}</b></div>}
+            {feesGross > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Fees (incl. VAT)</span><b style={{ color: 'var(--ink)' }}>{aed(feesGross)}</b></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Security deposit</span><b style={{ color: 'var(--ink)' }}>{deposit > 0 ? aed(deposit) : '—'}</b></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderTop: '1px dashed var(--mist-strong)', paddingTop: 4, marginTop: 2 }}><span style={{ fontWeight: 700 }}>Total payable</span><b style={{ color: 'var(--jade-deep)', fontSize: 13 }}>{aed(totalPayable)}</b></div>
+            {totalVat > 0 && <div style={{ fontSize: 9, color: 'var(--mute)', textAlign: 'right' }}>incl. {aed(totalVat)} VAT</div>}
+          </div>
         </div>
       </div>
     </div>
@@ -3716,6 +3674,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
   const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | null>(null);
+
+  // Deep-link from the Leases (record) view: ?action=renew / ?action=terminate
+  // jumps here into the full Operations view and opens that action directly, so
+  // the lease's "Propose renewal" / "Terminate" buttons land on the live flow.
+  const actionOpenedRef = useRef(false);
+  useEffect(() => {
+    if (view === 'record' || !contract || actionOpenedRef.current) return;
+    const action = searchParams.get('action');
+    if (action === 'renew') { actionOpenedRef.current = true; setModal('renew'); }
+    else if (action === 'terminate') { actionOpenedRef.current = true; setModal('direct-terminate'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contract]);
   // Ejari / utility upload (ported from the old page so v2 is self-contained).
   const ejariInputRef = useRef<HTMLInputElement>(null);
   const utilityInputRef = useRef<HTMLInputElement>(null);
@@ -3741,7 +3711,13 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       ),
     ])
       .then(([data, sigs]) => {
-        setContract(data);
+        // For a company tenant the lease party is the entity, so surface the
+        // company name as the displayed tenant name (every label on this page
+        // reads contract.tenant.name). entityType/companyName are kept intact.
+        const normalized: ContractDetail = data?.tenant
+          ? { ...data, tenant: { ...data.tenant, name: tenantDisplayName(data.tenant) } }
+          : data;
+        setContract(normalized);
         setSignatures(Array.isArray(sigs) ? sigs : []);
         fetch(`/api/contracts/${id}/inspection?type=move_in`, { credentials: 'include', signal: ctrl.signal })
           .then(r => (r.ok ? r.json() : null))
@@ -3850,7 +3826,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, CLOSEOUT_STEP, SETTLEMENT_STEP] : baseSteps;
   const doneArr = steps.map(s => isDone(s.key, derived));
   const firstTodo = doneArr.findIndex(x => !x);
-  const autoIdx = firstTodo >= 0 ? firstTodo : steps.length - 1;
+  let autoIdx = firstTodo >= 0 ? firstTodo : steps.length - 1;
+  // For a winding-down lease the setup steps are historical (the lease already
+  // activated) — focus the RP on the live wind-down work (move-out → settlement),
+  // not a setup step that might read incomplete. Default to the first unfinished
+  // wind-down step (move-out, else closeout / settlement).
+  if (isWinding) {
+    const moveOutIdx = steps.findIndex(s => s.key === 'moveout');
+    if (moveOutIdx >= 0) {
+      const windDownTodo = steps.findIndex((s, i) => i >= moveOutIdx && !doneArr[i]);
+      autoIdx = windDownTodo >= 0 ? windDownTodo : moveOutIdx;
+    }
+  }
   const selIdx = selKey ? Math.max(0, steps.findIndex(s => s.key === selKey)) : autoIdx;
   const selStep = steps[selIdx];
 
@@ -4510,14 +4497,32 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 actions; this is the one-click path into the Operations pipeline
                 so landing here (from a report/deposit/unit link) is never a dead
                 end. Hidden on terminated leases (nothing left to do). */}
-            {!showPipeline && contract.status !== 'terminated' && (
-              <Link
-                href={`${isManagerView ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}/${contract.id}`}
-                className="btn btn-jade btn-sm"
-              >
-                <ClipboardList size={14} /> Manage in Operations
-              </Link>
-            )}
+            {/* Leases (record) view: surface the two lease actions directly. Each
+                jumps into Operations (full view) and auto-opens that action,
+                replacing the generic "Manage in Operations" bridge. */}
+            {!showPipeline && contract.status !== 'terminated' && (() => {
+              const opsBase = `${isManagerView ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}/${contract.id}`;
+              const canRenew = contract.status === 'active'
+                && contract.renewalAccepted !== 'pending' && contract.renewalAccepted !== 'accepted'
+                && contract.renewalStatus !== 'draft' && contract.termination?.response !== 'accepted'
+                && perms.renewals;
+              const canTerminate = (contract.status === 'active' || contract.status === 'expired')
+                && contract.termination?.response !== 'accepted' && perms.agreements;
+              return (
+                <>
+                  {canRenew && (
+                    <Link href={`${opsBase}?action=renew`} className="btn btn-jade btn-sm">
+                      <RotateCcw size={14} /> Propose renewal
+                    </Link>
+                  )}
+                  {canTerminate && (
+                    <Link href={`${opsBase}?action=terminate`} className="btn btn-ghost btn-sm" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}>
+                      <X size={14} /> Terminate
+                    </Link>
+                  )}
+                </>
+              );
+            })()}
             {/* Always-available renewal entry — surfaces the existing renewal
                 feature on any live lease (incl. active renewal children, for
                 chained renewals) without hunting inside the Active step. Hidden
@@ -4561,7 +4566,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         {/* Record view: boarding-pass contract summary (Unit + parties + term +
             rent). Payment + document detail render below. The full/pipeline view
             keeps the compact info row instead. */}
-        {view === 'record' && <ContractPass contract={contract} />}
+        {view === 'record' && <ContractPass contract={contract} payments={contract.payments ?? []} />}
 
         {/* Customer + rental period — ONE info row under the header (replaces
             the old Parties and Rental period sections). */}

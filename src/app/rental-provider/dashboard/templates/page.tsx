@@ -15,9 +15,9 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
-import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2 } from 'lucide-react';
+import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock } from 'lucide-react';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
-import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { unitTypesForCategory, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
 import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
@@ -39,6 +39,9 @@ interface AddendumTemplate {
   spaceCategory: string | null;
   /** Sub-category (unit type) the default applies to; null = category-wide default. */
   unitType: string | null;
+  /** True when this template is already attached to a contract — editing it then
+   *  creates a new version rather than mutating the in-use one. */
+  inUse?: boolean;
   createdAt: string;
 }
 
@@ -55,6 +58,7 @@ export default function AddendumTemplatesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<AddendumTemplate | null>(null);
+  const [editTpl, setEditTpl] = useState<AddendumTemplate | null>(null);
 
   async function fetchAll() {
     setLoading(true); setErr(null);
@@ -159,10 +163,22 @@ export default function AddendumTemplatesPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
+                      {t.inUse && (
+                        <span title="Used on a contract — editing creates a new version"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#eef2ff] text-[#4f46e5] text-[10px] font-medium">
+                          <Lock size={10} /> In use
+                        </span>
+                      )}
                       {t.terms && (
                         <button onClick={() => setPreviewTpl(t)}
                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
                           <ExternalLink size={12} /> Preview
+                        </button>
+                      )}
+                      {t.terms && (
+                        <button onClick={() => setEditTpl(t)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#1a1916] hover:bg-[#f4f3ef]">
+                          <Pencil size={12} /> Edit
                         </button>
                       )}
                       {t.fileUrl && (
@@ -193,6 +209,18 @@ export default function AddendumTemplatesPage() {
 
       {previewTpl?.terms && (
         <AddendumPreviewModal terms={previewTpl.terms} title={previewTpl.name} onClose={() => setPreviewTpl(null)} />
+      )}
+
+      {editTpl && (
+        <EditTemplateModal
+          template={editTpl}
+          onClose={() => setEditTpl(null)}
+          onSaved={(versioned) => {
+            setEditTpl(null);
+            if (versioned) alert('Saved as a new version. Contracts already using the previous version keep it unchanged.');
+            void fetchAll();
+          }}
+        />
       )}
     </DashboardPage>
   );
@@ -283,6 +311,104 @@ function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreat
       subtitle="Write the terms; set the name and (optional) category. The layout previews on the right."
       options={options}
       primaryLabel="Save template"
+      onPrimary={submit}
+      primaryDisabled={!name.trim() || !hasAddendumTerms(terms)}
+      busy={busy}
+    />
+  );
+}
+
+/* ─── Edit template modal ────────────────────────────────────────────
+ * Editable in place — UNLESS the template is already attached to a contract
+ * (`inUse`), in which case saving creates a NEW version and leaves the in-use
+ * one untouched on its contracts. */
+
+function EditTemplateModal({ template, onClose, onSaved }: {
+  template: AddendumTemplate;
+  onClose: () => void;
+  onSaved: (versioned: boolean) => void;
+}) {
+  const [name, setName] = useState(template.name);
+  const [description, setDescription] = useState(template.description ?? '');
+  const [terms, setTerms] = useState<AddendumTerms>(template.terms ?? emptyAddendumTerms());
+  const [spaceCategory, setSpaceCategory] = useState(template.spaceCategory ?? '');
+  const [unitType, setUnitType] = useState(template.unitType ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const inUse = !!template.inUse;
+  const subTypes = spaceCategory ? unitTypesForCategory(spaceCategory) : [];
+
+  async function submit() {
+    if (!name.trim()) { setErr('Template name is required'); return; }
+    if (!hasAddendumTerms(terms)) { setErr('Write at least one addendum term'); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await apiPatch<{ versioned?: boolean }>(`/addendum-templates/${template.id}`, {
+        name: name.trim(),
+        description: description.trim() || null,
+        terms,
+        spaceCategory: spaceCategory || null,
+        unitType: spaceCategory && unitType ? unitType : null,
+      });
+      onSaved(!!res?.versioned);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save template');
+      setBusy(false);
+    }
+  }
+
+  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]';
+  const LBL = 'text-[10px] font-semibold text-[#6b6860] block mb-1 uppercase tracking-wide';
+
+  const options = (
+    <div className="space-y-2">
+      {inUse && (
+        <p className="text-[11px] text-[#4f46e5] bg-[#eef2ff] border border-[#e0e7ff] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+          <Lock size={12} className="shrink-0" />
+          This template is already on a contract. Saving creates a <b>new version</b> — contracts using the current one keep it unchanged.
+        </p>
+      )}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className={LBL}>Template name</label>
+          <input value={name} onChange={e => setName(e.target.value)} className={SELECT} />
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className={LBL}>Description (optional)</label>
+          <input value={description} onChange={e => setDescription(e.target.value)} placeholder="For your team's reference" className={SELECT} />
+        </div>
+        <div className="w-44">
+          <label className={LBL}>Default for category</label>
+          <select value={spaceCategory} onChange={e => { setSpaceCategory(e.target.value); setUnitType(''); }} className={SELECT}>
+            <option value="">No default (library only)</option>
+            {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="w-44">
+          <label className={LBL}>Sub-category</label>
+          <select value={unitType} onChange={e => setUnitType(e.target.value)} disabled={!spaceCategory} className={`${SELECT} disabled:opacity-50 disabled:bg-[#faf7ef]`}>
+            <option value="">All of this category</option>
+            {subTypes.map(u => <option key={u} value={u}>{UNIT_TYPE_LABELS[u] ?? u}</option>)}
+          </select>
+        </div>
+      </div>
+      {spaceCategory && (
+        <p className="text-[10px] text-[#a16207]">Sets the default addendum for {defaultLabel(spaceCategory, unitType || null)} — replaces any current one.</p>
+      )}
+      {err && <p className="text-[11px] text-red-600 flex items-center gap-1"><AlertCircle size={12} /> {err}</p>}
+    </div>
+  );
+
+  return (
+    <AddendumEditorModal
+      value={terms}
+      onChange={setTerms}
+      onClose={onClose}
+      title={`Edit — ${template.name}`}
+      subtitle="Update the terms; the layout previews on the right."
+      options={options}
+      primaryLabel={inUse ? 'Save as new version' : 'Save changes'}
       onPrimary={submit}
       primaryDisabled={!name.trim() || !hasAddendumTerms(terms)}
       busy={busy}

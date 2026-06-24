@@ -26,10 +26,11 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Search, X, Check, FileText, Coins, ClipboardList,
-  CheckCircle2, PenLine, RefreshCw, ArrowRight, Calendar,
+  CheckCircle2, PenLine, RefreshCw, ArrowRight, Calendar, LogOut,
 } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 interface ChecklistItem { key: string; label: string; done: boolean; action: string | null }
 export interface OpsContract {
@@ -40,6 +41,9 @@ export interface OpsContract {
   endDate: string;
   annualRent: number;
   status: string;
+  /** Active lease whose termination was accepted — back on Operations for
+   *  move-out + settlement (NOT a setup card; no "Mark active"). */
+  windDown?: boolean;
   lockedAt: string | null;
   contractSent: boolean;
   createdAt: string;
@@ -144,16 +148,16 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
   const filtered = useMemo(() => {
     const list = yearScoped.filter(c => {
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
-      // Stage: draft = pending, issued, live = active.
+      // Stage: draft = pending, issued, live = active, winddown = terminating.
       if (filterStage !== 'all') {
-        const stage = c.status === 'active' ? 'live' : c.status === 'issued' ? 'issued' : 'draft';
+        const stage = c.windDown ? 'winddown' : c.status === 'active' ? 'live' : c.status === 'issued' ? 'issued' : 'draft';
         if (stage !== filterStage) return false;
       }
       // Missing-item slice: keep only contracts where that item is still undone.
       if (filterMissing !== 'all' && !c.checklist.some(i => i.key === filterMissing && !i.done)) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const hay = [c.ref, c.tenant.name, c.tenant.email, c.unit.number, c.property.buildingName]
+        const hay = [c.ref, c.tenant.name, c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]
           .filter((s): s is string => Boolean(s)).join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -173,7 +177,8 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
   // semantics as the Leases page, so the counts always match the year selected.
   const stats = useMemo(() => ({
     total: yearScoped.length,
-    live: yearScoped.filter(c => c.status === 'active').length,
+    live: yearScoped.filter(c => c.status === 'active' && !c.windDown).length,
+    winding: yearScoped.filter(c => c.windDown).length,
     ready: yearScoped.filter(c => c.status !== 'active' && c.doneCount >= c.totalCount).length,
     drafts: yearScoped.filter(c => c.status === 'pending' && !c.contractSent).length,
   }), [yearScoped]);
@@ -229,7 +234,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
           <div className="left">
             <div className="eyebrow"><ClipboardList size={12} /> Operations</div>
             <h1>Setup <span className="accent">worklist</span></h1>
-            <p>Contracts still being set up — fill the missing steps, then <b>Mark active</b> to lock the lease and move it to Leases.</p>
+            <p>Contracts still being set up — fill the missing steps, then <b>Mark active</b> to lock the lease and move it to Leases. Terminated leases come back here to finish <b>move-out &amp; settlement</b>.</p>
           </div>
           <div className="hero-actions">
             <div className="year-global" title="Scope the worklist by lease year">
@@ -248,6 +253,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
         <div className="kpis">
           <div className="kpi"><div className="lbl"><ClipboardList size={12} /> Needs setup</div><div className="val">{stats.total}</div></div>
           <div className="kpi"><div className="lbl"><PenLine size={12} /> Live · finishing</div><div className="val">{stats.live}</div></div>
+          <div className="kpi"><div className="lbl"><LogOut size={12} /> Winding down</div><div className="val">{stats.winding}</div></div>
           <div className="kpi"><div className="lbl"><CheckCircle2 size={12} /> Ready to activate</div><div className="val">{stats.ready}</div></div>
           <div className="kpi"><div className="lbl"><FileText size={12} /> Drafts (not sent)</div><div className="val">{stats.drafts}</div></div>
         </div>
@@ -270,6 +276,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
               <option value="draft">Drafts</option>
               <option value="issued">Issued</option>
               <option value="live">Live leases</option>
+            <option value="winddown">Winding down</option>
             </select>
           </div>
           <div className="sel-wrap">
@@ -300,23 +307,25 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
           <div className="list">
             {filtered.map(c => {
               const isRenewal = c.contractType === 'renewal';
-              const isLive = c.status === 'active';
-              const stageLabel = isLive ? 'Live' : c.status === 'issued' ? 'Issued' : 'Draft';
+              const isWindDown = !!c.windDown;
+              const isLive = c.status === 'active' && !isWindDown;
+              const stageLabel = isWindDown ? 'Winding down' : isLive ? 'Live' : c.status === 'issued' ? 'Issued' : 'Draft';
               const pct = Math.round((c.doneCount / c.totalCount) * 100);
               const ready = c.doneCount >= c.totalCount;
               const quickItems = c.checklist.filter(i => !i.done && i.action && QUICK[i.action]);
               const rowBusy = busy === c.id;
+              const tenantLabel = tenantDisplayName(c.tenant);
               return (
                 <div key={c.id} className={'opcard' + (rowBusy ? ' busy' : '')}>
                   <div className="top">
                     <div className="who">
-                      <div className="av">{initials(c.tenant.name)}</div>
+                      <div className="av">{initials(tenantLabel)}</div>
                       <div className="info">
                         <div className="ref">{c.ref}
                           <span className={'type-chip ' + (isRenewal ? 'renewal' : '')}>{isRenewal ? 'Renewal' : 'New'}</span>
-                          <span className={'stage-chip ' + c.status}>{stageLabel}</span>
+                          <span className={'stage-chip ' + (isWindDown ? 'winddown' : c.status)}>{stageLabel}</span>
                         </div>
-                        <div className="tenant">{c.tenant.name ?? '—'}</div>
+                        <div className="tenant">{tenantLabel ?? '—'}</div>
                       </div>
                     </div>
                     <div className="meta">
@@ -332,7 +341,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
                         <div className="ring" style={{ ['--pct' as string]: `${pct}` }}>
                           <span>{c.doneCount}/{c.totalCount}</span>
                         </div>
-                        <div className="plabel">{ready ? 'Ready' : 'In setup'}</div>
+                        <div className="plabel">{isWindDown ? 'Wind-down' : ready ? 'Ready' : 'In setup'}</div>
                       </div>
                     </div>
                   </div>
@@ -358,7 +367,11 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
                     </div>
                     <div className="right">
                       <Link href={contractHref(c.id)} className="open">Open contract <ArrowRight size={13} /></Link>
-                      {canAct && (isLive ? (
+                      {canAct && (isWindDown ? (
+                        <Link href={contractHref(c.id)} className="activate go" title="Finish the move-out inspection, signature and deposit settlement">
+                          <LogOut size={14} /> Complete move-out
+                        </Link>
+                      ) : isLive ? (
                         <span className="live-note" title="Already a live lease — fill the remaining items to clear it from the worklist">Live · finish setup</span>
                       ) : (
                         <button type="button" className={'activate' + (ready ? ' go' : '')} disabled={rowBusy} onClick={() => markActive(c)}>
@@ -453,6 +466,7 @@ function Style() {
       .ops-page .stage-chip.active{ background:var(--green-t); color:var(--green-d); }
       .ops-page .stage-chip.issued{ background:var(--sky-bg); color:var(--sky-fg); }
       .ops-page .stage-chip.pending{ background:var(--warn-bg); color:var(--warn-fg); }
+      .ops-page .stage-chip.winddown{ background:var(--danger-bg); color:var(--danger-fg); }
       .ops-page .live-note{ font-size:11.5px; font-weight:600; color:var(--green-d); background:var(--green-t2); border:1px solid #cfe7dc; padding:8px 12px; border-radius:9px; white-space:nowrap; }
 
       .ops-page .meta{ display:flex; align-items:center; gap:22px; flex-wrap:wrap; }

@@ -46,7 +46,8 @@ interface ContractPayment {
   description: string | null;
   paymentType: string | null;
   paymentMethod: string | null;
-  amount: number;
+  amount: number;          // GROSS (incl. VAT)
+  vatAmount: number;       // VAT portion already inside `amount`
   charges: number;
   chequeNumber: string | null;
   chequeStatus: string;
@@ -77,7 +78,8 @@ interface ContractDetail {
   startDate: string;
   endDate: string;
   durationYears: number | null;
-  annualRent: number;
+  annualRent: number;            // NET annual rent (VAT added on cheques)
+  rentVatRate?: number;          // % VAT on rent (0 = residential/exempt)
   contractValue: number | null;
   listedRent: number | null;
   discountType: 'percent' | 'fixed' | null;
@@ -569,6 +571,9 @@ export default function TenantContractDetailPage() {
             {(contract.discountAmount ?? 0) > 0 && (
               <p className="text-[9px] font-semibold mt-0.5" style={{ color: '#b91c1c' }}>− {fmtAed(contract.discountAmount!)} discount</p>
             )}
+            {(contract.rentVatRate ?? 0) > 0 && (
+              <p className="text-[9px] text-[#9b9890] mt-0.5">+ {fmtAed(contract.annualRent * (contract.rentVatRate ?? 0) / 100)} VAT ({contract.rentVatRate}%)</p>
+            )}
           </div>
           <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
           <div>
@@ -785,7 +790,12 @@ export default function TenantContractDetailPage() {
                                 <tr key={p.id} className={`border-b border-[#f4f3ef] last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}>
                                   <td className="px-2 py-2 text-[#9b9890]">{i + 1}</td>
                                   <td className="px-2 py-2 text-[#1a1916]">{p.description ?? `Instalment ${i + 1}`}</td>
-                                  <td className="px-2 py-2 font-semibold text-[#1a1916]">{fmtAed(p.amount)}</td>
+                                  <td className="px-2 py-2 font-semibold text-[#1a1916]">
+                                    {fmtAed(p.amount)}
+                                    {(p.vatAmount ?? 0) > 0 && (
+                                      <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(p.vatAmount)} VAT</span>
+                                    )}
+                                  </td>
                                   <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
                                   <td className="px-2 py-2">
                                     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
@@ -818,6 +828,9 @@ export default function TenantContractDetailPage() {
                                 <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#1a1916]">Total</td>
                                 <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
                                   {fmtAed(rentPayments.reduce((s, p) => s + p.amount, 0))}
+                                  {rentPayments.reduce((s, p) => s + (p.vatAmount ?? 0), 0) > 0 && (
+                                    <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(rentPayments.reduce((s, p) => s + (p.vatAmount ?? 0), 0))} VAT</span>
+                                  )}
                                 </td>
                                 <td colSpan={3} />
                               </tr>

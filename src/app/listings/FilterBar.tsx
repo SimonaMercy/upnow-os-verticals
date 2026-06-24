@@ -239,7 +239,7 @@ export function ListingsSearchBar({ defaultQ, country, emirate, emiratesList, lo
         </select>
         <span className="schev"><ChevronDown size={14} /></span>
       </div>
-      <button className="sgo" onClick={runSearch}>
+      <button className="sgo" onClick={() => runSearch()}>
         <Search size={14} />
         Search
       </button>
@@ -269,9 +269,13 @@ export function FilterSidebar(
 
   const subTypes   = SPACE_TYPES[category] ?? [];
   const amenPool   = AMENITIES[category] ?? null;
-  const showBeds   = !category || category === 'residential';
-  const showBaths  = !category || category === 'residential' || category === 'commercial';
-  const showFurn   = !category || category === 'residential';
+  // Beds / baths / furnishing are residential-only facets — they make no sense
+  // when browsing commercial / industrial / land (a shop has no bedrooms). They
+  // stay on for "All" and mixed-use (which contains residential units).
+  const residentialFacets = !category || category === 'residential' || category === 'mixed_use';
+  const showBeds   = residentialFacets;
+  const showBaths  = residentialFacets;
+  const showFurn   = residentialFacets;
 
   function handleCategory(val: string) {
     onNavigate({ category: val, spaceType: '', bedrooms: '', bathrooms: '', furnishing: '', amenities: '', minPrice: '', maxPrice: '' });

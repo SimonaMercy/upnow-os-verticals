@@ -13,12 +13,18 @@ import { type AddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 
 interface Tpl { id: number; name: string; terms: AddendumTerms | null }
 
-export default function AddendumTemplatePicker({ onPick, manager, rpQ }: {
+export default function AddendumTemplatePicker({ onPick, manager, rpQ, selectedName }: {
   onPick: (terms: AddendumTerms, name: string) => void;
   manager?: { rp: number };
   rpQ?: string;
+  /** When provided, the dropdown is CONTROLLED and shows this as the selected
+   *  template (matched by name, else listed as the current one) instead of
+   *  resetting to "Choose a template…". Omit it to keep the action behaviour. */
+  selectedName?: string;
 }) {
   const [tpls, setTpls] = useState<Tpl[] | null>(null);
+  const [val, setVal] = useState('');
+  const controlled = selectedName !== undefined;
   useEffect(() => {
     const url = manager ? `/manager/templates?${rpQ ?? ''}` : '/addendum-templates';
     apiGet<Tpl[]>(url)
@@ -27,20 +33,32 @@ export default function AddendumTemplatePicker({ onPick, manager, rpQ }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Preselect the matching template (by name) when a selectedName is supplied.
+  useEffect(() => {
+    if (!tpls || !controlled) return;
+    const m = tpls.find(t => t.name === selectedName);
+    setVal(m ? String(m.id) : ((selectedName ?? '').trim() ? '__current__' : ''));
+  }, [tpls, selectedName, controlled]);
+
   if (tpls === null) {
     return <span className="text-[11px] text-[#9b9890] inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Loading templates…</span>;
   }
   if (tpls.length === 0) return null;
 
+  const hasCurrent = controlled && (selectedName ?? '').trim() && !tpls.some(t => t.name === selectedName);
+
   return (
     <div className="relative inline-block">
-      <select defaultValue=""
+      <select
+        {...(controlled ? { value: val } : { defaultValue: '' })}
         onChange={e => {
-          const t = tpls.find(x => String(x.id) === e.target.value);
+          const v = e.target.value;
+          const t = tpls.find(x => String(x.id) === v);
           if (t?.terms) onPick({ ...t.terms }, t.name);
-          e.target.value = '';
+          if (controlled) setVal(v); else e.target.value = '';
         }}
-        className="appearance-none pl-3 pr-8 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-xs font-semibold text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+        className="appearance-none max-w-[14rem] pl-3 pr-8 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-xs font-semibold text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+        {hasCurrent && <option value="__current__">{selectedName}</option>}
         <option value="">Choose a template…</option>
         {tpls.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
       </select>

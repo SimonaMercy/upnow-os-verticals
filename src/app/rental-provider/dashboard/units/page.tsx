@@ -1049,6 +1049,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           propertyStandalone={false}
           propertyId={unitModal.plan.propertyId}
           editingUnitId={unitModal.editingUnit?.id}
+          planLabel={unitModal.plan.planLabel}
+          manager={manager}
+          rpQ={rpQ}
+          seedAddendumTerms={unitModal.plan.termsVersion?.addendumTerms ?? null}
+          hasAddendumFile={!!unitModal.plan.termsVersion?.addendumUrl}
+          onAddendumApplied={reload}
           onClose={() => setUnitModal(null)}
           onSave={(data, floorPlan, titleDeed, addendums) =>
             onSaveUnit(unitModal.plan, unitModal.editingUnit, data, floorPlan, titleDeed, addendums)}

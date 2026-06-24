@@ -21,9 +21,9 @@ import {
   UNIT_TIERS, RENTAL_TYPE_OPTIONS, sqftFromSqm, sqmFromSqft,
 } from '@/components/upnow/UnitFormModal';
 import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
-import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
 import AddendumTemplatePicker from '@/components/upnow/AddendumTemplatePicker';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
+import { openAddendumPdfInNewTab } from '@/lib/openAddendumPdf';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
 const INPUT  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
@@ -91,6 +91,7 @@ interface UnitRow {
   gracePeriodDays: string;
   latePaymentFee: string;
   specialConditions: string;
+  additionalPayments: Array<{ label: string; amount: string; vat: string }>;
   description: string;
   stagedPhotos: StagedPhoto[];
   stagedFloorPlan: File | null;
@@ -109,6 +110,7 @@ function emptyRow(expanded = true): UnitRow {
     rentEscalationPct: '',
     rentalType: 'yearly', numberOfPayments: '', advancePayment: '',
     gracePeriodDays: '', latePaymentFee: '', specialConditions: '',
+    additionalPayments: [],
     description: '', stagedPhotos: [], stagedFloorPlan: null, stagedAddendums: [],
   };
 }
@@ -257,7 +259,7 @@ export default function AddListingPage() {
   // layout(s) on save (replaces the old per-unit .docx upload).
   const [addendumTerms, setAddendumTerms] = useState<AddendumTerms>(emptyAddendumTerms());
   const [addendumEditorOpen, setAddendumEditorOpen] = useState(false);
-  const [addendumPreviewOpen, setAddendumPreviewOpen] = useState(false);
+  const [addendumPreviewBusy, setAddendumPreviewBusy] = useState(false);
   const [error, setError]   = useState<string | null>(null);
   const [done, setDone]     = useState(false);
   const [doneMsg, setDoneMsg] = useState('');
@@ -517,6 +519,9 @@ export default function AddListingPage() {
             gracePeriodDays:  r.gracePeriodDays  ? Number(r.gracePeriodDays)  : undefined,
             latePaymentFee:   r.latePaymentFee   ? Number(r.latePaymentFee)   : undefined,
             specialConditions: r.specialConditions || undefined,
+            additionalPayments: (r.additionalPayments ?? [])
+              .map(p => ({ label: p.label.trim(), amount: Number(p.amount) || 0, vat: p.vat ? Number(p.vat) : 0 }))
+              .filter(p => p.label !== '' && p.amount > 0),
             view:             r.view            || undefined,
             furnishing:       r.furnishing      || undefined,
             amenities:        r.amenities.length ? r.amenities : undefined,
@@ -1144,9 +1149,15 @@ export default function AddListingPage() {
                 {/* Choose from a saved template… */}
                 <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} />
                 {hasAddendumTerms(addendumTerms) && (
-                  <button type="button" onClick={() => setAddendumPreviewOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
-                    <Eye size={13} /> Preview
+                  <button type="button" disabled={addendumPreviewBusy}
+                    onClick={async () => {
+                      if (addendumPreviewBusy) return;
+                      setAddendumPreviewBusy(true);
+                      try { await openAddendumPdfInNewTab(addendumTerms, addendumTerms.name?.trim() || 'Agreement Addendum'); }
+                      finally { setAddendumPreviewBusy(false); }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer disabled:opacity-50">
+                    {addendumPreviewBusy ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />} Preview
                   </button>
                 )}
                 {/* …or add new / edit */}
@@ -1213,9 +1224,6 @@ export default function AddListingPage() {
         {addendumEditorOpen && (
           <AddendumEditorModal value={addendumTerms} onChange={setAddendumTerms} onClose={() => setAddendumEditorOpen(false)}
             title="Agreement Addendum" subtitle="Write the terms; they're applied to the layout(s) you create. Preview on the right." />
-        )}
-        {addendumPreviewOpen && hasAddendumTerms(addendumTerms) && (
-          <AddendumPreviewModal terms={addendumTerms} title={addendumTerms.name?.trim() || 'Agreement Addendum'} onClose={() => setAddendumPreviewOpen(false)} />
         )}
       </div>
     </div>
@@ -1532,6 +1540,45 @@ function UnitCard({
                   value={row.serviceCharges}
                   onChange={e => onUpdate({ serviceCharges: e.target.value })} />
               </div>
+            </div>
+
+            {/* Additional Payments — extra one-off charges shown to the customer
+                on booking + added to the contract as "Others" rows. */}
+            <div className="border-t border-[#a7f3d0] pt-3">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-[#3d3b35]">Additional Payments</label>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-[#1a7a5a] hover:underline"
+                  onClick={() => onUpdate({ additionalPayments: [...(row.additionalPayments ?? []), { label: '', amount: '', vat: '' }] })}
+                >+ Add payment</button>
+              </div>
+              {(row.additionalPayments ?? []).length === 0 ? (
+                <p className="text-[11px] text-[#9b9890] italic">None — only rent, deposit and the fees above apply.</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[1fr_72px_72px_24px] gap-2 text-[10px] font-medium uppercase tracking-wider text-[#6b6860]">
+                    <span>Label</span><span>Net AED</span><span>VAT AED</span><span />
+                  </div>
+                  {(row.additionalPayments ?? []).map((p, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_72px_72px_24px] gap-2 items-center">
+                      <input type="text" className={INPUT_C} placeholder="e.g. Chiller deposit"
+                        value={p.label}
+                        onChange={e => onUpdate({ additionalPayments: (row.additionalPayments ?? []).map((r, j) => j === i ? { ...r, label: e.target.value } : r) })} />
+                      <input type="number" min="0" step="any" className={INPUT_C} placeholder="0"
+                        value={p.amount}
+                        onChange={e => onUpdate({ additionalPayments: (row.additionalPayments ?? []).map((r, j) => j === i ? { ...r, amount: e.target.value } : r) })} />
+                      <input type="number" min="0" step="any" className={INPUT_C} placeholder="0"
+                        value={p.vat}
+                        onChange={e => onUpdate({ additionalPayments: (row.additionalPayments ?? []).map((r, j) => j === i ? { ...r, vat: e.target.value } : r) })} />
+                      <button type="button" title="Remove"
+                        className="text-[#b91c1c] hover:bg-[#fee2e2] rounded-md w-6 h-6 flex items-center justify-center text-base leading-none"
+                        onClick={() => onUpdate({ additionalPayments: (row.additionalPayments ?? []).filter((_, j) => j !== i) })}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

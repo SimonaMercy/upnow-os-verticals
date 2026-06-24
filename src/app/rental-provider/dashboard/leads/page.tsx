@@ -157,6 +157,9 @@ interface PaymentPlan {
   ejariFils: number;
   commissionFils: number;
   securityDepositFils: number;
+  /** RP-defined extra unit charges (net + VAT, fils); gross = net + vat. */
+  customFees?: Array<{ label: string; netFils: number; vatFils: number }>;
+  customFeesFils?: number;
   items: PaymentPlanItem[];
   notes?: string;
   rentalIndexReportUrl?: string;
@@ -214,6 +217,19 @@ interface ApiLead {
   } | null;
   docStats: { total: number; pending: number } | null;
   paymentPlan?: PaymentPlan | null;
+  /** Live GROSS cost summary (VAT-inclusive) computed by the backend the same way
+   *  the customer's "I'm Interested" screen is — present only while no firm plan
+   *  exists, so the lead Details matches what the customer is shown. */
+  costPreview?: {
+    rentFils: number; rentVatFils: number; rentVatRate: number;
+    securityDepositFils: number;
+    adminFeeFils: number; adminFeeVatFils: number;
+    ejariFils: number; ejariVatFils: number;
+    commissionFils: number; commissionVatFils: number;
+    customFees?: Array<{ label: string; netFils: number; vatFils: number }>;
+    customFeesFils?: number;
+    totalFils: number;
+  } | null;
 }
 
 type TenantDoc = {
@@ -698,7 +714,7 @@ function LeadRow({
     if (!plan) return;
     const sorted = plan.items.slice().sort((a, b) => {
       if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-      const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
+      const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
       return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
     });
     const firstDate = sorted[0]?.dueDate ?? null;
@@ -1740,6 +1756,66 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               </div>
             )}
 
+            {/* What the customer is shown: the firm payment plan once one exists,
+                otherwise the LIVE cost summary derived from the unit's pricing —
+                the same figures on the customer's "I'm Interested" screen. */}
+            {lead.paymentPlan ? (() => {
+              const plan = lead.paymentPlan;
+              return (
+                <div className="flex items-start gap-2 bg-[#f0f9ff] border border-[#bae6fd] rounded-lg px-3 py-2.5">
+                  <ClipboardList size={12} className="text-[#0369a1] shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-[#0369a1] uppercase font-semibold tracking-wide mb-1">
+                      {lead.stage === 'payment_plan_shared' ? 'Proposed to Customer — awaiting response' : 'Proposed to Customer'}
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#6b6860]">
+                      <span>Annual Rent: <b className="text-[#1a1916]">AED {(plan.rentFils / 100).toLocaleString('en-AE')}</b></span>
+                      <span>Security Deposit: <b className="text-[#1a1916]">AED {(plan.securityDepositFils / 100).toLocaleString('en-AE')}</b></span>
+                      {plan.adminFeeFils > 0 && <span>Admin Fee: <b className="text-[#1a1916]">AED {(plan.adminFeeFils / 100).toLocaleString('en-AE')}</b></span>}
+                      {plan.ejariFils > 0 && <span>Ejari Fee: <b className="text-[#1a1916]">AED {(plan.ejariFils / 100).toLocaleString('en-AE')}</b></span>}
+                      {plan.commissionFils > 0 && <span>Commission: <b className="text-[#1a1916]">AED {(plan.commissionFils / 100).toLocaleString('en-AE')}</b></span>}
+                      {(plan.customFees ?? []).map((f, i) => (
+                        <span key={i}>{f.label}{f.vatFils > 0 ? ' (incl. VAT)' : ''}: <b className="text-[#1a1916]">AED {((f.netFils + f.vatFils) / 100).toLocaleString('en-AE')}</b></span>
+                      ))}
+                    </div>
+                    <p className="text-[10px] font-semibold text-[#0369a1] mt-1">
+                      Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}
+                    </p>
+                    <button
+                      onClick={() => openPanel('plan_summary')}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#0369a1] hover:text-[#0284c7] cursor-pointer"
+                    >
+                      <Eye size={10} /> View full plan &amp; schedule
+                    </button>
+                  </div>
+                </div>
+              );
+            })() : lead.costPreview ? (() => {
+              const c = lead.costPreview;
+              const aed = (fils: number) => (fils / 100).toLocaleString('en-AE');
+              const vlbl = (vat: number) => (vat > 0 ? ' (incl. VAT)' : '');
+              return (
+                <div className="flex items-start gap-2 bg-[#f0f9ff] border border-[#bae6fd] rounded-lg px-3 py-2.5">
+                  <ClipboardList size={12} className="text-[#0369a1] shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-[#0369a1] uppercase font-semibold tracking-wide mb-1">Cost Summary — what the customer sees</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#6b6860]">
+                      <span>Annual Rent{vlbl(c.rentVatFils)}: <b className="text-[#1a1916]">AED {aed(c.rentFils + c.rentVatFils)}</b></span>
+                      <span>Security Deposit: <b className="text-[#1a1916]">AED {aed(c.securityDepositFils)}</b></span>
+                      {c.adminFeeFils > 0 && <span>Admin Fee{vlbl(c.adminFeeVatFils)}: <b className="text-[#1a1916]">AED {aed(c.adminFeeFils + c.adminFeeVatFils)}</b></span>}
+                      {c.ejariFils > 0 && <span>Ejari Fee{vlbl(c.ejariVatFils)}: <b className="text-[#1a1916]">AED {aed(c.ejariFils + c.ejariVatFils)}</b></span>}
+                      {c.commissionFils > 0 && <span>Commission{vlbl(c.commissionVatFils)}: <b className="text-[#1a1916]">AED {aed(c.commissionFils + c.commissionVatFils)}</b></span>}
+                      {(c.customFees ?? []).map((f, i) => (
+                        <span key={i}>{f.label}{vlbl(f.vatFils)}: <b className="text-[#1a1916]">AED {aed(f.netFils + f.vatFils)}</b></span>
+                      ))}
+                    </div>
+                    <p className="text-[10px] font-semibold text-[#0369a1] mt-1">Total payable: AED {aed(c.totalFils)}</p>
+                    <p className="text-[9px] text-[#9b9890] mt-0.5 italic">Live estimate from the unit&rsquo;s pricing — a firm plan is created once the customer taps &ldquo;I&rsquo;m Interested&rdquo;.</p>
+                  </div>
+                </div>
+              );
+            })() : null}
+
             {/* Customer declined the viewing — surface the reason prominently */}
             {anyViewing.status === 'cancelled' && anyViewing.outcome === 'not_interested' && (
               <div className="flex items-start gap-2">
@@ -2232,7 +2308,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const plan = lead.paymentPlan;
         const sorted = plan.items.slice().sort((a, b) => {
           if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-          const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
+          const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
           return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
         });
         return (
@@ -2304,7 +2380,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         const sortedItems = plan
           ? plan.items.slice().sort((a, b) => {
               if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-              const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: 4 };
+              const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
               return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
             })
           : [];
@@ -2936,7 +3012,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [error, setError]           = useState<string | null>(null);
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
-  const [view, setView]             = useState<'row' | 'grid' | 'calendar'>('grid');
+  const [view, setView]             = useState<'row' | 'grid' | 'calendar'>('row');
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [movingLead, setMovingLead] = useState<number | null>(null);
   const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);

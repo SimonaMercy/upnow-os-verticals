@@ -9,6 +9,7 @@ import {
   MousePointerClick, FileText, ExternalLink,
 } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { BackLink } from '@/components/dashboard/DashboardWidgets';
 import { openDocViewer } from '@/lib/docViewer';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
@@ -461,8 +462,8 @@ function UnitDetailPanel({ row, acting, onApprove, onReject }: {
                 <Field label="Floor" value={detail.floor} />
                 <Field label="Available" value={detail.availability?.replace(/_/g, ' ')} />
                 <Field label="Tier" value={detail.unitTier?.replace(/_/g, ' ')} />
-                <Field label="Beds" value={detail.bedrooms != null ? String(detail.bedrooms) : null} />
-                <Field label="Baths" value={detail.bathrooms != null ? String(detail.bathrooms) : null} />
+                <Field label="Beds" value={isResidentialUnitType(detail.unitType) && detail.bedrooms != null ? String(detail.bedrooms) : null} />
+                <Field label="Baths" value={isResidentialUnitType(detail.unitType) && detail.bathrooms != null ? String(detail.bathrooms) : null} />
                 <Field label="sqft" value={detail.unitSizeSqft ? Number(detail.unitSizeSqft).toLocaleString() : null} />
                 <Field label="sqm" value={detail.unitSizeSqm ? Number(detail.unitSizeSqm).toLocaleString() : null} />
               </div>
