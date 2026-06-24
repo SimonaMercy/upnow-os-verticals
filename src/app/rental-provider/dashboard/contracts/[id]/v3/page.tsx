@@ -31,15 +31,19 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import {
   ArrowLeft, MapPin, ShieldCheck, CreditCard, Settings, FileText,
-  Eye, Download, RotateCcw, XCircle, Pencil, Trash2, ChevronDown, X, UploadCloud,
+  Eye, Download, RotateCcw, XCircle, Pencil, Trash2, ChevronDown, X, UploadCloud, Plus,
 } from 'lucide-react';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { openDocViewer } from '@/lib/docViewer';
+import { openDocsTogether } from '@/lib/openDocsTogether';
+import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { tenantDisplayName } from '@/lib/tenantName';
 import {
   KYC_DOCS, CONTRACT_DOCS, getRentalSectionDocs, isDocKeySatisfied,
   COMMERCIAL_TYPES, INDUSTRIAL_TYPES, type DocReq,
 } from '@/lib/docRequirements';
+import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'] });
@@ -65,6 +69,10 @@ interface ContractDetail {
   startDate: string; endDate: string; durationYears: number | null;
   annualRent: number; rentVatRate?: number;
   numberOfInstallments: number | null; modeOfPayment: string | null;
+  /** Installment plans the owning RP offers (empty = all) + their cheque days —
+   *  let the renewal modal show the same filtered picker + snap due dates the way
+   *  the backend stamps them (works for managers too). */
+  allowedInstallments?: number[]; preferredChequeDays?: number[];
   adminFeeFils: number; ejariFeeFils: number;
   securityDepositAmount: number | null; securityDepositHeld?: number | null;
   securityDeposit?: {
@@ -118,6 +126,50 @@ const STATUS_STYLE: Record<string, { color: string; bg: string }> = {
 };
 const FEE_LABEL: Record<string, string> = {
   admin_fee: 'Admin fee', ejari_fee: 'Ejari fee', commission: 'Commission',
+};
+const feeLabel = (t: string | null | undefined) => FEE_LABEL[t ?? ''] ?? 'Fee';
+
+// Shared option sets — mirror v2 exactly so both pages offer identical choices.
+const PAYMENT_METHODS = [
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'card', label: 'Card' },
+  { value: 'online', label: 'Online' },
+];
+const PAYMENT_TYPES = [
+  { value: 'rental_income', label: 'Rental income' },
+  { value: 'security_deposit', label: 'Security deposit' },
+  { value: 'admin_fee', label: 'Admin fee' },
+  { value: 'ejari_fee', label: 'Ejari fee' },
+  { value: 'commission', label: 'Commission' },
+  { value: 'maintenance_fee', label: 'Maintenance fee' },
+  { value: 'service_charge', label: 'Service charge' },
+  { value: 'other', label: 'Other' },
+];
+const FEE_TYPE_OPTIONS = [
+  { value: 'admin_fee', label: 'Admin fee' },
+  { value: 'ejari_fee', label: 'Ejari fee' },
+  { value: 'commission', label: 'Commission' },
+];
+
+/** RP fee rule (GET /api/fee-rules → { [category]: FeeRuleDto[] }) — the same
+ *  shape the leads payment-plan editor uses to compute fees from the rent. */
+interface FeeRuleDto { feeType: string; valueType: 'fixed_aed' | 'percentage'; value: number; vatApplicable: boolean; vatRate: number; isActive?: boolean; }
+/** Net (excl. VAT) fee for a rule applied to an annual rent — mirrors feeRulesService.computeFees. */
+const ruleFeeNet = (rule: FeeRuleDto | undefined, annualRent: number): string | null => {
+  if (!rule || rule.isActive === false) return null;
+  return rule.valueType === 'percentage' ? String(Math.round(annualRent * rule.value / 100)) : String(rule.value);
+};
+const spaceCategoryOf = (unitType: string | null | undefined): string =>
+  COMMERCIAL_TYPES.includes(unitType ?? '') ? 'commercial'
+    : INDUSTRIAL_TYPES.includes(unitType ?? '') ? 'industrial' : 'residential';
+/** Net annual rent = listed − discount (the figure fees + cheque split key off). */
+const renewalNetRent = (listedRent: string, discountType: string, discountValue: string): number => {
+  const listed = parseFloat(listedRent) || 0;
+  const dv = parseFloat(discountValue) || 0;
+  const da = discountType === 'percent' ? Math.round(listed * dv) / 100 : discountType === 'fixed' ? dv : 0;
+  return Math.max(0, listed - Math.min(da, listed));
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -219,51 +271,50 @@ function RecordPaymentModal({ onClose, onSubmit }: {
   return (
     <Modal title="Record payment" onClose={onClose}
       footer={<><button style={ghostBtn} onClick={onClose}>Cancel</button><button style={jadeBtn} disabled={busy} onClick={submit}>Record payment</button></>}>
-      <Field label="Description"><input style={inputCss} value={f.description} placeholder="e.g. Rental Instalment 2 of 4" onChange={e => set('description', e.target.value)} /></Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Field label="Amount (AED)"><input style={inputCss} type="number" value={f.amount} onChange={e => set('amount', e.target.value)} /></Field>
         <Field label="Type">
           <select style={inputCss} value={f.paymentType} onChange={e => set('paymentType', e.target.value)}>
-            <option value="rental_income">Rent</option>
-            <option value="other">Other charge</option>
-            <option value="security_deposit">Security deposit</option>
+            {PAYMENT_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </Field>
         <Field label="Method">
           <select style={inputCss} value={f.paymentMethod} onChange={e => set('paymentMethod', e.target.value)}>
-            <option value="cheque">Cheque</option>
-            <option value="bank_transfer">Bank transfer</option>
-            <option value="cash">Cash</option>
-            <option value="card">Card</option>
+            {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </Field>
-        <Field label="Cheque / ref no."><input style={inputCss} value={f.chequeNumber} onChange={e => set('chequeNumber', e.target.value)} /></Field>
       </div>
-      <Field label="Due / transaction date"><input style={inputCss} type="date" value={f.transactionDate} onChange={e => set('transactionDate', e.target.value)} /></Field>
+      <Field label="Description"><input style={inputCss} value={f.description} placeholder="e.g. Rental Instalment 2 of 4" onChange={e => set('description', e.target.value)} /></Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Amount (AED)"><input style={inputCss} type="number" value={f.amount} onChange={e => set('amount', e.target.value)} /></Field>
+        <Field label="Cheque / reference no."><input style={inputCss} value={f.chequeNumber} placeholder="Cheque #, transfer ID…" onChange={e => set('chequeNumber', e.target.value)} /></Field>
+      </div>
+      <Field label="Date"><input style={inputCss} type="date" value={f.transactionDate} onChange={e => set('transactionDate', e.target.value)} /></Field>
       {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '4px 0 0' }}>{err}</p>}
     </Modal>
   );
 }
 
-function EditPaymentModal({ payment, onClose, onSubmit }: {
-  payment: ContractPayment; onClose: () => void;
-  onSubmit: (patch: { amount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null }) => Promise<void>;
+function EditPaymentModal({ payment, vatRate, onClose, onSubmit }: {
+  payment: ContractPayment; vatRate?: number; onClose: () => void;
+  onSubmit: (patch: { amount?: number; chequeNumber?: string | null; description?: string | null; paymentMethod?: string; transactionDate?: string | null }) => Promise<void>;
 }) {
   const [f, setF] = useState({
-    description: payment.description ?? '', amount: String(payment.amount ?? ''),
-    chequeNumber: payment.chequeNumber ?? '', transactionDate: payment.transactionDate ? payment.transactionDate.slice(0, 10) : '',
+    description: payment.description ?? '', amount: payment.amount != null ? String(payment.amount) : '',
+    chequeNumber: payment.chequeNumber ?? '', paymentMethod: payment.paymentMethod ?? 'cheque',
+    transactionDate: payment.transactionDate ? payment.transactionDate.slice(0, 10) : '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
   const submit = async () => {
     const amt = Number(f.amount);
-    if (!amt || amt <= 0) { setErr('Enter a valid amount'); return; }
+    if (f.amount.trim() === '' || !Number.isFinite(amt) || amt < 0) { setErr('Enter a valid amount'); return; }
     setBusy(true); setErr(null);
     try {
       await onSubmit({
         amount: amt, description: f.description.trim() || null,
-        chequeNumber: f.chequeNumber.trim() || null, transactionDate: f.transactionDate || null,
+        chequeNumber: f.chequeNumber.trim() || null, paymentMethod: f.paymentMethod,
+        transactionDate: f.transactionDate || null,
       });
       onClose();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save'); }
@@ -272,31 +323,48 @@ function EditPaymentModal({ payment, onClose, onSubmit }: {
   return (
     <Modal title="Edit payment" onClose={onClose}
       footer={<><button style={ghostBtn} onClick={onClose}>Cancel</button><button style={jadeBtn} disabled={busy} onClick={submit}>Save changes</button></>}>
-      <Field label="Description"><input style={inputCss} value={f.description} onChange={e => set('description', e.target.value)} /></Field>
+      <Field label="Description"><input style={inputCss} value={f.description} placeholder="e.g. Rental Instalment 1 of 4" onChange={e => set('description', e.target.value)} /></Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Amount (AED)"><input style={inputCss} type="number" value={f.amount} onChange={e => set('amount', e.target.value)} /></Field>
-        <Field label="Cheque / ref no."><input style={inputCss} value={f.chequeNumber} onChange={e => set('chequeNumber', e.target.value)} /></Field>
+        <Field label="Due date"><input style={inputCss} type="date" value={f.transactionDate} onChange={e => set('transactionDate', e.target.value)} /></Field>
       </div>
-      <Field label="Due / transaction date"><input style={inputCss} type="date" value={f.transactionDate} onChange={e => set('transactionDate', e.target.value)} /></Field>
-      {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '4px 0 0' }}>{err}</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Payment method">
+          <select style={inputCss} value={f.paymentMethod} onChange={e => set('paymentMethod', e.target.value)}>
+            {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Cheque / reference no."><input style={inputCss} value={f.chequeNumber} placeholder="Cheque #, transfer ID…" onChange={e => set('chequeNumber', e.target.value)} /></Field>
+      </div>
+      {!!vatRate && vatRate > 0 && <p style={{ fontSize: 12, color: '#8a938c', margin: 0 }}>VAT ({vatRate}%) is recalculated from the corrected amount automatically.</p>}
+      {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '6px 0 0' }}>{err}</p>}
     </Modal>
   );
 }
 
+/** Add fee — net entered + optional VAT; backend stores GROSS (net + VAT). */
 function AddFeeModal({ onClose, onSubmit }: {
   onClose: () => void;
-  onSubmit: (b: { description?: string; amount: number; paymentType?: string; paymentMethod?: string; transactionDate?: string }) => Promise<void>;
+  onSubmit: (b: { description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string; transactionDate?: string; chequeStatus?: string }) => Promise<void>;
 }) {
-  const [f, setF] = useState({ paymentType: 'commission', amount: '', transactionDate: '' });
+  const [f, setF] = useState({ paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
+  const net = Number(f.amount); const vat = Number(f.vatAmount || 0);
   const submit = async () => {
-    const amt = Number(f.amount);
-    if (!amt || amt <= 0) { setErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(net) || net <= 0) { setErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(vat) || vat < 0) { setErr('Enter a valid VAT amount'); return; }
     setBusy(true); setErr(null);
     try {
-      await onSubmit({ description: FEE_LABEL[f.paymentType], amount: amt, paymentType: f.paymentType, paymentMethod: 'cheque', transactionDate: f.transactionDate || undefined });
+      await onSubmit({
+        paymentType: f.paymentType,
+        amount: Math.round((net + vat) * 100) / 100,   // GROSS
+        vatAmount: vat,
+        description: f.description.trim() || feeLabel(f.paymentType),
+        transactionDate: f.transactionDate || undefined,
+        paymentMethod: 'cheque', chequeStatus: 'pending',
+      });
       onClose();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to add fee'); }
     finally { setBusy(false); }
@@ -304,18 +372,60 @@ function AddFeeModal({ onClose, onSubmit }: {
   return (
     <Modal title="Add fee" onClose={onClose}
       footer={<><button style={ghostBtn} onClick={onClose}>Cancel</button><button style={jadeBtn} disabled={busy} onClick={submit}>Add fee</button></>}>
-      <Field label="Fee">
-        <select style={inputCss} value={f.paymentType} onChange={e => set('paymentType', e.target.value)}>
-          <option value="commission">Commission</option>
-          <option value="admin_fee">Admin fee</option>
-          <option value="ejari_fee">Ejari fee</option>
-        </select>
-      </Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Field label="Amount (AED)"><input style={inputCss} type="number" value={f.amount} onChange={e => set('amount', e.target.value)} /></Field>
+        <Field label="Fee type">
+          <select style={inputCss} value={f.paymentType} onChange={e => set('paymentType', e.target.value)}>
+            {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Amount (excl. VAT, AED)"><input style={inputCss} type="number" value={f.amount} placeholder="e.g. 750" onChange={e => set('amount', e.target.value)} /></Field>
+        <Field label="VAT (AED, optional)"><input style={inputCss} type="number" value={f.vatAmount} placeholder="0.00" onChange={e => set('vatAmount', e.target.value)} /></Field>
         <Field label="Due date"><input style={inputCss} type="date" value={f.transactionDate} onChange={e => set('transactionDate', e.target.value)} /></Field>
       </div>
-      {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '4px 0 0' }}>{err}</p>}
+      <Field label="Description (optional)"><input style={inputCss} value={f.description} placeholder={feeLabel(f.paymentType)} onChange={e => set('description', e.target.value)} /></Field>
+      <p style={{ fontSize: 12, color: '#6b756f', margin: 0 }}>Total charged: <strong style={{ color: '#1d2823' }}>{fmtAed((Number(f.amount) || 0) + (Number(f.vatAmount) || 0))}</strong></p>
+      {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '6px 0 0' }}>{err}</p>}
+    </Modal>
+  );
+}
+
+/** Edit fee — same net + VAT model as Add fee; submits the recomputed gross. */
+function FeeEditModal({ fee, onClose, onSubmit }: {
+  fee: ContractPayment; onClose: () => void;
+  onSubmit: (patch: { amount?: number; vatAmount?: number; description?: string | null; transactionDate?: string | null }) => Promise<void>;
+}) {
+  const vat0 = fee.vatAmount ?? 0;
+  const [f, setF] = useState({
+    amount: String(Math.max(Math.round(((fee.amount ?? 0) - vat0) * 100) / 100, 0)), // NET
+    vatAmount: vat0 ? String(vat0) : '',
+    transactionDate: fee.transactionDate ? fee.transactionDate.slice(0, 10) : '',
+    description: fee.description ?? '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
+  const net = Number(f.amount); const vat = Number(f.vatAmount || 0);
+  const submit = async () => {
+    if (!Number.isFinite(net) || net < 0) { setErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(vat) || vat < 0) { setErr('Enter a valid VAT amount'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await onSubmit({ amount: Math.round((net + vat) * 100) / 100, vatAmount: vat, description: f.description.trim() || null, transactionDate: f.transactionDate || null });
+      onClose();
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save changes'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Edit ${feeLabel(fee.paymentType).toLowerCase()}`} onClose={onClose}
+      footer={<><button style={ghostBtn} onClick={onClose}>Cancel</button><button style={jadeBtn} disabled={busy} onClick={submit}>Save changes</button></>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Amount (excl. VAT, AED)"><input style={inputCss} type="number" value={f.amount} onChange={e => set('amount', e.target.value)} /></Field>
+        <Field label="VAT (AED, optional)"><input style={inputCss} type="number" value={f.vatAmount} placeholder="0.00" onChange={e => set('vatAmount', e.target.value)} /></Field>
+        <Field label="Due date"><input style={inputCss} type="date" value={f.transactionDate} onChange={e => set('transactionDate', e.target.value)} /></Field>
+        <Field label="Description"><input style={inputCss} value={f.description} placeholder={feeLabel(fee.paymentType)} onChange={e => set('description', e.target.value)} /></Field>
+      </div>
+      <p style={{ fontSize: 12, color: '#6b756f', margin: 0 }}>Total charged: <strong style={{ color: '#1d2823' }}>{fmtAed((Number(f.amount) || 0) + (Number(f.vatAmount) || 0))}</strong></p>
+      {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '6px 0 0' }}>{err}</p>}
     </Modal>
   );
 }
@@ -350,11 +460,20 @@ function TerminateModal({ contract, onClose, onDone }: { contract: ContractDetai
   );
 }
 
+/**
+ * RenewalModal — faithful port of v2's RenewalProposeModal (the SCRUM-596
+ * overhaul): RP-filtered installment picker, de-bundled fee cheques, discount,
+ * cheque payee, extra one-off charges, and a live planned-schedule preview whose
+ * due dates snap to the RP's cheque days exactly as the backend stamps them.
+ * Submits the identical body to PATCH /contracts/:id/renewal/propose.
+ */
 function RenewalModal({ contract, onClose, onDone }: { contract: ContractDetail; onClose: () => void; onDone: () => void }) {
   const iso = (x: Date) => x.toISOString().slice(0, 10);
   const ns = new Date(contract.endDate); ns.setDate(ns.getDate() + 1);
   const ne = new Date(ns); ne.setFullYear(ne.getFullYear() + 1); ne.setDate(ne.getDate() - 1);
-  const parentFee = (t: string, col?: number | null) => {
+  // Prefill one-off fees from the PARENT lease's actual fees (its fee rows, else
+  // its stored column) — a sensible default the RP can edit. Blank when none.
+  const parentFeeAmt = (t: string, col?: number | null) => {
     const row = (contract.fees ?? []).find(x => x.paymentType === t)?.amount;
     const v = row ?? col ?? 0; return v > 0 ? String(v) : '';
   };
@@ -363,67 +482,254 @@ function RenewalModal({ contract, onClose, onDone }: { contract: ContractDetail;
     discountType: 'none' as 'none' | 'percent' | 'fixed', discountValue: '',
     newStartDate: iso(ns), newEndDate: iso(ne),
     numberOfInstallments: String(contract.numberOfInstallments ?? 4),
-    modeOfPayment: contract.modeOfPayment ?? 'cheque',
-    adminFee: parentFee('admin_fee', contract.adminFeeFils), ejariFee: parentFee('ejari_fee', contract.ejariFeeFils), commission: parentFee('commission'),
+    modeOfPayment: contract.modeOfPayment ?? 'cheque', chequePayeeName: '',
+    adminFee: parentFeeAmt('admin_fee', contract.adminFeeFils),
+    ejariFee: parentFeeAmt('ejari_fee', contract.ejariFeeFils),
+    commission: parentFeeAmt('commission'),
   });
+  const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
+  // RP fee rules (admin/ejari/commission as a % or fixed of the annual amount) —
+  // fetched on open and re-applied as the rent changes, mirroring the lead
+  // payment-plan editor and the backend's feeRulesService.computeFees.
+  const feeRulesRef = useRef<FeeRuleDto[]>([]);
+  const [rulesApplied, setRulesApplied] = useState(false);
+  const dirty = useRef<Set<string>>(new Set());   // fee fields the RP manually overrode
+
+  // Installment plans + cheque days come from the contract payload (the OWNING
+  // RP's config) so a manager still sees the right filtered list and the preview
+  // snaps dates the same way the backend does.
+  const allowedInstallments = contract.allowedInstallments ?? [];
+  const chequeDays = contract.preferredChequeDays ?? [];
+
+  // Recompute the non-overridden rule-based fees from the current net rent.
+  const withRuleFees = (d: typeof f): typeof f => {
+    const rules = feeRulesRef.current;
+    if (!rules.length) return d;
+    const net = renewalNetRent(d.listedRent, d.discountType, d.discountValue);
+    const out = { ...d };
+    ([['adminFee', 'admin_fee'], ['ejariFee', 'ejari_fee'], ['commission', 'commission']] as const).forEach(([field, ft]) => {
+      if (dirty.current.has(field)) return;
+      const rv = ruleFeeNet(rules.find(r => r.feeType === ft), net);
+      if (rv != null) out[field] = rv;
+    });
+    return out;
+  };
+  // Fetch the RP's fee rules once and apply them to the annual amount. The setF
+  // runs inside the async .then so it stays clear of the set-state-in-effect rule.
+  useEffect(() => {
+    let active = true;
+    fetch('/api/fee-rules', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((map: Record<string, FeeRuleDto[]> | null) => {
+        if (!active || !map) return;
+        const rules = map[spaceCategoryOf(contract.unit.type)] ?? map.residential ?? [];
+        feeRulesRef.current = rules;
+        if (rules.length) { setRulesApplied(true); setF(prev => withRuleFees(prev)); }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contract.unit.type]);
+
+  // Rent-affecting fields recompute the rule fees; fee fields mark themselves
+  // overridden so a manually-typed figure is never clobbered.
+  const set = (k: keyof typeof f, v: string) => setF(prev => {
+    const draft = { ...prev, [k]: v };
+    return (k === 'listedRent' || k === 'discountType' || k === 'discountValue') ? withRuleFees(draft) : draft;
+  });
+  const setFee = (k: 'adminFee' | 'ejariFee' | 'commission', v: string) => { dirty.current.add(k); setF(prev => ({ ...prev, [k]: v })); };
+  const addExtra = () => setExtras(p => [...p, { description: '', amount: '', dueDate: '' }]);
+  const setExtra = (i: number, k: 'description' | 'amount' | 'dueDate', v: string) =>
+    setExtras(p => p.map((e, idx) => idx === i ? { ...e, [k]: v } : e));
+  const removeExtra = (i: number) => setExtras(p => p.filter((_, idx) => idx !== i));
+
+  const n = parseInt(f.numberOfInstallments) || 0;
   const listed = parseFloat(f.listedRent) || 0;
   const discVal = parseFloat(f.discountValue) || 0;
-  const discountAmt = f.discountType === 'percent' ? Math.round(listed * discVal) / 100 : f.discountType === 'fixed' ? discVal : 0;
-  const netRent = Math.max(0, listed - Math.min(discountAmt, listed));
+  const discountAmt = f.discountType === 'percent'
+    ? Math.round(listed * discVal) / 100
+    : f.discountType === 'fixed' ? discVal : 0;
+  const rent = Math.max(0, listed - Math.min(discountAmt, listed)); // net rent
+  const adminN = parseFloat(f.adminFee) || 0;
+  const ejariN = parseFloat(f.ejariFee) || 0;
+  const commN = parseFloat(f.commission) || 0;
+  // Rent VAT (commercial/industrial) carries on the cheque; rate is a whole %.
+  const vatRate = Number(contract.rentVatRate) || 0;
+  const vatOf = (x: number) => vatRate ? Math.round(x * vatRate) / 100 : 0;
+  // Due dates — spread over the renewal term + snapped to the RP's cheque days,
+  // identical to what proposeRenewal stamps server-side.
+  const dueDates = buildInstallmentDueDates(f.newStartDate, f.newEndDate, n, chequeDays);
+
+  // Preview schedule: rent cheques (each pure rent + VAT), then separate fee
+  // rows, then any extra charges — mirrors the backend's de-bundled rows.
+  type Row = { key: string; d: string; date: string; net: number; vat: number };
+  const rows: Row[] = [];
+  if (n && rent) {
+    const base = Math.floor(rent / n);
+    const lastA = rent - base * (n - 1);
+    for (let i = 0; i < n; i++) {
+      const r = i === n - 1 ? lastA : base;
+      rows.push({ key: `r${i}`, d: n === 1 ? 'Annual Rent' : `Rental Instalment ${i + 1} of ${n}`, date: dueDates[i] ?? '', net: r, vat: vatOf(r) });
+    }
+  }
+  const feeDate = dueDates[0] ?? f.newStartDate;
+  if (adminN > 0) rows.push({ key: 'admin', d: 'Admin Fee', date: feeDate, net: adminN, vat: 0 });
+  if (ejariN > 0) rows.push({ key: 'ejari', d: 'Ejari Fee', date: feeDate, net: ejariN, vat: 0 });
+  if (commN > 0) rows.push({ key: 'comm', d: 'Commission', date: feeDate, net: commN, vat: 0 });
+  extras.forEach((e, i) => {
+    const amt = parseFloat(e.amount) || 0;
+    if (e.description.trim() && amt > 0) rows.push({ key: `x${i}`, d: e.description.trim(), date: e.dueDate || (dueDates[n - 1] ?? ''), net: amt, vat: 0 });
+  });
+  const totalVat = rows.reduce((s, r) => s + r.vat, 0);
+  const total = rows.reduce((s, r) => s + r.net + r.vat, 0);
+
   const submit = async () => {
-    if (!listed) { setErr('Enter the renewal rent'); return; }
     setBusy(true); setErr(null);
     try {
       const res = await fetch(`/api/contracts/${contract.id}/renewal/propose`, {
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          newAnnualRent: netRent, listedRent: listed,
+          newAnnualRent: rent,                       // NET (listed − discount)
+          listedRent: listed,
           discountType: f.discountType === 'none' ? undefined : f.discountType,
           discountValue: f.discountType === 'none' ? undefined : discVal,
-          newStartDate: f.newStartDate, newEndDate: f.newEndDate,
-          numberOfInstallments: parseInt(f.numberOfInstallments) || 0,
+          newStartDate: f.newStartDate,
+          newEndDate: f.newEndDate,
+          numberOfInstallments: n,
           modeOfPayment: f.modeOfPayment,
-          adminFee: parseFloat(f.adminFee) || 0, ejariFee: parseFloat(f.ejariFee) || 0, commission: parseFloat(f.commission) || 0,
+          chequePayeeName: f.chequePayeeName.trim() || undefined,
+          adminFee: adminN,
+          ejariFee: ejariN,
+          commission: commN,
+          extraCharges: extras
+            .map(e => ({ description: e.description.trim(), amount: parseFloat(e.amount) || 0, dueDate: e.dueDate || undefined }))
+            .filter(e => e.description && e.amount > 0),
         }),
       });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as { message?: string }).message ?? `Error ${res.status}`); }
+      if (!res.ok) { const body = await res.json().catch(() => null); throw new Error(body?.message ?? `Renewal propose failed: ${res.status}`); }
       onDone(); onClose();
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to propose renewal'); }
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Renewal propose failed'); }
     finally { setBusy(false); }
   };
+
+  const subhead: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: '#9aa39c', textTransform: 'uppercase', margin: '0 0 8px' };
+  const note: React.CSSProperties = { fontSize: 12, color: '#8a938c', margin: 0 };
+  const roInput: React.CSSProperties = { ...inputCss, background: '#f4f6f3', color: '#7d8780' };
+  const installmentPlans = allowedInstallmentPlans(allowedInstallments, [n]);
+
   return (
-    <Modal title="Propose renewal" onClose={onClose} width={520}
-      footer={<><button style={ghostBtn} onClick={onClose}>Cancel</button><button style={jadeBtn} disabled={busy} onClick={submit}>Save renewal draft</button></>}>
-      <p style={{ fontSize: 13, color: '#6b756f', margin: '0 0 14px' }}>This saves a draft — the customer is not notified until you send it.</p>
+    <Modal title="Propose renewal" onClose={onClose} width={640}
+      footer={<><button style={ghostBtn} onClick={onClose}>Cancel</button><button style={jadeBtn} disabled={busy} onClick={submit}><RotateCcw size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Save renewal draft</button></>}>
+
+      <p style={subhead}>Current contract</p>
+      <div style={{ marginBottom: 18, padding: '12px 14px', background: '#f9faf8', border: '1px solid #eef1ec', borderRadius: 11, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 18px' }}>
+        <div style={note}><b style={{ color: '#1d2823' }}>{contract.tenant.name ?? '—'}</b></div>
+        <div style={note}>{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</div>
+        <div style={note}>Unit {contract.unit.number ?? '—'} · {contract.property.buildingName ?? '—'}</div>
+        <div style={note}>Current rent <b style={{ color: '#1d2823' }}>{fmtAed(contract.annualRent)}</b></div>
+      </div>
+
+      <p style={subhead}>Renewal period</p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Field label="Listed rent (AED / yr)"><input style={inputCss} type="number" value={f.listedRent} onChange={e => set('listedRent', e.target.value)} /></Field>
+        <Field label="Start date"><input style={inputCss} type="date" value={f.newStartDate} onChange={e => set('newStartDate', e.target.value)} /></Field>
+        <Field label="End date"><input style={inputCss} type="date" value={f.newEndDate} onChange={e => set('newEndDate', e.target.value)} /></Field>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Installments">
           <select style={inputCss} value={f.numberOfInstallments} onChange={e => set('numberOfInstallments', e.target.value)}>
-            {[1, 2, 3, 4, 6, 12].map(n => <option key={n} value={n}>{n} cheque{n > 1 ? 's' : ''}</option>)}
+            {installmentPlans.map(p => <option key={p.value} value={p.value}>{p.value}</option>)}
           </select>
         </Field>
+        <Field label="Listed annual rent (AED)"><input style={inputCss} type="number" value={f.listedRent} onChange={e => set('listedRent', e.target.value)} /></Field>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Discount">
           <select style={inputCss} value={f.discountType} onChange={e => set('discountType', e.target.value)}>
-            <option value="none">None</option>
-            <option value="percent">Percent (%)</option>
+            <option value="none">No discount</option>
+            <option value="percent">Percentage (%)</option>
             <option value="fixed">Fixed (AED)</option>
           </select>
         </Field>
-        <Field label="Discount value"><input style={inputCss} type="number" value={f.discountValue} disabled={f.discountType === 'none'} onChange={e => set('discountValue', e.target.value)} /></Field>
-        <Field label="New start date"><input style={inputCss} type="date" value={f.newStartDate} onChange={e => set('newStartDate', e.target.value)} /></Field>
-        <Field label="New end date"><input style={inputCss} type="date" value={f.newEndDate} onChange={e => set('newEndDate', e.target.value)} /></Field>
-        <Field label="Admin fee"><input style={inputCss} type="number" value={f.adminFee} onChange={e => set('adminFee', e.target.value)} /></Field>
-        <Field label="Ejari fee"><input style={inputCss} type="number" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></Field>
-        <Field label="Commission"><input style={inputCss} type="number" value={f.commission} onChange={e => set('commission', e.target.value)} /></Field>
+        <Field label={f.discountType === 'percent' ? 'Discount %' : f.discountType === 'fixed' ? 'Discount (AED)' : 'Net annual rent (AED)'}>
+          {f.discountType === 'none'
+            ? <input style={roInput} value={fmtAed(rent)} disabled />
+            : <input style={inputCss} type="number" value={f.discountValue} onChange={e => set('discountValue', e.target.value)} />}
+        </Field>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, padding: '11px 14px', background: '#eef6f1', borderRadius: 11 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#1a6b4d' }}>Net renewal rent</span>
-        <span style={{ fontSize: 16, fontWeight: 800, color: '#1a6b4d', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(netRent)}</span>
+      {f.discountType !== 'none' && (
+        <p style={{ ...note, margin: '-4px 0 14px' }}>
+          Net annual rent after discount: <b style={{ color: '#1d2823' }}>{fmtAed(rent)}</b>{discountAmt > 0 && <> (−{fmtAed(discountAmt)})</>}
+        </p>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Mode of payment">
+          <select style={inputCss} value={f.modeOfPayment} onChange={e => set('modeOfPayment', e.target.value)}>
+            <option value="cheque">Cheque</option>
+            <option value="bank_transfer">Bank transfer</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="online">Online</option>
+          </select>
+        </Field>
+        <Field label="Cheques payable to (optional)"><input style={inputCss} value={f.chequePayeeName} placeholder={contract.landlord.companyName ?? contract.landlord.name ?? ''} onChange={e => set('chequePayeeName', e.target.value)} /></Field>
       </div>
-      {err && <p style={{ color: '#c44536', fontSize: 12.5, margin: '8px 0 0' }}>{err}</p>}
+
+      <p style={subhead}>Fees (AED) — billed as their own cheques</p>
+      {rulesApplied && <p style={{ ...note, margin: '-2px 0 8px' }}>Auto-filled from your fee rules on the annual amount — edit any to override.</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Admin fee"><input style={inputCss} type="number" value={f.adminFee} onChange={e => setFee('adminFee', e.target.value)} /></Field>
+        <Field label="Ejari fee"><input style={inputCss} type="number" value={f.ejariFee} onChange={e => setFee('ejariFee', e.target.value)} /></Field>
+        <Field label="Commission"><input style={inputCss} type="number" value={f.commission} onChange={e => setFee('commission', e.target.value)} /></Field>
+        <Field label="Deposit (carries over)"><input style={roInput} value={fmtAed(contract.securityDepositAmount)} disabled /></Field>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <p style={{ ...subhead, margin: 0 }}>Additional charges</p>
+        <button type="button" style={{ ...ghostBtn, padding: '6px 11px', fontSize: 12 }} onClick={addExtra}><Plus size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />Add charge</button>
+      </div>
+      {extras.map((e, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 150px 32px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+          <input style={inputCss} placeholder="Description (e.g. Municipality Fee)" value={e.description} onChange={ev => setExtra(i, 'description', ev.target.value)} />
+          <input style={inputCss} type="number" placeholder="Amount" value={e.amount} onChange={ev => setExtra(i, 'amount', ev.target.value)} />
+          <input style={inputCss} type="date" value={e.dueDate} onChange={ev => setExtra(i, 'dueDate', ev.target.value)} />
+          <button type="button" aria-label="Remove" style={{ display: 'flex', background: 'none', border: 'none', color: '#c44536', cursor: 'pointer', padding: 4 }} onClick={() => removeExtra(i)}><Trash2 size={15} /></button>
+        </div>
+      ))}
+
+      {rows.length > 0 && (
+        <>
+          <p style={{ ...subhead, marginTop: 14 }}>Planned schedule</p>
+          <div style={{ border: '1px solid #e7ebe6', borderRadius: 11, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 110px', padding: '9px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: '#9aa39c', background: '#fbfcfb' }}>
+              <span>#</span><span>DESCRIPTION</span><span>DUE</span><span style={{ textAlign: 'right' }}>AMOUNT</span>
+            </div>
+            {rows.map((r, i) => (
+              <div key={r.key} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 110px', alignItems: 'center', padding: '9px 12px', borderTop: '1px solid #f1f3f0', fontSize: 12.5 }}>
+                <span style={{ color: '#aab2ab' }}>{i + 1}</span>
+                <span style={{ color: '#2b342e' }}>{r.d}{r.vat > 0 && <span style={{ color: '#a0a8a1' }}> · incl. VAT {r.vat.toLocaleString('en-AE')}</span>}</span>
+                <span style={{ color: '#6b756f', fontVariantNumeric: 'tabular-nums' }}>{r.date ? fmtDate(r.date) : '—'}</span>
+                <span style={{ textAlign: 'right', fontWeight: 700, color: '#1d2823', fontVariantNumeric: 'tabular-nums' }}>{(r.net + r.vat).toLocaleString('en-AE')}</span>
+              </div>
+            ))}
+            {totalVat > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', padding: '8px 12px', borderTop: '1px solid #f1f3f0', fontSize: 12, color: '#9aa39c' }}>
+                <span>of which VAT</span><span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{totalVat.toLocaleString('en-AE')}</span>
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', padding: '10px 12px', borderTop: '1px solid #e7ebe6', background: '#eef6f1', fontSize: 13, fontWeight: 800, color: '#1a6b4d' }}>
+              <span>Total</span><span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{total.toLocaleString('en-AE')}</span>
+            </div>
+          </div>
+          {chequeDays.length === 0 && (
+            <p style={{ ...note, marginTop: 6 }}>Tip: set preferred cheque days in Settings → Rules to standardise due dates.</p>
+          )}
+        </>
+      )}
+      {err && <p style={{ color: '#c44536', fontSize: 12.5, marginTop: 8 }}>{err}</p>}
+      <p style={{ ...note, marginTop: 10 }}>This saves a draft for your review — the customer is <b>not</b> notified until you press <b>Send</b> on the contract page.</p>
     </Modal>
   );
 }
@@ -432,7 +738,9 @@ function RenewalModal({ contract, onClose, onDone }: { contract: ContractDetail;
 // Page
 // ────────────────────────────────────────────────────────────────────────────
 
-type ModalKind = null | 'record' | 'addFee' | 'renew' | 'terminate' | { kind: 'editPayment'; payment: ContractPayment };
+type ModalKind = null | 'record' | 'addFee' | 'renew' | 'terminate'
+  | { kind: 'editPayment'; payment: ContractPayment }
+  | { kind: 'editFee'; fee: ContractPayment };
 
 export default function LeaseDetailV3() {
   const params = useParams();
@@ -449,6 +757,7 @@ export default function LeaseDetailV3() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalKind>(null);
+  const [showDocsHistory, setShowDocsHistory] = useState(false);
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
@@ -635,6 +944,20 @@ export default function LeaseDetailV3() {
   const onFileCount = checklist.filter(d => isDocKeySatisfied(d.key, docKeys)).length;
   const setLabel = COMMERCIAL_TYPES.includes(c.unit.type ?? '') ? 'Commercial set'
     : INDUSTRIAL_TYPES.includes(c.unit.type ?? '') ? 'Industrial set' : 'Residential set';
+  // "View all" — every uploaded doc on this contract, checklist order first (rest
+  // appended), opened together in the inline viewer. Mirrors v2's View all.
+  const viewAllDocs = (() => {
+    const seen = new Set<number>();
+    const out: { fileUrl: string; displayName: string }[] = [];
+    for (const req of checklist) {
+      const d = findDoc(req.key);
+      if (d?.fileUrl && !seen.has(d.id)) { seen.add(d.id); out.push({ fileUrl: d.fileUrl, displayName: d.displayName ?? req.label }); }
+    }
+    for (const d of c.documents) {
+      if (d.fileUrl && !seen.has(d.id)) { seen.add(d.id); out.push({ fileUrl: d.fileUrl, displayName: d.displayName ?? d.documentKey }); }
+    }
+    return out;
+  })();
 
   // payment-row number (deposit shows "$", others count up)
   let payCounter = 0;
@@ -866,6 +1189,9 @@ export default function LeaseDetailV3() {
                       {perms.collections
                         ? <StatusSelect value={status} busy={statusBusy === f.id} onChange={s => changeStatus(f.id, s)} />
                         : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: (STATUS_STYLE[status] ?? STATUS_STYLE.pending).color, background: (STATUS_STYLE[status] ?? STATUS_STYLE.pending).bg, padding: '5px 10px', borderRadius: 7 }}>{STATUS_LABEL[status] ?? status}</span>}
+                      {perms.collections && status !== 'cleared' && (
+                        <button onClick={() => setModal({ kind: 'editFee', fee: f })} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, color: '#3a443d', background: '#fff', border: '1px solid #e2e7e1', padding: '5px 10px', borderRadius: 7, cursor: 'pointer' }}><Pencil size={13} />Edit</button>
+                      )}
                       {perms.collections && (
                         <button onClick={() => deleteFee(f.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, color: '#c44536', background: '#fff', border: '1px solid #f0d8d3', padding: '5px 10px', borderRadius: 7, cursor: 'pointer' }}><Trash2 size={12} />Delete</button>
                       )}
@@ -889,6 +1215,9 @@ export default function LeaseDetailV3() {
                 <div style={{ fontSize: 15, fontWeight: 700 }}>Documents <span style={{ color: '#9aa39c', fontWeight: 600 }}>({checklist.length})</span></div>
                 <div style={{ fontSize: 11.5, color: '#9aa39c' }}>{setLabel} · {onFileCount} of {checklist.length} on file</div>
               </div>
+              {viewAllDocs.length > 0 && (
+                <button onClick={() => openDocsTogether(viewAllDocs)} style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 12, fontWeight: 600, color: '#3a443d', background: '#fff', border: '1px solid #e2e7e1', padding: '7px 11px', borderRadius: 9, cursor: 'pointer' }}><Eye size={13} /> View all</button>
+              )}
               {perms.documents && (
                 <button onClick={() => triggerUpload({ key: 'document', label: 'Document', category: 'contract' })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 12, fontWeight: 600, color: '#3a443d', background: '#fff', border: '1px solid #e2e7e1', padding: '7px 11px', borderRadius: 9, cursor: 'pointer' }}><UploadCloud size={13} /> Upload</button>
               )}
@@ -929,6 +1258,12 @@ export default function LeaseDetailV3() {
                 })}
               </div>
 
+              {c.tenant.id != null && (
+                <p style={{ margin: '10px 4px 0' }}>
+                  <button type="button" onClick={() => setShowDocsHistory(true)} style={{ background: 'none', border: 0, padding: 0, font: 'inherit', fontSize: 12, fontWeight: 600, color: '#1a7a4f', cursor: 'pointer', textDecoration: 'underline' }}>Document History</button>
+                </p>
+              )}
+
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', color: '#9aa39c', margin: '16px 4px 9px' }}>PAYMENT RECEIPTS</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {[
@@ -956,7 +1291,14 @@ export default function LeaseDetailV3() {
       {modal === 'terminate' && <TerminateModal contract={c} onClose={() => setModal(null)} onDone={reload} />}
       {modal === 'renew' && <RenewalModal contract={c} onClose={() => setModal(null)} onDone={reload} />}
       {modal && typeof modal === 'object' && modal.kind === 'editPayment' && (
-        <EditPaymentModal payment={modal.payment} onClose={() => setModal(null)} onSubmit={patch => onUpdatePayment(modal.payment.id, patch)} />
+        <EditPaymentModal payment={modal.payment} vatRate={c.rentVatRate} onClose={() => setModal(null)} onSubmit={patch => onUpdatePayment(modal.payment.id, patch)} />
+      )}
+      {modal && typeof modal === 'object' && modal.kind === 'editFee' && (
+        <FeeEditModal fee={modal.fee} onClose={() => setModal(null)} onSubmit={patch => onUpdatePayment(modal.fee.id, patch)} />
+      )}
+      {/* Cross-lease document history — same popup module as v2, no navigation away. */}
+      {showDocsHistory && c.tenant.id != null && (
+        <CustomerDocsModal tenantId={c.tenant.id} tenantName={c.tenant.name} onClose={() => setShowDocsHistory(false)} />
       )}
     </div>
   );

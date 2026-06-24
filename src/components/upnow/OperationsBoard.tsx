@@ -64,6 +64,15 @@ interface Props {
   canAct?: boolean;
 }
 
+// Contract-type tabs — split the worklist into New leases vs Renewals so each
+// flow can be worked separately. 'all' keeps the combined view.
+type TypeKey = 'all' | 'new' | 'renewal';
+const TYPE_TABS: { key: TypeKey; label: string }[] = [
+  { key: 'all',     label: 'All' },
+  { key: 'new',     label: 'New' },
+  { key: 'renewal', label: 'Renewal' },
+];
+
 // Inline one-click flips. The other steps deep-link into the contract page.
 const QUICK: Record<string, { path: string; label: string }> = {
   pdc: { path: 'confirm-pdc', label: 'Confirm PDC' },
@@ -92,6 +101,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
   const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
   const [filterStage, setFilterStage] = useState('all');
   const [filterMissing, setFilterMissing] = useState('all');
+  const [filterType, setFilterType] = useState<TypeKey>('all');
   const [busy, setBusy] = useState<number | null>(null);
   const [note, setNote] = useState<{ id: number; text: string } | null>(null);
 
@@ -145,8 +155,10 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
     });
   }, [rows, filterYear]);
 
-  const filtered = useMemo(() => {
-    const list = yearScoped.filter(c => {
+  // Everything EXCEPT the New/Renewal tab — this base drives the tab counts so
+  // each tab shows how many it holds within the current year/asset/stage/search.
+  const typeBase = useMemo(() => {
+    return yearScoped.filter(c => {
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
       // Stage: draft = pending, issued, live = active, winddown = terminating.
       if (filterStage !== 'all') {
@@ -163,15 +175,29 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
       }
       return true;
     });
+  }, [yearScoped, search, filterAsset, filterStage, filterMissing]);
+
+  const typeCounts = useMemo<Record<TypeKey, number>>(() => ({
+    all:     typeBase.length,
+    new:     typeBase.filter(c => c.contractType !== 'renewal').length,
+    renewal: typeBase.filter(c => c.contractType === 'renewal').length,
+  }), [typeBase]);
+
+  const filtered = useMemo(() => {
+    const list = typeBase.filter(c => {
+      if (filterType === 'new' && c.contractType === 'renewal') return false;
+      if (filterType === 'renewal' && c.contractType !== 'renewal') return false;
+      return true;
+    });
     // Most-incomplete first — that's the work queue order. Ties: newest first.
     return [...list].sort((a, b) => {
       const ra = a.doneCount / a.totalCount, rb = b.doneCount / b.totalCount;
       if (ra !== rb) return ra - rb;
       return (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
     });
-  }, [yearScoped, search, filterAsset, filterStage, filterMissing]);
+  }, [typeBase, filterType]);
 
-  const hasFilters = filterAsset !== 'all' || filterYear !== 'all' || filterStage !== 'all' || filterMissing !== 'all' || search !== '';
+  const hasFilters = filterAsset !== 'all' || filterYear !== 'all' || filterStage !== 'all' || filterMissing !== 'all' || filterType !== 'all' || search !== '';
 
   // KPIs reflect the year scope (not the stage/missing/search slices) — same
   // semantics as the Leases page, so the counts always match the year selected.
@@ -258,6 +284,20 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
           <div className="kpi"><div className="lbl"><FileText size={12} /> Drafts (not sent)</div><div className="val">{stats.drafts}</div></div>
         </div>
 
+        {/* New vs Renewal — work each flow separately. */}
+        <div className="optabs">
+          {TYPE_TABS.map(t => (
+            <button
+              key={t.key}
+              type="button"
+              className={filterType === t.key ? 'active' : ''}
+              onClick={() => setFilterType(t.key)}
+            >
+              {t.label}<span className="count">{typeCounts[t.key]}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="filters">
           <div className="search">
             <span className="ic"><Search size={15} /></span>
@@ -286,7 +326,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
             </select>
           </div>
           {hasFilters && (
-            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setFilterYear('all'); setFilterStage('all'); setFilterMissing('all'); setSearch(''); }}>
+            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setFilterYear('all'); setFilterStage('all'); setFilterMissing('all'); setFilterType('all'); setSearch(''); }}>
               <X size={12} /> Reset
             </button>
           )}
@@ -406,7 +446,7 @@ function Style() {
       }
       .ops-page *{ box-sizing:border-box; }
       .ops-page button, .ops-page input, .ops-page select{ font-family:inherit; color:inherit; }
-      .ops-page .main{ padding:32px 36px 64px; max-width:1180px; margin:0 auto; width:100%; }
+      .ops-page .main{ padding:32px 36px 64px; max-width:1320px; margin:0 auto; width:100%; }
       @media (max-width:720px){ .ops-page .main{ padding:24px 16px 60px; } }
 
       .ops-page .hero{ display:flex; justify-content:space-between; align-items:flex-start; gap:18px; margin-bottom:22px; flex-wrap:wrap; }
@@ -433,6 +473,14 @@ function Style() {
       .ops-page .kpi .lbl{ font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--mute); font-weight:700; display:flex; align-items:center; gap:6px; }
       .ops-page .kpi .lbl svg{ color:var(--green-d); }
       .ops-page .kpi .val{ font-size:24px; font-weight:700; letter-spacing:-.025em; line-height:1; font-variant-numeric:tabular-nums; }
+
+      .ops-page .optabs{ display:flex; align-items:stretch; gap:0; margin:0 0 16px; border-bottom:1px solid var(--line); overflow-x:auto; }
+      .ops-page .optabs::-webkit-scrollbar{ display:none; }
+      .ops-page .optabs button{ appearance:none; background:transparent; border:0; cursor:pointer; padding:12px 16px 11px; font-size:13.5px; font-weight:600; color:var(--mute); border-bottom:2px solid transparent; margin-bottom:-1px; display:inline-flex; align-items:center; gap:8px; line-height:1; white-space:nowrap; font-family:inherit; transition:color .15s, border-color .15s; }
+      .ops-page .optabs button:hover{ color:var(--ink-2); }
+      .ops-page .optabs button.active{ color:var(--green-d); border-bottom-color:var(--green); }
+      .ops-page .optabs button .count{ font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:99px; background:var(--paper-2); color:var(--mute); }
+      .ops-page .optabs button.active .count{ background:var(--green-t); color:var(--green-d); }
 
       .ops-page .filters{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:16px; }
       .ops-page .search{ position:relative; flex:1; max-width:380px; min-width:200px; }

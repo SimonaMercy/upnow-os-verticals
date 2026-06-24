@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { openDocsTogether } from '@/lib/openDocsTogether';
+import OfferReceiptModal, { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { openDocViewer } from '@/lib/docViewer';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
@@ -144,6 +145,8 @@ interface ContractDetail {
   /** The lead this contract was created from (migration 0098) — drives the
    *  "Offer Receipt" row in the documents binder. NULL for renewals/manual. */
   originLeadId?: number | null;
+  /** The offered payment plan from the origin lead — powers the Offer Receipt. */
+  offerPlan?: OfferPlan | null;
   /** Live renewal child of THIS contract (when viewing a parent) — the agreed
    *  or in-flight renewal lives in its own contract row. */
   renewalChild?: { id: number; status: string; startDate?: string | null; endDate?: string | null; annualRent?: number } | null;
@@ -1755,6 +1758,7 @@ function DetailsDrawer({
   const [showDocsHistory, setShowDocsHistory] = useState(false);
   /** "View all" popup — same modal, scoped to THIS contract's documents. */
   const [showContractDocs, setShowContractDocs] = useState(false);
+  const [showOffer, setShowOffer] = useState(false);
   const addReqDoc = (name: string) => {
     const n = name.trim();
     if (!n) return;
@@ -2494,11 +2498,8 @@ function DetailsDrawer({
               | { kind: 'link'; key: string; label: string; sub: string; href: string | null };
             const moveOutShown = contract.status === 'terminated' || contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
             const receiptsReady = contract.pdcConfirmed || contract.status === 'active' || contract.contractActive;
-            const offerHref = contract.originLeadId
-              ? `${contractBase.replace(/\/contracts\/[^/]+$/, '/leads')}?lead=${contract.originLeadId}`
-              : null;
             const binderSeq: BinderSlot[] = [
-              { kind: 'link', key: 'offer',          label: 'Offer Receipt', sub: 'Offered during the lead phase', href: offerHref },
+              { kind: 'link', key: 'offer',          label: 'Offer Receipt', sub: 'Offered during the lead phase', href: null },
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: 'Admin, Ejari, commission & rent', href: receiptsReady ? `${receiptBase}?kind=contract` : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
@@ -2513,14 +2514,22 @@ function DetailsDrawer({
               binderSeq.push({ kind: 'doc',  key: 'utility_final_bill', label: 'Utility Final Bill' });
               binderSeq.push({ kind: 'link', key: 'settlement', label: 'Final Settlement', sub: 'Security deposit settlement', href: `${contractBase}/settlement` });
             }
-            // "View all" previews the binder's uploaded docs IN SEQUENCE ORDER
-            // (generated/print rows aren't files, so they're skipped here).
-            const binderPreviewDocs = binderSeq.flatMap(s => s.kind === 'doc' ? matchDocs(s.key) : []);
-            // "View all" previews EVERY uploaded document, but ordered by the
-            // sequence first (Payment Advice / Ejari / Utility …), then the rest
-            // (KYC, licenses, etc.).
-            const seqDocIds = new Set(binderPreviewDocs.map(d => d.id));
-            const viewAllDocs = [...binderPreviewDocs, ...all.filter(d => !seqDocIds.has(d.id))];
+            // Offer Receipt opens an in-app modal showing the offered plan
+            // (origin lead's plan), not an external link.
+            const renderOfferSlot = (s: Extract<BinderSlot, { kind: 'link' }>) => (
+              <div key={s.key} className="docitem approved">
+                <FileText size={14} />
+                <div>
+                  <div className="dn">{s.label}</div>
+                  <div className="ds">{s.sub}</div>
+                </div>
+                <div className="dacts">
+                  {contract.offerPlan
+                    ? <button type="button" className="mini-btn view cursor-pointer" onClick={() => setShowOffer(true)}><ExternalLink size={12} /> View</button>
+                    : <span className="ds" style={{ color: '#b8b5ae' }}>Not yet available</span>}
+                </div>
+              </div>
+            );
             const renderLinkSlot = (s: Extract<BinderSlot, { kind: 'link' }>) => (
               <div key={s.key} className="docitem approved">
                 <FileText size={14} />
@@ -2567,11 +2576,9 @@ function DetailsDrawer({
                   <span className="si"><Paperclip size={16} /></span>
                   <span className="st">Documents ({all.length})</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    {viewAllDocs.length > 0 && (
-                      <button type="button" className="mini-btn view" onClick={() => openDocsTogether(viewAllDocs)}>
-                        <ExternalLink size={12} /> View all
-                      </button>
-                    )}
+                    <Link href={`${contractBase}/documents`} target="_blank" rel="noopener noreferrer" className="mini-btn view">
+                      <ExternalLink size={12} /> View all
+                    </Link>
                     <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); }}>
                       <UploadCloud size={12} /> Upload
                     </button>
@@ -2598,7 +2605,7 @@ function DetailsDrawer({
                       </p>
                     )}
                     <div className="doclist">
-                      {binderSeq.map(s => s.kind === 'link' ? renderLinkSlot(s) : renderDocSlot(s))}
+                      {binderSeq.map(s => s.kind === 'doc' ? renderDocSlot(s) : s.key === 'offer' ? renderOfferSlot(s) : renderLinkSlot(s))}
                     </div>
                     {/* Everything else on this contract — one link, no inline dump. */}
                     <p className="note" style={{ marginTop: 8 }}>
@@ -2681,6 +2688,14 @@ function DetailsDrawer({
                   tenantName={contract.tenant.name}
                   documents={all}
                   onClose={() => setShowContractDocs(false)}
+                />
+              )}
+              {/* Offer Receipt — the offered plan from the origin lead. */}
+              {showOffer && contract.offerPlan && (
+                <OfferReceiptModal
+                  plan={contract.offerPlan}
+                  contractRef={contract.ref}
+                  onClose={() => setShowOffer(false)}
                 />
               )}
               {/* Request-a-document popup (Flow 6) */}
