@@ -435,9 +435,40 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         </View>
       </Page>
 
-      {addendumPages(addendums, data.signatures)}
+      {addendumPages(addendums, data.signatures, data)}
     </Document>
   );
+}
+
+// ── Dynamic addendum preamble ────────────────────────────────────────────────
+// Standard intro paragraph that opens every text addendum, interpolated from the
+// contract it belongs to: lease period, the leased unit (category · type · number)
+// and its location (building · emirate · country). Render-time only — never stored
+// in the saved terms, so it always reflects the live contract.
+const ADDENDUM_LAND_TYPES = ['residential_land','commercial_land','industrial_land','mixed_use_land','agricultural_land','labour_accommodation_land'];
+const ADDENDUM_INDUSTRIAL_TYPES = ['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
+const ADDENDUM_COMMERCIAL_TYPES = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue'];
+const prettyType = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+function addendumCategoryWord(type?: string | null): string {
+  const t = (type ?? '').toLowerCase();
+  if (ADDENDUM_LAND_TYPES.includes(t)) return 'land';
+  if (ADDENDUM_INDUSTRIAL_TYPES.includes(t)) return 'industrial';
+  if (ADDENDUM_COMMERCIAL_TYPES.includes(t)) return 'commercial';
+  return 'residential';
+}
+function buildAddendumPreamble(data?: EjariContractData): string | null {
+  if (!data) return null;
+  const from = fmtDate(data.startDate);
+  const to = fmtDate(data.endDate);
+  const type = data.unit?.type ?? null;
+  // Skip the empty editor-preview placeholder (no real contract context yet).
+  if (!from && !to && !type && !data.property?.buildingName) return null;
+  const subject = [addendumCategoryWord(type), type ? prettyType(type) : 'Unit', data.unit?.number ? `no. ${data.unit.number}` : '']
+    .filter(Boolean).join(' ');
+  const city = data.property?.emirate ? prettyType(data.property.emirate) : (data.property?.community ?? null);
+  const loc = [data.property?.buildingName, city, 'UAE'].filter(Boolean).join(', ');
+  const period = (from || to) ? ` for the period from (${from || '—'}) to (${to || '—'})` : '';
+  return `This addendum is part of the tenancy contract${period}. Conditions made between the Landlord and the Tenant for (${subject}) in (${loc}). Both parties have mutually agreed upon the following terms;`;
 }
 
 /** The addendum <Page> elements, shared by the full contract doc and the
@@ -449,14 +480,19 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
 function addendumPages(
   addendums: EjariAddendum[],
   contractSigs?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[],
+  data?: EjariContractData,
 ) {
   // The addendum is part of the contract — when its own signature fields aren't
   // set, fall back to the CONTRACT's signatures so a signed contract shows the
   // tenant/lessor signatures (and dates) on the addendum too.
   const cTenant = contractSigs?.find(s => s.role === 'tenant');
   const cLandlord = contractSigs?.find(s => s.role === 'landlord');
+  // Dynamic intro paragraph, interpolated from THIS contract; prepended to every
+  // text addendum's body.
+  const preamble = buildAddendumPreamble(data);
   return addendums.flatMap((a) => {
-    const lines = (a.lines && a.lines.length) ? a.lines : addendumTermsToLines(a.terms);
+    const baseLines = (a.lines && a.lines.length) ? a.lines : addendumTermsToLines(a.terms);
+    const lines = preamble && baseLines.length ? [preamble, ...baseLines] : baseLines;
     const isImg = !!(a.mimeType && a.mimeType.startsWith('image/'));
     const title = ((a.name && a.name.trim()) || 'Addendum to Tenancy Contract').toUpperCase();
     const titleAr = a.terms?.nameAr?.trim() || '';
@@ -507,7 +543,7 @@ function addendumPages(
 /** Standalone document of just the addendum pages — appended after the filled
  *  official template (Dubai). @react-pdf shapes Arabic correctly. */
 export function AddendumDoc({ data, addendums }: { data?: EjariContractData; addendums: EjariAddendum[] }) {
-  return <Document>{addendumPages(addendums, data?.signatures)}</Document>;
+  return <Document>{addendumPages(addendums, data?.signatures, data)}</Document>;
 }
 
 /** Render the addendum pages to raw PDF bytes (for pdf-lib to append). */
