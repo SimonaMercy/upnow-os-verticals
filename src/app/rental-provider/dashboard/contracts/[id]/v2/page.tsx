@@ -643,6 +643,9 @@ interface StepHandlers {
   /** Undo a sent settlement — pulls it back to draft so the figures can be
    *  corrected and re-sent (only while the customer hasn't agreed yet). */
   onUnsendSettlement: () => Promise<void>;
+  /** Cancel/undo a termination — reverts the lease to active while it has not
+   *  yet closed out. */
+  onCancelTermination: () => Promise<void>;
   /** Wind-down uploads — work even while the lease is active. */
   onUploadMoveOutDoc: () => void;
   onUploadCloseoutClearance: () => void;
@@ -1055,6 +1058,11 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
             <ClipboardCheck size={14} /> {st.moveOut.rpCounterSig ? 'View move-out inspection' : 'Open move-out inspection'}
           </Link>
+          {h.perms.agreements && (
+            <button className="btn btn-ghost btn-block" style={{ marginTop: 8 }} onClick={() => void h.onCancelTermination()}>
+              <RotateCcw size={14} /> Cancel termination — keep lease active
+            </button>
+          )}
         </>
       ),
     };
@@ -1975,9 +1983,9 @@ function DetailsDrawer({
                               <td>{fmtDate(sd.dueDate ?? sd.recordedDate)}</td>
                               <td>
                                 {editable && sd.amount ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
                                     {/* One clean action toolbar — status · Edit · Receipt · Settle */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                                       <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
                                         title="Cheque / banking status" value={sd.chequeStatus ?? 'pending'} disabled={depStatusBusy}
                                         onChange={e => void changeDepStatus(sd.depositId!, e.target.value)}>
@@ -3969,6 +3977,22 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch { alert('Unexpected error. Please try again.'); }
   };
+
+  // Undo a termination — reverts the lease to active (only while it hasn't
+  // closed out). Any move-out / settlement draft started so far is kept but no
+  // longer applies.
+  const onCancelTermination = async () => {
+    if (!window.confirm('Cancel this termination and return the lease to active? The move-out / settlement is no longer required.')) return;
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/termination/cancel`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        alert(b?.message ?? 'Could not cancel the termination.');
+        return;
+      }
+      void reload();
+    } catch { alert('Unexpected error. Please try again.'); }
+  };
   // Upload a file to GCS/local via presigned URL, then record the document row.
   async function uploadContractDoc(file: File, displayName: string, keyPrefix: string) {
     if (!contract) return;
@@ -4298,6 +4322,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
+    onCancelTermination,
     onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
     signActionUrl: `${contractsBase}/${contract.id}`,
     inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
@@ -4585,6 +4610,19 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 onClick={() => setModal('direct-terminate')}
               >
                 <X size={14} /> Terminate directly
+              </button>
+            )}
+            {/* Cancel/undo a termination that is still winding down (not yet
+                closed). Shows in place of "Terminate directly" once accepted. */}
+            {showPipeline && contract.status !== 'terminated'
+              && contract.termination?.response === 'accepted'
+              && perms.agreements && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
+                onClick={() => void onCancelTermination()}
+              >
+                <RotateCcw size={14} /> Cancel termination
               </button>
             )}
             {derived.landlordSigned && (
