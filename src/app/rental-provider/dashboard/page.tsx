@@ -740,13 +740,22 @@ export default function RentalProviderDashboard() {
                       <div className="text-[13.5px] font-bold text-[var(--neutral-900)] truncate">{r.unitLabel}</div>
                       <div className="text-[12px] text-[var(--neutral-400)] mt-0.5 truncate">{r.tenantName ?? 'No customer'}</div>
                     </div>
-                    <span
-                      className={`flex-shrink-0 text-[12px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${
-                        urgent ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
-                      }`}
-                    >
-                      {r.daysUntilEnd <= 0 ? 'expires today' : `${r.daysUntilEnd}d`}
-                    </span>
+                    <div className="flex-shrink-0 flex items-center gap-1.5">
+                      {(() => {
+                        const st = renewalStatusInfo(r.renewalStatus);
+                        const cls = st.tone === 'green' ? 'bg-green-50 text-green-700'
+                          : st.tone === 'amber' ? 'bg-amber-50 text-amber-700'
+                          : 'bg-[var(--base-200)] text-[var(--neutral-500)]';
+                        return <span className={`text-[11px] font-bold px-2 py-1 rounded-full whitespace-nowrap ${cls}`} title={st.label === 'Sent' ? 'Renewal proposal sent to tenant' : st.label === 'Draft' ? 'Renewal drafted — not sent yet' : 'No renewal proposed yet'}>{st.label}</span>;
+                      })()}
+                      <span
+                        className={`text-[12px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${
+                          urgent ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
+                        }`}
+                      >
+                        {r.daysUntilEnd <= 0 ? 'expires today' : `${r.daysUntilEnd}d`}
+                      </span>
+                    </div>
                   </Link>
                 );
               })}
