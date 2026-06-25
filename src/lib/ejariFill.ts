@@ -103,11 +103,14 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
 
   const lord = data.landlord, ten = data.tenant, prop = data.property, unit = data.unit;
   const landlordName = lord.companyName || lord.name || '';
+  // Company tenants are named by their company on the contract (the authorised
+  // person still signs); individuals by their person name — mirrors the landlord.
+  const tenantName = ten.companyName || ten.name || '';
   put('date', fmtDate(data.createdAt) || fmtDate(new Date().toISOString()));
   put('owner_name', landlordName); put('lessor_name', landlordName);
   put('lessor_id', lord.emiratesId); put('lessor_license', lord.licenseNumber); put('lessor_license_authority', lord.licenseAuthority);
   put('lessor_email', lord.email); put('lessor_phone', lord.phone);
-  put('tenant_name', ten.name); put('tenant_id', ten.emiratesId); put('tenant_license', ten.licenseNumber); put('tenant_license_authority', ten.licenseAuthority);
+  put('tenant_name', tenantName); put('tenant_id', ten.emiratesId); put('tenant_license', ten.licenseNumber); put('tenant_license_authority', ten.licenseAuthority);
   put('tenant_email', ten.email); put('tenant_phone', ten.phone);
   put('plot_no', prop.plotNumber); put('makani_no', prop.makaniNumber);
   put('building_name', prop.buildingName); put('property_no', unit.number || unit.name);
@@ -168,7 +171,7 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
     }
   };
   for (const [pi, tCx, lCx, base, dateB] of SIG) {
-    sign(pi, tCx, base, tImg, tSig, ten.name);
+    sign(pi, tCx, base, tImg, tSig, tenantName);
     sign(pi, lCx, base, lImg, lSig, landlordName);
     if (tSig?.signedAt) pages[pi].drawText(fmtDate(tSig.signedAt), { x: 200, y: H - dateB + 2, size: 8, font: roboto, color: rgb(0.05, 0.05, 0.05) });
     if (lSig?.signedAt) pages[pi].drawText(fmtDate(lSig.signedAt), { x: 473, y: H - dateB + 2, size: 8, font: roboto, color: rgb(0.05, 0.05, 0.05) });
