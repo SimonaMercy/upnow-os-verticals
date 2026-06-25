@@ -2494,7 +2494,7 @@ function DetailsDrawer({
             // print items are link rows. KYC/licenses live behind the
             // "View customer documents" link.
             type BinderSlot =
-              | { kind: 'doc'; key: string; label: string }
+              | { kind: 'doc'; key: string; label: string; fallbackHref?: string; fallbackSub?: string }
               | { kind: 'link'; key: string; label: string; sub: string; href: string | null };
             const moveOutShown = contract.status === 'terminated' || contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
             const receiptsReady = contract.pdcConfirmed || contract.status === 'active' || contract.contractActive;
@@ -2507,12 +2507,13 @@ function DetailsDrawer({
             ];
             if (!isRenewal) {
               binderSeq.push({ kind: 'doc',  key: 'utility_registration', label: 'Utility Proof of Payment' });
-              binderSeq.push({ kind: 'link', key: 'movein', label: 'Move-in', sub: 'Move-in inspection report', href: `${contractBase}/inspection?type=move_in` });
+              // Stored PDF once the inspection is counter-signed; live page until then.
+              binderSeq.push({ kind: 'doc', key: 'move_in_report', label: 'Move-in', fallbackHref: `${contractBase}/inspection?type=move_in`, fallbackSub: 'Move-in inspection report' });
             }
             if (moveOutShown) {
-              binderSeq.push({ kind: 'link', key: 'moveout', label: 'Move-out', sub: 'Move-out inspection report', href: `${contractBase}/inspection?type=move_out` });
+              binderSeq.push({ kind: 'doc', key: 'move_out_report', label: 'Move-out', fallbackHref: `${contractBase}/inspection?type=move_out`, fallbackSub: 'Move-out inspection report' });
               binderSeq.push({ kind: 'doc',  key: 'utility_final_bill', label: 'Utility Final Bill' });
-              binderSeq.push({ kind: 'link', key: 'settlement', label: 'Final Settlement', sub: 'Security deposit settlement', href: `${contractBase}/settlement` });
+              binderSeq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', fallbackHref: `${contractBase}/settlement`, fallbackSub: 'Security deposit settlement' });
             }
             // Offer Receipt opens an in-app modal showing the offered plan
             // (origin lead's plan), not an external link.
@@ -2547,7 +2548,23 @@ function DetailsDrawer({
             const renderDocSlot = (s: Extract<BinderSlot, { kind: 'doc' }>) => {
               const docs = matchDocs(s.key);
               const req: DocReq = { key: s.key, label: s.label, category: 'contract', required: false };
-              if (docs.length === 0) return renderMissing(req);
+              if (docs.length === 0) {
+                // No stored PDF yet — fall back to the live page (inspection / settlement)
+                // so it's reachable until the artifact is completed + snapshotted.
+                if (s.fallbackHref) return (
+                  <div key={s.key} className="docitem approved">
+                    <FileText size={14} />
+                    <div>
+                      <div className="dn">{s.label}</div>
+                      <div className="ds">{s.fallbackSub ?? 'Generated on completion'}</div>
+                    </div>
+                    <div className="dacts">
+                      <Link href={s.fallbackHref} target="_blank" className="mini-btn view"><ExternalLink size={12} /> View</Link>
+                    </div>
+                  </div>
+                );
+                return renderMissing(req);
+              }
               const multi = docs.length > 1;
               const doc = docs[0];
               const ok  = ['approved', 'processed', 'complete'].includes(doc.status);

@@ -60,6 +60,7 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
       name: c.tenant?.name ?? null,
       email: c.tenant?.email ?? null,
       phone: c.tenant?.phone ?? null,
+      companyName: c.tenant?.companyName ?? null,
       emiratesId: c.tenant?.emiratesId ?? null,
       licenseNumber: c.tenant?.licenseNumber ?? null,
       licenseAuthority: c.tenant?.licenseAuthority ?? null,

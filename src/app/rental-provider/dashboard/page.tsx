@@ -47,6 +47,16 @@ interface UnitRow {
 }
 
 type BadgeTone = 'green' | 'amber' | 'red' | 'indigo' | 'gray';
+
+/** Renewal status of an expiring lease, derived from the parent's renewal_status:
+ *  'proposed' = a renewal proposal was SENT to the tenant; 'draft' = drafted but
+ *  not yet sent; anything else = not started (pending). */
+function renewalStatusInfo(rs: string | null): { label: string; tone: BadgeTone } {
+  if (rs === 'proposed') return { label: 'Sent', tone: 'green' };
+  if (rs === 'draft')    return { label: 'Draft', tone: 'amber' };
+  return { label: 'Pending', tone: 'gray' };
+}
+
 interface DrillRow {
   key: string | number;
   title: string;
@@ -308,6 +318,11 @@ export default function RentalProviderDashboard() {
   const occupancyRate    = stats?.occupancyRate ?? 0;
   const activeContracts  = stats?.activeContracts ?? 0;
   const renewalsDue90    = stats?.renewalsDue90Days ?? 0;
+  // Split the 90-day renewals into already-sent (proposal sent to the tenant) vs
+  // still pending (drafted-but-not-sent, or not started) for the status display.
+  const renewalsList     = extras?.upcomingRenewals ?? [];
+  const renewalsSent     = renewalsList.filter(r => r.renewalStatus === 'proposed').length;
+  const renewalsPending  = renewalsList.length - renewalsSent;
   const units            = stats?.units ?? [];
   const [drill, setDrill] = useState<DrillState | null>(null);
 
@@ -347,14 +362,14 @@ export default function RentalProviderDashboard() {
         rows: items.map(x => ({
           key: x.contractId,
           title: x.unitLabel,
-          subtitle: `Ends ${new Date(x.endDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} · ${x.tenantName ?? 'Tenant'}${x.renewalStatus ? ` · ${x.renewalStatus}` : ''}`,
+          subtitle: `Ends ${new Date(x.endDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} · ${x.tenantName ?? 'Tenant'}`,
           href: `/rental-provider/dashboard/contracts/${x.contractId}/v2`,
-          badges: [daysBadge(x.daysUntilEnd)],
+          badges: [renewalStatusInfo(x.renewalStatus), daysBadge(x.daysUntilEnd)],
         })),
       }));
     setDrill({
       title: `Renewals due · ${list.length}`,
-      note: list.length ? 'Grouped by lease-end month — soonest first. Propose a renewal before they lapse.' : 'No renewals due in this window.',
+      note: list.length ? `${renewalsSent} sent · ${renewalsPending} pending — grouped by lease-end month, soonest first. Propose a renewal before they lapse.` : 'No renewals due in this window.',
       groups,
     });
   };
@@ -546,7 +561,7 @@ export default function RentalProviderDashboard() {
           icon={<AlertCircle size={12} />}
           label="Renewals · 90 days"
           value={String(renewalsDue90)}
-          sub={renewalsDue90 > 0 ? 'action needed' : 'none pending'}
+          sub={extras ? (renewalsList.length ? `${renewalsSent} sent · ${renewalsPending} pending` : 'none pending') : (renewalsDue90 > 0 ? 'action needed' : 'none pending')}
           tone={renewalsDue90 > 0 ? 'warn' : 'default'}
           onClick={drillRenewals}
         />

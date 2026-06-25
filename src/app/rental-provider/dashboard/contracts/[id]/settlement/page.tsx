@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, createElement } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -230,6 +230,27 @@ export default function SettlementPage() {
       const res = await fetch(`/api/contracts/${contractId}/settlement/paid`, { method: 'POST', credentials: 'include' });
       if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to mark paid'); return; }
       await load();
+      // Snapshot the completed settlement as a stored PDF so the contract documents
+      // binder shows a real document (best-effort — never block the close-out).
+      try {
+        const sres = await fetch(`/api/contracts/${contractId}/settlement`, { credentials: 'include' });
+        if (sres.ok) {
+          const sd = await sres.json() as ApiSettlement;
+          const [{ storeContractPdf }, mod] = await Promise.all([
+            import('@/lib/storeContractPdf'),
+            import('@/components/contract/DepositSettlementPdf'),
+          ]);
+          await storeContractPdf({
+            contractId: Number(contractId), documentKey: 'deposit_settlement', category: 'payment', displayName: 'Deposit Settlement',
+            element: createElement(mod.default, { data: {
+              ref: `CID-${contractId}`, property: meta?.property ?? '', unit: meta?.unit ?? '', tenantName: meta?.tenantName ?? '',
+              depositHeld: sd.depositHeld, lines: sd.lines, chargesTotal: sd.chargesTotal, refundAmount: sd.refundAmount,
+              payments: sd.payments, paymentsReceivedTotal: sd.paymentsReceivedTotal, balance: sd.balance,
+              paidAt: sd.paidAt, rpSignature: sd.rpSignature, tenantSignature: sd.tenantSignature, notes: sd.notes,
+            } }),
+          });
+        }
+      } catch { /* PDF snapshot is best-effort */ }
     } catch { setError('Unexpected error marking paid'); }
     finally { setActing(null); }
   }

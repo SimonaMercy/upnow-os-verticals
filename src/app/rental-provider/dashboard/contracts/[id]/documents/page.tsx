@@ -67,6 +67,18 @@ function Missing({ label }: { label: string }) {
   );
 }
 
+/** Fallback for an artifact whose PDF isn't generated yet (inspection not yet
+ *  counter-signed / settlement not yet paid). A light link to the live page —
+ *  NOT an iframe, since those routes are heavy full-screen workspaces. */
+function PendingLink({ label, href }: { label: string; href: string }) {
+  return (
+    <div style={{ border: '1px dashed #d8d4cc', borderRadius: 10, padding: '14px 16px', marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: '#fff' }}>
+      <span style={{ color: '#6b6860', display: 'flex', alignItems: 'center', gap: 8 }}><FileText size={14} /> {label} — not completed yet</span>
+      <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#1f6f54', textDecoration: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>Open ↗</a>
+    </div>
+  );
+}
+
 function OfferBlock({ plan }: { plan: OfferPlan }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
@@ -144,7 +156,7 @@ export default function ContractDocumentsPage() {
   const receiptsReady = !!c.pdcConfirmed || c.status === 'active' || !!c.contractActive;
 
   type Slot =
-    | { kind: 'doc'; key: string; label: string }
+    | { kind: 'doc'; key: string; label: string; fallbackHref?: string }
     | { kind: 'frame'; key: string; label: string; href: string }
     | { kind: 'offer'; key: string; label: string };
   const seq: Slot[] = [
@@ -156,12 +168,13 @@ export default function ContractDocumentsPage() {
   seq.push({ kind: 'doc', key: 'ejari_certificate', label: 'Ejari' });
   if (!isRenewal) {
     seq.push({ kind: 'doc', key: 'utility_registration', label: 'Utility Proof of Payment' });
-    seq.push({ kind: 'frame', key: 'movein', label: 'Move-in', href: `${contractBase}/inspection?type=move_in` });
+    // Stored PDF once the inspection is counter-signed; live page until then.
+    seq.push({ kind: 'doc', key: 'move_in_report', label: 'Move-in', fallbackHref: `${contractBase}/inspection?type=move_in` });
   }
   if (moveOut) {
-    seq.push({ kind: 'frame', key: 'moveout', label: 'Move-out', href: `${contractBase}/inspection?type=move_out` });
+    seq.push({ kind: 'doc', key: 'move_out_report', label: 'Move-out', fallbackHref: `${contractBase}/inspection?type=move_out` });
     seq.push({ kind: 'doc', key: 'utility_final_bill', label: 'Utility Final Bill' });
-    seq.push({ kind: 'frame', key: 'settlement', label: 'Final Settlement', href: `${contractBase}/settlement` });
+    seq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', fallbackHref: `${contractBase}/settlement` });
   }
   const seqIds = new Set(seq.flatMap(s => (s.kind === 'doc' ? matchDocs(s.key).map(d => d.id) : [])));
   const kyc = all.filter(d => !seqIds.has(d.id));
@@ -182,7 +195,9 @@ export default function ContractDocumentsPage() {
             if (s.kind === 'offer') return c.offerPlan ? <OfferBlock key="offer" plan={c.offerPlan} /> : <Missing key="offer" label="Offer Receipt" />;
             if (s.kind === 'frame') return <FrameBlock key={s.key} label={s.label} href={s.href} />;
             const docs = matchDocs(s.key);
-            if (!docs.length) return <Missing key={s.key} label={s.label} />;
+            if (!docs.length) return s.fallbackHref
+              ? <PendingLink key={s.key} label={s.label} href={s.fallbackHref} />
+              : <Missing key={s.key} label={s.label} />;
             return docs.map((d, i) => <Preview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} />);
           })}
         </Pane>

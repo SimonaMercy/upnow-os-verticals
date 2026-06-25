@@ -1,7 +1,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, createElement } from 'react';
 import { useParams, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -1019,6 +1019,36 @@ export default function InspectionPage() {
       }
       setCounterDone(true);
       setData(d => ({ ...d, rpCounterSig: counterSig, rpCounterSignedAt: new Date().toISOString() }));
+      // Snapshot the completed inspection as a stored PDF so the contract documents
+      // binder shows a real document (RP/manager authed path only — the upload flow
+      // needs a session; best-effort, never block signing).
+      if (!portalToken && meta) {
+        try {
+          const nowIso = new Date().toISOString();
+          const [{ storeContractPdf }, mod] = await Promise.all([
+            import('@/lib/storeContractPdf'),
+            import('@/components/contract/InspectionReportPdf'),
+          ]);
+          await storeContractPdf({
+            contractId: Number(contractId),
+            documentKey: inspType === 'move_out' ? 'move_out_report' : 'move_in_report',
+            category: 'inspection',
+            displayName: inspType === 'move_out' ? 'Move-out Inspection Checklist' : 'Move-in Inspection Checklist',
+            element: createElement(mod.default, { data: {
+              type: inspType, ref: `CID-${contractId}`,
+              property: meta.property, unit: meta.unit, tenantName: meta.tenantName,
+              inspectorName: data.inspectorName, inspectionDate: data.inspectionDate ?? nowIso, moveInDate: data.moveInDate || meta.moveInDate,
+              areas: data.areas.map(a => ({ name: a.name, items: a.items.map(it => ({ name: it.name, inCondition: it.inCondition, outCondition: it.outCondition, photoCount: it.itemAttachments?.length ?? 0 })), remarks: a.remarks })),
+              generalNotes: data.generalNotes,
+              photoCaptions: data.photos.map(p => p.caption?.trim() || 'Photo'),
+              utilities: (data.billClearance?.items ?? []).map(u => ({ provider: u.provider, cleared: u.cleared, outstanding: u.outstanding, reference: u.reference })),
+              billNotes: data.billClearance?.notes,
+              tenantSig: data.tenantSig, tenantSignedAt: data.tenantSignedAt ?? null,
+              rpCounterSig: counterSig, rpCounterSignedAt: nowIso,
+            } }),
+          });
+        } catch { /* PDF snapshot is best-effort */ }
+      }
     } catch {
       setCounterError('Unexpected error submitting signature');
     } finally {

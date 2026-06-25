@@ -276,6 +276,8 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   const listed = data.listedRent != null ? Number(data.listedRent) : rent;
   const discount = data.discountAmount != null ? Number(data.discountAmount) : Math.max(0, listed - rent);
   const landlordName = data.landlord.companyName || data.landlord.name || '';
+  // Company tenants are named by their company; individuals by their person name.
+  const tenantName = data.tenant.companyName || data.tenant.name || '';
   // Usage comes from the property's space category (residential/commercial/
   // industrial); fall back to matching the unit type string if it's absent.
   const sc = (data.property.spaceCategory || '').toLowerCase();
@@ -319,7 +321,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           <Field label="Lessor's Phone" ar="رقم هاتف المؤجر" value={data.landlord.phone} />
         </Section>
         <Section en="Tenant Information" ar="معلومات المستأجر">
-          <Field label="Tenant's Name" ar="اسم المستأجر" value={data.tenant.name} />
+          <Field label="Tenant's Name" ar="اسم المستأجر" value={tenantName} />
           <Field label="Tenant's Emirates ID" ar="الهوية الإماراتية للمستأجر" value={data.tenant.emiratesId} />
           <View style={{ flexDirection: 'row' }}>
             <Field label="License No." ar="رقم الرخصة" value={data.tenant.licenseNumber} half />
