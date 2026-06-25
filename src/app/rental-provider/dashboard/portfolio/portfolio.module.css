@@ -200,3 +200,43 @@
 .unitConfirmText { font-size: 12px; color: var(--danger-fg); font-weight: 600; }
 .unitConfirmYes { padding: 4px 10px; font-size: 11px; font-weight: 700; background: var(--danger-fg); color: #fff; border-radius: 6px; border: 0; cursor: pointer; }
 .unitConfirmNo { padding: 4px 10px; font-size: 11px; font-weight: 700; background: transparent; color: var(--ink-2); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+
+/* ── Claude-Design "Properties" handoff — internal section redesign ──────────
+   These power the new hero / KPI strip / Row + Grid cards. Pixel values mirror
+   page-redesign-request/project/Properties.dc.html. Self-contained to this page
+   (CSS module) so the rest of the portal palette is untouched. */
+
+/* 4-up KPI strip → 2-up on tablet (design: repeat(4,1fr) / repeat(2,1fr)). */
+.dxKpiGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin-bottom: 18px; }
+@media (max-width: 900px) { .dxKpiGrid { grid-template-columns: repeat(2, 1fr); } }
+
+/* Grid view → single column on narrow screens. */
+.dxGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+@media (max-width: 560px) { .dxGrid { grid-template-columns: 1fr; } }
+
+/* Add-property CTA (full-width on mobile). */
+.dxAddBtn { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; font-weight: 700; color: #fff; background: #1a9a64; border: none; padding: 12px 20px; border-radius: 11px; cursor: pointer; box-shadow: 0 6px 16px rgba(26, 154, 100, .26); transition: background .15s; }
+.dxAddBtn:hover { background: #178a59; }
+
+/* Row card (whole row opens the details popup). On mobile the rent + actions
+   wrap onto their own full-width line so nothing overlaps the name/address. */
+.dxRowCard { display: flex; align-items: center; gap: 14px; background: #fff; border: 1px solid #e7ebe6; border-radius: 14px; padding: 13px 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.dxRowCard:hover { border-color: #cfe7da; box-shadow: 0 3px 12px rgba(20, 40, 30, .06); }
+.dxRowLead { display: flex; align-items: center; gap: 14px; flex: 1 1 auto; min-width: 0; }
+.dxRowTail { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+
+@media (max-width: 600px) {
+  .dxAddBtn { width: 100%; }
+  .dxRowCard { flex-wrap: wrap; }
+  /* Drop below the lead, aligned under the name (photo 52 + gap 14). */
+  .dxRowTail { width: 100%; padding-left: 66px; justify-content: space-between; }
+}
+
+/* Grid card. */
+.dxGridCard { transition: border-color .15s, box-shadow .15s; }
+.dxGridCard:hover { border-color: #cfe7da; box-shadow: 0 6px 20px rgba(20, 40, 30, .08); }
+
+/* Row action icons (subtle until hovered). */
+.dxIconBtn { background: transparent; border: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .15s, color .15s; }
+.dxEdit:hover { background: #f4f6f3; color: #5a635c; }
+.dxTrash:hover { background: #fcebe7; color: #c44536; }

@@ -33,6 +33,7 @@ interface ManagedProperty {
   fullAddress:     string | null;
   spaceCategory:   string;
   numberOfFloors:  string | null;
+  numberOfUnits:   number | null;
   makaniNumber:    string | null;
   rentalProviderId:number;
   rpName?:         string;
@@ -57,6 +58,7 @@ interface ManagedProperty {
   hasPool?:        boolean;
   hasParking?:     boolean;
   isStandaloneUnit?: boolean;
+  leasingType?:    'direct' | 'sub' | 'management' | null;
 }
 
 /** Map the property-form values to the create/update DTO (mirrors the RP portfolio). */
@@ -74,6 +76,7 @@ function formToCreateDto(data: PropertyFormData) {
     communityId: data.communityId ?? undefined,
     subCommunityId: data.subCommunityId ?? undefined,
     numberOfFloors: data.numberOfFloors || undefined,
+    numberOfUnits: data.numberOfUnits ? Number(data.numberOfUnits) : undefined,
     makaniNumber: data.makaniNumber || undefined,
     plotNumber: data.plotNumber || undefined,
     latitude: data.latitude ?? undefined,
@@ -443,6 +446,7 @@ export default function ManagerPropertiesPage() {
           hasParking:          propertyModal.editing.hasParking,
           isStandaloneUnit:    propertyModal.editing.isStandaloneUnit,
           numberOfFloors:      propertyModal.editing.numberOfFloors ?? '',
+          numberOfUnits:       propertyModal.editing.numberOfUnits != null ? String(propertyModal.editing.numberOfUnits) : '',
         } : undefined}
         propertyId={propertyModal.editing?.id}
         unitCount={propertyModal.editing?.unitCount}
@@ -470,12 +474,19 @@ export default function ManagerPropertiesPage() {
             hasPool: detailsProperty.hasPool ?? false,
             hasParking: detailsProperty.hasParking ?? false,
             isStandaloneUnit: detailsProperty.isStandaloneUnit ?? false,
+            leasingType: detailsProperty.leasingType ?? null,
+            sharedAmenities: detailsProperty.sharedAmenities ?? null,
             propertyDescription: detailsProperty.propertyDescription ?? null,
             numberOfFloors: detailsProperty.numberOfFloors ?? null,
             createdAt: '',
             unitCount: detailsProperty.unitCount,
           }}
           stats={detailsProperty.unitCount != null ? { units: detailsProperty.unitCount, occupied: 0, rentTotal: 0 } : null}
+          onEdit={can('canEditProperties') ? () => {
+            const editing = detailsProperty;
+            setDetailsProperty(null);
+            setPropertyModal({ open: true, editing });
+          } : undefined}
           onClose={() => setDetailsProperty(null)}
         />
       )}

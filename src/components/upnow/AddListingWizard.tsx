@@ -64,7 +64,7 @@ const EMPTY_PROP: PropertyFormData = {
   buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
-  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
+  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '', numberOfUnits: '',
   propertyDescription: '', latitude: null, longitude: null,
   googlePlaceId: null,
   sharedAmenities: [],
@@ -289,6 +289,7 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
           emirateId: pf.emirateId ?? undefined,
           communityId: pf.communityId ?? undefined,
           numberOfFloors: pf.numberOfFloors || undefined,
+          numberOfUnits: pf.numberOfUnits ? Number(pf.numberOfUnits) : undefined,
           makaniNumber: pf.makaniNumber || undefined,
           plotNumber: pf.plotNumber || undefined,
           hasGym: pf.hasGym, hasPool: pf.hasPool, hasParking: pf.hasParking,
@@ -575,6 +576,10 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                     <div>
                       <Label t="Number of Floors" />
                       <input className={INPUT} placeholder="e.g. 20" value={pf.numberOfFloors} onChange={e => updP('numberOfFloors', e.target.value)} />
+                    </div>
+                    <div>
+                      <Label t="Number of Units" />
+                      <input type="number" min={0} inputMode="numeric" className={INPUT} placeholder="e.g. 24" value={pf.numberOfUnits} onChange={e => updP('numberOfUnits', e.target.value.replace(/[^0-9]/g, ''))} />
                     </div>
                   </div>
                 </div>

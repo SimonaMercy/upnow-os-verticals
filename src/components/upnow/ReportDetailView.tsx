@@ -57,7 +57,10 @@ interface ReportDef {
 }
 
 /** A building option for the fee-taxation building multi-select (from the API). */
-interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'sub'; contracts: number; }
+interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'sub' | 'management'; contracts: number; }
+type LeaseType = 'direct' | 'sub' | 'management';
+const ALL_LEASE_TYPES: LeaseType[] = ['direct', 'sub', 'management'];
+const LEASE_TYPE_LABELS: Record<LeaseType, string> = { direct: 'Direct', sub: 'Sub-lease', management: 'Management' };
 
 interface Column {
   key: string;
@@ -711,7 +714,7 @@ export function ReportDetailView({
   // types default to both selected (= all). Inline reclassify bumps refreshTick
   // to refetch so the rows reflect the building's new leasing model.
   const [selectedBuildings, setSelectedBuildings] = useState<number[]>([]);
-  const [selectedLeaseTypes, setSelectedLeaseTypes] = useState<('direct' | 'sub')[]>(['direct', 'sub']);
+  const [selectedLeaseTypes, setSelectedLeaseTypes] = useState<LeaseType[]>([...ALL_LEASE_TYPES]);
   const [buildingMenuOpen, setBuildingMenuOpen] = useState(false);
   const [classifyingId, setClassifyingId] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -745,13 +748,14 @@ export function ReportDetailView({
       url = `${endpoint}?year=${year}`;
     }
     // Building + leasing-model filters (fee-taxation). Buildings: omit when none
-    // selected (= all). Lease types: send only when exactly one of the two is
-    // selected; both or none → no param (= all), so a contract is never hidden
-    // by an empty selection.
+    // selected (= all). Lease types: send only when a strict subset is selected;
+    // all or none → no param (= all), so a contract is never hidden by an empty
+    // selection.
     if (def.buildingLeaseFilter) {
       const extra = new URLSearchParams();
       if (selectedBuildings.length) extra.set('buildings', selectedBuildings.join(','));
-      if (selectedLeaseTypes.length === 1) extra.set('leaseTypes', selectedLeaseTypes[0]);
+      if (selectedLeaseTypes.length > 0 && selectedLeaseTypes.length < ALL_LEASE_TYPES.length)
+        extra.set('leaseTypes', selectedLeaseTypes.join(','));
       if (granularity === 'quarter') extra.set('groupBy', 'quarter');
       const s = extra.toString();
       if (s) url += (url.includes('?') ? '&' : '?') + s;
@@ -790,15 +794,15 @@ export function ReportDetailView({
       const next = base.includes(id) ? base.filter(b => b !== id) : [...base, id];
       return next.length === allBuildingIds.length ? [] : next; // all selected → "all"
     });
-  // Toggle a leasing model; never allow an empty selection (resets to both = all).
-  const toggleLeaseType = (t: 'direct' | 'sub') =>
+  // Toggle a leasing model; never allow an empty selection (resets to all).
+  const toggleLeaseType = (t: LeaseType) =>
     setSelectedLeaseTypes(prev => {
       const next = prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t];
-      return next.length ? next : (['direct', 'sub'] as ('direct' | 'sub')[]);
+      return next.length ? next : [...ALL_LEASE_TYPES];
     });
   // Reclassify a building's leasing model inline (RP only). Optimistic on the
   // badge, then refetch so the rows/totals follow the new model.
-  async function classifyBuilding(id: number, leasingType: 'direct' | 'sub') {
+  async function classifyBuilding(id: number, leasingType: LeaseType) {
     if (!canClassify) return;
     setClassifyingId(id);
     setData(prev => prev ? { ...prev, buildings: prev.buildings?.map(b => b.id === id ? { ...b, leasingType } : b) } : prev);
@@ -1122,14 +1126,15 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Building + leasing-model (direct/sub) filters — fee-taxation only. */}
+      {/* Building + leasing-model (direct/sub/management) filters — fee-taxation only. */}
       {def.buildingLeaseFilter && (
         <div className={ctrlRowCls}>
-          {/* Leasing model — true multi-select; both on = all. */}
+          {/* Leasing model — true multi-select; all on = all. */}
           <span className={ctrlLabelCls}>Leasing model:</span>
           {([
-            { id: 'direct', label: 'Direct lease' },
-            { id: 'sub',    label: 'Sub-lease' },
+            { id: 'direct',     label: 'Direct lease' },
+            { id: 'sub',        label: 'Sub-lease' },
+            { id: 'management', label: 'Management' },
           ] as const).map(t => {
             const on = selectedLeaseTypes.includes(t.id);
             return (
@@ -1180,17 +1185,17 @@ export function ReportDetailView({
                         {/* Leasing model — inline toggle for RP, read-only badge for managers. */}
                         {canClassify ? (
                           <span className="inline-flex shrink-0 rounded-md border border-[#e8e6e0] overflow-hidden text-[10px] font-semibold">
-                            {(['direct', 'sub'] as const).map(t => (
+                            {ALL_LEASE_TYPES.map(t => (
                               <button key={t} type="button" disabled={classifyingId === b.id}
                                 onClick={() => b.leasingType !== t && classifyBuilding(b.id, t)}
                                 className={`px-2 py-1 transition-colors disabled:opacity-50 ${b.leasingType === t ? 'bg-[#2e9f82] text-white' : 'bg-white text-[#6b6860] hover:bg-[#f0fdf8]'}`}>
-                                {t === 'direct' ? 'Direct' : 'Sub'}
+                                {LEASE_TYPE_LABELS[t]}
                               </button>
                             ))}
                           </span>
                         ) : (
-                          <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${b.leasingType === 'sub' ? 'bg-[#ede9fe] text-[#5b21b6]' : 'bg-[#d8f2e8] text-[#1a7a5a]'}`}>
-                            {b.leasingType === 'sub' ? 'Sub-lease' : 'Direct'}
+                          <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${b.leasingType === 'sub' ? 'bg-[#ede9fe] text-[#5b21b6]' : b.leasingType === 'management' ? 'bg-[#fef0e0] text-[#b45309]' : 'bg-[#d8f2e8] text-[#1a7a5a]'}`}>
+                            {b.leasingType === 'sub' ? 'Sub-lease' : b.leasingType === 'management' ? 'Management' : 'Direct'}
                           </span>
                         )}
                       </li>

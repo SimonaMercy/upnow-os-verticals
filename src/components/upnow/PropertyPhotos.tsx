@@ -21,14 +21,19 @@ export function PropertyPhotos({
   propertyId,
   value,
   onChange,
+  layout = 'compact',
 }: {
   /** When set → live mode (immediate upload/delete/reorder). Absent → pending mode. */
   propertyId?: number;
   /** Pending-mode controlled files (add flow). */
   value?: File[];
   onChange?: (files: File[]) => void;
+  /** 'grid' → design-faithful 4:3 tile grid (Add Property form). 'compact'
+   *  (default) → small wrap tiles (unit uploaders). */
+  layout?: 'compact' | 'grid';
 }) {
   const live = propertyId != null;
+  const grid = layout === 'grid';
   const [items, setItems] = useState<PhotoRow[]>([]);
   const [loading, setLoading] = useState(live);
   const [busy, setBusy] = useState(false);
@@ -142,19 +147,30 @@ export function PropertyPhotos({
         onChange={e => { pick(e.target.files); e.target.value = ''; }}
       />
 
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-[#6b6860]">
-          Property Photos
-          <span className="text-[#9b9890] font-normal ml-1">({count}/{MAX})</span>
-          {count > 1 && <span className="text-[#9b9890] font-normal ml-2">· drag to set cover</span>}
-        </p>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div>
+          {grid ? (
+            <>
+              <p className="text-[13px] font-bold text-[#1a1916]">{count} / {MAX} photos added</p>
+              <p className="text-[11.5px] text-[#9b9890] mt-0.5">
+                {count === 0 ? `Add up to ${MAX} — at least 4 recommended.` : 'First photo is the cover · drag thumbnails to reorder.'}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs font-medium text-[#6b6860]">
+              Property Photos
+              <span className="text-[#9b9890] font-normal ml-1">({count}/{MAX})</span>
+              {count > 1 && <span className="text-[#9b9890] font-normal ml-2">· drag to set cover</span>}
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {busy && <Loader2 size={13} className="animate-spin text-[#2e9f82]" />}
           {count > 0 && count < MAX && (
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer"
+              className="flex items-center gap-1 text-xs text-[#2e9f82] font-semibold hover:text-[#1f6655] cursor-pointer"
             >
               <ImagePlus size={13} /> Add Photos
             </button>
@@ -169,14 +185,77 @@ export function PropertyPhotos({
           <Loader2 size={18} className="animate-spin text-[#2e9f82]" />
         </div>
       ) : count === 0 ? (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
-        >
-          <Camera size={22} className="text-[#c8c6c0] mb-1.5" />
-          <span className="text-xs text-[#9b9890]">Click to add photos</span>
-        </button>
+        grid ? (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="w-full flex flex-col items-center gap-2.5 rounded-[14px] border-[1.5px] border-dashed border-[#d6ddd6] bg-[#f6f8f5] py-8 hover:bg-[#f0f4ee] hover:border-[#bcd1c3] transition-colors cursor-pointer"
+          >
+            <span className="w-[46px] h-[46px] rounded-xl bg-white border border-[#e7ebe6] text-[#1a7a5a] flex items-center justify-center"><Camera size={22} /></span>
+            <span className="text-sm font-bold text-[#3a443d]">Click to add photos</span>
+            <span className="text-[11.5px] text-[#9b9890]">JPEG, PNG or WebP · up to {MAX} per property</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+          >
+            <Camera size={22} className="text-[#c8c6c0] mb-1.5" />
+            <span className="text-xs text-[#9b9890]">Click to add photos</span>
+          </button>
+        )
+      ) : grid ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+          {tiles.map((tile, idx) => (
+            <div
+              key={tile.key}
+              draggable
+              onDragStart={() => { dragIdxRef.current = idx; }}
+              onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const from = dragIdxRef.current;
+                if (from !== null && from !== idx) reorder(from, idx);
+                dragIdxRef.current = null;
+                setDragOverIdx(null);
+              }}
+              onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null); }}
+              className={`relative aspect-[4/3] rounded-xl overflow-hidden border group select-none transition-all
+                ${dragOverIdx === idx && dragIdxRef.current !== idx
+                  ? 'border-[#2e9f82] ring-2 ring-[#2e9f82]'
+                  : idx === 0 ? 'border-[#2e9f82]' : 'border-[#dfe6df]'}
+              `}
+              style={{ cursor: 'grab' }}
+            >
+              {idx === 0 && (
+                <span className="absolute top-2 left-2 z-10 text-[10px] font-bold tracking-wide text-white px-2 py-0.5 rounded-md"
+                  style={{ background: 'rgba(20,40,30,0.6)' }}>COVER</span>
+              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={tile.src} alt="" className="w-full h-full object-cover pointer-events-none" draggable={false} />
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); remove(idx); }}
+                disabled={busy}
+                className="absolute top-1.5 right-1.5 z-10 w-[22px] h-[22px] rounded-[7px] bg-white/90 text-[#5a635c] flex items-center justify-center hover:bg-white cursor-pointer disabled:opacity-40 transition-colors"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
+          {count < MAX && (
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="aspect-[4/3] rounded-xl border-[1.5px] border-dashed border-[#cdd5cf] bg-[#f6f8f5] flex flex-col items-center justify-center gap-1.5 text-[#9aa39c] hover:bg-[#f0f4ee] hover:border-[#2e9f82] cursor-pointer transition-colors"
+            >
+              <Plus size={20} />
+              <span className="text-[11px] font-semibold">Add more</span>
+            </button>
+          )}
+        </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
           {tiles.map((tile, idx) => (
@@ -231,7 +310,7 @@ export function PropertyPhotos({
         </div>
       )}
 
-      <p className="text-[10px] text-[#9b9890] mt-1">
+      <p className="text-[10px] text-[#9b9890] mt-2">
         JPEG, PNG or WebP · up to {MAX} per property · drag thumbnails to reorder · first image is the cover.
       </p>
     </div>

@@ -11,7 +11,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, User, FileText, ExternalLink, Mail, Phone, IdCard,
   Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Files, Pencil, History,
-  Upload, Check, Eye, Loader2, X,
+  Upload, Check, Eye, Loader2, X, Landmark,
 } from 'lucide-react';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
@@ -50,6 +50,7 @@ type CustomerDetail = {
     email: string | null; phone: string | null; emiratesId: string | null;
     nationality: string | null; gender: string | null; dateOfBirth: string | null;
     entityType: string | null; companyName: string | null; tradeLicenseNumber: string | null;
+    tradeLicenseAuthority: string | null;
   };
   summary: { totalLeases: number; activeLeases: number; totalActiveRent: number; documentCount: number };
   financials: Financials;
@@ -254,9 +255,13 @@ export default function CustomerDetailPage() {
   if (kycDocs.length === 0) actions.push('Upload KYC documents');
   if (!c.emiratesId) actions.push('Add Emirates ID');
   if (!c.phone) actions.push('Add phone number');
-  if (!c.nationality) actions.push('Add nationality');
-  if (!c.gender) actions.push('Add gender');
-  if (!c.dateOfBirth) actions.push('Add date of birth');
+  // Nationality / gender / DOB are personal attributes — only prompt for them on
+  // individuals. Companies are licensed entities (no person details apply).
+  if (!isCompany) {
+    if (!c.nationality) actions.push('Add nationality');
+    if (!c.gender) actions.push('Add gender');
+    if (!c.dateOfBirth) actions.push('Add date of birth');
+  }
 
   // Collected / Outstanding are scoped to the active (in-force) lease(s) only —
   // matching the Rent figure — so each card describes the same current tenancy
@@ -282,13 +287,17 @@ export default function CustomerDetailPage() {
     { icon: Mail, label: 'Email', value: c.email },
     { icon: Phone, label: 'Phone', value: c.phone },
     { icon: IdCard, label: 'Emirates ID', value: c.emiratesId },
-    { icon: Globe, label: 'Nationality', value: c.nationality },
-    { icon: User, label: 'Gender', value: c.gender ? c.gender.replace(/^./, x => x.toUpperCase()) : null },
-    { icon: Calendar, label: 'DOB', value: c.dateOfBirth ? `${fmtDate(c.dateOfBirth)}${ageFromDob(c.dateOfBirth) != null ? ` · ${ageFromDob(c.dateOfBirth)} yrs` : ''}` : null },
-    ...(isCompany ? [
+    // Personal attributes are shown for individuals only; companies surface
+    // their licensing details instead.
+    ...(!isCompany ? [
+      { icon: Globe, label: 'Nationality', value: c.nationality },
+      { icon: User, label: 'Gender', value: c.gender ? c.gender.replace(/^./, x => x.toUpperCase()) : null },
+      { icon: Calendar, label: 'DOB', value: c.dateOfBirth ? `${fmtDate(c.dateOfBirth)}${ageFromDob(c.dateOfBirth) != null ? ` · ${ageFromDob(c.dateOfBirth)} yrs` : ''}` : null },
+    ] : [
       { icon: Building2, label: 'Company', value: c.companyName },
       { icon: IdCard, label: 'Trade license', value: c.tradeLicenseNumber },
-    ] : []),
+      { icon: Landmark, label: 'License authority', value: c.tradeLicenseAuthority },
+    ]),
   ];
   // Rent progression — grouped PER UNIT so each unit's renewal chain is its own
   // timeline (mixing units interleaves dates and produces nonsensical deltas).
@@ -421,6 +430,7 @@ export default function CustomerDetailPage() {
               firstName: c.firstName, lastName: c.lastName, name: c.name, email: c.email, phone: c.phone,
               emiratesIdNumber: c.emiratesId, nationality: c.nationality, gender: c.gender,
               dateOfBirth: c.dateOfBirth, entityType: c.entityType, companyName: c.companyName,
+              tradeLicenseNumber: c.tradeLicenseNumber, tradeLicenseAuthority: c.tradeLicenseAuthority,
             }}
             onCancel={() => setEditing(false)}
             onDone={() => { setEditing(false); load(); }}

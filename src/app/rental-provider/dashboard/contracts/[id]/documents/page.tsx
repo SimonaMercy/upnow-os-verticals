@@ -47,7 +47,7 @@ function Center({ children }: { children: React.ReactNode }) {
   return <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', color: '#6b6860' }}>{children}</div>;
 }
 
-function Preview({ url, caption, footer }: { url: string; caption: string; footer?: React.ReactNode }) {
+function Preview({ url, caption }: { url: string; caption: string }) {
   const isPdf = (url || '').toLowerCase().split('?')[0].endsWith('.pdf');
   return (
     <div style={{ border: '1px solid #e3e0d9', borderRadius: 10, overflow: 'hidden', marginBottom: 14, background: '#fff' }}>
@@ -55,7 +55,6 @@ function Preview({ url, caption, footer }: { url: string; caption: string; foote
       {isPdf
         ? <iframe src={`${url}#toolbar=0&navpanes=0&view=FitH`} title={caption} style={{ width: '100%', height: 560, border: 0, display: 'block' }} />
         : <img src={url} alt={caption} style={{ width: '100%', display: 'block', background: '#f4f3ef' }} />}
-      {footer}
     </div>
   );
 }
@@ -78,7 +77,7 @@ function ReclassifySelect({ docId, onDone }: { docId: number; onDone: () => void
     finally { setBusy(false); }
   };
   return (
-    <div style={{ padding: '7px 12px', borderTop: '1px solid #efece6', display: 'flex', alignItems: 'center', gap: 8, background: '#fafaf8' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
       <span style={{ fontSize: 11, color: '#9b9890', fontWeight: 600 }}>Change type:</span>
       <select disabled={busy} defaultValue="" onChange={change}
         style={{ fontSize: 12, padding: '3px 7px', borderRadius: 6, border: '1px solid #e3e0d9', background: '#fff', cursor: busy ? 'wait' : 'pointer' }}>
@@ -236,7 +235,12 @@ export default function ContractDocumentsPage() {
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
         <Pane title="KYC documents">
           {kyc.length === 0 ? <p style={{ fontSize: 13, color: '#9b9890' }}>No customer documents on file.</p>
-            : kyc.map(d => <Preview key={'k' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} footer={<ReclassifySelect docId={d.id} onDone={refresh} />} />)}
+            : kyc.map(d => (
+                <div key={'k' + d.id}>
+                  <ReclassifySelect docId={d.id} onDone={refresh} />
+                  <Preview url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} />
+                </div>
+              ))}
         </Pane>
         <Pane title="Documents · in order" border>
           {seq.map(s => {
@@ -248,7 +252,12 @@ export default function ContractDocumentsPage() {
               : <Missing key={s.key} label={s.label} />;
             return docs.map((d, i) => <Preview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} />);
           })}
-          {otherDocs.map(d => <Preview key={'o' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} footer={<ReclassifySelect docId={d.id} onDone={refresh} />} />)}
+          {otherDocs.map(d => (
+            <div key={'o' + d.id}>
+              <ReclassifySelect docId={d.id} onDone={refresh} />
+              <Preview url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} />
+            </div>
+          ))}
         </Pane>
       </div>
     </div>

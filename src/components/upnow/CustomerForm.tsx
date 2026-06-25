@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { LICENSING_AUTHORITIES } from '@/lib/licensingAuthorities';
 
 export interface CustomerInitial {
   firstName?: string | null;
@@ -14,6 +15,8 @@ export interface CustomerInitial {
   dateOfBirth?: string | null;
   entityType?: string | null;
   companyName?: string | null;
+  tradeLicenseNumber?: string | null;
+  tradeLicenseAuthority?: string | null;
 }
 
 const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
@@ -42,6 +45,8 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
   const [dateOfBirth, setDob] = useState((initial?.dateOfBirth ?? '').slice(0, 10));
   const [entityType, setEntityType] = useState<'individual' | 'company'>(initial?.entityType === 'company' ? 'company' : 'individual');
   const [companyName, setCompanyName] = useState(initial?.companyName ?? '');
+  const [tradeLicenseNumber, setTradeLicenseNumber] = useState(initial?.tradeLicenseNumber ?? '');
+  const [tradeLicenseAuthority, setTradeLicenseAuthority] = useState(initial?.tradeLicenseAuthority ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -64,9 +69,24 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
       : {
           firstName: firstName.trim() || null, lastName: lastName.trim() || null,
           phone: phone.trim() || null, email: email.trim() || undefined,
-          emiratesIdNumber: emiratesIdNumber.trim() || null, nationality: nationality.trim() || null,
-          gender: gender.trim() || null, dateOfBirth: dateOfBirth || null,
+          emiratesIdNumber: emiratesIdNumber.trim() || null,
           entityType, companyName: entityType === 'company' ? (companyName.trim() || null) : null,
+          // Company tenants are licensed entities, not people: capture trade
+          // license + authority and leave the personal attributes untouched
+          // (they don't apply). Individuals capture nationality/gender/DOB and
+          // clear any stray license fields.
+          ...(entityType === 'company'
+            ? {
+                tradeLicenseNumber: tradeLicenseNumber.trim() || null,
+                tradeLicenseAuthority: tradeLicenseAuthority.trim() || null,
+              }
+            : {
+                nationality: nationality.trim() || null,
+                gender: gender.trim() || null,
+                dateOfBirth: dateOfBirth || null,
+                tradeLicenseNumber: null,
+                tradeLicenseAuthority: null,
+              }),
         };
     try {
       const res = await fetch(submitUrl, {
@@ -99,14 +119,35 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
         {mode === 'edit' && (
           <>
             <div><label className={label}>Emirates ID</label><input className={field} value={emiratesIdNumber} onChange={e => setEid(e.target.value)} placeholder="784-YYYY-NNNNNNN-D" /></div>
-            <div><label className={label}>Nationality</label><input className={field} value={nationality} onChange={e => setNationality(e.target.value)} placeholder="e.g. Emirati" /></div>
-            <div>
-              <label className={label}>Gender</label>
-              <select className={field} value={gender} onChange={e => setGender(e.target.value)}>
-                <option value="">—</option><option value="male">Male</option><option value="female">Female</option>
-              </select>
-            </div>
-            <div><label className={label}>Date of birth</label><input className={field} type="date" value={dateOfBirth} onChange={e => setDob(e.target.value)} /></div>
+            {entityType === 'company' ? (
+              <>
+                {/* Companies are licensed entities — capture the trade license
+                    and its issuing authority instead of personal attributes. */}
+                <div><label className={label}>Trade license no.</label><input className={field} value={tradeLicenseNumber} onChange={e => setTradeLicenseNumber(e.target.value)} placeholder="License number" /></div>
+                <div>
+                  <label className={label}>License authority</label>
+                  <select className={field} value={tradeLicenseAuthority} onChange={e => setTradeLicenseAuthority(e.target.value)}>
+                    <option value="">—</option>
+                    {/* Preserve any stored value that predates this list. */}
+                    {tradeLicenseAuthority && !LICENSING_AUTHORITIES.includes(tradeLicenseAuthority as typeof LICENSING_AUTHORITIES[number]) && (
+                      <option value={tradeLicenseAuthority}>{tradeLicenseAuthority}</option>
+                    )}
+                    {LICENSING_AUTHORITIES.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+              </>
+            ) : (
+              <>
+                <div><label className={label}>Nationality</label><input className={field} value={nationality} onChange={e => setNationality(e.target.value)} placeholder="e.g. Emirati" /></div>
+                <div>
+                  <label className={label}>Gender</label>
+                  <select className={field} value={gender} onChange={e => setGender(e.target.value)}>
+                    <option value="">—</option><option value="male">Male</option><option value="female">Female</option>
+                  </select>
+                </div>
+                <div><label className={label}>Date of birth</label><input className={field} type="date" value={dateOfBirth} onChange={e => setDob(e.target.value)} /></div>
+              </>
+            )}
           </>
         )}
       </div>

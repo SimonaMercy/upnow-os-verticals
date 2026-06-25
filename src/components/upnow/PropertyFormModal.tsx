@@ -1,13 +1,36 @@
 'use client';
 
-import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Check } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment, type Dispatch, type SetStateAction, type ReactNode } from 'react';
+import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Check, Home, Camera } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
-import { PROPERTY_DOC_SLOTS, HEAD_LEASE_KEY, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
+import { PROPERTY_DOC_SLOTS, HEAD_LEASE_KEY, MGMT_AGREEMENT_KEY, LEASE_PROOF_KEYS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
 import { DocPreviewModal } from './DocPreviewModal';
 import { PropertyPhotos } from './PropertyPhotos';
+
+// ─── Form section model (drives the modal's left-nav + scroll-spy) ──────────
+export type PropSectionId = 'cat' | 'loc' | 'det' | 'doc' | 'pho';
+export const PROPERTY_FORM_SECTIONS: { id: PropSectionId; num: number; label: string; desc: string }[] = [
+  { id: 'cat', num: 1, label: 'Category & lease',   desc: 'How you hold this building and what type it is.' },
+  { id: 'loc', num: 2, label: 'Location',           desc: 'Search to auto-fill, or enter the address manually.' },
+  { id: 'det', num: 3, label: 'Property details',   desc: 'Optional context that helps units and listings later.' },
+  { id: 'doc', num: 4, label: 'Property documents', desc: 'All optional — attach what you have now, add the rest later.' },
+  { id: 'pho', num: 5, label: 'Property photos',    desc: 'First image becomes the cover. Drag thumbnails to reorder.' },
+];
+
+/** Numbered section header (badge + title + subtitle) used in the sectioned form. */
+export function PropSectionHeader({ num, label, desc }: { num: number; label: string; desc: string }) {
+  return (
+    <div className="flex gap-3 mb-4">
+      <span className="w-[30px] h-[30px] shrink-0 rounded-[9px] bg-[#d8f2e8] text-[#1a7a5a] flex items-center justify-center text-[13px] font-extrabold">{num}</span>
+      <div>
+        <div className="text-[16px] font-extrabold tracking-tight text-[#1a1916] leading-tight">{label}</div>
+        <div className="text-[12.5px] text-[#9b9890] mt-0.5">{desc}</div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Types from backend location endpoints ────────────────
 interface Country      { id: number; nameEn: string; code: string; }
@@ -488,9 +511,10 @@ export function categoryDisplayLabel(id: string | null | undefined): string {
 export interface PropertyFormData {
   buildingName: string;
   spaceCategory: string;
-  // How the RP holds this building: 'direct' (owns/leases directly) vs 'sub'
-  // (head-leases then sub-leases). Drives the Fee & VAT report's direct/sub split.
-  leasingType: 'direct' | 'sub';
+  // How the RP holds this building: 'direct' (owns/leases directly), 'sub'
+  // (head-leases then sub-leases), or 'management' (manages on the owner's
+  // behalf). Drives the Fee & VAT report's direct/sub/management split.
+  leasingType: 'direct' | 'sub' | 'management';
   // Structured location (FK IDs) — Country → Emirate → City → Community → Sub-Community
   countryId: number | null;
   emirateId: number | null;
@@ -508,6 +532,9 @@ export interface PropertyFormData {
   makaniNumber: string;
   plotNumber: string;
   numberOfFloors: string;
+  // RP-declared total units in the building (metadata) — distinct from the live
+  // count of unit rows actually created on the property.
+  numberOfUnits: string;
   propertyDescription: string;
   latitude: number | null;
   longitude: number | null;
@@ -526,7 +553,7 @@ const EMPTY: PropertyFormData = {
   buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
-  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
+  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '', numberOfUnits: '',
   propertyDescription: '',
   latitude: null, longitude: null,
   sharedAmenities: [],
@@ -652,6 +679,113 @@ export function DocSlotCard({
   );
 }
 
+// Inline glyphs matching the Add Property design's document icons (a single
+// document vs a stacked-docs glyph for multi-file slots, and an eye for view).
+const DOC_FILE_SVG = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 2h9l5 5v15H6z" /><path d="M14 2v6h6" /></svg>
+);
+const DOC_STACK_SVG = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M8 3h7l4 4v11H8z" /><path d="M5 7v13h11" /></svg>
+);
+const DOC_EYE_SVG = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+);
+
+/**
+ * Property document slot — faithful to the Add Property design: a rounded icon
+ * tile (single-file vs stacked-docs glyph), the name with a stacked OPTIONAL
+ * chip (or a green "N files attached"), a mint pill Upload / Replace / Add
+ * button, and attached files shown as green pills (eye + name + ×).
+ *
+ * Pass `description` for the wider lease-proof layout used beside the leasing
+ * picker (icon + title + inline OPTIONAL chip + description + larger button).
+ */
+export function PropertyDocCard({
+  label, multiple, existing, queued, onAdd, onRemoveQueued, onRemoveExisting, onView,
+  description, stacked = false,
+}: {
+  label: string;
+  multiple: boolean;
+  existing: PropertyDoc[];
+  queued: File[];
+  onAdd: (files: FileList | null) => void;
+  onRemoveQueued: (idx: number) => void;
+  onRemoveExisting?: (id: number) => void;
+  onView: (doc: { url: string; mime?: string | null; name: string }) => void;
+  /** Present → lease-proof layout (inline chip + description + larger button). */
+  description?: string;
+  /** Use the stacked-docs glyph (multi-file slots). */
+  stacked?: boolean;
+}) {
+  const count = existing.length + queued.length;
+  const has = count > 0;
+  const inline = description != null;
+  const btnLabel = !has ? 'Upload' : multiple ? 'Add' : 'Replace';
+  const pillCls = 'inline-flex items-center gap-1.5 text-[11.5px] font-semibold rounded-lg px-2.5 py-1.5';
+  const pillStyle = { color: '#1a6b4d', background: '#e6f7f1', border: '1px solid #bfe0cd' } as const;
+  return (
+    <div className="rounded-xl border px-3.5 py-3" style={{ borderColor: has ? '#bfe0cd' : '#e8e6e0', background: has ? '#f5fbf8' : '#fff' }}>
+      <div className={cn('flex items-center', inline ? 'gap-3' : 'gap-2.5')}>
+        <span className={cn(inline ? 'w-[34px] h-[34px]' : 'w-8 h-8', 'shrink-0 rounded-[9px] flex items-center justify-center')}
+          style={{ background: has ? '#d8f2e8' : '#f4f3ef', color: has ? '#1a7a5a' : '#9b9890' }}>
+          {stacked ? DOC_STACK_SVG : DOC_FILE_SVG}
+        </span>
+        <div className="flex-1 min-w-0">
+          {inline ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-[13.5px] font-bold text-[#2b342e] truncate">{label}</span>
+                {!has && <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-[#9b9890] bg-[#f4f3ef] px-1.5 py-0.5 rounded">Optional</span>}
+              </div>
+              <div className="text-[11.5px] text-[#8a938c] mt-0.5 leading-snug">{description}</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[13px] font-bold text-[#2b342e] truncate">{label}</div>
+              {has
+                ? <div className="text-[11px] font-bold text-[#1a7a5a] mt-0.5">{count} file{count === 1 ? '' : 's'} attached</div>
+                : <span className="inline-block text-[9.5px] font-bold uppercase tracking-wide text-[#9b9890] bg-[#f4f3ef] px-1.5 py-0.5 rounded mt-1">Optional</span>}
+            </>
+          )}
+        </div>
+        <label className={cn('shrink-0 inline-flex items-center gap-1.5 rounded-[9px] font-bold cursor-pointer',
+          inline ? 'text-[13px] px-4 py-2.5' : 'text-[12px] px-3 py-2')}
+          style={{ background: '#e6f7f1', border: '1px solid #bfe0cd', color: '#1f6655' }}>
+          <input type="file" accept={PROPERTY_DOC_ACCEPT} multiple={multiple} className="sr-only"
+            onChange={e => { onAdd(e.target.files); e.target.value = ''; }} />
+          <Upload size={inline ? 14 : 13} /> {btnLabel}
+        </label>
+      </div>
+      {has && (
+        <div className="flex flex-wrap gap-1.5 mt-2.5">
+          {existing.map(d => (
+            <span key={`e${d.id}`} className={pillCls} style={pillStyle}>
+              <span className="inline-flex items-center gap-1.5 cursor-pointer max-w-[220px]" title="View document"
+                onClick={() => d.fileUrl && onView({ url: d.fileUrl, name: d.displayName || label })}>
+                <span className="opacity-70 inline-flex shrink-0">{DOC_EYE_SVG}</span>
+                <span className="truncate">{d.displayName || 'Document'}</span>
+              </span>
+              {onRemoveExisting && (
+                <span className="cursor-pointer text-[#9aa39c] leading-none text-sm shrink-0" title="Remove" onClick={() => onRemoveExisting(d.id)}>×</span>
+              )}
+            </span>
+          ))}
+          {queued.map((f, i) => (
+            <span key={`q${i}`} className={pillCls} style={pillStyle}>
+              <span className="inline-flex items-center gap-1.5 cursor-pointer max-w-[220px]" title="View document"
+                onClick={() => onView({ url: URL.createObjectURL(f), mime: f.type, name: f.name })}>
+                <span className="opacity-70 inline-flex shrink-0">{DOC_EYE_SVG}</span>
+                <span className="truncate">{f.name}</span>
+              </span>
+              <span className="cursor-pointer text-[#9aa39c] leading-none text-sm shrink-0" title="Remove" onClick={() => onRemoveQueued(i)}>×</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Shared, controlled property form body ──────────────────────────────────
 // Single source of truth for BOTH the Edit modal and the Add wizard (RP +
 // manager), so the two can never drift. Owns the location cascade + building
@@ -664,6 +798,7 @@ export function PropertyFields({
   existingDocs = [], onRemoveExisting,
   unitCount,
   extraDocs = {}, setExtraDocs,
+  sectioned = false, registerSection,
 }: {
   value: PropertyFormData;
   setValue: Dispatch<SetStateAction<PropertyFormData>>;
@@ -681,6 +816,11 @@ export function PropertyFields({
   /** Queued files for the extra document slots (affection plan, NOC, …). */
   extraDocs?: Record<string, File[]>;
   setExtraDocs?: Dispatch<SetStateAction<Record<string, File[]>>>;
+  /** Modal layout — render numbered section headers + dividers and register each
+   *  section's element for the modal's left-nav scroll-spy. Off (default) = the
+   *  flat inline layout used by the units/add wizard. */
+  sectioned?: boolean;
+  registerSection?: (id: PropSectionId, el: HTMLElement | null) => void;
 }) {
   const [autoFilled, setAutoFilled] = useState(false);
   const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
@@ -744,17 +884,22 @@ export function PropertyFields({
     apiGet<City[]>(`/locations/emirates/${loadCitiesFor}/cities`)
       .then(cs => {
         setCities(cs);
+        // UAE: exactly one city per emirate — auto-select it so the community
+        // list loads. Decide the community-load BEFORE setValue so we never call
+        // a setState from inside the updater (React runs updaters during render,
+        // and a nested setState there warns "update X while rendering Y").
+        const autoCityId = !value.cityId && cs.length === 1 ? cs[0].id : null;
         setValue(prev => {
           if (prev.cityId && !prev.cityName) {
             const match = cs.find(c => c.id === prev.cityId);
             if (match) return { ...prev, cityName: match.nameEn };
           }
           if (!prev.cityId && cs.length === 1) {
-            setLoadCommsFor(cs[0].id);
             return { ...prev, cityId: cs[0].id, cityName: cs[0].nameEn };
           }
           return prev;
         });
+        if (autoCityId != null) setLoadCommsFor(autoCityId);
       })
       .finally(() => setLoadingCities(false));
   }, [loadCitiesFor]);
@@ -766,16 +911,18 @@ export function PropertyFields({
     apiGet<Community[]>(`/locations/cities/${loadCommsFor}/communities`)
       .then(comms => {
         setCommunities(comms);
+        // Trigger the sub-community load BEFORE setValue (never call setState from
+        // inside the updater — it runs during render). Backfill the name purely.
+        const matchedCommId = value.communityId && comms.some(c => c.id === value.communityId)
+          ? value.communityId : null;
         setValue(prev => {
-          if (prev.communityId) {
+          if (prev.communityId && !prev.communityName) {
             const match = comms.find(c => c.id === prev.communityId);
-            if (match) {
-              setLoadSubsFor(prev.communityId);
-              if (!prev.communityName) return { ...prev, communityName: match.nameEn };
-            }
+            if (match) return { ...prev, communityName: match.nameEn };
           }
           return prev;
         });
+        if (matchedCommId != null) setLoadSubsFor(matchedCommId);
         // Fuzzy-match a community name carried over from a Mapbox/Google result
         if (pendingCommunityRef.current) {
           const pending = pendingCommunityRef.current.toLowerCase().trim();
@@ -963,294 +1110,352 @@ export function PropertyFields({
 
   const addDrawings = (files: FileList | null) => {
     if (!files?.length) return;
-    setDrawings(prev => [...prev, ...Array.from(files)]);
+    // Capture the files eagerly: the picker's onChange clears the input
+    // (`e.target.value = ''`) right after calling this, which empties the live
+    // FileList — so a lazy `Array.from(files)` inside the setState updater would
+    // read an already-cleared list and drop the upload.
+    const incoming = Array.from(files);
+    setDrawings(prev => [...prev, ...incoming]);
   };
+
+  // Wrap a logical group as a numbered, ref-registered <section> (modal layout)
+  // or render it flat (units/add wizard) — keeping ONE field-rendering source.
+  const renderSection = (id: PropSectionId, content: ReactNode) => {
+    if (!sectioned) return <Fragment key={id}>{content}</Fragment>;
+    const meta = PROPERTY_FORM_SECTIONS.find(s => s.id === id)!;
+    return (
+      <section key={id} ref={el => registerSection?.(id, el)} data-prop-section={id} style={{ scrollMarginTop: 20 }}>
+        <PropSectionHeader num={meta.num} label={meta.label} desc={meta.desc} />
+        <div className="space-y-5">{content}</div>
+      </section>
+    );
+  };
+  const divider = <div className="h-px bg-[#eef1ec] my-7" />;
 
   return (
     <>
-      {/* Category — only field the user sets manually */}
-      <div>
-        <FieldLabel label="Category" required />
-        {isEdit ? (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] text-sm text-[#3d3b35]">
-            <span className="flex-1">{categoryDisplayLabel(value.spaceCategory)}</span>
-            <span className="text-[10px] text-[#9b9890] font-medium">Locked</span>
-          </div>
-        ) : (
-          <>
-            <select className={cn(SELECT, errors.spaceCategory && 'border-red-400')}
-              value={value.spaceCategory} onChange={e => upd('spaceCategory', e.target.value)}>
-              <option value="">Select category</option>
-              {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-            {errors.spaceCategory && <p className="text-xs text-red-500 mt-1">{errors.spaceCategory}</p>}
-          </>
-        )}
-      </div>
-
-      {/* Leasing model — direct lease vs sub-lease. Editable in both add & edit
-          (unlike Category, which locks). Used by the Fee & VAT report's split. */}
-      <div>
-        <FieldLabel label="Leasing model" />
-        <div className="grid grid-cols-2 gap-2">
-          {([
-            { id: 'direct', label: 'Direct lease', desc: 'You own / lease this building directly to tenants' },
-            { id: 'sub',    label: 'Sub-lease',    desc: 'You head-lease this building, then sub-lease its units' },
-          ] as const).map(opt => {
-            const on = value.leasingType === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => upd('leasingType', opt.id)}
-                className={cn(
-                  'text-left rounded-lg border px-3 py-2 transition-colors cursor-pointer',
-                  on ? 'border-[#2e9f82] bg-[#e6f7f1]' : 'border-[#e8e6e0] hover:border-[#c5c2bc]',
-                )}
-              >
-                <span className={cn('block text-sm font-medium', on ? 'text-[#1f6655]' : 'text-[#1a1916]')}>{opt.label}</span>
-                <span className="block text-[11px] text-[#9b9890] mt-0.5 leading-tight">{opt.desc}</span>
-              </button>
-            );
-          })}
+      {/* ══ SECTION 1 — Category & lease ══ */}
+      {renderSection('cat', <>
+        {/* Category — only field the user sets manually (locked once set). */}
+        <div>
+          <FieldLabel label="Category" required />
+          {isEdit ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] text-sm text-[#3d3b35]">
+              <span className="flex-1">{categoryDisplayLabel(value.spaceCategory)}</span>
+              <span className="text-[10px] text-[#9b9890] font-medium">Locked</span>
+            </div>
+          ) : (
+            <>
+              <select className={cn(SELECT, errors.spaceCategory && 'border-red-400')}
+                value={value.spaceCategory} onChange={e => upd('spaceCategory', e.target.value)}>
+                <option value="">Select category</option>
+                {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              {errors.spaceCategory && <p className="text-xs text-red-500 mt-1">{errors.spaceCategory}</p>}
+            </>
+          )}
         </div>
 
-        {/* The proof-of-right document follows the leasing model: a directly-held
-            building has a Title Deed; a sub-leased one has the Master-lease
-            agreement (the contract that lets you sub-let it). Both optional. */}
-        {value.leasingType === 'direct' ? (
-          <div className="mt-2.5">
-            <DocSlotCard
-              label="Title Deed" multiple={false}
-              existing={existingDeed}
-              queued={titleDeed ? [titleDeed] : []}
-              onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
-              onRemoveQueued={() => setTitleDeed(null)}
-              onRemoveExisting={onRemoveExisting}
-              onView={setViewerDoc}
+        {/* Leasing model — direct / sub / management. Editable in both add & edit
+            (unlike Category, which locks). Drives the Fee & VAT report's split. */}
+        <div>
+          <FieldLabel label="Leasing model" required />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {([
+              { id: 'direct',     label: 'Direct lease',        desc: 'You own this building and lease it directly to tenants.',  attach: 'Title Deed' },
+              { id: 'sub',        label: 'Sub-lease',           desc: 'You head-lease this building, then sub-lease its units.',  attach: 'Head-lease Agreement' },
+              { id: 'management', label: 'Property management', desc: 'You manage this building on behalf of its owner.',         attach: 'Management Agreement' },
+            ] as const).map(opt => {
+              const on = value.leasingType === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => upd('leasingType', opt.id)}
+                  className={cn(
+                    'text-left rounded-xl border px-3.5 py-3 transition-colors cursor-pointer',
+                    on ? 'border-[#2e9f82] bg-[#e6f7f1]' : 'border-[#e8e6e0] bg-white hover:border-[#c5c2bc]',
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={cn('w-[18px] h-[18px] shrink-0 rounded-full border-2 flex items-center justify-center', on ? 'border-[#2e9f82]' : 'border-[#cdd5cf]')}>
+                      <span className={cn('w-2 h-2 rounded-full', on ? 'bg-[#2e9f82]' : 'bg-transparent')} />
+                    </span>
+                    <span className={cn('text-sm font-bold', on ? 'text-[#1f6655]' : 'text-[#1a1916]')}>{opt.label}</span>
+                  </span>
+                  <span className="block text-[12px] text-[#7d8780] mt-1.5 leading-snug">{opt.desc}</span>
+                  <span className="block text-[11px] text-[#9b9890] font-semibold mt-2">Attach · {opt.attach}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* The proof-of-right document follows the leasing model: a directly-held
+              building has a Title Deed; a sub-leased one has the head-lease /
+              master-lease agreement; a managed one has the signed management
+              agreement. All optional. */}
+          <div className="mt-3">
+            {value.leasingType === 'direct' ? (
+              <PropertyDocCard
+                label="Title Deed" multiple={false}
+                description="The building's title deed — proof of ownership of this property."
+                existing={existingDeed}
+                queued={titleDeed ? [titleDeed] : []}
+                onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
+                onRemoveQueued={() => setTitleDeed(null)}
+                onRemoveExisting={onRemoveExisting}
+                onView={setViewerDoc}
+              />
+            ) : value.leasingType === 'sub' ? (
+              <PropertyDocCard
+                label="Head-lease / Master-lease Agreement" multiple={false}
+                description="Your head-lease / master-lease agreement with the building owner — for a sub-leased property."
+                existing={existingDocs.filter(d => d.documentKey === HEAD_LEASE_KEY)}
+                queued={extraDocs[HEAD_LEASE_KEY] ?? []}
+                onAdd={files => addSlotFiles(HEAD_LEASE_KEY, files, false)}
+                onRemoveQueued={i => removeSlotFile(HEAD_LEASE_KEY, i)}
+                onRemoveExisting={onRemoveExisting}
+                onView={setViewerDoc}
+              />
+            ) : (
+              <PropertyDocCard
+                label="Signed Property Management Agreement" multiple={false}
+                description="The signed agreement authorising you to manage this property on the owner's behalf."
+                existing={existingDocs.filter(d => d.documentKey === MGMT_AGREEMENT_KEY)}
+                queued={extraDocs[MGMT_AGREEMENT_KEY] ?? []}
+                onAdd={files => addSlotFiles(MGMT_AGREEMENT_KEY, files, false)}
+                onRemoveQueued={i => removeSlotFile(MGMT_AGREEMENT_KEY, i)}
+                onRemoveExisting={onRemoveExisting}
+                onView={setViewerDoc}
+              />
+            )}
+          </div>
+        </div>
+      </>)}
+
+      {sectioned && divider}
+
+      {/* ══ SECTION 2 — Location ══ */}
+      {renderSection('loc', <>
+        {/* Search + Map — triggers auto-fill of all fields below */}
+        <div>
+          {!sectioned && <FieldLabel label="Search Building / Address" />}
+          {autoFilled ? (
+            <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8f2e8] rounded-lg px-3 py-2 mb-2">
+              <CheckCircle2 size={13} className="shrink-0" />
+              <span>Fields auto-filled from search — review and adjust below</span>
+            </div>
+          ) : (!sectioned && (
+            <p className="text-[10px] text-[#9b9890] mb-2">Search to auto-fill all fields below, or fill in manually</p>
+          ))}
+          <BuildingSearch onSelect={handleSearchSelect} onManualEntry={() => setAutoFilled(false)} />
+          <p className="text-[10px] text-[#9b9890] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
+          {showMap ? (
+            <MapPicker
+              latitude={value.latitude} longitude={value.longitude}
+              onChange={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
             />
-            <p className="text-[11px] text-[#9b9890] mt-1">The building&apos;s title deed — for a directly-owned / directly-leased property.</p>
-          </div>
-        ) : (
-          <div className="mt-2.5">
-            <DocSlotCard
-              label="Master Lease Agreement" multiple={false}
-              existing={existingDocs.filter(d => d.documentKey === HEAD_LEASE_KEY)}
-              queued={extraDocs[HEAD_LEASE_KEY] ?? []}
-              onAdd={files => addSlotFiles(HEAD_LEASE_KEY, files, false)}
-              onRemoveQueued={i => removeSlotFile(HEAD_LEASE_KEY, i)}
-              onRemoveExisting={onRemoveExisting}
-              onView={setViewerDoc}
-            />
-            <p className="text-[11px] text-[#9b9890] mt-1">Your master-lease agreement with the building owner — for a sub-leased property.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Search + Map — triggers auto-fill of all fields below */}
-      <div>
-        <FieldLabel label="Search Building / Address" />
-        {autoFilled ? (
-          <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8f2e8] rounded-lg px-3 py-2 mb-2">
-            <CheckCircle2 size={13} className="shrink-0" />
-            <span>Fields auto-filled from search — review and adjust below</span>
-          </div>
-        ) : (
-          <p className="text-[10px] text-[#9b9890] mb-2">Search to auto-fill all fields below, or fill in manually</p>
-        )}
-        <BuildingSearch onSelect={handleSearchSelect} onManualEntry={() => setAutoFilled(false)} />
-        <p className="text-[10px] text-[#9b9890] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
-        {showMap ? (
-          <MapPicker
-            latitude={value.latitude} longitude={value.longitude}
-            onChange={(lat, lng) => { upd('latitude', lat); upd('longitude', lng); }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowMap(true)}
-            className="w-full h-[220px] rounded-xl border border-dashed border-[#e8e6e0] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
-          >
-            <MapPin size={20} className="opacity-40" />
-            <span className="text-xs">Search above to pin location, or click to open map</span>
-          </button>
-        )}
-      </div>
-
-      {/* Location chain: Country → Emirate. The City tier is hidden for now —
-          it still auto-selects internally (one city per UAE emirate) so the
-          community list loads and cityId is saved; we just don't show it. */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <FieldLabel label="Country" required />
-          <select className={SELECT} value={value.countryId ?? ''} onChange={e => handleCountryChange(e.target.value)}>
-            <option value="">Select Country</option>
-            {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-          </select>
-        </div>
-        <div>
-          <FieldLabel label="Emirate / Region" required />
-          <select
-            className={cn(SELECT, errors.emirateId && 'border-red-400', !value.countryId && DISABLED_CLS)}
-            value={value.emirateId ?? ''}
-            onChange={e => handleEmirateChange(e.target.value)}
-            disabled={!value.countryId}
-          >
-            <option value="">{value.countryId ? 'Select Emirate' : 'Select Country first'}</option>
-            {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
-          </select>
-          {errors.emirateId && <p className="text-xs text-red-500 mt-1">{errors.emirateId}</p>}
-        </div>
-      </div>
-
-      {/* Community + (Sub-Community only when the community has any) */}
-      <div className={cn('grid gap-3', subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1')}>
-        <div>
-          <FieldLabel label="Community / Area" />
-          <select
-            className={cn(SELECT, (!value.cityId || loadingComms) && DISABLED_CLS)}
-            value={value.communityId ?? ''}
-            onChange={e => handleCommunityChange(e.target.value)}
-            disabled={!value.cityId || loadingComms}
-          >
-            <option value="">{loadingComms ? 'Loading…' : value.cityId ? 'Select Community' : 'Select City first'}</option>
-            {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-          </select>
-        </div>
-        {subCommunities.length > 0 && (
-          <div>
-            <FieldLabel label="Sub-Community" />
-            <select
-              className={cn(SELECT, loadingSubs && DISABLED_CLS)}
-              value={value.subCommunityId ?? ''}
-              onChange={e => handleSubCommunityChange(e.target.value)}
-              disabled={loadingSubs}
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowMap(true)}
+              className="w-full h-[220px] rounded-xl border border-dashed border-[#e8e6e0] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
             >
-              <option value="">Select Sub-Community (optional)</option>
-              {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
+              <MapPin size={20} className="opacity-40" />
+              <span className="text-xs">Search above to pin location, or click to open map</span>
+            </button>
+          )}
+        </div>
+
+        {/* Location chain: Country → Emirate. The City tier is hidden for now —
+            it still auto-selects internally (one city per UAE emirate) so the
+            community list loads and cityId is saved; we just don't show it. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FieldLabel label="Country" required />
+            <select className={SELECT} value={value.countryId ?? ''} onChange={e => handleCountryChange(e.target.value)}>
+              <option value="">Select Country</option>
+              {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
             </select>
           </div>
-        )}
-      </div>
-
-      {/* Building Name | Street — auto-filled from search */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <FieldLabel label="Building / Property Name" />
-          <input
-            className={cn(INPUT, errors.buildingName && 'border-red-400')}
-            placeholder="e.g. Al Safa Tower, Palm Residences"
-            value={value.buildingName}
-            onChange={e => upd('buildingName', e.target.value)}
-          />
-          {errors.buildingName && <p className="text-xs text-red-500 mt-1">{errors.buildingName}</p>}
-        </div>
-        <div>
-          <FieldLabel label="Street / Address" />
-          {/* Plain input — no autocomplete here; the "Search Building / Address"
-              field above already auto-fills the street and coordinates. */}
-          <input
-            className={INPUT}
-            placeholder="e.g. Sheikh Zayed Road, Al Wasl Road…"
-            value={value.street}
-            onChange={e => upd('street', e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Plot Number | Makani Number | Number of floors — manual (Makani = Dubai's 10-digit geo address) */}
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <FieldLabel label="Plot Number" />
-          <input className={INPUT} placeholder="e.g. PLOT-12345" value={value.plotNumber}
-            onChange={e => upd('plotNumber', e.target.value)} />
-        </div>
-        <div>
-          <FieldLabel label="Makani Number" />
-          <input className={INPUT} placeholder="e.g. 1234567890" value={value.makaniNumber}
-            onChange={e => upd('makaniNumber', e.target.value)} />
-        </div>
-        <div>
-          <FieldLabel label="Number of floors" />
-          <input className={INPUT} placeholder="e.g. 20 or G+12" value={value.numberOfFloors}
-            onChange={e => upd('numberOfFloors', e.target.value)} />
-        </div>
-      </div>
-
-      {/* Property description — free text, shown on the listing + property profile. */}
-      <div>
-        <FieldLabel label="Property description" />
-        <textarea
-          className={cn(INPUT, 'min-h-[88px] resize-y leading-relaxed')}
-          placeholder="Optional — location highlights, shared facilities, building notes…"
-          value={value.propertyDescription}
-          onChange={e => upd('propertyDescription', e.target.value)}
-        />
-      </div>
-
-      {/* Number of units — auto-derived (read-only). Units are added/managed in
-          the unit forms; this just reflects the live count. */}
-      {unitCount != null && (
-        <div>
-          <FieldLabel label="Number of units" />
-          <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 bg-[#faf9f6]">
-            <span className="text-sm font-semibold text-[#1a1916]">{unitCount}</span>
-            <span className="text-xs text-[#9b9890]">unit{unitCount === 1 ? '' : 's'} on this property · managed in the unit forms</span>
+          <div>
+            <FieldLabel label="Emirate / Region" required />
+            <select
+              className={cn(SELECT, errors.emirateId && 'border-red-400', !value.countryId && DISABLED_CLS)}
+              value={value.emirateId ?? ''}
+              onChange={e => handleEmirateChange(e.target.value)}
+              disabled={!value.countryId}
+            >
+              <option value="">{value.countryId ? 'Select Emirate' : 'Select Country first'}</option>
+              {emirates.map(em => <option key={em.id} value={em.id}>{em.nameEn}</option>)}
+            </select>
+            {errors.emirateId && <p className="text-xs text-red-500 mt-1">{errors.emirateId}</p>}
           </div>
         </div>
-      )}
 
-      {/* Property Features — multi-select from the preset list only. */}
-      <div>
-        <FieldLabel label="Property features" />
-        <div className="flex flex-wrap gap-1.5">
-          {[...PROPERTY_FEATURES, ...value.sharedAmenities.filter(a => !PROPERTY_FEATURES.includes(a))].map(feat => {
-            const on = value.sharedAmenities.includes(feat);
-            return (
-              <button
-                key={feat}
-                type="button"
-                onClick={() => toggleFeature(feat)}
-                className={cn(
-                  'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors cursor-pointer',
-                  on ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]',
-                )}
+        {/* Community + (Sub-Community only when the community has any) */}
+        <div className={cn('grid gap-3', subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1')}>
+          <div>
+            <FieldLabel label="Community / Area" />
+            <select
+              className={cn(SELECT, (!value.cityId || loadingComms) && DISABLED_CLS)}
+              value={value.communityId ?? ''}
+              onChange={e => handleCommunityChange(e.target.value)}
+              disabled={!value.cityId || loadingComms}
+            >
+              <option value="">{loadingComms ? 'Loading…' : value.cityId ? 'Select Community' : 'Select Emirate first'}</option>
+              {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+            </select>
+          </div>
+          {subCommunities.length > 0 && (
+            <div>
+              <FieldLabel label="Sub-Community" />
+              <select
+                className={cn(SELECT, loadingSubs && DISABLED_CLS)}
+                value={value.subCommunityId ?? ''}
+                onChange={e => handleSubCommunityChange(e.target.value)}
+                disabled={loadingSubs}
               >
-                {feat}
-              </button>
-            );
-          })}
+                <option value="">Select Sub-Community (optional)</option>
+                {subCommunities.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
+              </select>
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* ── Property documents — same slot pattern as KYC / contract docs ── */}
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[#9b9890] mb-2">Property documents</p>
+        {/* Building Name | Street — auto-filled from search */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FieldLabel label="Building / Property Name" />
+            <input
+              className={cn(INPUT, errors.buildingName && 'border-red-400')}
+              placeholder="e.g. Al Safa Tower, Palm Residences"
+              value={value.buildingName}
+              onChange={e => upd('buildingName', e.target.value)}
+            />
+            {errors.buildingName && <p className="text-xs text-red-500 mt-1">{errors.buildingName}</p>}
+          </div>
+          <div>
+            <FieldLabel label="Street / Address" />
+            {/* Plain input — no autocomplete here; the "Search Building / Address"
+                field above already auto-fills the street and coordinates. */}
+            <input
+              className={INPUT}
+              placeholder="e.g. Sheikh Zayed Road, Al Wasl Road…"
+              value={value.street}
+              onChange={e => upd('street', e.target.value)}
+            />
+          </div>
+        </div>
+      </>)}
 
-        {/* Property structure flag. The title deed / master-lease itself is asked
-            up top, driven by the leasing model. */}
-        <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-2.5 cursor-pointer hover:border-[#c5c2bc] mb-2.5">
+      {sectioned && divider}
+
+      {/* ══ SECTION 3 — Property details ══ */}
+      {renderSection('det', <>
+        {/* Plot | Makani | Floors | (live unit count, edit only). Makani = Dubai's
+            10-digit geo address. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <FieldLabel label="Plot Number" />
+            <input className={INPUT} placeholder="e.g. PLOT-12345" value={value.plotNumber}
+              onChange={e => upd('plotNumber', e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel label="Makani Number" />
+            <input className={INPUT} placeholder="e.g. 1234567890" value={value.makaniNumber}
+              onChange={e => upd('makaniNumber', e.target.value)} />
+          </div>
+          <div>
+            <FieldLabel label="Number of floors" />
+            <input className={INPUT} placeholder="e.g. 20 or G+12" value={value.numberOfFloors}
+              onChange={e => upd('numberOfFloors', e.target.value)} />
+          </div>
+          {/* Number of units — RP-declared total for the building. The live count
+              of units actually added (unitCount, edit only) shows as a hint. */}
+          <div>
+            <FieldLabel label="Number of units" />
+            <input
+              type="number" min={0} inputMode="numeric"
+              className={INPUT}
+              placeholder="e.g. 24"
+              value={value.numberOfUnits}
+              onChange={e => upd('numberOfUnits', e.target.value.replace(/[^0-9]/g, ''))}
+            />
+            {unitCount != null && (
+              <p className="text-[11px] text-[#9b9890] mt-1">{unitCount} unit{unitCount === 1 ? '' : 's'} added so far · managed in the unit forms</p>
+            )}
+          </div>
+        </div>
+
+        {/* Property description — free text, shown on the listing + property profile. */}
+        <div>
+          <FieldLabel label="Property description" />
+          <textarea
+            className={cn(INPUT, 'min-h-[88px] resize-y leading-relaxed')}
+            placeholder="Optional — location highlights, shared facilities, building notes…"
+            value={value.propertyDescription}
+            onChange={e => upd('propertyDescription', e.target.value)}
+          />
+        </div>
+
+        {/* Property Features — multi-select from the preset list only. */}
+        <div>
+          <FieldLabel label="Property features" />
+          <div className="flex flex-wrap gap-1.5">
+            {[...PROPERTY_FEATURES, ...value.sharedAmenities.filter(a => !PROPERTY_FEATURES.includes(a))].map(feat => {
+              const on = value.sharedAmenities.includes(feat);
+              return (
+                <button
+                  key={feat}
+                  type="button"
+                  onClick={() => toggleFeature(feat)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors cursor-pointer',
+                    on ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]',
+                  )}
+                >
+                  {on && <Check size={12} className="shrink-0" />}
+                  {feat}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </>)}
+
+      {sectioned && divider}
+
+      {/* ══ SECTION 4 — Property documents (same slot pattern as KYC / contract docs) ══ */}
+      {renderSection('doc', <>
+        {!sectioned && <p className="text-[11px] font-bold uppercase tracking-wider text-[#9b9890]">Property documents</p>}
+
+        {/* Property structure flag. The title deed / head-lease / management
+            agreement itself is asked up top, driven by the leasing model. */}
+        <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-xl px-4 py-3.5 cursor-pointer hover:border-[#c5c2bc]">
           <input
             type="checkbox"
             checked={value.isStandaloneUnit}
             onChange={e => upd('isStandaloneUnit', e.target.checked)}
-            className="mt-0.5 accent-[#2e9f82]"
+            className="mt-0.5 w-[18px] h-[18px] accent-[#2e9f82]"
           />
           <span>
-            <span className="block text-sm font-medium text-[#1a1916]">Standalone property (the property is a single unit)</span>
-            <span className="block text-[11px] text-[#9b9890] mt-0.5">
-              On — a villa or single standalone unit held as one whole (its title deed / master-lease is the one above).
+            <span className="block text-sm font-bold text-[#1a1916]">Standalone property <span className="font-medium text-[#8a938c]">— the property is a single unit</span></span>
+            <span className="block text-[11px] text-[#9b9890] mt-1 leading-relaxed">
+              On — a villa or single standalone unit held as one whole (its title deed / agreement is the one above).
               Off — a multi-unit building; units are managed separately, each with its own deed in the unit form.
             </span>
           </span>
         </label>
 
-        <div className="space-y-4">
-          {/* Single-file documents — one file each (re-uploading replaces it). */}
-          <div className="space-y-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Single file</p>
-            {PROPERTY_DOC_SLOTS.filter(s => !s.multiple && s.key !== HEAD_LEASE_KEY).map(slot => (
-              <DocSlotCard
+        {/* Single-file documents — one file each (re-uploading replaces it).
+            Lease-proof slots (head-lease, management agreement) live next to the
+            leasing picker above, so they're excluded here. */}
+        <div className="space-y-2.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#a0a8a1]">Single file</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {PROPERTY_DOC_SLOTS.filter(s => !s.multiple && !LEASE_PROOF_KEYS.includes(s.key)).map(slot => (
+              <PropertyDocCard
                 key={slot.key}
                 label={slot.label} multiple={slot.multiple}
                 existing={existingDocs.filter(d => docBelongsToSlot(d.documentKey, slot))}
@@ -1262,12 +1467,14 @@ export function PropertyFields({
               />
             ))}
           </div>
+        </div>
 
-          {/* Multi-file documents — attach several. */}
-          <div className="space-y-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#b6b3ab]">Multiple files</p>
-            <DocSlotCard
-              label="Building Floor Plans" multiple
+        {/* Multi-file documents — attach several. */}
+        <div className="space-y-2.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#a0a8a1]">Multiple files</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <PropertyDocCard
+              label="Building Floor Plans" multiple stacked
               existing={existingDrawings}
               queued={drawings}
               onAdd={addDrawings}
@@ -1276,9 +1483,9 @@ export function PropertyFields({
               onView={setViewerDoc}
             />
             {PROPERTY_DOC_SLOTS.filter(s => s.multiple).map(slot => (
-              <DocSlotCard
+              <PropertyDocCard
                 key={slot.key}
-                label={slot.label} multiple={slot.multiple}
+                label={slot.label} multiple stacked
                 existing={existingDocs.filter(d => docBelongsToSlot(d.documentKey, slot))}
                 queued={extraDocs[slot.key] ?? []}
                 onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
@@ -1289,7 +1496,7 @@ export function PropertyFields({
             ))}
           </div>
         </div>
-      </div>
+      </>)}
 
       {/* In-app document preview ("View") */}
       {viewerDoc && (
@@ -1318,10 +1525,58 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
   // Bumped each open so PropertyFields remounts and re-derives its cascade.
   const [openSeq, setOpenSeq] = useState(0);
 
+  // Left-nav scroll-spy: the body is the scroll container; each section
+  // registers its element here so clicking the nav scrolls to it and scrolling
+  // highlights the section in view.
+  const [activeSection, setActiveSection] = useState<PropSectionId>('cat');
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const sectionEls = useRef<Partial<Record<PropSectionId, HTMLElement | null>>>({});
+  const scrollingRef = useRef(false);
+  const registerSection = useCallback((id: PropSectionId, el: HTMLElement | null) => {
+    sectionEls.current[id] = el;
+  }, []);
+
+  const scrollToSection = (id: PropSectionId) => {
+    setActiveSection(id);
+    const c = bodyRef.current, el = sectionEls.current[id];
+    if (!c || !el) return;
+    const top = c.scrollTop + (el.getBoundingClientRect().top - c.getBoundingClientRect().top) - 14;
+    scrollingRef.current = true;
+    c.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    window.setTimeout(() => { scrollingRef.current = false; }, 450);
+  };
+
+  const onBodyScroll = () => {
+    const c = bodyRef.current;
+    if (!c || scrollingRef.current) return;
+    const cTop = c.getBoundingClientRect().top;
+    let cur: PropSectionId = PROPERTY_FORM_SECTIONS[0].id;
+    for (const s of PROPERTY_FORM_SECTIONS) {
+      const el = sectionEls.current[s.id];
+      if (el && el.getBoundingClientRect().top - cTop <= 80) cur = s.id;
+    }
+    if (c.scrollTop + c.clientHeight >= c.scrollHeight - 4) cur = 'pho';
+    if (cur !== activeSection) setActiveSection(cur);
+  };
+
+  // Lightweight setup-progress signal for the sidebar bar.
+  const progressPct = useMemo(() => {
+    const checks = [
+      !!form.spaceCategory,
+      !!form.emirateId,
+      !!form.buildingName.trim(),
+      !!(form.latitude && form.longitude),
+      !!(form.street.trim() || form.communityId),
+      !!(form.sharedAmenities.length || form.propertyDescription.trim() || form.plotNumber.trim() || form.makaniNumber.trim()),
+    ];
+    return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  }, [form]);
+
   useEffect(() => {
     if (!open) return;
     setForm({ ...EMPTY, ...initial });
     setErrors({}); setTitleDeed(null); setDrawings([]); setExtraDocs({}); setPropertyPhotos([]);
+    setActiveSection('cat');
     setOpenSeq(s => s + 1);
     if (propertyId) {
       apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
@@ -1349,10 +1604,14 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     if (!form.emirateId)     errs.emirateId = 'Required';
     setErrors(errs);
     // Title deed is OPTIONAL — even for a standalone property.
-    if (Object.keys(errs).length > 0) return;
+    if (Object.keys(errs).length > 0) {
+      // Jump to the first section with a missing required field.
+      scrollToSection(errs.spaceCategory ? 'cat' : 'loc');
+      return;
+    }
     setSaving(true);
-    // Title deed travels for directly-held properties (sub-leases carry a master
-    // lease via extraDocs instead).
+    // Title deed travels for directly-held properties (sub-leases / managed
+    // properties carry their proof doc via extraDocs instead).
     try { await onSave(form, form.leasingType === 'direct' ? titleDeed : null, drawings, extraDocs, propertyPhotos); onClose(); }
     finally { setSaving(false); }
   };
@@ -1361,59 +1620,136 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto py-10 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4"
+      style={{ background: 'rgba(20,30,25,0.46)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl">
-        {/* Header */}
-        <div className="sticky top-0 bg-white rounded-t-2xl flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] z-10">
-          <div>
-            <h3 className="font-semibold text-lg text-[#1a1916]">{title ?? 'Add Property'}</h3>
-            <p className="text-xs text-[#9b9890] mt-0.5">Add once — then add units to it anytime</p>
+      <div className="bg-white w-full h-[100dvh] sm:h-[96vh] max-w-[1400px] max-h-[100dvh] sm:max-h-[96vh] sm:rounded-[18px] shadow-[0_24px_70px_rgba(15,30,22,0.30)] flex flex-col overflow-hidden">
+
+        {/* ── Header ── */}
+        <header className="flex items-center gap-3.5 px-5 sm:px-6 py-4 sm:py-5 border-b border-[#eef1ec] shrink-0">
+          <div className="w-[42px] h-[42px] shrink-0 rounded-xl bg-[#d8f2e8] text-[#1a7a5a] flex items-center justify-center">
+            <Home size={22} />
           </div>
-          <button onClick={onClose} className="cursor-pointer text-[#6b6860] hover:text-[#1a1916]"><X size={20} /></button>
-        </div>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-[18px] sm:text-[20px] font-extrabold tracking-tight text-[#1a1916] leading-tight">{title ?? 'Add Property'}</h1>
+            {isEdit ? (
+              <p className="text-[13px] text-[#5a635c] mt-0.5 truncate">
+                Editing <span className="font-bold text-[#1a1916]">{form.buildingName || 'this property'}</span>
+                {form.spaceCategory && <span className="text-[#9b9890]"> · {categoryDisplayLabel(form.spaceCategory)}</span>}
+              </p>
+            ) : (
+              <p className="text-[13px] text-[#9b9890] mt-0.5">Add once — then add units to it anytime</p>
+            )}
+          </div>
+          <button type="button" onClick={onClose}
+            className="w-[34px] h-[34px] shrink-0 rounded-[10px] border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer transition-colors">
+            <X size={18} />
+          </button>
+        </header>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <PropertyFields
-            key={openSeq}
-            value={form} setValue={setForm}
-            errors={errors} setErrors={setErrors}
-            isEdit={isEdit}
-            titleDeed={titleDeed} setTitleDeed={setTitleDeed}
-            drawings={drawings} setDrawings={setDrawings}
-            existingDocs={existingDocs} onRemoveExisting={removeExisting}
-            unitCount={unitCount}
-            extraDocs={extraDocs} setExtraDocs={setExtraDocs}
-          />
+        {/* ── Body (nav + form) + Footer, wrapped in the form ── */}
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col">
+          <div ref={bodyRef} onScroll={onBodyScroll} className="flex-1 min-h-0 overflow-y-auto flex items-start">
 
-          {/* Building photos. Edit → live gallery (immediate upload/delete/
-              reorder). Add → staged in the form; the parent uploads them after
-              the property is created. */}
-          <div className="pt-1 border-t border-[#f0ede8]">
-            <div className="pt-4">
-              {propertyId ? (
-                <PropertyPhotos propertyId={propertyId} />
-              ) : (
-                <PropertyPhotos value={propertyPhotos} onChange={setPropertyPhotos} />
-              )}
+            {/* Left nav — scroll-spy + setup progress (hidden on small screens) */}
+            <aside className="hidden md:flex flex-col gap-1 w-[210px] shrink-0 sticky top-0 self-stretch px-4 py-5 border-r border-[#eef1ec] bg-[#fbfcfb]">
+              <div className="text-[10px] font-bold tracking-[0.1em] text-[#a0a8a1] px-2.5 pb-2">SECTIONS</div>
+              {PROPERTY_FORM_SECTIONS.map(s => {
+                const on = activeSection === s.id;
+                return (
+                  <button
+                    type="button"
+                    key={s.id}
+                    onClick={() => scrollToSection(s.id)}
+                    className={cn(
+                      'flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-[13.5px] text-left cursor-pointer transition-colors',
+                      on ? 'bg-[#d8f2e8] text-[#1a7a5a] font-bold' : 'text-[#5a635c] font-semibold hover:bg-[#f4f3ef]',
+                    )}
+                  >
+                    <span className={cn('w-[26px] h-[26px] shrink-0 rounded-[8px] flex items-center justify-center text-[12px] font-bold transition-colors',
+                      on ? 'bg-[#2e9f82] text-white' : 'bg-[#eef1ec] text-[#8d978f]')}>{s.num}</span>
+                    <span className="flex-1">{s.label}</span>
+                  </button>
+                );
+              })}
+              <div className="mt-auto px-2.5 pt-3.5">
+                <div className="text-[11px] text-[#9b9890] mb-1.5 font-semibold">Setup progress</div>
+                <div className="h-1.5 rounded bg-[#edf0ec] overflow-hidden">
+                  <div className="h-full bg-[#2e9f82] rounded transition-all duration-300" style={{ width: `${progressPct}%` }} />
+                </div>
+                <div className="text-[10.5px] text-[#a0a8a1] mt-1.5">Required fields keep this moving.</div>
+              </div>
+            </aside>
+
+            {/* Form column — content capped to a readable width and centred so a
+                near-full-screen modal keeps the mock's field proportions. */}
+            <div className="flex-1 min-w-0 px-5 py-5 sm:px-7 sm:py-6">
+              <div className="mx-auto w-full max-w-[860px]">
+                <PropertyFields
+                  key={openSeq}
+                  sectioned
+                  registerSection={registerSection}
+                  value={form} setValue={setForm}
+                  errors={errors} setErrors={setErrors}
+                  isEdit={isEdit}
+                  titleDeed={titleDeed} setTitleDeed={setTitleDeed}
+                  drawings={drawings} setDrawings={setDrawings}
+                  existingDocs={existingDocs} onRemoveExisting={removeExisting}
+                  unitCount={unitCount}
+                  extraDocs={extraDocs} setExtraDocs={setExtraDocs}
+                />
+
+                <div className="h-px bg-[#eef1ec] my-7" />
+
+                {/* ══ SECTION 5 — Property photos ══ Edit → live gallery (immediate
+                    upload/delete/reorder). Add → staged; parent uploads after create. */}
+                <section ref={el => { sectionEls.current['pho'] = el; }} data-prop-section="pho" style={{ scrollMarginTop: 20 }}>
+                  <PropSectionHeader num={5} label="Property photos" desc="First image becomes the cover. Drag thumbnails to reorder." />
+
+                  {/* Suggested shots — guides RPs to capture a complete, accurate set. */}
+                  <div className="mb-4 rounded-xl border border-[#e8e6e0] bg-[#fbfcfb] px-4 py-3.5">
+                    <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#1a7a5a] mb-2">
+                      <Camera size={13} className="shrink-0" /> Suggested shots for an accurate listing
+                    </div>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {[
+                        'Front exterior', 'Back / side exterior', 'Main entrance', 'Reception / lobby',
+                        'Parking area', 'Shared amenities (pool, gym)', 'Common corridor', 'View from the building',
+                      ].map(s => (
+                        <li key={s} className="text-[11px] text-[#5a635c] bg-white border border-[#e8e6e0] rounded-full px-2.5 py-1">{s}</li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] text-[#9b9890] mt-2.5 leading-relaxed">
+                      Tip: one clear photo each of the <strong>front</strong>, <strong>back/side</strong>, <strong>main entrance</strong> and <strong>reception</strong> gives tenants a complete picture. Shoot in landscape, in daylight — the first photo becomes the cover.
+                    </p>
+                  </div>
+
+                  {propertyId ? (
+                    <PropertyPhotos propertyId={propertyId} layout="grid" />
+                  ) : (
+                    <PropertyPhotos value={propertyPhotos} onChange={setPropertyPhotos} layout="grid" />
+                  )}
+                </section>
+              </div>
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 pt-2">
+          {/* ── Footer ── */}
+          <footer className="flex items-center gap-3 px-5 sm:px-6 py-4 border-t border-[#eef1ec] bg-[#fbfcfb] shrink-0">
+            <span className="hidden sm:block text-[11.5px] text-[#9b9890]">You can edit everything after saving.</span>
+            <div className="flex-1" />
             <button type="button" onClick={onClose}
-              className="flex-1 border border-[#e8e6e0] text-[#3d3b35] rounded-lg py-2.5 text-sm font-medium cursor-pointer hover:bg-[#f4f3ef]">
+              className="text-sm font-bold text-[#3a443d] bg-white border border-[#e2e7e1] px-5 py-3 rounded-[11px] cursor-pointer hover:bg-[#f4f6f3] transition-colors">
               Cancel
             </button>
             <button type="submit" disabled={saving}
-              className="flex-1 flex items-center justify-center gap-2 text-sm text-white rounded-lg py-2.5 font-medium cursor-pointer disabled:opacity-50"
-              style={{ background: '#2e9f82' }}>
+              className="inline-flex items-center justify-center gap-2 text-sm font-bold text-white px-6 py-3 rounded-[11px] cursor-pointer disabled:opacity-50 transition-[filter] hover:brightness-105"
+              style={{ background: '#2e9f82', boxShadow: '0 6px 16px rgba(46,159,130,0.28)' }}>
               {saving && <Loader2 size={14} className="animate-spin" />}
-              {saving ? 'Saving…' : title?.startsWith('Edit') ? 'Save Changes' : 'Add Property'}
+              {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Property'}
             </button>
-          </div>
-
+          </footer>
         </form>
       </div>
     </div>

@@ -15,15 +15,27 @@ export interface PropertyDocSlot {
 // Document key for the head-lease (master-lease) agreement — the contract that
 // gives a sub-leasing RP the right to sub-let the building. Rendered ONLY when a
 // property's leasing model is 'sub' (handled in PropertyFields), but kept in the
-// slot list so the existing three save flows upload + detect it automatically.
+// slot list so the existing save flows upload + detect it automatically.
 export const HEAD_LEASE_KEY = 'head_lease';
 
+// Document key for the signed Property Management Agreement — the mandate that
+// authorises a managing RP to manage the building on the owner's behalf. Rendered
+// ONLY when a property's leasing model is 'management' (handled in PropertyFields),
+// kept in the slot list so the save flows upload + detect it automatically.
+export const MGMT_AGREEMENT_KEY = 'management_agreement';
+
+// The two proof-of-right slots above are leasing-model-specific and rendered next
+// to the leasing picker — NOT in the general single-file document grid.
+export const LEASE_PROOF_KEYS = [HEAD_LEASE_KEY, MGMT_AGREEMENT_KEY];
+
 export const PROPERTY_DOC_SLOTS: PropertyDocSlot[] = [
-  { key: HEAD_LEASE_KEY,           label: 'Head-lease / Master-lease Agreement', category: 'legal', multiple: false },
+  { key: HEAD_LEASE_KEY,           label: 'Head-lease / Master-lease Agreement',  category: 'legal',      multiple: false },
+  { key: MGMT_AGREEMENT_KEY,       label: 'Signed Property Management Agreement',  category: 'legal',      multiple: false },
   { key: 'affection_plan',         label: 'Affection Plan',         category: 'property',   multiple: false },
   { key: 'completion_certificate', label: 'Completion Certificate', category: 'compliance', multiple: false },
-  { key: 'architectural_drawings', label: 'Architectural Drawings', category: 'property',   multiple: true },
   { key: 'site_plan',              label: 'Site Plan',              category: 'property',   multiple: false },
+  { key: 'utility_account',        label: 'Utility Account Details', category: 'property',  multiple: false },
+  { key: 'architectural_drawings', label: 'Architectural Drawings', category: 'property',   multiple: true },
   { key: 'noc_documents',          label: 'NOC Documents',          category: 'legal',      multiple: true },
   { key: 'other_document',         label: 'Other Documents',        category: 'property',   multiple: true },
 ];
