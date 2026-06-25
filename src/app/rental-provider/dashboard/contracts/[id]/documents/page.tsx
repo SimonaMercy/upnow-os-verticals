@@ -27,6 +27,18 @@ const KEY_ALIASES: Record<string, string[]> = {
   utility_registration: ['utility_proof_of_payment', 'utility_proof', 'utility_activation'],
   utility_final_bill: ['final_bill'],
 };
+// Target types an RP can retype a document INTO — keyed to the right-hand binder
+// slots (documentKey drives the slot; category keeps it out of the KYC pane).
+const RECLASSIFY_TARGETS: { documentKey: string; category: string; label: string }[] = [
+  { documentKey: 'payment_advice',       category: 'payment',    label: 'Payment Advice' },
+  { documentKey: 'ejari_certificate',    category: 'contract',   label: 'Ejari' },
+  { documentKey: 'utility_registration', category: 'contract',   label: 'Utility Proof of Payment' },
+  { documentKey: 'utility_final_bill',   category: 'payment',    label: 'Utility Final Bill' },
+  { documentKey: 'move_in_report',       category: 'inspection', label: 'Move-in Report' },
+  { documentKey: 'move_out_report',      category: 'inspection', label: 'Move-out Report' },
+  { documentKey: 'deposit_settlement',   category: 'payment',    label: 'Final Settlement' },
+  { documentKey: 'other',                category: 'other',      label: 'Other' },
+];
 const norm = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 const aed = (fils: number) => `AED ${Math.round((fils ?? 0) / 100).toLocaleString('en-AE')}`;
 const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
@@ -35,7 +47,7 @@ function Center({ children }: { children: React.ReactNode }) {
   return <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', color: '#6b6860' }}>{children}</div>;
 }
 
-function Preview({ url, caption }: { url: string; caption: string }) {
+function Preview({ url, caption, footer }: { url: string; caption: string; footer?: React.ReactNode }) {
   const isPdf = (url || '').toLowerCase().split('?')[0].endsWith('.pdf');
   return (
     <div style={{ border: '1px solid #e3e0d9', borderRadius: 10, overflow: 'hidden', marginBottom: 14, background: '#fff' }}>
@@ -43,6 +55,36 @@ function Preview({ url, caption }: { url: string; caption: string }) {
       {isPdf
         ? <iframe src={`${url}#toolbar=0&navpanes=0&view=FitH`} title={caption} style={{ width: '100%', height: 560, border: 0, display: 'block' }} />
         : <img src={url} alt={caption} style={{ width: '100%', display: 'block', background: '#f4f3ef' }} />}
+      {footer}
+    </div>
+  );
+}
+
+/** RP control to retype a misfiled document (e.g. "Other" → "Payment Advice"). */
+function ReclassifySelect({ docId, onDone }: { docId: number; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const change = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const t = RECLASSIFY_TARGETS.find(x => x.documentKey === e.target.value);
+    if (!t) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/documents/${docId}/reclassify`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentKey: t.documentKey, category: t.category }),
+      });
+      if (!res.ok) { alert('Could not change the document type.'); return; }
+      onDone();
+    } catch { alert('Unexpected error. Please try again.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ padding: '7px 12px', borderTop: '1px solid #efece6', display: 'flex', alignItems: 'center', gap: 8, background: '#fafaf8' }}>
+      <span style={{ fontSize: 11, color: '#9b9890', fontWeight: 600 }}>Change type:</span>
+      <select disabled={busy} defaultValue="" onChange={change}
+        style={{ fontSize: 12, padding: '3px 7px', borderRadius: 6, border: '1px solid #e3e0d9', background: '#fff', cursor: busy ? 'wait' : 'pointer' }}>
+        <option value="" disabled>Select…</option>
+        {RECLASSIFY_TARGETS.map(t => <option key={t.documentKey} value={t.documentKey}>{t.label}</option>)}
+      </select>
     </div>
   );
 }
@@ -131,6 +173,8 @@ export default function ContractDocumentsPage() {
   const receiptBase = `${contractBase}/print/receipt`;
   const [c, setC] = useState<Contract | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const refresh = () => setReloadKey(k => k + 1);
 
   useEffect(() => {
     if (!id) return;
@@ -140,7 +184,7 @@ export default function ContractDocumentsPage() {
       .then(d => setC(d))
       .catch(e => { if (!ctrl.signal.aborted) setErr(e instanceof Error ? e.message : 'Failed to load'); });
     return () => ctrl.abort();
-  }, [id]);
+  }, [id, reloadKey]);
 
   if (err) return <Center>Failed to load documents: {err}</Center>;
   if (!c) return <Center><Loader2 className="animate-spin" size={32} /></Center>;
@@ -177,7 +221,11 @@ export default function ContractDocumentsPage() {
     seq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', fallbackHref: `${contractBase}/settlement` });
   }
   const seqIds = new Set(seq.flatMap(s => (s.kind === 'doc' ? matchDocs(s.key).map(d => d.id) : [])));
-  const kyc = all.filter(d => !seqIds.has(d.id));
+  const nonSeq = all.filter(d => !seqIds.has(d.id));
+  // KYC pane holds the customer's documents only. Miscellaneous "other" uploads
+  // are contract documents, so they belong on the right-hand contract list.
+  const kyc = nonSeq.filter(d => d.category !== 'other');
+  const otherDocs = nonSeq.filter(d => d.category === 'other');
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#f4f3ef', display: 'flex', flexDirection: 'column', zIndex: 50 }}>
@@ -188,7 +236,7 @@ export default function ContractDocumentsPage() {
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
         <Pane title="KYC documents">
           {kyc.length === 0 ? <p style={{ fontSize: 13, color: '#9b9890' }}>No customer documents on file.</p>
-            : kyc.map(d => <Preview key={'k' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} />)}
+            : kyc.map(d => <Preview key={'k' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} footer={<ReclassifySelect docId={d.id} onDone={refresh} />} />)}
         </Pane>
         <Pane title="Documents · in order" border>
           {seq.map(s => {
@@ -200,6 +248,7 @@ export default function ContractDocumentsPage() {
               : <Missing key={s.key} label={s.label} />;
             return docs.map((d, i) => <Preview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} />);
           })}
+          {otherDocs.map(d => <Preview key={'o' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} footer={<ReclassifySelect docId={d.id} onDone={refresh} />} />)}
         </Pane>
       </div>
     </div>
