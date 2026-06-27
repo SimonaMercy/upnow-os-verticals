@@ -1,75 +1,23 @@
 /**
- * Manager "Customers / Tenants" page.
+ * Manager "Customers" page — Claude-Design "Customers" handoff.
  *
- * Mirrors the landlord Customers page design EXACTLY
- * (src/app/rental-provider/dashboard/tenants/page.tsx) but for the landlord
- * selected in the LandlordSwitcher (`?rp=<landlordId>`), permission-gated on
- * `canManageAgreements` and rendered read-only (no /rental-provider links).
- *
- * Like the RP page, the tenant list is DERIVED from the contracts data — here
- * fetched from `/manager/contracts?rp=<id>` (same backend `listForRp` shape the
- * RP page consumes), using the identical dedup/derivation logic copied verbatim.
+ * Mirrors the landlord Customers page (src/app/rental-provider/dashboard/tenants)
+ * via the shared CustomersDirectory, but for the landlord selected in the
+ * LandlordSwitcher (`?rp=<landlordId>`): permission-gated on `canManageAgreements`
+ * and read-only except for Add-customer (gated on `canCreateContracts`). The list
+ * is DERIVED from `/manager/contracts?rp=<id>` (same backend `listForRp` shape the
+ * RP page consumes), using the shared deriveCustomers logic.
  */
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Search, X, Users, Lock, Plus } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
+import { CustomersDirectory } from '@/components/upnow/CustomersDirectory';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { liveTenantIdSet } from '@/lib/activeCustomer';
-
-type ContractStatus = 'active' | 'terminated' | 'none';
-
-type Tenant = {
-  id: number;
-  contractId: number | null;
-  name: string;
-  email: string;
-  unit: string;
-  asset: string;
-  contractStatus: ContractStatus;
-  rentPerYear: number;
-  renewalDays: number | null;
-  endDate: string | null;
-};
-
-/** Shape of each row from `/manager/contracts` (backend `listForRp`). */
-type ContractRow = {
-  id: number | null;
-  status: string;
-  contractActive: boolean;
-  annualRent: number | null;
-  startDate: string | null;
-  endDate: string | null;
-  tenant: { id: number | null; name: string | null; email: string | null };
-  unit: { id: number | null; number: string | null; name: string | null };
-  property: { buildingName: string | null };
-};
-
-const CONTRACT_LABELS: Record<ContractStatus, string> = {
-  active: 'Active',
-  terminated: 'Terminated',
-  none: 'No Contract',
-};
-
-const CONTRACT_STYLE: Record<ContractStatus, string> = {
-  active: 'bg-[#d8f2e8] text-[#1a7a5a]',
-  terminated: 'bg-[#fee2e2] text-[#b91c1c]',
-  none: 'bg-[#f4f3ef] text-[#6b6860]',
-};
-
-function calcRenewalDays(endDate: string | null): number | null {
-  if (!endDate) return null;
-  // Compare calendar day to calendar day (UTC) so the count isn't skewed by the
-  // current time-of-day vs the date's UTC-midnight.
-  const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`).getTime();
-  const now = new Date();
-  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return Math.round((end - todayUtc) / 86400000);
-}
+import { deriveCustomers, type DirectoryContractRow, type DirectoryCustomer } from '@/lib/customersDirectory';
 
 export default function ManagerTenantsPage() {
   const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
@@ -79,59 +27,30 @@ export default function ManagerTenantsPage() {
   // the first managed landlord that delegated agreement access.
   const effectiveRp = selectedRp
     ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageAgreements)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
+    : (rps.find((r) => r.permissions.canManageAgreements)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
   const allowed = effectiveRp != null && canForRp('canManageAgreements', effectiveRp);
   const canCreate = effectiveRp != null && canForRp('canCreateContracts', effectiveRp);
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
 
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filterContract, setFilterContract] = useState('all');
+  // Tag the loaded rows with the landlord they belong to. A landlord switch
+  // (?rp= changes) re-runs the effect without remounting, so deriving `loading`
+  // from "do the loaded rows match the current landlord?" lets us show the
+  // loading state on switch — instead of flashing the prior landlord's rows —
+  // without a synchronous setState in the effect (react-hooks/set-state-in-effect).
+  const [loaded, setLoaded] = useState<{ rp: number; rows: DirectoryCustomer[] } | null>(null);
 
   useEffect(() => {
-    if (effectiveRp == null || !allowed) { setTenants([]); setLoading(false); return; }
-    setLoading(true);
-    apiGet<ContractRow[]>(`/manager/contracts?rp=${effectiveRp}`)
-      .then(data => {
-        if (!Array.isArray(data)) return;
-        // Active tenants only — the set of customers with a live/upcoming lease
-        // (shared definition, exact inverse of the Ended Leases nav).
-        const liveIds = liveTenantIdSet(data);
-        // Deduplicate by tenant id, keeping the most recent active contract
-        // (logic copied verbatim from the RP Customers page).
-        const map = new Map<number, Tenant>();
-        for (const c of data) {
-          const tid = c.tenant?.id;
-          if (!tid || !c.tenant?.name) continue;
-          const contractStatus: ContractStatus =
-            c.contractActive ? 'active' : c.status === 'terminated' ? 'terminated' : 'none';
-          const existing = map.get(tid);
-          // Prefer active contracts; among equals keep the more recent one,
-          // comparing like-for-like end dates (the later-ending contract is the
-          // current/renewed one).
-          if (!existing || (contractStatus === 'active' && existing.contractStatus !== 'active') ||
-              (contractStatus === existing.contractStatus && new Date(c.endDate ?? 0) > new Date(existing.endDate ?? 0))) {
-            map.set(tid, {
-              id: tid,
-              contractId: c.id ?? null,
-              name: c.tenant.name,
-              email: c.tenant.email ?? '',
-              unit: c.unit?.number ? `Unit ${c.unit.number}` : (c.unit?.name ?? '—'),
-              asset: c.property?.buildingName ?? '—',
-              contractStatus,
-              rentPerYear: c.annualRent ?? 0,
-              endDate: c.endDate ?? null,
-              renewalDays: calcRenewalDays(c.endDate),
-            });
-          }
-        }
-        setTenants(Array.from(map.values()).filter(t => liveIds.has(t.id)));
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+    if (effectiveRp == null || !allowed) return;
+    let cancelled = false;
+    apiGet<DirectoryContractRow[]>(`/manager/contracts?rp=${effectiveRp}`)
+      .then((data) => { if (!cancelled) setLoaded({ rp: effectiveRp, rows: Array.isArray(data) ? deriveCustomers(data) : [] }); })
+      .catch(() => { if (!cancelled) setLoaded({ rp: effectiveRp, rows: [] }); });
+    return () => { cancelled = true; };
   }, [effectiveRp, allowed]);
+
+  const customers = loaded?.rp === effectiveRp ? loaded.rows : [];
+  const loading = permsLoading || (allowed && loaded?.rp !== effectiveRp);
 
   // Per-landlord permission gate — mirrors the lock the manager contracts page uses.
   if (!permsLoading && !allowed) {
@@ -150,48 +69,21 @@ export default function ManagerTenantsPage() {
     );
   }
 
-  const filtered = tenants.filter(t => {
-    if (filterContract !== 'all' && t.contractStatus !== filterContract) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!t.name.toLowerCase().includes(q) && !t.email.toLowerCase().includes(q) && !t.unit.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-
-  const hasFilters = filterContract !== 'all' || search !== '';
-  const clearFilters = () => { setFilterContract('all'); setSearch(''); };
-
-  const totalRent = tenants.reduce((s, t) => s + (t.contractStatus === 'active' ? t.rentPerYear : 0), 0);
-  const renewalSoon = tenants.filter(t => t.renewalDays !== null && t.renewalDays >= 0 && t.renewalDays <= 90).length;
-
-  const SUMMARY = [
-    { label: 'Total Customers',     value: loading ? '…' : String(tenants.length) },
-    { label: 'Active Contracts',     value: loading ? '…' : String(tenants.filter(t => t.contractStatus === 'active').length) },
-    { label: 'Total Active Rent',    value: loading ? '…' : `AED ${totalRent.toLocaleString('en-AE')}` },
-    { label: 'Renewals Within 90d', value: loading ? '…' : String(renewalSoon) },
-  ];
-
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Active customers — anyone with a live or upcoming lease. Ended tenancies move to Ended Leases.</p>
-        </div>
-        {canCreate && (
-          <button onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65]">
-            <Plus size={15} /> Add Customer
-          </button>
-        )}
-      </div>
+    <>
+      <CustomersDirectory
+        customers={customers}
+        loading={loading}
+        onAdd={canCreate ? () => setShowAdd(true) : undefined}
+        viewHref={(id) => `/dashboard/manager/tenants/${id}?rp=${effectiveRp}`}
+        emptySubtitle="Customers appear here once this landlord has a rental agreement."
+      />
 
       {showAdd && effectiveRp != null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}
+          role="dialog" aria-modal="true" aria-labelledby="add-customer-title">
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <h2 id="add-customer-title" className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
             <CustomerForm
               mode="create"
               method="POST"
@@ -205,101 +97,6 @@ export default function ManagerTenantsPage() {
           </div>
         </div>
       )}
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {SUMMARY.map((s, i) => (
-          <div key={i} className="bg-white rounded-2xl p-5 shadow-sm">
-            <div className="text-xs text-[#6b6860] font-medium">{s.label}</div>
-            <div className="font-bold text-xl text-[#1a1916] mt-1">{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input
-            type="text"
-            placeholder="Search by name, email or unit…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
-          />
-        </div>
-        <select value={filterContract} onChange={e => setFilterContract(e.target.value)} className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35]">
-          <option value="all">All Contracts</option>
-          <option value="active">Active</option>
-          <option value="none">Upcoming / no active lease</option>
-        </select>
-        {hasFilters && (
-          <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
-            <X size={12} /> Reset
-          </button>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">{filtered.length} customer{filtered.length !== 1 ? 's' : ''} found</span>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-[#9b9890]">Loading customers…</div>
-        ) : tenants.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-              <Users size={24} className="text-[#2e9f82]" />
-            </div>
-            <p className="text-sm text-[#6b6860] mb-1">No customers yet</p>
-            <p className="text-xs text-[#9b9890]">Customers will appear here once this landlord has active rental agreements</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[800px]">
-              <thead>
-                <tr className="bg-[#f4f3ef]">
-                  {['Name', 'Unit', 'Property', 'Contract', 'Annual Rent', 'Renewal In', ''].map((h, i) => (
-                    <th key={h || `c${i}`} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(t => (
-                  <tr key={t.id} className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916]">
-                    <td className="px-4 py-3.5">
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-[#9b9890]">{t.email}</div>
-                    </td>
-                    <td className="px-4 py-3.5">{t.unit}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{t.asset}</td>
-                    <td className="px-4 py-3.5">
-                      <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${CONTRACT_STYLE[t.contractStatus]}`}>
-                        {CONTRACT_LABELS[t.contractStatus]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 font-medium">
-                      {t.contractStatus === 'active' ? `AED ${t.rentPerYear.toLocaleString('en-AE')}` : '—'}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      {t.renewalDays !== null ? (
-                        <span className={`text-xs font-medium ${t.renewalDays <= 30 ? 'text-red-600' : t.renewalDays <= 90 ? 'text-amber-600' : 'text-[#6b6860]'}`}>
-                          {t.renewalDays > 0 ? `${t.renewalDays}d` : 'Expired'}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="px-4 py-3.5 text-right">
-                      <Link href={`/dashboard/manager/tenants/${t.id}?rp=${effectiveRp}`} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
+    </>
   );
 }

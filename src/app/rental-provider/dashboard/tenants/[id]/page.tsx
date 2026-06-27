@@ -10,14 +10,13 @@ import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigat
 import Link from 'next/link';
 import {
   ArrowLeft, User, FileText, ExternalLink, Mail, Phone, IdCard,
-  Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Files, Pencil, History,
-  Upload, Check, Eye, Loader2, X, Landmark,
+  Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Pencil, History,
+  Upload, Check, Eye, Loader2, X, Landmark, StickyNote, Plus, Send,
 } from 'lucide-react';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
-import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { docLabel } from '@/lib/docLabel';
-import { DocPreviewModal } from '@/components/upnow/DocPreviewModal';
 import { openDocViewer } from '@/lib/docViewer';
+import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/DocumentReaderModal';
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 
@@ -44,6 +43,13 @@ type Financials = {
   totalActiveRent: number; securityDepositHeld: number;
   totalBilled: number; totalCollected: number; totalOutstanding: number; vatCollected: number;
 };
+// One entry in the customer's running notes journal — aggregated across every
+// lease the customer holds (sequence-wise), each tagged with its tenancy.
+type Note = {
+  id: number; body: string; authorName: string | null;
+  authorRole: 'rental_provider' | 'manager' | null; createdAt: string;
+  leaseId: number; leaseRef: string; unitLabel: string | null;
+};
 type CustomerDetail = {
   customer: {
     id: number; name: string | null; firstName: string | null; lastName: string | null;
@@ -55,6 +61,7 @@ type CustomerDetail = {
   summary: { totalLeases: number; activeLeases: number; totalActiveRent: number; documentCount: number };
   financials: Financials;
   leases: Lease[];
+  notes?: Note[];
   documents: Doc[];
 };
 
@@ -64,6 +71,19 @@ function fmtDate(d: string | null | undefined): string {
   const dt = new Date(`${d.slice(0, 10)}T00:00:00Z`);
   return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
+function monthYear(d: string | null | undefined): string | null {
+  if (!d) return null;
+  const dt = new Date(`${d.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(dt.getTime()) ? null : dt.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+// Notes timestamp: "12 Jun 2026" for the journal stream.
+function fmtNoteDate(d: string | null | undefined): string {
+  if (!d) return '';
+  const dt = new Date(d);
+  return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' });
+}
+const noteInitials = (name: string | null | undefined): string =>
+  (name ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '–';
 function ageFromDob(dob: string | null | undefined): number | null {
   if (!dob) return null;
   const d = new Date(`${dob.slice(0, 10)}T00:00:00Z`);
@@ -94,8 +114,8 @@ function leaseBadge(l: Lease, currentOfUnit?: Lease, isLatestHistory = false): {
 }
 const prettyKey = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 // KYC = the customer's own identity / licensing rows. Everything else (payment
-// proofs, deposit receipts, lease paperwork) lives in the all-documents popup
-// (shared CustomerDocsModal module).
+// proofs, deposit receipts, lease paperwork) is the lease/contract paperwork,
+// surfaced contract-wise via the "History Documents" reader.
 const KYC_KEY_RE = /emirates|passport|visa|trade_license|moa|poa|labour|establishment/;
 const isKycDoc = (d: Doc) =>
   (d.ownerType ?? 'customer') === 'customer' &&
@@ -122,7 +142,10 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
-  const [showAllDocs, setShowAllDocs] = useState(false);
+  // The shared document reader (sidebar list + gallery preview) — same popup the
+  // Property / Unit views use. Drives KYC "View" / "View All" and the lease-doc
+  // "History Documents" preview.
+  const [reader, setReader] = useState<{ title: string; summary?: string; slots: ReaderSlot[]; initialKey?: string } | null>(null);
   const [showDeposits, setShowDeposits] = useState(false);
 
   const load = useCallback(() => {
@@ -136,8 +159,7 @@ export default function CustomerDetailPage() {
   }, [detailUrl, params?.id]);
   useEffect(() => { load(); }, [load]);
 
-  // KYC preview / upload popups (set to the requirement being acted on).
-  const [previewDoc, setPreviewDoc] = useState<{ title: string; docs: Doc[] } | null>(null);
+  // KYC upload popup (set to the requirement being acted on).
   const [uploadDoc, setUploadDoc] = useState<{ title: string; slots: UploadSlot[] } | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   // Single-doc requirements (Passport, Visa, …) upload directly via a file
@@ -165,6 +187,35 @@ export default function CustomerDetailPage() {
     }
   };
 
+  // ── Lease-notes composer (append to a chosen lease's shared journal) ──
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteLeaseId, setNoteLeaseId] = useState<number | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteErr, setNoteErr] = useState<string | null>(null);
+  const submitNote = async () => {
+    const text = noteDraft.trim();
+    if (!text || noteLeaseId == null) return;
+    setNoteBusy(true);
+    setNoteErr(null);
+    try {
+      // Notes are anchored on the renewal-chain root server-side, so any lease in
+      // the chain is a valid target — the backend resolves the shared journal.
+      const res = await fetch(`/api/contracts/${noteLeaseId}/notes`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: text }),
+      });
+      if (!res.ok) throw new Error(res.status === 403 ? 'You do not have permission to add notes.' : `Error ${res.status}`);
+      setNoteDraft(''); setNoteOpen(false);
+      load(); // reload so the note comes back with its resolved lease/unit label
+    } catch (e) {
+      setNoteErr(e instanceof Error ? e.message : 'Failed to save note');
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+
   if (loading) return <div className="p-6 text-sm text-[#9b9890]">Loading customer…</div>;
   if (error || !data) {
     return (
@@ -177,9 +228,15 @@ export default function CustomerDetailPage() {
 
   const c = data.customer;
   const fin = data.financials;
+  const notes = data.notes ?? [];
   const isCompany = c.entityType === 'company';
   // Company customers are identified by their company name, individuals by person name.
   const displayName = isCompany && c.companyName ? c.companyName : (c.name ?? '—');
+  // "Customer since" — derived from the earliest lease start on record (their
+  // first tenancy with this RP); omitted when there are no dated leases yet.
+  const customerSince = monthYear(
+    data.leases.map(l => l.startDate).filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)))[0],
+  );
   const kycDocs = data.documents.filter(isKycDoc);
   // KYC checklist (RP view): the identity docs this customer should have on
   // file. Missing ones get an inline upload affordance. Mirrors the customer
@@ -208,7 +265,46 @@ export default function CustomerDetailPage() {
   const matchedKycIds = new Set(kycChecklist.flatMap(x => x.docs.map(d => d.id)));
   const extraKycDocs = kycDocs.filter(d => !matchedKycIds.has(d.id)); // KYC docs outside the standard checklist
   const kycUploadedCount = kycChecklist.filter(x => x.docs.length > 0).length;
-  const otherDocsCount = data.documents.filter(d => !isKycDoc(d)).length; // non-KYC (shown in the popup, grouped by lease)
+  const kycViewable = kycDocs.filter(d => d.fileUrl);
+  // Lease/contract paperwork (non-KYC) — shown contract-wise in "History Documents".
+  const otherDocsCount = data.documents.filter(d => !isKycDoc(d)).length;
+
+  // ── Document reader slots (shared sidebar + gallery popup) ──
+  const toReaderFile = (d: Doc) => ({ id: d.id, name: docLabel(d, data.documents), url: d.fileUrl as string, mimeType: d.mimeType });
+  // KYC slots = one row per requirement (uploaded → its files; missing → empty,
+  // so the list mirrors the on-page checklist) plus any extra KYC docs.
+  const kycSlots: ReaderSlot[] = [
+    ...kycChecklist.map(({ req, docs }) => ({ key: req.key, label: req.label, files: docs.filter(d => d.fileUrl).map(toReaderFile) })),
+    ...extraKycDocs.filter(d => d.fileUrl).map(d => ({ key: `extra-${d.id}`, label: docLabel(d, data.documents), files: [toReaderFile(d)] })),
+  ];
+  const openKycReader = (initialKey?: string) => setReader({
+    title: isCompany ? 'Company KYC' : 'KYC documents',
+    summary: `${kycUploadedCount} of ${KYC_REQS.length} on file`,
+    slots: kycSlots, initialKey,
+  });
+  // History slots = lease/contract paperwork grouped per contract (newest first),
+  // then customer-level documents with no lease link.
+  const leaseGroupLabel = (l: Lease) => {
+    const span = [monthYear(l.startDate), monthYear(l.endDate)].filter(Boolean).join(' – ');
+    return `${l.ref}${l.unit.number ? ` · Unit ${l.unit.number}` : ''}${span ? ` · ${span}` : ''}`;
+  };
+  const historySlots: ReaderSlot[] = (() => {
+    const docs = data.documents.filter(d => !isKycDoc(d) && d.fileUrl);
+    const byLease = new Map(data.leases.map(l => [l.id, l]));
+    const orderedLeases = [...data.leases].sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
+    const out: ReaderSlot[] = [];
+    for (const l of orderedLeases) {
+      const group = leaseGroupLabel(l);
+      for (const d of docs.filter(x => x.leaseId === l.id)) {
+        out.push({ key: `doc-${d.id}`, label: docLabel(d, data.documents), group, files: [toReaderFile(d)] });
+      }
+    }
+    for (const d of docs.filter(x => x.leaseId == null || !byLease.has(x.leaseId))) {
+      out.push({ key: `doc-${d.id}`, label: docLabel(d, data.documents), group: 'Customer & general', files: [toReaderFile(d)] });
+    }
+    return out;
+  })();
+  const openHistoryReader = () => setReader({ title: 'Lease documents', summary: `${otherDocsCount} document${otherDocsCount !== 1 ? 's' : ''} across all leases`, slots: historySlots });
   const slotDoc = (d?: Doc): UploadSlot['existing'] => d ? { id: d.id, documentKey: d.documentKey, fileUrl: d.fileUrl, mimeType: d.mimeType } : null;
   // Upload slots for a requirement — Emirates ID is two-sided (Front + Back),
   // everything else is a single slot.
@@ -382,38 +478,44 @@ export default function CustomerDetailPage() {
         </div>
       )}
 
-      {/* Header card */}
+      {/* Identity card */}
       <div className="bg-white rounded-2xl shadow-sm p-5 mb-6">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-start gap-3.5 flex-wrap">
           <button onClick={() => router.push(listHref)} aria-label="Back to Customers"
-            className="w-9 h-9 rounded-full border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] shrink-0 cursor-pointer">
+            className="w-9 h-9 mt-0.5 rounded-full border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] shrink-0 cursor-pointer">
             <ArrowLeft size={16} />
           </button>
-          <div className="w-11 h-11 rounded-full bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] font-semibold text-sm shrink-0">
-            {isCompany ? <Building2 size={20} /> : initials}
+          <div className="w-12 h-12 rounded-2xl bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] font-semibold text-sm shrink-0">
+            {isCompany ? <Building2 size={22} /> : initials}
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold text-[#1a1916]">{displayName}</h1>
-            <p className="text-xs text-[#6b6860] mt-1 flex items-center gap-1.5 flex-wrap">
+            <p className="text-xs text-[#9b9890] flex items-center gap-1.5 flex-wrap">
               <Link href={listHref} className="hover:underline">Customers</Link>
               <span className="text-[#c4c1b8]">›</span>
-              <span className="truncate max-w-[160px]">{displayName}</span>
+              <span className="truncate max-w-[200px]">{displayName}</span>
             </p>
+            <h1 className="text-[22px] leading-tight font-bold text-[#1a1916] mt-0.5">{displayName}</h1>
+            <div className="flex items-center gap-2 flex-wrap mt-1.5">
+              <span className={`inline-flex rounded-full text-[10px] font-bold uppercase tracking-wide px-2.5 py-0.5 ${isCompany ? 'bg-[#f3ecdd] text-[#7a5a2e]' : 'bg-[#eef2fb] text-[#3b5bb5]'}`}>
+                {isCompany ? 'Company' : 'Individual'}
+              </span>
+              {customerSince && <span className="text-xs text-[#9b9890]">Customer since {customerSince}</span>}
+            </div>
           </div>
           {!editing && (
             <button onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-full border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] shrink-0 cursor-pointer">
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] shrink-0 cursor-pointer">
               <Pencil size={14} /> Edit
             </button>
           )}
         </div>
 
         {/* Profile / KYC strip */}
-        <div className="mt-4 border border-[#e8e6e0] rounded-xl px-4 py-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4 pt-4 border-t border-[#eeece6]">
           {profile.map((f, i) => (
             <div key={i} className="min-w-0">
-              <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-medium">{f.label}</div>
-              <div className={`text-sm break-words mt-0.5 ${f.value ? 'text-[#1a1916] font-medium' : 'text-[#b91c1c] font-semibold'}`}>{f.value ?? 'Missing'}</div>
+              <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{f.label}</div>
+              <div className={`text-sm break-words mt-1 ${f.value ? 'text-[#1a1916] font-medium' : 'text-[#b91c1c] font-semibold'}`}>{f.value ?? 'Missing'}</div>
             </div>
           ))}
         </div>
@@ -545,83 +647,100 @@ export default function CustomerDetailPage() {
 
       {/* KYC documents (wider, left) + Rent progression (narrow, right) */}
       <div className={`grid gap-6 mb-6 items-start ${hasProgression ? 'lg:grid-cols-[2fr_1fr]' : ''}`}>
-      <div className="bg-white rounded-2xl p-5 shadow-sm">
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
         {/* Hidden picker for single-doc requirements (Passport, Visa, …) */}
         <input ref={directFileRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" className="hidden" onChange={onDirectFile} />
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2"><FileText size={16} className="text-[#2e9f82]" /> KYC documents ({kycUploadedCount}/{KYC_REQS.length})</h2>
+        <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-4 py-3.5 border-b border-[#eeece6]">
+          <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><FileText size={15} /></span>
+          <h2 className="text-sm font-bold text-[#1a1916]">
+            {isCompany ? 'Company KYC' : 'KYC documents'} <span className="font-normal text-[#9b9890]">({kycUploadedCount}/{KYC_REQS.length})</span>
+          </h2>
+          <div className="flex-1 min-w-[12px]" />
           {otherDocsCount > 0 && (
             <button
               type="button"
-              onClick={() => setShowAllDocs(true)}
-              className="text-sm text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1.5 cursor-pointer"
+              onClick={openHistoryReader}
+              title="Contract-wise history of all lease documents (contracts, Ejari, cheques, receipts), grouped per lease"
+              className="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer"
             >
-              <Files size={14} /> All Documents ({otherDocsCount})
+              <History size={13} /> History Documents ({otherDocsCount})
+            </button>
+          )}
+          {kycViewable.length > 0 && (
+            <button
+              type="button"
+              onClick={() => openKycReader()}
+              title="Preview every KYC document on file together in one viewer"
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:underline cursor-pointer"
+            >
+              <Eye size={14} /> View All
             </button>
           )}
         </div>
-        <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+        <div className="p-2 max-h-[480px] overflow-y-auto">
           {kycChecklist.map(({ req, docs }) => {
             const uploaded = docs.length > 0;
+            const hasFile = docs.some(d => d.fileUrl);
+            const pending = uploaded && docs[0].status === 'pending';
+            const twoSided = req.key === 'emirates_id';
+            const busy = directBusy === req.key;
+            // Emirates ID opens the Front/Back slot popup; everything else picks a file directly.
+            const onUpload = twoSided
+              ? () => setUploadDoc({ title: req.label, slots: slotsFor(req, docs) })
+              : () => pickDirect(slotsFor(req, docs)[0]);
             return (
-              <div key={req.key} className={`border rounded-xl p-3.5 flex items-center gap-3 ${uploaded ? 'border-[#e8e6e0]' : req.required ? 'border-[#fecaca] bg-[#fef9f9]' : 'border-[#e8e6e0]'}`}>
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#d8f2e8] text-[#1a7a5a]' : req.required ? 'bg-[#fee2e2] text-[#b91c1c]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+              <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
                   {uploaded ? <Check size={16} /> : <FileText size={16} />}
-                </div>
+                </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium text-[#1a1916]">{req.label}</span>
-                    <span className={`inline-flex rounded-full text-[10px] font-semibold uppercase px-2 py-0.5 ${req.required ? 'bg-[#fee2e2] text-[#b91c1c]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>{req.required ? 'Required' : 'Optional'}</span>
+                  <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
+                  <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
+                    {uploaded ? (
+                      <>
+                        {pending && <span className="text-[#b91c1c]">Pending review</span>}
+                        {docs[0].expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(docs[0].expiryDate)}</span>}
+                        <span className="text-[#1a7a5a]">{docs.length} file{docs.length !== 1 ? 's' : ''} on record</span>
+                      </>
+                    ) : (
+                      <span className="text-[#b07415]">Not uploaded{req.required ? ' · required' : ' · optional'}</span>
+                    )}
                   </div>
-                  {uploaded ? (
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
-                      {docs[0].status === 'pending' && <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#fee2e2] text-[#b91c1c]">Pending review</span>}
-                      {docs[0].expiryDate && <span className="text-[11px] text-[#9b9890]">exp {fmtDate(docs[0].expiryDate)}</span>}
-                      {docs.length > 1 && <span className="text-[11px] text-[#9b9890]">{docs.length} files</span>}
-                    </div>
-                  ) : (
-                    <p className={`text-xs mt-1 ${req.required ? 'text-[#b91c1c] font-medium' : 'text-[#9b9890]'}`}>Not uploaded</p>
-                  )}
                   {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                 </div>
-                {/* Right-aligned actions: View sits next to Add / replace */}
-                {uploaded && docs.some(d => d.fileUrl) && (
-                  <button type="button" onClick={() => setPreviewDoc({ title: req.label, docs })}
-                    className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer">
+                {uploaded && hasFile && (
+                  <button type="button" onClick={() => openKycReader(req.key)}
+                    className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
                     <Eye size={13} /> View
                   </button>
                 )}
-                {(() => {
-                  const twoSided = req.key === 'emirates_id';
-                  const busy = directBusy === req.key;
-                  // Emirates ID opens the Front/Back slot popup; everything else picks a file directly.
-                  const onClick = twoSided
-                    ? () => setUploadDoc({ title: req.label, slots: slotsFor(req, docs) })
-                    : () => pickDirect(slotsFor(req, docs)[0]);
-                  return (
-                    <button type="button" onClick={onClick} disabled={busy}
-                      className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef]' : 'bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
-                      {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                      {uploaded ? 'Add / replace' : 'Upload'}
-                    </button>
-                  );
-                })()}
+                <button type="button" onClick={onUpload} disabled={busy}
+                  className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  {uploaded ? 'Replace' : 'Upload'}
+                </button>
               </div>
             );
           })}
 
           {/* KYC docs outside the standard checklist (e.g. labour card) — still listed */}
           {extraKycDocs.map(d => (
-            <div key={d.id} className="border border-[#e8e6e0] rounded-xl p-3.5 flex items-start gap-3">
-              <div className="w-9 h-9 rounded-lg bg-[#d8f2e8] text-[#1a7a5a] flex items-center justify-center shrink-0"><Check size={16} /></div>
+            <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
+              <span className="w-9 h-9 rounded-lg bg-[#eef9f4] text-[#1a7a5a] flex items-center justify-center shrink-0"><Check size={16} /></span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-[#1a1916]">{docLabel(d, data.documents)}</div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
-                  {d.status === 'pending' && <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#fee2e2] text-[#b91c1c]">Pending review</span>}
-                  {d.expiryDate && <span className="text-[11px] text-[#9b9890]">exp {fmtDate(d.expiryDate)}</span>}
-                  {d.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, data.documents), mimeType: d.mimeType })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-0.5 cursor-pointer">View <ExternalLink size={10} /></button>}
+                <div className="text-[13px] font-bold text-[#1a1916] truncate">{docLabel(d, data.documents)}</div>
+                <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
+                  {d.status === 'pending' && <span className="text-[#b91c1c]">Pending review</span>}
+                  {d.expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(d.expiryDate)}</span>}
+                  {!d.expiryDate && d.status !== 'pending' && <span className="text-[#1a7a5a]">On record</span>}
                 </div>
               </div>
+              {d.fileUrl && (
+                <button type="button" onClick={() => openKycReader(`extra-${d.id}`)}
+                  className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                  <Eye size={13} /> View
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -668,23 +787,104 @@ export default function CustomerDetailPage() {
       )}
       </div>
 
-      {/* All-documents popup — shared module (also used on the contract page) */}
-      {showAllDocs && (
-        <CustomerDocsModal
-          documents={data.documents}
-          tenantName={c.name}
-          leases={data.leases.map(l => ({ id: l.id, ref: l.ref, startDate: l.startDate, endDate: l.endDate }))}
-          excludeKyc
-          onClose={() => setShowAllDocs(false)}
-        />
-      )}
+      {/* Lease notes — the running operational journal across EVERY lease this
+          customer holds, in one chronological stream so the next person picking
+          up the account can see, in sequence, what is going on. */}
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#eeece6]">
+          <h2 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
+            <StickyNote size={16} className="text-[#2e9f82]" /> Lease notes <span className="font-normal text-[#9b9890]">({notes.length})</span>
+          </h2>
+          {data.leases.length > 0 && (
+            <button type="button"
+              onClick={() => { setNoteErr(null); setNoteLeaseId(prev => prev ?? (currentLeases[0]?.id ?? data.leases[0]?.id ?? null)); setNoteOpen(o => !o); }}
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+              <Plus size={14} /> Add note
+            </button>
+          )}
+        </div>
 
-      {/* KYC preview popup — shows both sides together */}
-      {previewDoc && (
-        <DocPreviewModal
-          title={previewDoc.title}
-          docs={previewDoc.docs.map(d => ({ id: d.id, fileUrl: d.fileUrl, mimeType: d.mimeType, caption: docLabel(d, data.documents).replace(/^Emirates ID\s*[—-]\s*/, '') || previewDoc.title }))}
-          onClose={() => setPreviewDoc(null)}
+        {/* Composer */}
+        {noteOpen && (
+          <div className="px-5 py-4 border-b border-[#eeece6] bg-[#fbfcfb]">
+            <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890]">Lease</label>
+              <select
+                value={noteLeaseId ?? ''}
+                onChange={e => setNoteLeaseId(Number(e.target.value))}
+                className="text-xs font-medium text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white cursor-pointer focus:outline-none focus:border-[#2e9f82]">
+                {data.leases.map(l => (
+                  <option key={l.id} value={l.id}>
+                    {(l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? 'Unit')) + ` · ${l.ref}`}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-[#9b9890]">Shared across this tenancy&apos;s renewals.</span>
+            </div>
+            <textarea
+              value={noteDraft}
+              onChange={e => setNoteDraft(e.target.value)}
+              rows={3}
+              placeholder="What's going on with this lease? (e.g. payment arrangement, renewal intent, signatory change…)"
+              className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3.5 py-2.5 resize-y focus:outline-none focus:border-[#2e9f82] placeholder:text-[#b3b0a8]"
+            />
+            {noteErr && <p className="text-xs mt-1.5 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {noteErr}</p>}
+            <div className="flex items-center justify-end gap-2 mt-2.5">
+              <button type="button" onClick={() => { setNoteOpen(false); setNoteDraft(''); setNoteErr(null); }}
+                className="text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer">Cancel</button>
+              <button type="button" onClick={submitNote} disabled={noteBusy || !noteDraft.trim() || noteLeaseId == null}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
+                {noteBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Save note
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Journal */}
+        {notes.length === 0 ? (
+          <div className="px-5 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#f4f3ef] text-[#9b9890] flex items-center justify-center mx-auto"><StickyNote size={20} /></div>
+            <p className="text-sm text-[#6b6860] font-medium mt-3">No notes yet</p>
+            <p className="text-xs text-[#9b9890] mt-1">Keep a running log of what&apos;s happening on each lease — payment arrangements, renewals, signatory changes.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-[#f1efe9]">
+            {notes.map(n => {
+              const isMgr = n.authorRole === 'manager';
+              return (
+                <div key={n.id} className="flex gap-3.5 px-5 py-4">
+                  <span className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${isMgr ? 'bg-[#eef2fb] text-[#3b5bb5]' : 'bg-[#d8f2e8] text-[#1a7a5a]'}`}>
+                    {noteInitials(n.authorName)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-[#1a1916]">{n.authorName ?? 'Unknown'}</span>
+                      {isMgr && <span className="inline-flex rounded text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 bg-[#eef2fb] text-[#3b5bb5]">Manager</span>}
+                      <Link href={`/rental-provider/dashboard/contracts/${n.leaseId}/v2`}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#6b6860] bg-[#f4f3ef] hover:bg-[#eceae4] rounded px-1.5 py-0.5">
+                        {n.unitLabel ? `${n.unitLabel} · ` : ''}{n.leaseRef}
+                      </Link>
+                      <span className="ml-auto text-[11px] text-[#9b9890]">{fmtNoteDate(n.createdAt)}</span>
+                    </div>
+                    <p className="text-sm text-[#5a564e] leading-relaxed mt-1 whitespace-pre-wrap break-words">{n.body}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Document reader — shared sidebar-list + gallery-preview popup (the same
+          reader the Property / Unit views use). Drives KYC "View" / "View All"
+          and the lease-doc "History Documents" preview. */}
+      {reader && (
+        <DocumentReaderModal
+          title={reader.title}
+          summary={reader.summary}
+          slots={reader.slots}
+          initialKey={reader.initialKey}
+          onClose={() => setReader(null)}
         />
       )}
 

@@ -1,0 +1,263 @@
+/* UpNow Customers directory — Claude-Design "Customers" handoff.
+   Pixel values mirror page-redesign-request/project/Customers.dc.html. Shared by
+   the RP page and the manager mirror. Self-contained (CSS module) so the rest of
+   the portal palette is untouched. Breakpoints match the prototype: 860px =
+   "mobile" (hide Contact column, single-column grid), 640px = "tight". */
+
+.app {
+  background: #f2f4f1;
+  color: #1d2823;
+  min-height: 100%;
+}
+.app input,
+.app select {
+  font-family: inherit;
+}
+.app input::placeholder {
+  color: #aab2ab;
+}
+
+/* Centred content column with the prototype's main padding. */
+.main {
+  padding: 24px 30px 36px;
+  max-width: 1320px;
+  margin: 0 auto;
+  width: 100%;
+}
+@media (max-width: 640px) {
+  .main {
+    padding: 18px 16px 30px;
+  }
+}
+
+/* Add-customer CTA (full-width on mobile). */
+.addBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: #1a9a64;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 11px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(26, 154, 100, 0.26);
+  transition: background 0.15s;
+}
+.addBtn:hover {
+  background: #178a59;
+}
+
+/* 4-up KPI strip → 2-up when tight. */
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 13px;
+  margin-bottom: 18px;
+}
+@media (max-width: 640px) {
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Controls row — search · filter · view toggle. */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+.searchIc {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9aa39c;
+  display: inline-flex;
+  pointer-events: none;
+}
+.searchInput {
+  width: 100%;
+  font-size: 14px;
+  color: #1d2823;
+  background: #fff;
+  border: 1px solid #e2e7e1;
+  border-radius: 11px;
+  padding: 11px 14px 11px 40px;
+  outline: none;
+}
+.searchInput:focus {
+  border-color: #c2d2c9;
+  box-shadow: 0 0 0 3px rgba(26, 154, 100, 0.08);
+}
+.select {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #3a443d;
+  background: #fff;
+  border: 1px solid #e2e7e1;
+  border-radius: 11px;
+  padding: 11px 36px 11px 14px;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%238d978f' stroke-width='2'><path d='M4 8l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+}
+
+/* View toggle — icon-only, dark active (matches the prototype). */
+.toggle {
+  display: flex;
+  background: #fff;
+  border: 1px solid #e7ebe6;
+  border-radius: 11px;
+  padding: 4px;
+  gap: 3px;
+}
+.toggleBtn {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: transparent;
+  color: #9aa39c;
+  transition: background 0.15s, color 0.15s;
+}
+.toggleBtn:hover {
+  color: #5a635c;
+}
+.toggleBtnActive {
+  background: #1d2823;
+  color: #fff;
+}
+.toggleBtnActive:hover {
+  color: #fff;
+}
+
+.resultCount {
+  font-size: 12.5px;
+  color: #8a938c;
+  margin-bottom: 12px;
+}
+.resultCount strong {
+  color: #1d2823;
+  font-weight: 700;
+}
+
+/* ── Row view ────────────────────────────────────────────── */
+.rowTable {
+  background: #fff;
+  border: 1px solid #e7ebe6;
+  border-radius: 15px;
+  overflow: hidden;
+}
+.rowHead,
+.rowItem {
+  display: grid;
+  grid-template-columns: 2.4fr 1.7fr 0.9fr 1.1fr 0.8fr;
+  gap: 14px;
+}
+.rowHead {
+  padding: 13px 18px;
+  border-bottom: 1px solid #eef1ec;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #a0a8a1;
+}
+.rowItem {
+  align-items: center;
+  padding: 14px 18px;
+  border-top: 1px solid #f4f6f3;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  width: 100%;
+  font-family: inherit;
+  text-decoration: none;
+  color: inherit;
+}
+.rowItem:hover {
+  background: #fafdfb;
+}
+.rowHead :nth-child(4),
+.rowHead :nth-child(5) {
+  text-align: right;
+}
+
+@media (max-width: 860px) {
+  .rowHead,
+  .rowItem {
+    grid-template-columns: 2fr 1fr 1.1fr 0.8fr;
+  }
+  .colContact {
+    display: none !important;
+  }
+}
+
+/* ── Grid view ───────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+@media (max-width: 860px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+.gridCard {
+  display: block;
+  background: #fff;
+  border: 1px solid #e7ebe6;
+  border-radius: 15px;
+  padding: 17px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(20, 40, 30, 0.03);
+  text-align: left;
+  width: 100%;
+  font-family: inherit;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.gridCard:hover {
+  border-color: #cfe7da;
+  box-shadow: 0 6px 20px rgba(20, 40, 30, 0.08);
+}
+
+/* Empty state. */
+.empty {
+  text-align: center;
+  padding: 56px 20px;
+  color: #9aa39c;
+}
+.emptyTtl {
+  font-size: 15px;
+  font-weight: 700;
+  color: #3a443d;
+}
+.emptySub {
+  font-size: 13px;
+  margin-top: 5px;
+}

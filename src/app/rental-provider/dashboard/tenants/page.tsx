@@ -1,129 +1,51 @@
 'use client';
 
+/**
+ * RP → Customers directory (Claude-Design "Customers" handoff).
+ *
+ * Active customers only — anyone with a live or upcoming lease (ended tenancies
+ * live under the Ended Leases nav). The list is DERIVED client-side from the flat
+ * /contracts feed (backend `listForRp`, which now also returns per-lease rent
+ * arrears for the Outstanding KPI/column). The shared CustomersDirectory renders
+ * the hero / KPIs / Row · Grid cards; this page owns the data + Add-customer flow.
+ */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Search, X, Users, Plus } from 'lucide-react';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
-import { liveLeaseTips } from '@/lib/activeCustomer';
-
-type Customer = {
-  id: number;
-  name: string;
-  email: string;
-  phone: string | null;
-  nationality: string | null;
-  leaseCount: number;
-  activeLeaseCount: number;
-  totalActiveRent: number;
-  latestActiveEnd: string | null;
-};
-
-function calcRenewalDays(endDate: string | null): number | null {
-  if (!endDate) return null;
-  const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`).getTime();
-  const now = new Date();
-  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return Math.round((end - todayUtc) / 86400000);
-}
+import { CustomersDirectory } from '@/components/upnow/CustomersDirectory';
+import { deriveCustomers, type DirectoryContractRow, type DirectoryCustomer } from '@/lib/customersDirectory';
 
 export default function TenantsPage() {
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<DirectoryCustomer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [renewalOnly, setRenewalOnly] = useState(false); // only renewals within 90d
 
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => {
-        if (!Array.isArray(data)) return;
-        // Collect raw leases per customer, then resolve the CURRENT lease per unit.
-        // Imported renewals are all flagged contractActive=true, so the live lease for
-        // a unit is the one with the latest start date; older same-unit leases are history.
-        type Raw = { id: number | null; unitId: number | null; startDate: string | null; endDate: string | null; annualRent: number; status: string | null; contractActive: boolean | null };
-        const byTenant = new Map<number, { c: Customer; leases: Raw[] }>();
-        for (const c of data) {
-          const tid = c.tenant?.id;
-          // Company customers display by company name; individuals by person name.
-          const displayName = c.tenant?.entityType === 'company' && c.tenant?.companyName
-            ? c.tenant.companyName
-            : c.tenant?.name;
-          if (!tid || !displayName) continue;
-          const e = byTenant.get(tid) ?? {
-            c: { id: tid, name: displayName, email: c.tenant.email ?? '', phone: c.tenant.phone ?? null, nationality: c.tenant.nationality ?? null, leaseCount: 0, activeLeaseCount: 0, totalActiveRent: 0, latestActiveEnd: null } as Customer,
-            leases: [] as Raw[],
-          };
-          e.leases.push({ id: c.id ?? null, unitId: c.unit?.id ?? null, startDate: c.startDate ?? null, endDate: c.endDate ?? null, annualRent: c.annualRent ?? 0, status: c.status ?? null, contractActive: c.contractActive ?? null });
-          byTenant.set(tid, e);
-        }
-        const customers = Array.from(byTenant.values()).map(({ c, leases }) => {
-          // Live leases = the in-force / in-flight tip of each renewal chain
-          // (shared definition, exact inverse of the Ended Leases nav).
-          const tips = liveLeaseTips(leases);
-          c.leaseCount = leases.length;
-          c.activeLeaseCount = tips.length;
-          c.totalActiveRent = tips.reduce((s, l) => s + (l.annualRent ?? 0), 0);
-          c.latestActiveEnd = tips.reduce<string | null>((m, l) => (l.endDate && (!m || new Date(l.endDate) > new Date(m)) ? l.endDate : m), null);
-          return c;
-        })
-        // Active tenants only — drop customers whose every lease has ended; they
-        // live under the Ended Leases nav.
-        .filter(c => c.activeLeaseCount > 0);
-        setCustomers(customers.sort((a, b) => a.name.localeCompare(b.name)));
+      .then((r) => r.json())
+      .then((data: DirectoryContractRow[]) => {
+        if (Array.isArray(data)) setCustomers(deriveCustomers(data));
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
   }, []);
 
-  const isRenewalSoon = (t: Customer) => {
-    const d = calcRenewalDays(t.latestActiveEnd);
-    return d !== null && d >= 0 && d <= 90;
-  };
-
-  const filtered = customers.filter(t => {
-    if (renewalOnly && !isRenewalSoon(t)) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!t.name.toLowerCase().includes(q) && !t.email.toLowerCase().includes(q) && !(t.phone ?? '').toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-
-  const hasFilters = search !== '' || renewalOnly;
-  const clearFilters = () => { setSearch(''); setRenewalOnly(false); };
-
-  const activeLeases = customers.reduce((s, t) => s + t.activeLeaseCount, 0);
-  const totalRent = customers.reduce((s, t) => s + t.totalActiveRent, 0);
-  const renewalSoon = customers.filter(isRenewalSoon).length;
-
-  const SUMMARY: { label: string; value: string; onClick?: () => void; active?: boolean }[] = [
-    { label: 'Total Customers',    value: loading ? '…' : String(customers.length) },
-    { label: 'Active Leases',      value: loading ? '…' : String(activeLeases) },
-    { label: 'Total Active Rent',  value: loading ? '…' : `AED ${totalRent.toLocaleString('en-AE')}` },
-    { label: 'Renewals Within 90d', value: loading ? '…' : String(renewalSoon), onClick: () => setRenewalOnly(v => !v), active: renewalOnly },
-  ];
-
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Customers</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Your active customers — anyone with a live or upcoming lease. Ended tenancies move to Ended Leases.</p>
-        </div>
-        <button onClick={() => setShowAdd(true)}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65]">
-          <Plus size={15} /> Add Customer
-        </button>
-      </div>
+    <>
+      <CustomersDirectory
+        customers={customers}
+        loading={loading}
+        onAdd={() => setShowAdd(true)}
+        viewHref={(id) => `/rental-provider/dashboard/tenants/${id}`}
+        emptySubtitle="Customers appear here once you have a rental agreement."
+      />
 
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}
+          role="dialog" aria-modal="true" aria-labelledby="add-customer-title">
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <h2 id="add-customer-title" className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
             <CustomerForm
               mode="create"
               submitUrl="/api/contracts/tenants"
@@ -139,94 +61,6 @@ export default function TenantsPage() {
           </div>
         </div>
       )}
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {SUMMARY.map((s, i) => (
-          <div key={i}
-            onClick={s.onClick}
-            className={`bg-white rounded-2xl p-5 shadow-sm transition ${s.onClick ? 'cursor-pointer hover:shadow-md' : ''} ${s.active ? 'ring-2 ring-[#2e9f82]' : ''}`}>
-            <div className="text-xs text-[#6b6860] font-medium flex items-center gap-1.5">
-              {s.label}
-              {s.onClick && <span className="text-[#2e9f82]">{s.active ? '• filtering' : 'filter'}</span>}
-            </div>
-            <div className="font-bold text-xl text-[#1a1916] mt-1">{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input
-            type="text"
-            placeholder="Search by name, email or phone…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
-          />
-        </div>
-        {hasFilters && (
-          <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
-            <X size={12} /> Reset
-          </button>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">{filtered.length} customer{filtered.length !== 1 ? 's' : ''} found</span>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-sm text-[#9b9890]">Loading customers…</div>
-        ) : customers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-              <Users size={24} className="text-[#2e9f82]" />
-            </div>
-            <p className="text-sm text-[#6b6860] mb-1">No customers yet</p>
-            <p className="text-xs text-[#9b9890]">Customers will appear here once you have rental agreements</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[800px]">
-              <thead>
-                <tr className="bg-[#f4f3ef]">
-                  {['Name', 'Email', 'Phone', 'Leases', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(t => (
-                  <tr key={t.id}
-                    onClick={() => router.push(`/rental-provider/dashboard/tenants/${t.id}`)}
-                    className="border-b border-[#e8e6e0] hover:bg-[#f4f3ef] text-sm text-[#1a1916] cursor-pointer">
-                    <td className="px-4 py-3.5 font-medium">{t.name}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{t.email || '—'}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{t.phone || '—'}</td>
-                    <td className="px-4 py-3.5">
-                      <span className="font-medium">{t.leaseCount}</span>
-                      {t.activeLeaseCount > 0 && (
-                        <span className="text-xs text-[#1a7a5a] ml-1.5">· {t.activeLeaseCount} active</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <Link href={`/rental-provider/dashboard/tenants/${t.id}`} onClick={e => e.stopPropagation()} className="text-sm text-[#2e9f82] font-medium hover:underline">View</Link>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-[#9b9890]">No customers match your filters.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
