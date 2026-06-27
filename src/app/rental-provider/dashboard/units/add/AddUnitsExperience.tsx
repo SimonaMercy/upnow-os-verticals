@@ -22,7 +22,7 @@ import { useRouter } from 'next/navigation';
 import { SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import Link from 'next/link';
 import {
-  ArrowLeft, Plus, X, Camera, Copy, Building2, Eye, FileText,
+  Plus, X, Camera, Copy, Building2, Eye, FileText,
   AlertCircle, Loader2, CheckCircle2, ImagePlus, ChevronDown, Search, Check, Pencil, Layers,
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
@@ -449,12 +449,13 @@ export default function AddUnitsExperience({ backHref }: { backHref: string }) {
     <div className={s.app}>
       {/* ── Header ── */}
       <header className={s.header}>
-        <button className={s.backBtn} onClick={requestBack} aria-label="Back to Units"><ArrowLeft size={17} /></button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className={s.headTitle}>Add Units</div>
           <div className={s.headSub}>Add units to one of your properties</div>
         </div>
         {kycReview && <div className={s.kyc}><AlertCircle size={13} /> KYC under review</div>}
+        {/* Close on the RIGHT — aligned with the property modals + unit form. */}
+        <button className={s.backBtn} onClick={requestBack} aria-label="Close"><X size={17} /></button>
       </header>
 
       {done ? (

@@ -693,11 +693,12 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     <div className={cn(ds.fullscreen, 'slideover-panel', closing && 'closing')}>
       <div className={ds.app}>
         <header className={ds.header}>
-          <button type="button" className={ds.backBtn} onClick={requestClose} aria-label="Close"><X size={17} /></button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className={ds.headTitle}>{title ?? 'Add Unit'}</div>
             <div className={ds.headSub}>{editingUnitId ? 'Update identity, pricing, terms and documents.' : 'Add a unit to this layout.'}</div>
           </div>
+          {/* Close on the RIGHT — aligned with the property modals. */}
+          <button type="button" className={ds.backBtn} onClick={requestClose} aria-label="Close"><X size={17} /></button>
         </header>
 
         <div ref={bodyRef} onScroll={onBodyScroll} className={ds.body}>
