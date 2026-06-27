@@ -18,7 +18,7 @@
  *   GET /api/documents?ownerType=property&ownerId=:id   (property documents)
  * Uploads reuse uploadOwnedDocument; deletes hit DELETE /documents/:id.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
-import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
+import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
@@ -175,6 +175,20 @@ export function PropertyDetailsModal({
   const [lb, setLb] = useState<number | null>(null);          // lightbox photo index
   const [reader, setReader] = useState<string | null>(null);  // active slot key
   const [readerFile, setReaderFile] = useState(0);            // active file in slot
+
+  // Swipe-in / swipe-out — same right-to-left slide as PropertyFormModal (see
+  // globals.css .slideover-*). This modal is mounted only while open, so the
+  // slide-in plays on mount automatically; `requestClose` plays the reverse
+  // slide first, then calls the parent's onClose (which unmounts us) once it has
+  // finished. The ref guards against double-firing mid-slide.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    window.setTimeout(() => onClose(), SLIDEOVER_MS);
+  }, [onClose]);
 
   // Track viewport so the layout collapses like the handoff (CSS can't do it via
   // inline styles).
@@ -372,11 +386,11 @@ export function PropertyDetailsModal({
       if (e.key !== 'Escape') return;
       if (lb !== null) setLb(null);
       else if (reader !== null) setReader(null);
-      else onClose();
+      else requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lb, reader, onClose]);
+  }, [lb, reader, requestClose]);
 
   // ── summary numbers ─────────────────────────────────────
   const occFromUnits = units.filter((u) => u.availability === 'occupied').length;
@@ -435,14 +449,16 @@ export function PropertyDetailsModal({
 
   return (
     <>
-      {/* ── MAIN CARD ── */}
+      {/* ── MAIN CARD — full-screen panel that swipes in from the right ── */}
       <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,25,.46)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isTight ? 0 : 22, zIndex: 50 }}
+        onClick={requestClose}
+        className={`slideover-scrim${closing ? ' closing' : ''}`}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,25,.46)', display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end', zIndex: 50 }}
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          style={{ width: '100%', maxWidth: 1000, maxHeight: '95vh', background: '#fff', borderRadius: isTight ? 0 : 18, boxShadow: '0 24px 70px rgba(15,30,22,.30)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          className={`slideover-panel${closing ? ' closing' : ''}`}
+          style={{ width: '100%', height: '100dvh', maxHeight: '100dvh', background: '#fff', boxShadow: '0 24px 70px rgba(15,30,22,.30)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         >
           {/* HEADER */}
           <header style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 24px', borderBottom: `1px solid ${C.line2}`, flex: '0 0 auto' }}>
@@ -462,7 +478,7 @@ export function PropertyDetailsModal({
                 <Pencil size={14} /> Edit
               </button>
             )}
-            <button type="button" onClick={onClose} aria-label="Close"
+            <button type="button" onClick={requestClose} aria-label="Close"
               style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
               <X size={18} />
             </button>

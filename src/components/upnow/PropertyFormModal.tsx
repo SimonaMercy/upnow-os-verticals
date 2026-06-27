@@ -1510,6 +1510,12 @@ export function PropertyFields({
   );
 }
 
+// Slide-over animation duration — keep in sync with `.slideover-panel-out` /
+// `.slideover-scrim-out` in globals.css so the parent is told to unmount only
+// after the swipe-out has finished playing. Shared with PropertyDetailsModal so
+// both the form and the detail preview swipe out for the same length of time.
+export const SLIDEOVER_MS = 380;
+
 export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId, unitCount }: Props) {
   const isEdit = !!initial?.spaceCategory;
   const [form, setForm] = useState<PropertyFormData>({ ...EMPTY, ...initial });
@@ -1524,6 +1530,19 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
   const [existingDocs, setExistingDocs] = useState<PropertyDoc[]>([]);
   // Bumped each open so PropertyFields remounts and re-derives its cascade.
   const [openSeq, setOpenSeq] = useState(0);
+
+  // Swipe-in / swipe-out: the panel slides in from the right on open. On close
+  // we play the reverse slide first (`closing`), then tell the parent to flip
+  // `open` false (which unmounts us) once the animation has finished. The ref
+  // guards against double-firing while the slide-out is mid-flight.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    window.setTimeout(() => onClose(), SLIDEOVER_MS);
+  }, [onClose]);
 
   // Left-nav scroll-spy: the body is the scroll container; each section
   // registers its element here so clicking the nav scrolls to it and scrolling
@@ -1578,6 +1597,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     setErrors({}); setTitleDeed(null); setDrawings([]); setExtraDocs({}); setPropertyPhotos([]);
     setActiveSection('cat');
     setOpenSeq(s => s + 1);
+    setClosing(false); closingRef.current = false;
     if (propertyId) {
       apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
         .then(ds => setExistingDocs(ds.filter(d => d.documentKey === 'title_deed' || d.documentKey.startsWith('building_drawing') || isExtraSlotDoc(d.documentKey))))
@@ -1612,7 +1632,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     setSaving(true);
     // Title deed travels for directly-held properties (sub-leases / managed
     // properties carry their proof doc via extraDocs instead).
-    try { await onSave(form, form.leasingType === 'direct' ? titleDeed : null, drawings, extraDocs, propertyPhotos); onClose(); }
+    try { await onSave(form, form.leasingType === 'direct' ? titleDeed : null, drawings, extraDocs, propertyPhotos); requestClose(); }
     finally { setSaving(false); }
   };
 
@@ -1620,11 +1640,12 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4"
+      className={cn('fixed inset-0 z-50 flex justify-end slideover-scrim', closing && 'closing')}
       style={{ background: 'rgba(20,30,25,0.46)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={e => { if (e.target === e.currentTarget) requestClose(); }}
     >
-      <div className="bg-white w-full h-[100dvh] sm:h-[96vh] max-w-[1400px] max-h-[100dvh] sm:max-h-[96vh] sm:rounded-[18px] shadow-[0_24px_70px_rgba(15,30,22,0.30)] flex flex-col overflow-hidden">
+      {/* Full-screen panel that swipes in from the right (see globals.css). */}
+      <div className={cn('slideover-panel bg-white w-full h-[100dvh] flex flex-col overflow-hidden shadow-[0_24px_70px_rgba(15,30,22,0.30)]', closing && 'closing')}>
 
         {/* ── Header ── */}
         <header className="flex items-center gap-3.5 px-5 sm:px-6 py-4 sm:py-5 border-b border-[#eef1ec] shrink-0">
@@ -1642,7 +1663,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
               <p className="text-[13px] text-[#9b9890] mt-0.5">Add once — then add units to it anytime</p>
             )}
           </div>
-          <button type="button" onClick={onClose}
+          <button type="button" onClick={requestClose}
             className="w-[34px] h-[34px] shrink-0 rounded-[10px] border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer transition-colors">
             <X size={18} />
           </button>
@@ -1739,7 +1760,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
           <footer className="flex items-center gap-3 px-5 sm:px-6 py-4 border-t border-[#eef1ec] bg-[#fbfcfb] shrink-0">
             <span className="hidden sm:block text-[11.5px] text-[#9b9890]">You can edit everything after saving.</span>
             <div className="flex-1" />
-            <button type="button" onClick={onClose}
+            <button type="button" onClick={requestClose}
               className="text-sm font-bold text-[#3a443d] bg-white border border-[#e2e7e1] px-5 py-3 rounded-[11px] cursor-pointer hover:bg-[#f4f6f3] transition-colors">
               Cancel
             </button>

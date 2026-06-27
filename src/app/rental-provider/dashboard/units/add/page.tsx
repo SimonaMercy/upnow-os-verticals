@@ -24,6 +24,7 @@ import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
 import AddendumTemplatePicker from '@/components/upnow/AddendumTemplatePicker';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 import { openAddendumPdfInNewTab } from '@/lib/openAddendumPdf';
+import AddUnitsExperience from './AddUnitsExperience';
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
 const INPUT  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
@@ -119,7 +120,7 @@ const EMPTY_PROP: PropertyFormData = {
   buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
-  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '',
+  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '', numberOfUnits: '',
   propertyDescription: '', latitude: null, longitude: null,
   sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
@@ -764,6 +765,12 @@ export default function AddListingPage() {
   const propCategory = selectedPropId
     ? (existingProps.find(p => p.id === selectedPropId)?.spaceCategory ?? '')
     : pf.spaceCategory;
+
+  // RP owner (no ?rp) adding units to an existing property → the redesigned,
+  // self-contained "Add Units" experience. The manager property-creation + CSV
+  // wizard below is unchanged. (All hooks above run first, so this conditional
+  // return is rules-of-hooks safe.)
+  if (unitsOnly) return <AddUnitsExperience backHref={backHref} />;
 
   /* ══════════════════════════════════════════════════════════════════════════ */
   return (

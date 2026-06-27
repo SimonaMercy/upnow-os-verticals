@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
-  ArrowRight, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
+  ArrowUp, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
   LayoutGrid, Rows3, Search, Plus, Eye, Trash2, Star,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete } from '@/lib/api';
@@ -33,6 +33,10 @@ import { UnitFormModal, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModa
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { saveUnit, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
+import ds from '@/components/upnow/unitForm.module.css';
+
+/** Tiny class-name joiner for the redesigned modal (drops falsy values). */
+const dcx = (...a: (string | false | null | undefined)[]) => a.filter(Boolean).join(' ');
 
 interface Plan {
   displayName: string;
@@ -113,6 +117,16 @@ const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigit
 const bedLabel = (b: number | null) => (b == null ? 'Unit' : b === 0 ? 'Studio' : `${b} Bed`);
 const typeLabel = (t: string | null) => (t == null ? 'Other' : t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
 
+// ── "Units & Pricing" redesign tokens (Claude-Design handoff). Mock structure
+// + neutrals, but the brand green is the app green (#2e9f82) so this page stays
+// consistent with its neighbours (Add Units, portfolio, the edit modals). ──────
+const GREEN = '#2e9f82', GREEN_D = '#1a7a5a', GREEN_T = '#e6f7f1', GREEN_T2 = '#d8f2e8';
+const INK = '#1d2823', MUTE = '#8a938c', MUTE2 = '#9aa39c', LINE = '#e7ebe6', THUMB_BG = '#f4f6f3';
+const ICON_MUTE = '#a0a8a1';
+// Small reusable inline-style fragments shared by the redesigned rows/cards.
+const CHIP_COUNT = { fontSize: 11.5, fontWeight: 600, color: '#7d8780', background: '#eef1ec', padding: '4px 10px', borderRadius: 7 } as const;
+const UNITS_CHIP = { fontSize: 10.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '3px 9px', borderRadius: 6 } as const;
+
 // Fee key (units column) → fee-rule fee_type, and the rule-based default off rent.
 const FEE_RULE_TYPE: Record<string, string> = {
   securityDeposit: 'security_deposit', adminFee: 'admin_fee', ejariFee: 'ejari_fee', commission: 'commission',
@@ -150,10 +164,10 @@ const SORT_OPTIONS: { value: string; label: string }[] = [
 ];
 
 const isPdf = (u: string) => /\.pdf(\?|$)/i.test(u);
-function PlanThumb({ url, alt }: { url: string | null; alt: string }) {
+function PlanThumb({ url, alt, emptyLabel = 'No floor plan' }: { url: string | null; alt: string; emptyLabel?: string }) {
   if (!url) return (
-    <div className="w-full h-full flex flex-col items-center justify-center text-[#c5c3bc] bg-[#fafaf8]">
-      <ImageIcon size={30} /><span className="text-xs mt-1">No floor plan</span>
+    <div className="w-full h-full flex flex-col items-center justify-center gap-1" style={{ color: '#b9c1ba', background: THUMB_BG }}>
+      <ImageIcon size={20} /><span style={{ fontSize: 10.5, color: ICON_MUTE }}>{emptyLabel}</span>
     </div>
   );
   if (isPdf(url)) return (
@@ -179,9 +193,11 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [sort, setSort] = useState('default');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'grid' | 'row'>('row');
-  // Primary axis: 'type' = layout cards grouped by unit type (default), 'unit' =
-  // a flat list of every individual unit (still grouped under its unit type).
-  const [mode, setMode] = useState<'type' | 'unit'>('type');
+  // Primary axis: 'unit' = a flat list of every individual unit grouped by
+  // building (default), 'type' = layout cards grouped by unit type (pricing).
+  const [mode, setMode] = useState<'type' | 'unit'>('unit');
+  // By-unit status tab filter (All / Occupied / Published / Draft).
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Occupied' | 'Published' | 'Draft'>('All');
   const [loading, setLoading] = useState(true);
 
   // shared error surface (image upload, etc.)
@@ -336,7 +352,6 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     }
   };
 
-  const building = data?.properties.find(p => p.id === propertyId)?.buildingName?.trim();
   const allPlans = data?.plans ?? [];
   const q = query.trim().toLowerCase();
 
@@ -392,8 +407,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const flagged = plans.filter(p => p.flags.length > 0).length;
   const counts = FLAG_ORDER.map(f => ({ f, n: plans.filter(p => p.flags.includes(f)).length })).filter(c => c.n > 0);
 
-  // total units, broken down by unit type (a layout maps to one type)
-  const totalUnits = plans.reduce((s, p) => s + p.unitCount, 0);
+  // unit-type breakdown (a layout maps to one type) — drives the By-layout groups
   const typeCounts = Object.entries(plans.reduce<Record<string, number>>((m, p) => {
     const k = p.unitType ?? 'other';
     m[k] = (m[k] ?? 0) + p.unitCount;
@@ -455,74 +469,90 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       return true;
     });
 
-  // Group units under their unit type (largest group first); each group is
-  // ordered by the active Sort, falling back to unit number.
+  // Status buckets for the By-unit status tabs (mock's three buckets): occupied
+  // wins, then a live "published" listing, else "Draft" (anything not yet live).
+  const unitBucket = (u: UnitRecord): 'Occupied' | 'Published' | 'Draft' =>
+    u.availability === 'occupied' ? 'Occupied'
+    : u.listingStatus === 'published' ? 'Published'
+    : 'Draft';
+  const statusCounts = scopedUnitRows.reduce(
+    (m, { u }) => { m[unitBucket(u)] += 1; return m; },
+    { Occupied: 0, Published: 0, Draft: 0 } as Record<'Occupied' | 'Published' | 'Draft', number>,
+  );
+  const statusTotal = scopedUnitRows.length;
+  const statusVisibleRows = statusFilter === 'All'
+    ? scopedUnitRows
+    : scopedUnitRows.filter(({ u }) => unitBucket(u) === statusFilter);
+
+  const sortUnitItems = (items: { u: UnitRecord; pl: Plan }[]) => sortField
+    ? [...items].sort((a, b) => {
+        const av = unitSortVal(a.u), bv = unitSortVal(b.u);
+        if (av == null && bv == null) return byUnitNumber(a.u, b.u);
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av - bv) * sortDir;
+      })
+    : [...items].sort((a, b) => byUnitNumber(a.u, b.u));
+
+  // Group the status-visible units under their BUILDING (largest group first);
+  // each group is ordered by the active Sort, falling back to unit number.
   const unitGroups = Object.entries(
-    scopedUnitRows.reduce<Record<string, { u: UnitRecord; pl: Plan }[]>>((m, r) => {
-      const t = r.pl.unitType ?? 'other'; (m[t] ??= []).push(r); return m;
+    statusVisibleRows.reduce<Record<string, { u: UnitRecord; pl: Plan }[]>>((m, r) => {
+      const b = r.pl.buildingName || 'Other'; (m[b] ??= []).push(r); return m;
     }, {}),
-  ).map(([unitType, items]) => ({
-    unitType,
-    items: sortField
-      ? [...items].sort((a, b) => {
-          const av = unitSortVal(a.u), bv = unitSortVal(b.u);
-          if (av == null && bv == null) return byUnitNumber(a.u, b.u);
-          if (av == null) return 1;
-          if (bv == null) return -1;
-          return (av - bv) * sortDir;
-        })
-      : [...items].sort((a, b) => byUnitNumber(a.u, b.u)),
-  })).sort((a, b) => b.items.length - a.items.length);
+  ).map(([building, items]) => ({ building, items: sortUnitItems(items) }))
+   .sort((a, b) => b.items.length - a.items.length);
 
   // ── shared bits, reused by both the grid card and the row ──────────────
-  const flagChips = (p: Plan) => p.flags.length > 0 && (
+  // Pricing flags shown as per-row badges (mock: amber "Doesn't scale" etc.;
+  // unpriced is red).
+  const flagBadges = (p: Plan) => p.flags.length > 0 && (
     <div className="flex flex-wrap gap-1.5">
       {FLAG_ORDER.filter(f => p.flags.includes(f)).map(f => (
-        <span key={f} title={FLAG_META[f].tip(p)} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full cursor-help ${FLAG_META[f].cls}`}>
+        <span key={f} title={FLAG_META[f].tip(p)} className="cursor-help"
+          style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 7,
+            ...(f === 'unpriced' ? { color: '#b91c1c', background: '#fdecec' } : { color: '#b07415', background: '#fbf0dd' }) }}>
           {FLAG_META[f].label}
         </span>
       ))}
     </div>
   );
 
+  // Floating view / replace floor-plan controls on a layout thumbnail.
   const imageActions = (p: Plan, isUploading: boolean) => (
     <div className="flex gap-1.5">
       {p.floorPlanUrl && (
-        <button onClick={() => setViewer({ url: p.floorPlanUrl!, name: `${p.buildingName} ${p.displayName}` })}
-          title="View full floor plan"
-          className="w-8 h-8 rounded-full bg-white/95 shadow flex items-center justify-center text-[#44423c] hover:bg-white">
-          <Maximize size={14} />
+        <button onClick={(e) => { e.stopPropagation(); setViewer({ url: p.floorPlanUrl!, name: `${p.buildingName} ${p.displayName}` }); }}
+          title="View full floor plan" className="flex items-center justify-center hover:bg-white"
+          style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,.95)', color: '#5a635c', boxShadow: '0 2px 6px rgba(20,40,30,.1)', border: '1px solid #e2e7e1' }}>
+          <Maximize size={13} />
         </button>
       )}
-      <button onClick={() => pickImage(p)} disabled={isUploading}
-        title="Replace floor plan (applies to all units on this plan)"
-        className="w-8 h-8 rounded-full bg-white/95 shadow flex items-center justify-center text-[#44423c] hover:bg-white disabled:opacity-60">
-        {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+      <button onClick={(e) => { e.stopPropagation(); pickImage(p); }} disabled={isUploading}
+        title="Replace floor plan (applies to all units on this plan)" className="flex items-center justify-center hover:bg-white disabled:opacity-60"
+        style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,.95)', color: '#5a635c', boxShadow: '0 2px 6px rgba(20,40,30,.1)', border: '1px solid #e2e7e1' }}>
+        {isUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
       </button>
     </div>
   );
 
-  // Price display + a single "Edit" that opens the combined pricing & financial
-  // details editor (one place — no separate pricing flow).
+  // Annual rent (right) + an "Edit" pill that opens the combined plan-wide
+  // pricing & financial-details editor (one place — no separate pricing flow).
   const priceBlock = (p: Plan) => (
-    <div className="flex items-center justify-between gap-2">
+    <div className="flex items-end justify-between gap-3">
       <div>
         {p.rentFrom != null ? (
-          <>
-            <span className="font-bold text-lg" style={{ color: 'var(--primary, #2e9f82)' }}>AED {aed(p.rentFrom)}</span>
-            {p.rentTo != null && p.rentTo !== p.rentFrom && (
-              <span className="text-xs" style={{ color: 'var(--neutral-400,#9b9890)' }}> – {aed(p.rentTo)}</span>
-            )}
-            <span className="text-xs ml-1" style={{ color: 'var(--neutral-500, #6b6860)' }}>/yr</span>
-          </>
+          <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
+            AED {aed(p.rentFrom)}{p.rentTo != null && p.rentTo !== p.rentFrom ? ` – ${aed(p.rentTo)}` : ''}
+            <span style={{ fontSize: 12, fontWeight: 600, color: MUTE2 }}> /yr</span>
+          </div>
         ) : (
-          <span className="text-sm font-medium" style={{ color: '#b91c1c' }}>No price set</span>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#b91c1c' }}>No price set</div>
         )}
       </div>
-      <button onClick={() => setFinModal(p)}
-        className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-        style={{ backgroundColor: '#e6f7f1', color: 'var(--primary, #2e9f82)' }}>
-        <Pencil size={12} /> {p.rentFrom != null ? 'Edit' : 'Set price'}
+      <button onClick={() => setFinModal(p)} className="flex items-center gap-1.5 whitespace-nowrap shrink-0"
+        style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 15px', borderRadius: 10 }}>
+        <Pencil size={13} /> {p.rentFrom != null ? 'Edit' : 'Set price'}
       </button>
     </div>
   );
@@ -532,47 +562,30 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const isUploading = uploadingPlan === planKey(p);
     return (
       <div key={planKey(p)} className="flex flex-col overflow-hidden"
-        style={{ backgroundColor: 'var(--white, #fff)', borderRadius: 20, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
         {/* Floor-plan drawing */}
-        <div className="relative overflow-hidden group" style={{ height: 200 }}>
+        <div className="relative overflow-hidden" style={{ height: 128, background: THUMB_BG, borderBottom: '1px dashed #e0e6df' }}>
           <PlanThumb url={p.floorPlanUrl} alt={p.displayName} />
-          <span className="absolute top-3 left-3 text-xs font-semibold px-2.5 py-1 rounded-full"
-            style={{ backgroundColor: 'rgba(255,255,255,0.92)', color: 'var(--neutral-700, #44423c)' }}>
-            {p.displayName}
-          </span>
-          <span className="absolute top-3 right-3 text-xs font-semibold px-2.5 py-1 rounded-full"
-            style={{ backgroundColor: '#d8f2e8', color: '#1a7a5a' }}>
-            {p.unitCount} {p.unitCount === 1 ? 'unit' : 'units'}
-          </span>
-          <div className="absolute bottom-2 right-2">{imageActions(p, isUploading)}</div>
+          <div className="absolute" style={{ top: 10, right: 10 }}>{imageActions(p, isUploading)}</div>
+          {p.flags.length > 0 && <div className="absolute" style={{ top: 10, left: 10 }}>{flagBadges(p)}</div>}
         </div>
 
         {/* Body */}
-        <div className="flex flex-col flex-1 p-5">
-          <p className="text-xs font-medium mb-0.5 truncate" style={{ color: 'var(--neutral-500, #6b6860)' }}>
-            {p.buildingName}
-          </p>
-          <h3 className="font-semibold text-base truncate" style={{ color: 'var(--neutral-900, #1a1916)' }}>
-            {bedLabel(p.bedrooms)}{p.bathrooms != null ? ` · ${p.bathrooms} Bath` : ''}
-          </h3>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--neutral-500, #6b6860)' }}>{p.planLabel}</p>
-
-          <div className="flex items-center gap-4 mt-3 text-xs" style={{ color: 'var(--neutral-600, #57544d)' }}>
-            {p.bedrooms != null && (<span className="flex items-center gap-1"><BedDouble size={13} />{p.bedrooms === 0 ? 'Studio' : `${p.bedrooms} BR`}</span>)}
-            {p.bathrooms != null && (<span className="flex items-center gap-1"><Bath size={13} />{p.bathrooms} Bath</span>)}
-            <span className="flex items-center gap-1"><Maximize2 size={13} />{sizeLabel(p.sqftMin, p.sqftMax)} sqft</span>
+        <div className="flex flex-col flex-1" style={{ padding: '14px 16px' }}>
+          <div className="flex items-center gap-2">
+            <span className="truncate" style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-.01em', color: INK, flex: 1, minWidth: 0 }}>
+              {bedLabel(p.bedrooms)}{p.bathrooms != null ? ` · ${p.bathrooms} Bath` : ''}
+            </span>
+            <span className="shrink-0" style={UNITS_CHIP}>{p.unitCount} {p.unitCount === 1 ? 'unit' : 'units'}</span>
           </div>
-
-          {p.flags.length > 0 && <div className="mt-3">{flagChips(p)}</div>}
-
-          <div className="mt-auto pt-4">
+          <div className="truncate" style={{ fontSize: 12, color: MUTE, marginTop: 5 }}>{p.buildingName} · {p.planLabel}</div>
+          <div className="flex items-center gap-3.5" style={{ marginTop: 11, fontSize: 12, color: '#6b756f', fontWeight: 600 }}>
+            {p.bedrooms != null && (<span className="inline-flex items-center gap-1"><BedDouble size={13} style={{ color: ICON_MUTE }} />{p.bedrooms === 0 ? 'Studio' : `${p.bedrooms} BR`}</span>)}
+            {p.bathrooms != null && (<span className="inline-flex items-center gap-1"><Bath size={13} style={{ color: ICON_MUTE }} />{p.bathrooms} Bath</span>)}
+            <span className="inline-flex items-center gap-1"><Maximize2 size={13} style={{ color: ICON_MUTE }} />{sizeLabel(p.sqftMin, p.sqftMax)} sqft</span>
+          </div>
+          <div className="mt-auto" style={{ paddingTop: 13, marginTop: 14, borderTop: '1px solid #f1f3f0' }}>
             {priceBlock(p)}
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <Link href={`/listings/units/${p.sampleUnitId}`} target="_blank"
-                className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-                View a unit <ArrowRight size={12} />
-              </Link>
-            </div>
           </div>
         </div>
       </div>
@@ -582,39 +595,33 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const rowCard = (p: Plan) => {
     const isUploading = uploadingPlan === planKey(p);
     return (
-      <div key={planKey(p)} className="flex items-stretch gap-4 p-3 sm:p-4"
-        style={{ backgroundColor: 'var(--white, #fff)', borderRadius: 16, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+      <div key={planKey(p)} className="flex items-center gap-4"
+        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
         {/* Floor-plan thumbnail */}
-        <div className="relative shrink-0 overflow-hidden rounded-xl" style={{ width: 132, height: 92 }}>
+        <div className="relative shrink-0 overflow-hidden" style={{ width: 84, height: 66, borderRadius: 11, background: THUMB_BG, border: '1px dashed #d6ddd6' }}>
           <PlanThumb url={p.floorPlanUrl} alt={p.displayName} />
-          <div className="absolute bottom-1.5 right-1.5">{imageActions(p, isUploading)}</div>
+          <div className="absolute bottom-1 right-1">{imageActions(p, isUploading)}</div>
         </div>
 
         {/* Identity + stats + flags */}
         <div className="flex flex-col justify-center min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-base truncate" style={{ color: 'var(--neutral-900, #1a1916)' }}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>
               {bedLabel(p.bedrooms)}{p.bathrooms != null ? ` · ${p.bathrooms} Bath` : ''}
-            </h3>
-            <span className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#d8f2e8', color: '#1a7a5a' }}>
-              {p.unitCount} {p.unitCount === 1 ? 'unit' : 'units'}
             </span>
+            <span className="shrink-0" style={UNITS_CHIP}>{p.unitCount} {p.unitCount === 1 ? 'unit' : 'units'}</span>
           </div>
-          <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--neutral-500, #6b6860)' }}>
-            {p.buildingName} · {p.planLabel}
-          </p>
-          <div className="flex items-center gap-4 mt-1.5 text-xs" style={{ color: 'var(--neutral-600, #57544d)' }}>
-            {p.bedrooms != null && (<span className="flex items-center gap-1"><BedDouble size={13} />{p.bedrooms === 0 ? 'Studio' : `${p.bedrooms} BR`}</span>)}
-            {p.bathrooms != null && (<span className="flex items-center gap-1"><Bath size={13} />{p.bathrooms} Bath</span>)}
-            <span className="flex items-center gap-1"><Maximize2 size={13} />{sizeLabel(p.sqftMin, p.sqftMax)} sqft</span>
+          <div className="truncate" style={{ fontSize: 12.5, color: MUTE, marginTop: 5 }}>{p.buildingName} · {p.planLabel}</div>
+          <div className="flex items-center gap-4" style={{ marginTop: 9, fontSize: 12.5, color: '#6b756f', fontWeight: 600 }}>
+            {p.bedrooms != null && (<span className="inline-flex items-center gap-1.5"><BedDouble size={14} style={{ color: ICON_MUTE }} />{p.bedrooms === 0 ? 'Studio' : `${p.bedrooms} BR`}</span>)}
+            {p.bathrooms != null && (<span className="inline-flex items-center gap-1.5"><Bath size={14} style={{ color: ICON_MUTE }} />{p.bathrooms} Bath</span>)}
+            <span className="inline-flex items-center gap-1.5"><Maximize2 size={14} style={{ color: ICON_MUTE }} />{sizeLabel(p.sqftMin, p.sqftMax)} sqft</span>
           </div>
-          {p.flags.length > 0 && <div className="mt-2">{flagChips(p)}</div>}
+          {p.flags.length > 0 && <div style={{ marginTop: 9 }}>{flagBadges(p)}</div>}
         </div>
 
         {/* Pricing */}
-        <div className="flex flex-col justify-center items-end gap-1.5 shrink-0 w-[300px] max-w-[44%]">
-          <div className="w-full">{priceBlock(p)}</div>
-        </div>
+        <div className="shrink-0" style={{ width: 300, maxWidth: '42%' }}>{priceBlock(p)}</div>
       </div>
     );
   };
@@ -633,47 +640,51 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice ?? u.marketPrice, busy: busyUnit === u.id };
   };
 
-  // Listing / view / edit / delete buttons — shared by the unit row and card.
+  // Listing / edit / delete actions — shared by the unit row and card. (The row
+  // and unit number already open the read-only preview, so there's no separate
+  // "View" button; the mock leads with the "Edit" pill.)
   const unitActions = (p: Plan, u: UnitRecord, busy: boolean) => (
     <>
       {u.availability === 'available' && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
         <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'submit-listing'); }}
-          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: '#e6f7f1', color: 'var(--primary,#2e9f82)' }}>
+          className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '7px 11px', borderRadius: 9 }}>
           {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
         </button>
       )}
       {u.availability === 'available' && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
         <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'withdraw-listing'); }}
-          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: '#f1efe9', color: 'var(--neutral-600,#57544d)' }}>
+          className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#6b756f', background: '#eef1ec', padding: '7px 11px', borderRadius: 9 }}>
           Withdraw
         </button>
       )}
-      <button onClick={(e) => { e.stopPropagation(); setUnitPreview({ plan: p, unit: u }); }} title="View full unit details"
-        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap"
-        style={{ color: 'var(--primary,#2e9f82)', background: '#e6f7f1', border: '1px solid #cfe9df' }}>
-        <Eye size={13} /> View
-      </button>
       <button onClick={(e) => { e.stopPropagation(); setUnitModal({ plan: p, editingUnit: u }); }} title="Edit unit"
-        className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: 'var(--neutral-500,#6b6860)', background: '#fff', border: '1px solid #e8e6e0' }}>
-        <Pencil size={14} />
+        className="flex items-center gap-1.5 shrink-0"
+        style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 14px', borderRadius: 10 }}>
+        <Pencil size={13} /> Edit
       </button>
       {confirmDelete === u.id ? (
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1 shrink-0">
           <button disabled={busy} onClick={(e) => { e.stopPropagation(); onDeleteUnit(p.propertyId, u.id); }}
-            className="text-[11px] font-semibold px-2 py-1 rounded-lg disabled:opacity-50" style={{ background: '#fee2e2', color: '#b91c1c' }}>
+            className="disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#b91c1c', background: '#fdecec', padding: '7px 10px', borderRadius: 9 }}>
             {busy ? '…' : 'Delete'}
           </button>
           <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }}
-            className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ background: '#f1efe9', color: '#6b6860' }}>No</button>
+            style={{ fontSize: 11.5, fontWeight: 700, color: '#6b756f', background: '#eef1ec', padding: '7px 10px', borderRadius: 9 }}>No</button>
         </span>
       ) : (
         <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(u.id); }} title="Delete unit"
-          className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: '#b91c1c', background: '#fff', border: '1px solid #f1d5d5' }}>
+          className="flex items-center justify-center shrink-0" style={{ width: 34, height: 34, borderRadius: 9, color: '#b91c1c', background: '#fff', border: '1px solid #f1d5d5' }}>
           <Trash2 size={14} />
         </button>
       )}
     </>
   );
+
+  // Sub-line for a unit row/card: building (when rows span properties) · name ·
+  // type · plan.
+  const unitSub = (p: Plan, u: UnitRecord, showBuilding: boolean) =>
+    [showBuilding && p.buildingName ? p.buildingName : null, u.unitName || null,
+      u.unitType.replace(/_/g, ' '), u.planLabel || null].filter(Boolean).join(' · ');
 
   // One unit row — used in the per-unit row view (`showBuilding` adds the
   // building name, since rows can span properties).
@@ -681,37 +692,32 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const { tenant, leaseRange, pill, size, price, busy } = unitMeta(u);
     return (
       <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
-        className="flex items-center gap-3 rounded-xl px-3 py-2.5 cursor-pointer transition-colors bg-[#fafaf8] border border-[#eef0ee] hover:bg-[#f3f7f5] hover:border-[#cfe9df]">
-        <button onClick={(e) => { e.stopPropagation(); setUnitPreview({ plan: p, unit: u }); }} title="Preview unit"
-          className="font-semibold text-sm shrink-0 hover:underline"
-          style={{ color: 'var(--neutral-900,#1a1916)', minWidth: 52, textAlign: 'left' }}>
-          {u.unitNumber}
-        </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 flex-wrap text-xs" style={{ color: 'var(--neutral-600,#57544d)' }}>
-            {showBuilding && p.buildingName && <span className="font-medium" style={{ color: 'var(--neutral-700,#44423c)' }}>{p.buildingName}</span>}
-            {u.unitName && <span className="font-medium" style={{ color: 'var(--neutral-800,#2d2b26)' }}>{u.unitName}</span>}
-            <span>{u.unitType.replace(/_/g, ' ')}</span>
-            {u.bedrooms != null && <span>· {u.bedrooms} BR</span>}
-            {u.bathrooms != null && <span>· {u.bathrooms} BA</span>}
-            {size && <span>· {size}</span>}
-            {u.view && <span>· {u.view}</span>}
-          </div>
-          {tenant && (
-            <div className="text-[11px] mt-0.5" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-              {tenant}{leaseRange ? ` · ${leaseRange}` : ''}
-            </div>
-          )}
+        className="flex items-center gap-4 cursor-pointer transition-colors hover:border-[#cfe7da]"
+        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
+        {/* Photo / floor-plan thumbnail */}
+        <div className="relative shrink-0 overflow-hidden" style={{ width: 84, height: 66, borderRadius: 11, background: THUMB_BG, border: '1px dashed #d6ddd6' }}>
+          <PlanThumb url={u.floorPlanUrl ?? p.floorPlanUrl} alt={u.unitNumber} emptyLabel="No photo" />
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {price != null && (
-            <div className="text-sm font-bold whitespace-nowrap" style={{ color: 'var(--primary,#2e9f82)' }}>
-              AED {aed(Number(price))}
-            </div>
-          )}
-          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: pill.bg, color: pill.fg }}>
-            {pill.label}
-          </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>Unit {u.unitNumber}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: pill.fg, background: pill.bg, padding: '5px 11px', borderRadius: 8 }}>{pill.label}</span>
+          </div>
+          <div className="truncate" style={{ fontSize: 12.5, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
+          <div className="flex items-center gap-4" style={{ marginTop: 9, fontSize: 12.5, color: '#6b756f', fontWeight: 600 }}>
+            {u.bedrooms != null && <span className="inline-flex items-center gap-1.5"><BedDouble size={14} style={{ color: ICON_MUTE }} />{u.bedrooms === 0 ? 'Studio' : `${u.bedrooms} BR`}</span>}
+            {u.bathrooms != null && <span className="inline-flex items-center gap-1.5"><Bath size={14} style={{ color: ICON_MUTE }} />{u.bathrooms} Bath</span>}
+            {size && <span className="inline-flex items-center gap-1.5"><Maximize2 size={14} style={{ color: ICON_MUTE }} />{size}</span>}
+          </div>
+          {tenant && <div className="truncate" style={{ fontSize: 11.5, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
+        </div>
+        {/* Price */}
+        <div className="text-right shrink-0">
+          {price != null
+            ? <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>AED {aed(Number(price))} <span style={{ fontSize: 12, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
+            : <div style={{ fontSize: 14, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
+        </div>
+        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
           {unitActions(p, u, busy)}
         </div>
       </div>
@@ -723,175 +729,155 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const { tenant, leaseRange, pill, size, price, busy } = unitMeta(u);
     return (
       <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
-        className="flex flex-col overflow-hidden cursor-pointer transition-shadow hover:shadow-md"
-        style={{ background: 'var(--white,#fff)', borderRadius: 16, border: '1px solid #eef0ee', boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-        {/* Floor-plan thumbnail */}
-        <div className="relative" style={{ height: 132 }}>
-          <PlanThumb url={u.floorPlanUrl ?? p.floorPlanUrl} alt={u.unitNumber} />
-          <span className="absolute top-2 left-2 text-xs font-semibold px-2 py-0.5 rounded-full"
-            style={{ background: 'rgba(255,255,255,0.92)', color: 'var(--neutral-700,#44423c)' }}>
-            {u.unitNumber}
-          </span>
-          <span className="absolute top-2 right-2 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: pill.bg, color: pill.fg }}>
-            {pill.label}
-          </span>
+        className="flex flex-col overflow-hidden cursor-pointer"
+        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
+        {/* Photo / floor-plan thumbnail */}
+        <div className="relative overflow-hidden" style={{ height: 128, background: THUMB_BG, borderBottom: '1px dashed #e0e6df' }}>
+          <PlanThumb url={u.floorPlanUrl ?? p.floorPlanUrl} alt={u.unitNumber} emptyLabel="No photo" />
+          <span className="absolute" style={{ top: 10, left: 10, fontSize: 11, fontWeight: 700, color: pill.fg, background: pill.bg, padding: '5px 11px', borderRadius: 8 }}>{pill.label}</span>
         </div>
         {/* Body */}
-        <div className="flex flex-col flex-1 p-4">
-          {showBuilding && p.buildingName && (
-            <p className="text-xs font-medium truncate" style={{ color: 'var(--neutral-500,#6b6860)' }}>{p.buildingName}</p>
-          )}
-          {u.unitName && (
-            <h3 className="font-semibold text-sm truncate" style={{ color: 'var(--neutral-900,#1a1916)' }}>{u.unitName}</h3>
-          )}
-          <div className="flex items-center gap-1.5 flex-wrap text-xs mt-0.5" style={{ color: 'var(--neutral-600,#57544d)' }}>
-            <span>{u.unitType.replace(/_/g, ' ')}</span>
-            {u.bedrooms != null && <span>· {u.bedrooms} BR</span>}
-            {u.bathrooms != null && <span>· {u.bathrooms} BA</span>}
-            {size && <span>· {size}</span>}
-            {u.view && <span>· {u.view}</span>}
+        <div className="flex flex-col flex-1" style={{ padding: '14px 16px' }}>
+          <div className="truncate" style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>Unit {u.unitNumber}</div>
+          <div className="truncate" style={{ fontSize: 12, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
+          <div className="flex items-center gap-3.5" style={{ marginTop: 11, fontSize: 12, color: '#6b756f', fontWeight: 600 }}>
+            {u.bedrooms != null && <span className="inline-flex items-center gap-1"><BedDouble size={13} style={{ color: ICON_MUTE }} />{u.bedrooms === 0 ? 'Studio' : `${u.bedrooms} BR`}</span>}
+            {u.bathrooms != null && <span className="inline-flex items-center gap-1"><Bath size={13} style={{ color: ICON_MUTE }} />{u.bathrooms} Bath</span>}
+            {size && <span className="inline-flex items-center gap-1"><Maximize2 size={13} style={{ color: ICON_MUTE }} />{size}</span>}
           </div>
-          {tenant && (
-            <p className="text-[11px] mt-1 truncate" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-              {tenant}{leaseRange ? ` · ${leaseRange}` : ''}
-            </p>
-          )}
-          <div className="mt-auto pt-3">
-            {price != null && (
-              <div className="text-base font-bold whitespace-nowrap" style={{ color: 'var(--primary,#2e9f82)' }}>
-                AED {aed(Number(price))}<span className="text-xs font-medium" style={{ color: 'var(--neutral-500,#6b6860)' }}> /yr</span>
-              </div>
-            )}
-            <div className="mt-2 flex items-center gap-2 flex-wrap">
-              {unitActions(p, u, busy)}
-            </div>
+          {tenant && <div className="truncate" style={{ fontSize: 11, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
+          <div className="mt-auto flex items-end justify-between gap-2" style={{ paddingTop: 13, marginTop: 14, borderTop: '1px solid #f1f3f0' }}>
+            {price != null
+              ? <div style={{ fontSize: 17, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums' }}>AED {aed(Number(price))} <span style={{ fontSize: 11, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
+              : <div style={{ fontSize: 13, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>{unitActions(p, u, busy)}</div>
           </div>
         </div>
       </div>
     );
   };
 
+  const loadingRow = (text: string, small = false) => (
+    <div className="flex items-center justify-center gap-2" style={{ padding: small ? '8px 0' : '80px 0', fontSize: 13.5, color: MUTE2 }}>
+      <Loader2 size={16} className="animate-spin" /> {text}
+    </div>
+  );
+
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--base-100, #f7f6f2)' }}>
+    <div className="min-h-screen" style={{ background: '#f2f4f1', color: INK }}>
       <input ref={fileRef} type="file" accept="application/pdf,image/png,image/jpeg,image/webp" hidden onChange={onFile} />
 
-      <div className="max-w-6xl mx-auto px-5 py-8">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="font-bold" style={{ fontSize: 28, color: 'var(--neutral-900, #1a1916)', letterSpacing: '-0.02em' }}>
-              Units &amp; pricing
-            </h1>
-            <p className="mt-1 text-sm" style={{ color: 'var(--neutral-500, #6b6860)' }}>
-              {building ? `${building} · pricing by floor-plan layout` : 'All properties · pricing by floor-plan layout'}
-            </p>
+      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '26px 28px' }}>
+        {/* HEADER */}
+        <div className="flex items-start gap-4 flex-wrap" style={{ marginBottom: 20 }}>
+          <div className="flex-1" style={{ minWidth: 200 }}>
+            <div className="flex items-center gap-1.5" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', color: GREEN_D }}>
+              <Layers size={13} /> UNITS &amp; PRICING
+            </div>
+            <h1 style={{ margin: '6px 0 0', fontSize: 30, fontWeight: 800, letterSpacing: '-.025em', color: INK }}>My Units</h1>
           </div>
           {!manager && (
-            <Link href="/rental-provider/dashboard/units/add"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2.5 rounded-lg shrink-0"
-              style={{ background: 'var(--primary,#2e9f82)', color: '#fff' }}>
-              <Plus size={15} /> Add units
+            <Link href="/rental-provider/dashboard/units/add" className="flex items-center gap-2 shrink-0"
+              style={{ fontSize: 14, fontWeight: 700, color: '#fff', background: GREEN, padding: '11px 18px', borderRadius: 11, boxShadow: '0 6px 16px rgba(46,159,100,.26)' }}>
+              <Plus size={16} /> Add units
             </Link>
           )}
         </div>
 
-        {/* Row 1 — switch tab (left) + sort & layout view (right). */}
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: '#f1efe9' }}>
-            {([['type', 'By layout'], ['unit', 'By unit']] as const).map(([m, label]) => (
+        {/* CONTROLS — By unit / By layout · sort · grid/list */}
+        <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 14 }}>
+          <div className="inline-flex" style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 11, padding: 4, gap: 3 }}>
+            {([['unit', 'By unit'], ['type', 'By layout']] as const).map(([m, label]) => (
               <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m}
-                className="px-3 h-8 rounded-md text-xs font-semibold transition-colors"
-                style={mode === m
-                  ? { background: 'var(--white,#fff)', color: 'var(--neutral-900,#1a1916)', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
-                  : { color: 'var(--neutral-500,#6b6860)' }}>
+                style={{ fontSize: 13.5, fontWeight: 700, padding: '8px 16px', borderRadius: 8,
+                  ...(mode === m ? { color: INK, background: '#f2f4f1' } : { color: '#7d8780', background: 'transparent' }) }}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="ml-auto flex items-center gap-3">
-            <Select label="Sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
-            <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: '#f1efe9' }}>
-              {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
-                <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={view === v}
-                  className="flex items-center justify-center w-9 h-8 rounded-md transition-colors"
-                  style={view === v
-                    ? { background: 'var(--white,#fff)', color: 'var(--neutral-900,#1a1916)', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
-                    : { color: 'var(--neutral-500,#6b6860)' }}>
-                  <Icon size={16} />
-                </button>
-              ))}
-            </div>
+          <div className="flex-1" />
+          <Select label="Sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
+          <div className="inline-flex" style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 11, padding: 4, gap: 3 }}>
+            {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
+              <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={view === v}
+                className="flex items-center justify-center"
+                style={{ width: 34, height: 34, borderRadius: 8, ...(view === v ? { background: GREEN, color: '#fff' } : { color: MUTE2 }) }}>
+                <Icon size={17} />
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Row 2 — filters, left-aligned to line up with Row 1, separate row. */}
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          {/* Search — matches the portfolio page filter style */}
-          <div className="relative w-[240px] max-w-full">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--mute, #9b9890)' }} />
-            <input
-              type="text"
-              value={query} onChange={e => setQuery(e.target.value)}
+        {/* FILTERS — search · property · type · plan */}
+        <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 16 }}>
+          <div className="relative" style={{ flex: '1 1 240px', minWidth: 200 }}>
+            <Search size={16} className="absolute pointer-events-none" style={{ left: 13, top: '50%', transform: 'translateY(-50%)', color: MUTE2 }} />
+            <input type="text" value={query} onChange={e => setQuery(e.target.value)}
               placeholder={mode === 'unit' ? 'Search units…' : 'Search layouts…'}
               aria-label={mode === 'unit' ? 'Search units' : 'Search layouts'}
-              className="w-full outline-none transition-all"
-              style={{ padding: '10px 32px 10px 36px', fontSize: 13.5, border: '1px solid var(--line-2, #d8d6d0)', borderRadius: 10, background: '#fff', color: 'var(--ink, #1a1916)' }} />
-            {query && (
-              <button type="button" onClick={() => setQuery('')} aria-label="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center cursor-pointer"
-                style={{ width: 24, height: 24, borderRadius: 6, background: 'transparent', border: 0, color: 'var(--mute, #9b9890)' }}>
-                <X size={12} />
-              </button>
-            )}
+              className="w-full outline-none"
+              style={{ fontSize: 14, color: INK, background: '#fff', border: '1px solid #e2e7e1', borderRadius: 11, padding: '11px 14px 11px 38px' }} />
           </div>
           {data && data.properties.length > 0 && (
             <Select label="Property" value={propertyId == null ? 'all' : String(propertyId)} onChange={onProperty}
               options={[{ value: 'all', label: 'All properties' }, ...data.properties.map(p => ({ value: String(p.id), label: p.buildingName.trim() }))]} />
           )}
-
           {typeOptions.length > 1 && (
             <Select label="Unit type" value={typeFilter} onChange={onType}
               options={[{ value: 'all', label: 'All types' }, ...typeOptions.map(t => ({ value: t, label: typeLabel(t === 'other' ? null : t) }))]} />
           )}
-
           {typePlans.length > 1 && (
             <Select label="Plan" value={planFilter} onChange={setPlanFilter} options={planOptions} />
           )}
         </div>
 
-        {/* Total units by unit type */}
-        {!loading && plans.length > 0 && (
-          <div className="mt-5 flex items-center gap-2 flex-wrap text-sm">
-            <span className="font-semibold" style={{ color: 'var(--neutral-900,#1a1916)' }}>
-              {totalUnits.toLocaleString()} {totalUnits === 1 ? 'unit' : 'units'}
-            </span>
-            <span style={{ color: '#d8d6d0' }}>·</span>
-            {typeCounts.map(t => (
-              <span key={t.unitType} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs"
-                style={{ background: 'var(--white,#fff)', color: 'var(--neutral-600,#57544d)', boxShadow: '0 1px 4px -1px rgba(0,0,0,0.06)' }}>
-                {typeLabel(t.unitType === 'other' ? null : t.unitType)}
-                <span className="font-bold" style={{ color: 'var(--neutral-900,#1a1916)' }}>{t.count}</span>
+        {/* STATUS BAR (By unit) — status filter tabs + a visual draft indicator. */}
+        {!loading && mode === 'unit' && scopedUnitRows.length > 0 && (
+          <div className="flex items-center gap-2.5 flex-wrap" style={{ marginBottom: 18 }}>
+            {([
+              { key: 'All', label: 'All units', count: statusTotal, dot: '#cdd5cf' },
+              { key: 'Occupied', label: 'Occupied', count: statusCounts.Occupied, dot: '#4a5a8f' },
+              { key: 'Published', label: 'Published', count: statusCounts.Published, dot: GREEN },
+              { key: 'Draft', label: 'Draft', count: statusCounts.Draft, dot: '#b0b8b1' },
+            ] as const).map(s => {
+              const on = statusFilter === s.key;
+              return (
+                <button key={s.key} onClick={() => setStatusFilter(s.key)} className="inline-flex items-center gap-2"
+                  style={{ fontSize: 13, fontWeight: 700, padding: '9px 15px', borderRadius: 11,
+                    border: `1px solid ${on ? GREEN : LINE}`, background: on ? GREEN_T : '#fff', color: on ? GREEN_D : '#3a443d' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.dot, flex: '0 0 8px' }} />
+                  <span>{s.label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: on ? GREEN_D : INK, fontVariantNumeric: 'tabular-nums' }}>{s.count}</span>
+                </button>
+              );
+            })}
+            <div className="flex-1" />
+            {statusCounts.Draft > 0 && (
+              <span className="inline-flex items-center gap-2" title="Draft units are not yet listed"
+                style={{ fontSize: 13, fontWeight: 700, color: '#fff', background: GREEN, padding: '9px 16px', borderRadius: 10, boxShadow: '0 4px 12px rgba(46,159,100,.22)' }}>
+                <ArrowUp size={15} /> {statusCounts.Draft} draft{statusCounts.Draft === 1 ? '' : 's'} to publish
               </span>
-            ))}
+            )}
           </div>
         )}
 
-        {/* Pricing health */}
-        {!loading && plans.length > 0 && (
-          <div className="mt-5 rounded-2xl p-4" style={{ background: 'var(--white,#fff)', boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+        {/* PRICING HEALTH (By layout) — summary band kept; flags also badge each row. */}
+        {!loading && mode === 'type' && plans.length > 0 && (
+          <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 14, padding: '14px 16px', marginBottom: 16, boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
             {flagged === 0 ? (
-              <div className="flex items-center gap-2 text-sm" style={{ color: '#1a7a5a' }}>
+              <div className="flex items-center gap-2" style={{ fontSize: 13.5, fontWeight: 600, color: GREEN_D }}>
                 <Check size={16} /> No pricing gaps on the shown layouts.
               </div>
             ) : (
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--neutral-800,#2d2b26)' }}>
-                  <AlertTriangle size={15} className="text-[#d97706]" />
+                <span className="flex items-center gap-1.5" style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>
+                  <AlertTriangle size={15} style={{ color: '#d97706' }} />
                   {flagged} of {plans.length} layouts need a pricing look
                 </span>
-                <span className="text-[#d8d6d0]">·</span>
+                <span style={{ color: '#d8d6d0' }}>·</span>
                 {counts.map(c => (
-                  <span key={c.f} className={`text-xs font-semibold px-2.5 py-1 rounded-full ${FLAG_META[c.f].cls}`}>
+                  <span key={c.f} style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 7,
+                    ...(c.f === 'unpriced' ? { color: '#b91c1c', background: '#fdecec' } : { color: '#b07415', background: '#fbf0dd' }) }}>
                     {c.n} {FLAG_META[c.f].label}
                   </span>
                 ))}
@@ -901,110 +887,88 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         )}
 
         {err && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm" style={{ background: '#fee2e2', color: '#b91c1c' }}>
+          <div className="flex items-center gap-2" style={{ background: '#fdecec', color: '#b91c1c', borderRadius: 11, padding: '10px 16px', fontSize: 13.5, marginBottom: 16 }}>
             <Info size={15} /> {err}
           </div>
         )}
 
-        {/* Grid */}
+        {/* GROUPS — By unit (grouped by building) / By layout (grouped by type) */}
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
-            <Loader2 size={16} className="animate-spin" /> Loading layouts…
-          </div>
+          loadingRow('Loading layouts…')
         ) : mode === 'unit' ? (
-          // ── Per-unit (flat) view — units grouped under their unit type ──
+          // ── Per-unit (flat) view — units grouped under their building ──
           scopedUnitRows.length === 0 ? (
-            perUnitLoading ? (
-              <div className="flex items-center justify-center gap-2 py-24 text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
-                <Loader2 size={16} className="animate-spin" /> Loading units…
-              </div>
-            ) : (
-              <div className="text-center py-24">
-                <Layers size={32} className="mx-auto mb-3" style={{ color: 'var(--neutral-300, #c5c3bc)' }} />
-                <p className="text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
+            perUnitLoading ? loadingRow('Loading units…') : (
+              <div className="text-center" style={{ padding: '80px 0' }}>
+                <Layers size={32} className="mx-auto" style={{ color: '#c5c3bc', marginBottom: 12 }} />
+                <p style={{ fontSize: 13.5, color: MUTE2 }}>
                   {q ? `No units match “${query.trim()}”.`
                     : typeFilter !== 'all' ? `No ${typeLabel(typeFilter === 'other' ? null : typeFilter)} units in this scope.`
                     : 'No units found for this scope.'}
                 </p>
               </div>
             )
+          ) : statusVisibleRows.length === 0 ? (
+            <div className="text-center" style={{ padding: '56px 0', fontSize: 13.5, color: MUTE2 }}>
+              No {statusFilter.toLowerCase()} units in this scope.
+            </div>
           ) : (
-            <div className="mt-6 flex flex-col gap-9">
+            <>
               {unitGroups.map(g => (
-                <section key={g.unitType}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <h2 className="font-semibold" style={{ fontSize: 17, color: 'var(--neutral-900,#1a1916)' }}>
-                      {typeLabel(g.unitType === 'other' ? null : g.unitType)}
-                    </h2>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                      style={{ background: '#f1efe9', color: 'var(--neutral-600,#57544d)' }}>
-                      {g.items.length} {g.items.length === 1 ? 'unit' : 'units'}
-                    </span>
-                    {/* Add a unit to this group's property (single-property scope is
-                        unambiguous; in "all properties" it targets the first listed
-                        unit's property — the new unit's type is set in the form). */}
+                <section key={g.building} style={{ marginBottom: 26 }}>
+                  <div className="flex items-center gap-3" style={{ margin: '6px 0 12px' }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>{g.building}</div>
+                    <span style={CHIP_COUNT}>{g.items.length} {g.items.length === 1 ? 'unit' : 'units'}</span>
+                    <div className="flex-1" />
+                    {/* Add a unit to this building (its property); the form sets the type. */}
                     {g.items[0]?.pl && (
-                      <button onClick={() => setUnitModal({ plan: g.items[0].pl })}
-                        className="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg"
-                        style={{ background: 'var(--primary,#2e9f82)', color: '#fff' }}>
-                        <Plus size={13} /> Add unit
+                      <button onClick={() => setUnitModal({ plan: g.items[0].pl })} className="flex items-center gap-1.5"
+                        style={{ fontSize: 12.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, border: '1px solid #cce6d8', padding: '8px 13px', borderRadius: 9 }}>
+                        <Plus size={14} /> Add unit
                       </button>
                     )}
                   </div>
                   {view === 'grid' ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>
                       {g.items.map(({ u, pl }) => unitCard(pl, u, propertyId == null))}
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col" style={{ gap: 12 }}>
                       {g.items.map(({ u, pl }) => unitRow(pl, u, propertyId == null))}
                     </div>
                   )}
                 </section>
               ))}
-              {perUnitLoading && (
-                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--neutral-400,#9b9890)' }}>
-                  <Loader2 size={15} className="animate-spin" /> Loading more units…
-                </div>
-              )}
-            </div>
+              {perUnitLoading && loadingRow('Loading more units…', true)}
+            </>
           )
         ) : plans.length === 0 ? (
-          <div className="text-center py-24">
-            <Layers size={32} className="mx-auto mb-3" style={{ color: 'var(--neutral-300, #c5c3bc)' }} />
-            <p className="text-sm" style={{ color: 'var(--neutral-400, #9b9890)' }}>
+          <div className="text-center" style={{ padding: '80px 0' }}>
+            <Layers size={32} className="mx-auto" style={{ color: '#c5c3bc', marginBottom: 12 }} />
+            <p style={{ fontSize: 13.5, color: MUTE2 }}>
               {q ? `No layouts match “${query.trim()}”.`
                 : typeFilter !== 'all' ? `No ${typeLabel(typeFilter === 'other' ? null : typeFilter)} layouts in this scope.`
                 : 'No layout plans found for this scope.'}
             </p>
           </div>
         ) : (
-          <div className="mt-6 flex flex-col gap-9">
-            {groups.map(g => (
-              <section key={g.unitType}>
-                {/* Unit-type heading */}
-                <div className="flex items-center gap-2 mb-3">
-                  <h2 className="font-semibold" style={{ fontSize: 17, color: 'var(--neutral-900,#1a1916)' }}>
-                    {typeLabel(g.unitType === 'other' ? null : g.unitType)}
-                  </h2>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                    style={{ background: '#f1efe9', color: 'var(--neutral-600,#57544d)' }}>
-                    {g.count} {g.count === 1 ? 'unit' : 'units'}
-                  </span>
+          groups.map(g => (
+            <section key={g.unitType} style={{ marginBottom: 26 }}>
+              <div className="flex items-center gap-3" style={{ margin: '6px 0 12px' }}>
+                <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>{typeLabel(g.unitType === 'other' ? null : g.unitType)}</div>
+                <span style={CHIP_COUNT}>{g.count} {g.count === 1 ? 'unit' : 'units'}</span>
+              </div>
+              {view === 'grid' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>
+                  {g.plans.map(p => gridCard(p))}
                 </div>
-
-                {view === 'grid' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {g.plans.map(p => gridCard(p))}
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {g.plans.map(p => rowCard(p))}
-                  </div>
-                )}
-              </section>
-            ))}
-          </div>
+              ) : (
+                <div className="flex flex-col" style={{ gap: 12 }}>
+                  {g.plans.map(p => rowCard(p))}
+                </div>
+              )}
+            </section>
+          ))
         )}
       </div>
 
@@ -1077,6 +1041,10 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
             const c = forUnit.find(x => x.contractActive) ?? forUnit[0];
             return c ? { id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive } : null;
           })()}
+          contracts={contracts
+            .filter(x => x.unit?.id === unitPreview.unit.id)
+            .map(c => ({ id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive }))}
+          onEdit={() => { setUnitModal({ plan: unitPreview.plan, editingUnit: unitPreview.unit }); setUnitPreview(null); }}
           onClose={() => setUnitPreview(null)}
         />
       )}
@@ -1090,11 +1058,11 @@ function Select({ label, value, onChange, options }: {
   return (
     <div className="relative">
       <select value={value} onChange={e => onChange(e.target.value)} aria-label={label}
-        className="appearance-none bg-white focus:outline-none cursor-pointer transition-all"
-        style={{ padding: '10px 32px 10px 14px', fontSize: 13.5, fontWeight: 500, border: '1px solid var(--line-2, #d8d6d0)', borderRadius: 10, color: 'var(--ink-2, #44423c)' }}>
+        className="appearance-none bg-white focus:outline-none cursor-pointer"
+        style={{ padding: '11px 34px 11px 14px', fontSize: 13.5, fontWeight: 500, border: '1px solid #e2e7e1', borderRadius: 11, color: '#5a635c' }}>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
-      <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--mute, #9b9890)' }} />
+      <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: '#8d978f' }} />
     </div>
   );
 }
@@ -1133,10 +1101,6 @@ const RENTAL_TYPES = [
 ];
 const fmtDate = (s?: string | null) =>
   s ? new Date(s).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' }) : '';
-
-// Shared form styling — matches UnitFormModal so both unit editors look the same.
-const FORM_INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
-const FORM_LABEL = 'block text-xs font-medium text-[#3d3b35] mb-1';
 
 function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
   plan: Plan; manager?: { rp: number }; rpQ: string;
@@ -1334,47 +1298,44 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,19,18,0.55)' }} onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-2xl bg-white overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}
-        style={{ boxShadow: '0 20px 60px -10px rgba(0,0,0,0.3)' }}>
-        <div className="px-5 py-4 border-b" style={{ borderColor: '#efece6' }}>
-          <h3 className="font-semibold text-base" style={{ color: 'var(--neutral-900,#1a1916)' }}>
-            {plan.buildingName} · {plan.displayName}
-          </h3>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--neutral-500,#6b6860)' }}>
-            {bedLabel(plan.bedrooms)} · {sizeLabel(plan.sqftMin, plan.sqftMax)} sqft · applies to all {plan.unitCount} unit{plan.unitCount === 1 ? '' : 's'} on this layout
-          </p>
-        </div>
-        <div className="p-5 space-y-4 overflow-y-auto">
+    <div className={ds.overlay} onClick={onClose}>
+      <div className={dcx(ds.modalCard, ds.modalNarrow)} onClick={e => e.stopPropagation()}>
+        <header className={ds.modalHeader}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className={ds.modalTitle}>{plan.buildingName} · {plan.displayName}</div>
+            <div className={ds.modalSub}>
+              {bedLabel(plan.bedrooms)} · {sizeLabel(plan.sqftMin, plan.sqftMax)} sqft · applies to all {plan.unitCount} unit{plan.unitCount === 1 ? '' : 's'} on this layout
+            </div>
+          </div>
+          <button className={ds.closeBtn} onClick={onClose} aria-label="Close"><X size={16} /></button>
+        </header>
+
+        <div className={ds.modalBody}>
           {/* Annual rent — the single price (drives the fee auto-defaults). */}
-          <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED)</label>
+          <div className={ds.field}>
+            <label className={ds.lbl}>Annual Rent (AED)</label>
             <input type="number" min={0} step="any" autoFocus placeholder="e.g. 85000" value={vals.rentalPrice}
               onChange={e => onRentChange(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') save(); }}
-              className={FORM_INPUT} />
+              className={ds.input} />
           </div>
 
-          {/* Financial Details */}
-          <div className="rounded-xl border border-[#a7f3d0] bg-[#f0fdf8] p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a7a5a]">Financial Details</p>
-              <button type="button" onClick={resetToRules} className="text-[10px] font-semibold text-[#1a7a5a] underline">
-                Reset to fee rules
-              </button>
+          {/* Fees — plan-wide; rule-driven defaults off the rent. */}
+          <div className={ds.feesBox} style={{ marginBottom: 15 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span className={ds.feesTitle} style={{ marginBottom: 0 }}>FEES</span>
+              <button type="button" onClick={resetToRules} className={ds.linkBtn}>Reset to fee rules</button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={ds.grid2}>
               {FIN_FIELDS.map(f => {
                 const ruled = RULE_KEYS.includes(f.key);
                 return (
                   <div key={f.key}>
-                    <label className={FORM_LABEL}>
+                    <label className={ds.lbl}>
                       {f.label}
-                      {ruled && overridden.has(f.key) && (
-                        <span className="ml-1 text-[10px] font-semibold text-[#92400e]">· custom</span>
-                      )}
+                      {ruled && overridden.has(f.key) && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#92400e' }}>· custom</span>}
                     </label>
-                    <input type="number" min={0} step="any" className={FORM_INPUT} value={vals[f.key]}
+                    <input type="number" min={0} step="any" className={ds.input} value={vals[f.key]}
                       onChange={e => onFeeChange(f.key, e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') save(); }} />
                   </div>
@@ -1383,35 +1344,33 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
             </div>
           </div>
 
-          {/* Lease Terms — plan-wide; written to every unit's facilities JSON. */}
-          <div className="rounded-xl border border-[#dbeafe] bg-[#eff6ff] p-4 space-y-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#1e40af]">Lease Terms</p>
-            <div className="grid grid-cols-3 gap-3">
+          {/* Lease & payment — plan-wide; written to every unit's facilities JSON. */}
+          <div className={ds.leaseBox} style={{ marginBottom: 15 }}>
+            <div className={ds.leaseTitle}>LEASE &amp; PAYMENT</div>
+            <div className={ds.field}>
+              <label className={ds.lbl}>Rental Type</label>
+              <div className={ds.segGroup}>
+                {RENTAL_TYPES.map(o => (
+                  <button key={o.id} type="button" className={dcx(ds.seg, rentalType === o.id && ds.segOn)}
+                    onClick={() => setRentalType(o.id)}>{o.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className={dcx(ds.grid3, ds.field)}>
               {LEASE_TERM_FIELDS.map(f => (
                 <div key={f.key}>
-                  <label className={FORM_LABEL}>{f.label}</label>
-                  <input type="number" min={0} step={f.step} max={f.max} className={FORM_INPUT}
+                  <label className={ds.lbl}>{f.label}</label>
+                  <input type="number" min={0} step={f.step} max={f.max} className={ds.input}
                     placeholder={f.placeholder} value={lease[f.key] ?? ''}
                     onChange={e => setLease(v => ({ ...v, [f.key]: e.target.value }))} />
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Leasing Configuration — rental cadence + payment terms. */}
-          <div className="rounded-xl border border-[#ede9fe] bg-[#f5f3ff] p-4 space-y-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#6d28d9]">Leasing Configuration</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={FORM_LABEL}>Rental Type</label>
-                <select value={rentalType} onChange={e => setRentalType(e.target.value)} className={`${FORM_INPUT} appearance-none`}>
-                  {RENTAL_TYPES.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                </select>
-              </div>
+            <div className={ds.grid2}>
               {LEASE_CONFIG_FIELDS.map(f => (
                 <div key={f.key}>
-                  <label className={FORM_LABEL}>{f.label}</label>
-                  <input type="number" min={0} step={f.step} className={FORM_INPUT}
+                  <label className={ds.lbl}>{f.label}</label>
+                  <input type="number" min={0} step={f.step} className={ds.input}
                     placeholder={f.placeholder} value={lease[f.key] ?? ''}
                     onChange={e => setLease(v => ({ ...v, [f.key]: e.target.value }))} />
                 </div>
@@ -1423,7 +1382,7 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
               signature block is system-managed (rendered into the contract PDF)
               and shown locked in the editor — it can never be missing. Saving
               changes mints a new version; signed contracts keep theirs. */}
-          <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
+          <div className="rounded-xl border border-[#efe1bf] bg-[#fdf8ec] p-4 space-y-3">
             <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Addendum</p>
             <p className="text-[10px] text-[#a16207]">
               {plan.termsVersion
@@ -1526,14 +1485,14 @@ function FinancialsModal({ plan, manager, rpQ, feeRules, onClose, onSaved }: {
             )}
           </div>
         </div>
-        {err && <div className="px-5 pb-1 text-xs" style={{ color: '#b91c1c' }}>{err}</div>}
-        <div className="px-5 py-4 flex items-center justify-end gap-2 border-t" style={{ borderColor: '#efece6' }}>
-          <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: '#f1efe9', color: '#6b6860' }}>Cancel</button>
-          <button onClick={save} disabled={saving}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-60" style={{ background: 'var(--primary,#2e9f82)' }}>
+        {err && <div style={{ padding: '0 22px 4px', fontSize: 12.5, color: '#b91c1c' }}>{err}</div>}
+        <footer className={ds.modalFooter}>
+          <button className={ds.cancelBtn} onClick={onClose} disabled={saving}>Cancel</button>
+          <div className={ds.footSpacer} />
+          <button className={ds.saveBtn} onClick={save} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Save to layout
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

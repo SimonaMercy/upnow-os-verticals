@@ -818,6 +818,28 @@ html, body {
 .drawer-body { padding: 20px; }
 .drawer-body .fcard { border: none; box-shadow: none; padding: 0; }
 
+/* -- Full-screen slide-over (Add / Edit Property) ------------ */
+/* A full-page panel that swipes in from the right edge and out again, used in
+   place of a centred modal for the property form. Mount = slide-in plays once;
+   the `.closing` modifier replays it in reverse before the panel unmounts. */
+@keyframes slideover-scrim-in  { from { opacity: 0; }                  to { opacity: 1; } }
+@keyframes slideover-scrim-out { from { opacity: 1; }                  to { opacity: 0; } }
+@keyframes slideover-panel-in  { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes slideover-panel-out { from { transform: translateX(0); }    to { transform: translateX(100%); } }
+.slideover-scrim         { animation: slideover-scrim-in  .30s ease both; }
+.slideover-scrim.closing { animation: slideover-scrim-out .38s ease both; }
+.slideover-panel         { animation: slideover-panel-in  .42s cubic-bezier(.32,.72,0,1) both; will-change: transform; }
+.slideover-panel.closing { animation: slideover-panel-out .38s cubic-bezier(.32,.72,0,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .slideover-scrim, .slideover-scrim.closing,
+  .slideover-panel, .slideover-panel.closing { animation: none; }
+}
+/* While a slide-over is mounted its panel starts at translateX(100%) — off the
+   right edge. Clip horizontal overflow so that off-screen start never adds a
+   transient horizontal scrollbar. Scoped via :has() so it only applies while a
+   panel exists; vertical scroll is unaffected. */
+body:has(.slideover-panel) { overflow-x: clip; }
+
 /* -- Mobile tap targets -------------------------------------- */
 @media (max-width: 920px) {
   .empill { padding: 11px 18px; }
