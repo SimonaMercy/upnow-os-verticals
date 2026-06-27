@@ -3,8 +3,8 @@
  *
  * Thin data shell: fetches the contract (tenant endpoint) and renders the shared
  * <PaymentReceiptViewer> — a real @react-pdf document (same approach as the
- * tenancy-contract print). Select by ?kind=contract|deposit, ?pid=<paymentId>,
- * or the legacy ?p=<index>.
+ * tenancy-contract print). Select by ?kind=rental|deposit|management (the three
+ * segmented receipts), the legacy ?kind=contract, ?pid=<paymentId>, or ?p=<index>.
  */
 'use client';
 
@@ -31,7 +31,7 @@ export default function CustomerReceiptPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const pid = searchParams?.get('pid');
-  const kind = searchParams?.get('kind') as 'deposit' | 'contract' | null;
+  const kind = searchParams?.get('kind') as 'deposit' | 'contract' | 'rental' | 'management' | null;
   const idx = parseInt(searchParams?.get('p') ?? '0', 10);
 
   const [contract, setContract] = useState<ReceiptContract | null>(null);

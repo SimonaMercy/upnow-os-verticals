@@ -2509,7 +2509,8 @@ function DetailsDrawer({
             const binderSeq: BinderSlot[] = [
               { kind: 'link', key: 'offer',          label: 'Offer Receipt', sub: 'Offered during the lead phase', href: null },
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
-              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: 'Admin, Ejari, commission & rent', href: receiptsReady ? `${receiptBase}?kind=contract` : null },
+              // One file → three receipts inside (Rental Income · Security Deposit · Management Fee).
+              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: 'Rental income, security deposit & management fee', href: receiptsReady ? receiptBase : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
               { kind: 'doc',  key: 'ejari_certificate', label: 'Ejari' },
             ];

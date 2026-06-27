@@ -1267,8 +1267,7 @@ export default function LeaseDetailV3() {
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', color: '#9aa39c', margin: '16px 4px 9px' }}>PAYMENT RECEIPTS</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {[
-                  { name: 'Contract Payment Receipt', sub: 'Admin, Ejari, commission & rent instalments', href: `${receiptBase}?kind=contract` },
-                  { name: 'Security Deposit Receipt', sub: 'Refundable security deposit', href: `${receiptBase}?kind=deposit` },
+                  { name: 'Receipts', sub: 'Rental income, security deposit & management fee', href: receiptBase },
                 ].map(r => (
                   <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px', border: '1px solid #e7ebe6', borderRadius: 10 }}>
                     <span style={{ width: 28, height: 28, flex: '0 0 28px', borderRadius: 8, background: '#eef6f1', color: '#1a7a4f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>🧾</span>

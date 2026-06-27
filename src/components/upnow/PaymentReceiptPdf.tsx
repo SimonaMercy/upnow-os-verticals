@@ -7,10 +7,17 @@
  * next/dynamic ssr:false from the print/receipt routes. The receipt model/logic
  * lives here too (shared by RP/manager + customer routes).
  *
+ * The contract issues THREE separate receipts, segmented exactly like the Payments
+ * ledger. They are bundled into ONE document (one file → three pages) by default;
+ * a single `kind` shows just that page.
  * Modes (chosen by `kind` / `selectedId`):
- *   • kind="contract" → total contract amount itemised (Admin/Ejari/Commission/Rent)
- *   • kind="deposit"  → Security Deposit Receipt (resolves the held deposit entity)
- *   • default (pid)   → one payment (instalment #1 itemises the bundled fees)
+ *   • default / kind="all" → ONE document, three pages: Rental Income, Security
+ *                            Deposit, Management Fee (only those with data)
+ *   • kind="rental"     → Rental Income page only (every rent instalment, VAT split)
+ *   • kind="deposit"    → Security Deposit page only (resolves the held deposit entity)
+ *   • kind="management" → Management Fee page only (Ejari / Admin / Commission lines)
+ *   • kind="contract"   → legacy single combined receipt (Admin/Ejari/Commission/Rent)
+ *   • pid=<id>          → one payment (instalment #1 itemises the bundled fees)
  *
  * Money: contract adminFeeFils/ejariFeeFils are stored inconsistently (AED or fils)
  * → normalizeFees() self-corrects (legacy/bundled contracts only). Admin/ejari/
@@ -113,7 +120,7 @@ interface Props {
   contract: ReceiptContract;
   selectedId?: number | null;
   selectedIdx?: number;
-  kind?: 'deposit' | 'contract' | null;
+  kind?: 'deposit' | 'contract' | 'rental' | 'management' | 'all' | null;
 }
 
 // ─── Model helpers ──────────────────────────────────────────────────────────
@@ -187,7 +194,7 @@ function isDeposit(p: ReceiptPayment): boolean {
 
 interface LineItem { desc: string; net: number; vat: number; total: number; }
 interface Receipt {
-  kind: 'deposit' | 'rent' | 'fee' | 'contract';
+  kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management';
   title: string;
   titleAr: string;
   receiptNo: string;
@@ -237,54 +244,101 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     receiptNo: `RCP-${contract.ref}-${String(ordinal).padStart(2, '0')}`, date: sel.transactionDate, single: sel, lines };
 }
 
-function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
-  // Rent (and any non-fee, non-deposit charges) — the fee rows are a separate set.
-  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p));
+/** The Management-Fee lines (Admin / Ejari / Commission), each net + VAT — read
+ *  from the real one-off fee rows when present, else reconstructed from the legacy
+ *  bundled columns. Also returns `legacyBundle` = the admin+ejari amount that was
+ *  folded into the FIRST rent cheque on legacy contracts, so the Rent receipt can
+ *  strip it (and the combined receipt can net it out of rent). Commission is NEVER
+ *  synthesised from a residual — it only appears from a real commission fee row. */
+function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { lines: LineItem[]; legacyBundle: number; feeCount: number } {
   const feeRows = (contract.fees ?? []).filter(isFee);
-  if (rentRows.length === 0 && feeRows.length === 0) return null;
-
-  const netOf = (rows: ReceiptPayment[]) =>
-    round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
-  const rentVat = round2(rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0));
-
-  // Per-fee NET + VAT. Real fee rows store the GROSS amount + their own vatAmount,
-  // so the receipt must show net / VAT / gross (not strip VAT to net — that
-  // undercounts the printed total by the fee VAT). Legacy/bundled contracts have
-  // no fee VAT tracked, so VAT stays 0 there.
+  // Real fee rows store the GROSS amount + their own vatAmount, so each fee shows
+  // net / VAT / gross (stripping VAT to net would undercount the printed total).
   const grossOf = (rows: ReceiptPayment[]) => round2(rows.reduce((s, p) => s + (p.amount || 0), 0));
   const vatSumOf = (rows: ReceiptPayment[]) => round2(rows.reduce((s, p) => s + (p.vatAmount || 0), 0));
-  const feeOfType = (t: string) => feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === t);
+  const netOf = (rows: ReceiptPayment[]) => round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
 
-  let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commissionNet = 0, commissionVat = 0, rentNet: number;
+  let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commissionNet = 0, commissionVat = 0, legacyBundle = 0;
 
   if (feeRows.length > 0) {
     // Real fee rows — read each fee (gross + VAT) directly from its own row(s).
+    const feeOfType = (t: string) => feeRows.filter(p => (p.paymentType ?? '').toLowerCase() === t);
     const a = feeOfType('admin_fee'), e = feeOfType('ejari_fee'), c = feeOfType('commission');
     adminVat = vatSumOf(a); adminNet = round2(grossOf(a) - adminVat);
     ejariVat = vatSumOf(e); ejariNet = round2(grossOf(e) - ejariVat);
     commissionVat = vatSumOf(c); commissionNet = round2(grossOf(c) - commissionVat);
-    rentNet = netOf(rentRows);
   } else {
     // Legacy / renewal: no separate fee rows — fees were bundled into the rent
     // cheques. Reconstruct admin/ejari from the (RP-entered) columns; everything
-    // else in the cheque total is rent. Commission is NEVER synthesised from a
-    // residual — it only appears when a real commission fee row exists (above).
+    // else in the cheque total is rent.
     const sumNet = netOf(rentRows);
     const feesPlusComm = round2(sumNet - (contract.annualRent ?? 0));
     const n = normalizeFees(contract.adminFeeFils ?? 0, contract.ejariFeeFils ?? 0, feesPlusComm);
     adminNet = n.admin; ejariNet = n.ejari;
-    rentNet = Math.max(0, round2(sumNet - adminNet - ejariNet));
+    legacyBundle = round2(adminNet + ejariNet);
   }
 
   const lines: LineItem[] = [];
   if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat) });
   if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat) });
   if (commissionNet + commissionVat > 0) lines.push({ desc: 'Agency Commission',      net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat) });
-  lines.push({ desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) });
+  return { lines, legacyBundle, feeCount: feeRows.length };
+}
+
+/** RENTAL INCOME receipt — every rent instalment as its own line (net / VAT /
+ *  gross), mirroring the Payments ledger's Rental Income category. */
+function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]): Receipt | null {
+  if (rentals.length === 0) return null;
+  const n = contract.numberOfInstallments ?? rentals.length ?? 1;
+  // On legacy contracts admin+ejari were folded into the first rent cheque — strip
+  // that bundle here so the Rent receipt shows pure rent (the fees live on the
+  // Management Fee receipt instead).
+  const { legacyBundle } = feeLinesOf(contract, rentals);
+  const lines: LineItem[] = rentals.map((p, i) => {
+    const gross = p.amount || 0;
+    const vat = p.vatAmount || 0;
+    let net = Math.max(0, round2(gross - vat));
+    if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
+    return { desc: `Rent — Instalment ${i + 1} of ${n}`, net, vat, total: round2(net + vat) };
+  });
+  return { kind: 'rental', title: 'RENT INCOME RECEIPT', titleAr: 'إيصال إيجار',
+    receiptNo: `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
+    lines, scheduleCount: rentals.length };
+}
+
+/** MANAGEMENT FEE receipt — Ejari / Admin / Commission only, each net + VAT,
+ *  mirroring the Payments ledger's Management Fee category. */
+function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPayment[]): Receipt | null {
+  const { lines, feeCount } = feeLinesOf(contract, rentRows);
+  if (lines.length === 0) return null;
+  const feeRows = (contract.fees ?? []).filter(isFee);
+  return { kind: 'management', title: 'MANAGEMENT FEE RECEIPT', titleAr: 'إيصال رسوم الإدارة',
+    receiptNo: `RCP-${contract.ref}-MGMT`,
+    date: feeRows[0]?.transactionDate ?? rentRows[0]?.transactionDate ?? contract.startDate ?? null,
+    lines, scheduleCount: feeCount || lines.length };
+}
+
+function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
+  // Legacy combined receipt: fee lines + a single rolled-up rent line. The binder
+  // now links the three segmented receipts above; this is retained for old links.
+  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p));
+  const feeRows = (contract.fees ?? []).filter(isFee);
+  const { lines: feeLines, legacyBundle, feeCount } = feeLinesOf(contract, rentRows);
+  if (rentRows.length === 0 && feeLines.length === 0) return null;
+
+  const netOf = (rows: ReceiptPayment[]) =>
+    round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
+  const rentVat = round2(rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0));
+  // legacyBundle = admin+ejari folded into the rent cheques on legacy contracts;
+  // 0 when real fee rows exist (those rents are already pure).
+  const rentNet = Math.max(0, round2(netOf(rentRows) - legacyBundle));
+
+  const lines: LineItem[] = [...feeLines,
+    { desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) }];
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT', titleAr: 'إيصال دفعات العقد',
     receiptNo: `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
-    lines, scheduleCount: rentRows.length + feeRows.length };
+    lines, scheduleCount: rentRows.length + feeCount };
 }
 
 /** Resolve the deposit pseudo-payment from the entity / held amount / column. */
@@ -313,6 +367,8 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   const all = [...payments, ...((contract.fees ?? []).filter(isFee))];
   const rentals = payments.filter(isRental);
   if (kind === 'contract') return buildContractReceipt(contract, payments);
+  if (kind === 'rental') return buildRentalReceipt(contract, rentals);
+  if (kind === 'management') return buildManagementReceipt(contract, rentals);
   if (kind === 'deposit') {
     const dep = resolveDeposit(contract);
     return dep ? buildSingleReceipt(dep, contract, rentals) : null;
@@ -321,6 +377,27 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   if (selectedId != null) sel = all.find(p => p.id === selectedId);
   if (!sel) sel = payments[Math.min(Math.max(selectedIdx, 0), Math.max(payments.length - 1, 0))];
   return sel ? buildSingleReceipt(sel, contract, rentals) : null;
+}
+
+/** The three segmented receipts (Rental Income · Security Deposit · Management
+ *  Fee) in ledger order — only those with data. These become the three pages of
+ *  the combined document. */
+function buildAllReceipts(contract: ReceiptContract): Receipt[] {
+  const rentals = (contract.payments ?? []).filter(isRental);
+  const out: Receipt[] = [];
+  const rent = buildRentalReceipt(contract, rentals);
+  if (rent) out.push(rent);
+  const dep = resolveDeposit(contract);
+  if (dep) { const d = buildSingleReceipt(dep, contract, rentals); if (d) out.push(d); }
+  const mgmt = buildManagementReceipt(contract, rentals);
+  if (mgmt) out.push(mgmt);
+  return out;
+}
+
+/** Is this a combined (all-three-pages) request? True when no single payment and
+ *  no specific category is selected. */
+function isCombined(kind: Props['kind'], selectedId?: number | null): boolean {
+  return selectedId == null && (kind == null || kind === 'all');
 }
 
 // ─── PDF styles ──────────────────────────────────────────────────────────────
@@ -364,21 +441,9 @@ function Detail({ label, value }: { label: string; value?: string | null }) {
 
 // ─── The PDF document ─────────────────────────────────────────────────────────
 
-function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
-  const receipt = resolveReceipt(contract, kind, selectedId, selectedIdx);
-
-  if (!receipt) {
-    return (
-      <Document>
-        <Page size="A4" style={st.page}>
-          <Text style={{ marginTop: 40, textAlign: 'center', color: MUTE }}>
-            {kind === 'deposit' ? 'No security deposit is recorded for this contract.' : 'No payment is available to receipt for this contract yet.'}
-          </Text>
-        </Page>
-      </Document>
-    );
-  }
-
+/** One receipt rendered as a single A4 page — used standalone OR as one page of
+ *  the combined three-receipt document. */
+function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: ReceiptContract }) {
   const subtotal = round2(receipt.lines.reduce((s, l) => s + l.net, 0));
   const totalVat = round2(receipt.lines.reduce((s, l) => s + l.vat, 0));
   const grandTotal = round2(receipt.lines.reduce((s, l) => s + l.total, 0));
@@ -398,7 +463,6 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
   ].filter(Boolean) as string[];
 
   return (
-    <Document title={receipt.receiptNo}>
       <Page size="A4" style={st.page}>
 
         {/* ── Header band (full-bleed) ── */}
@@ -507,6 +571,42 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
           UpNow Property Management · {receipt.receiptNo} · Contract {contract.ref}
         </Text>
       </Page>
+  );
+}
+
+/** Empty-state document for when the selected receipt has no data. */
+function EmptyDoc({ kind }: { kind: Props['kind'] }) {
+  return (
+    <Document>
+      <Page size="A4" style={st.page}>
+        <Text style={{ marginTop: 40, textAlign: 'center', color: MUTE }}>
+          {kind === 'deposit' ? 'No security deposit is recorded for this contract.'
+            : kind === 'management' ? 'No management fees (Ejari, admin or commission) are recorded for this contract.'
+            : kind === 'rental' ? 'No rent payments are recorded for this contract yet.'
+            : 'No payments are available to receipt for this contract yet.'}
+        </Text>
+      </Page>
+    </Document>
+  );
+}
+
+function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
+  // Default / kind="all" → ONE document holding the three segmented receipts as
+  // separate pages. A specific kind / pid → that single page only.
+  if (isCombined(kind, selectedId)) {
+    const receipts = buildAllReceipts(contract);
+    if (receipts.length === 0) return <EmptyDoc kind={kind} />;
+    return (
+      <Document title={`Receipts — ${contract.ref}`}>
+        {receipts.map((r, i) => <ReceiptPage key={`${r.kind}-${i}`} receipt={r} contract={contract} />)}
+      </Document>
+    );
+  }
+  const receipt = resolveReceipt(contract, kind, selectedId, selectedIdx);
+  if (!receipt) return <EmptyDoc kind={kind} />;
+  return (
+    <Document title={receipt.receiptNo}>
+      <ReceiptPage receipt={receipt} contract={contract} />
     </Document>
   );
 }
@@ -520,30 +620,39 @@ const DL_BTN = { padding: '6px 16px', background: NAVY, color: '#fff', borderRad
 
 export default function PaymentReceiptViewer({ contract, kind, selectedId, selectedIdx }: Props) {
   const doc = <PaymentReceiptDoc contract={contract} kind={kind} selectedId={selectedId} selectedIdx={selectedIdx} />;
-  const receipt = resolveReceipt(contract, kind, selectedId, selectedIdx);
-  const fileName = `${receipt?.receiptNo ?? `receipt-${contract.ref}`}.pdf`;
+  const combined = isCombined(kind, selectedId);
+  const receipt = combined ? null : resolveReceipt(contract, kind, selectedId, selectedIdx);
+  // One file by default: "Receipts — <ref>.pdf" holding all three pages.
+  const fileName = combined ? `Receipts-${contract.ref}.pdf` : `${receipt?.receiptNo ?? `receipt-${contract.ref}`}.pdf`;
 
-  // Tabs across the receiptable views (same-page query nav).
+  // Tabs: All (the combined three-page file) + jump to a single segmented receipt
+  // — mirrors the Payments ledger categories: Rental Income · Security Deposit ·
+  // Management Fee.
   const payments = contract.payments ?? [];
   const rentals = payments.filter(isRental);
+  const hasRental = rentals.length > 0;
   const hasDeposit = payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
     || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0;
+  const hasManagement = feeLinesOf(contract, rentals).lines.length > 0;
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
   return (
     <div style={VIEWER_WRAP}>
       <div style={VIEWER_BAR}>
         <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{receipt ? titleCase(receipt.title) : 'Receipt'} — {receipt?.receiptNo ?? contract.ref}</p>
-          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>System-generated payment receipt</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
+            {combined ? `Receipts — ${contract.ref}` : `${receipt ? titleCase(receipt.title) : 'Receipt'} — ${receipt?.receiptNo ?? contract.ref}`}
+          </p>
+          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
+            {combined ? 'Rental income · security deposit · management fee — one file, three receipts' : 'System-generated payment receipt'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: '#666' }}>
-            <a href="?kind=contract" style={tab(receipt?.kind === 'contract')}>Contract</a>
-            {hasDeposit && <a href="?kind=deposit" style={tab(receipt?.kind === 'deposit')}>Deposit</a>}
-            {rentals.map((p, i) => (
-              <a key={p.id} href={`?pid=${p.id}`} style={tab(receipt?.kind === 'rent' && receipt?.single?.id === p.id)}>#{i + 1}</a>
-            ))}
+            <a href="?kind=all" style={tab(combined)}>All</a>
+            {hasRental && <a href="?kind=rental" style={tab(!combined && receipt?.kind === 'rental')}>Rental Income</a>}
+            {hasDeposit && <a href="?kind=deposit" style={tab(!combined && receipt?.kind === 'deposit')}>Security Deposit</a>}
+            {hasManagement && <a href="?kind=management" style={tab(!combined && receipt?.kind === 'management')}>Management Fee</a>}
           </span>
           <button onClick={() => window.history.back()} style={CLOSE_BTN}>✕ Close</button>
           <PDFDownloadLink document={doc} fileName={fileName} style={DL_BTN}>

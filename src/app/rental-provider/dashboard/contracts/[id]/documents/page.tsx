@@ -206,7 +206,8 @@ export default function ContractDocumentsPage() {
     { kind: 'offer', key: 'offer', label: 'Offer Receipt' },
     { kind: 'doc', key: 'payment_advice', label: 'Payment Advice' },
   ];
-  if (receiptsReady) seq.push({ kind: 'frame', key: 'receipts', label: 'Receipts', href: `${receiptBase}?kind=contract` });
+  // One file → three receipts inside (Rental Income · Security Deposit · Management Fee).
+  if (receiptsReady) seq.push({ kind: 'frame', key: 'receipts', label: 'Receipts', href: receiptBase });
   seq.push({ kind: 'frame', key: 'agreement', label: 'Agreement', href: `${contractBase}/print` });
   seq.push({ kind: 'doc', key: 'ejari_certificate', label: 'Ejari' });
   if (!isRenewal) {

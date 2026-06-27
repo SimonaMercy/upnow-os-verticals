@@ -3635,9 +3635,8 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
               {[
                 { label: 'Signed tenancy contract',   href: `/dashboard/customer/contracts/${c.id}/print`, newTab: false },
                 { label: 'Move-in inspection report', href: `/dashboard/customer/contracts/${c.id}/inspection?type=move_in`, newTab: false },
-                // Two payment receipts, attached by default once the contract is live.
-                { label: 'Contract payment receipt',  href: `/dashboard/customer/contracts/${c.id}/print/receipt?kind=contract`, newTab: true },
-                { label: 'Security deposit receipt',  href: `/dashboard/customer/contracts/${c.id}/print/receipt?kind=deposit`, newTab: true },
+                // One receipts file → three receipts inside (rental income · security deposit · management fee).
+                { label: 'Payment receipts',          href: `/dashboard/customer/contracts/${c.id}/print/receipt`, newTab: true },
               ].map((d, i) => (
                 <Link key={i} href={d.href} target={d.newTab ? '_blank' : undefined} rel={d.newTab ? 'noopener noreferrer' : undefined} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
