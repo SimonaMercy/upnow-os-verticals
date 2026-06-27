@@ -31,6 +31,7 @@ import {
 import { apiGet, apiPatch } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
+import OperationsViewToggle from '@/components/upnow/OperationsViewToggle';
 
 interface ChecklistItem { key: string; label: string; done: boolean; action: string | null }
 export interface OpsContract {
@@ -111,6 +112,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
       .catch(() => undefined);
   }, [listPath]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLoading(true); load().finally(() => setLoading(false)); }, [load]);
 
   const assets = useMemo(
@@ -263,6 +265,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
             <p>Contracts still being set up — fill the missing steps, then <b>Mark active</b> to lock the lease and move it to Leases. Terminated leases come back here to finish <b>move-out &amp; settlement</b>.</p>
           </div>
           <div className="hero-actions">
+            <OperationsViewToggle active="list" />
             <div className="year-global" title="Scope the worklist by lease year">
               <Calendar size={14} />
               <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter by year">
