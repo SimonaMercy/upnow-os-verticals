@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { SecureDocCanvas } from "@/components/upnow/SecureDocCanvas";
+import { currentDocWatermark } from "@/lib/docViewer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -210,6 +212,11 @@ export function KycDocumentsPanel({
   const [viewerDocs, setViewerDocs] = useState<
     { name: string; url: string; mimeType: string }[] | null
   >(null);
+  // Identity stamp captured when the viewer opens (stable while it's open).
+  const [viewerWatermark, setViewerWatermark] = useState("");
+  useEffect(() => {
+    if (viewerDocs) setViewerWatermark(currentDocWatermark());
+  }, [viewerDocs]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingKey = useRef<string | null>(null);
@@ -887,7 +894,12 @@ export function KycDocumentsPanel({
                 <X size={18} />
               </button>
             </div>
-            <div className="overflow-y-auto p-4 space-y-5" style={{ background: "var(--color-base-50, #fafafa)" }}>
+            <div
+              className="overflow-y-auto p-4 space-y-5 select-none"
+              style={{ background: "var(--color-base-50, #fafafa)" }}
+              onContextMenu={(e) => e.preventDefault()}
+              onDragStart={(e) => e.preventDefault()}
+            >
               {viewerDocs.map((d, i) => {
                 const isImg = d.mimeType.startsWith("image/");
                 return (
@@ -897,22 +909,14 @@ export function KycDocumentsPanel({
                         {d.name}
                       </p>
                     )}
-                    {isImg ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={d.url}
-                        alt={d.name}
-                        className="w-full rounded-xl border"
-                        style={{ borderColor: "var(--color-base-200)" }}
+                    <div className="rounded-xl border overflow-hidden bg-white" style={{ borderColor: "var(--color-base-200)" }}>
+                      <SecureDocCanvas
+                        fileUrl={d.url}
+                        isImage={isImg}
+                        caption={d.name}
+                        watermark={viewerWatermark}
                       />
-                    ) : (
-                      <iframe
-                        src={`${d.url}#toolbar=0&navpanes=0&view=FitH`}
-                        title={d.name}
-                        className="w-full rounded-xl border bg-white"
-                        style={{ height: "70vh", borderColor: "var(--color-base-200)" }}
-                      />
-                    )}
+                    </div>
                   </div>
                 );
               })}

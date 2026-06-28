@@ -15,6 +15,13 @@
  * Out of scope (these stay downloadable): the GENERATED tenancy contract / Ejari
  * PDF (the customer/RP's own contract via the /print routes) and blank
  * sample/template/CSV downloads — those aren't customer documents.
+ *
+ * Anti-exfiltration: the host renders every document onto a <canvas> (images via
+ * a tainted canvas the browser refuses to "Save image as"; PDFs via pdf.js) with
+ * a per-viewer watermark baked into the pixels, and disables the right-click /
+ * drag / select gestures. This makes the underlying file URL absent from the DOM
+ * and casual "Save as" impossible; it cannot stop OS screenshots (no web API
+ * can), so the watermark makes any screen-grab traceable to who took it.
  */
 import { useSyncExternalStore } from 'react';
 
@@ -27,11 +34,35 @@ export type DocViewerDoc = {
   mimeType?: string | null;
 };
 
-export type DocViewerState = { docs: DocViewerDoc[]; title: string };
+export type DocViewerState = { docs: DocViewerDoc[]; title: string; watermark: string };
 
 let current: DocViewerState | null = null;
 const listeners = new Set<() => void>();
 const notify = () => { for (const l of listeners) l(); };
+
+/**
+ * The identity stamped (tiled, translucent) over every viewed document, e.g.
+ * "Ayesha Almulla · #395". Set once where the viewer's identity is known — the
+ * authenticated user in the app shell, or the tenant on a magic-link portal —
+ * since <DocViewerHost/> is mounted outside the auth context and can't read it.
+ */
+let watermarkLabel = '';
+export function setDocViewerWatermark(label: string | null | undefined): void {
+  watermarkLabel = (label ?? '').trim();
+}
+
+/**
+ * Builds the full watermark line (identity + the moment it was opened). Exported
+ * so the other in-portal document readers (DocumentReaderModal, KycDocumentsPanel)
+ * stamp the same identity through <SecureDocCanvas/> as this viewer does.
+ */
+export function currentDocWatermark(): string {
+  const stamp = new Date().toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  const who = watermarkLabel || 'UpNow — Confidential';
+  return `${who} · ${stamp}`;
+}
 
 /**
  * Open the in-portal viewer for one or more documents. Accepts a single doc or
@@ -43,7 +74,7 @@ export function openDocViewer(docs: DocViewerDoc | DocViewerDoc[], title = 'Docu
     (d): d is DocViewerDoc => !!d && !!d.fileUrl,
   );
   if (!list.length) return;
-  current = { docs: list, title };
+  current = { docs: list, title, watermark: currentDocWatermark() };
   notify();
 }
 

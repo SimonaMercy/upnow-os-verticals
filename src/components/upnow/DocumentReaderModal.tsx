@@ -11,6 +11,8 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { FileText, X, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { SecureDocCanvas } from './SecureDocCanvas';
+import { currentDocWatermark } from '@/lib/docViewer';
 
 export type ReaderFile = { id: string | number; name: string; url: string; mimeType?: string | null };
 /** group → optional section heading in the sidebar (e.g. a lease ref). */
@@ -35,6 +37,8 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
   onClose: () => void;
 }) {
   const firstWithFiles = slots.find(s => s.files.length > 0)?.key ?? slots[0]?.key ?? null;
+  // Computed once when the reader opens — same identity stamp as openDocViewer.
+  const [watermark] = useState(() => currentDocWatermark());
   const [activeKey, setActiveKey] = useState<string | null>(initialKey ?? firstWithFiles);
   const [fileIdx, setFileIdx] = useState(0);
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1280);
@@ -144,13 +148,18 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
 
             {/* preview body */}
             {rActive ? (
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: C.line2, display: 'flex', justifyContent: 'center' }}>
-                {isImage(rActive) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={rActive.url} alt={rActive.name} style={{ maxWidth: '100%', alignSelf: 'flex-start', margin: 22, borderRadius: 8, boxShadow: '0 6px 22px rgba(20,40,30,.12)' }} />
-                ) : (
-                  <iframe src={`${rActive.url}#toolbar=0&navpanes=0&statusbar=0&view=FitH`} title={rActive.name} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
-                )}
+              <div
+                onContextMenu={e => e.preventDefault()}
+                onDragStart={e => e.preventDefault()}
+                style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: C.line2, padding: isImage(rActive) ? 22 : 0, userSelect: 'none', WebkitUserSelect: 'none' }}
+              >
+                <SecureDocCanvas
+                  key={`${rActive.id}-${rf}`}
+                  fileUrl={rActive.url}
+                  isImage={isImage(rActive)}
+                  caption={rActive.name}
+                  watermark={watermark}
+                />
               </div>
             ) : (
               <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 30, background: C.soft }}>

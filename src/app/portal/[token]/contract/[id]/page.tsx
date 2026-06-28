@@ -11,7 +11,7 @@ import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
-import { openDocViewer } from '@/lib/docViewer';
+import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
@@ -78,6 +78,9 @@ export default function ContractReviewPage() {
       .then(setD).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [token, id]);
   useEffect(() => { load(); }, [load]);
+
+  // No auth user on the magic link — stamp viewed documents with the tenant name.
+  useEffect(() => { setDocViewerWatermark(d?.contract?.tenant?.name ?? null); }, [d]);
 
   // When the link is scoped to an inspection, the tenant should review the
   // inspection the RP recorded (not the tenancy contract) before signing.

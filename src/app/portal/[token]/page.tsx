@@ -12,7 +12,7 @@ import {
   UploadCloud, CheckCircle2, ExternalLink, Loader2, FileText,
   ShieldCheck, AlertTriangle,
 } from 'lucide-react';
-import { openDocViewer } from '@/lib/docViewer';
+import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
 
 interface DocItem { key: string; displayName: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null; category?: string | null; hint?: string | null }
 interface Portal {
@@ -53,6 +53,9 @@ export default function TenantPortalPage() {
       .then(setData).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [token]);
   useEffect(() => { load(); }, [load]);
+
+  // No auth user on the magic link — stamp viewed documents with the tenant name.
+  useEffect(() => { setDocViewerWatermark(data?.tenant?.name ?? null); }, [data]);
 
   async function upload(doc: DocItem, file: File) {
     setUploading(doc.key);

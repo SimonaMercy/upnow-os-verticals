@@ -1,10 +1,25 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { installApiFetchCoalescing } from "@/lib/fetchCoalescing";
+import { setDocViewerWatermark } from "@/lib/docViewer";
+
+/**
+ * Feeds the logged-in user's identity to the document viewer's watermark. Lives
+ * inside <AuthProvider/> because <DocViewerHost/> is mounted outside it (at the
+ * app root) and can't read the auth context itself. The tenant magic-link portal
+ * has no auth user and sets its own watermark from the resolved tenant name.
+ */
+function DocViewerIdentityBinder() {
+  const { user } = useAuth();
+  useEffect(() => {
+    setDocViewerWatermark(user ? `${user.name} · #${user.id}` : null);
+  }, [user]);
+  return null;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => {
@@ -21,7 +36,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>{children}</AuthProvider>
+      <AuthProvider>
+        <DocViewerIdentityBinder />
+        {children}
+      </AuthProvider>
       <Toaster position="top-right" richColors closeButton duration={4000} />
     </QueryClientProvider>
   );
