@@ -177,8 +177,22 @@ export default function OperationsKanban({ listPath, contractHref, canAct = true
     return map;
   }, [visible]);
 
-  const hasWindDown = (byColumn.get('winddown')?.length ?? 0) > 0;
-  const renderedCols = COLS.filter(c => c.key !== 'winddown' || hasWindDown);
+  // Dynamic lanes: render only stages that actually hold cards, so the board stays
+  // focused on live work. Renewals never produce Utility / Move-in cards, so those
+  // lanes drop off entirely; an empty Signatures lane likewise disappears once
+  // nothing is pending signature, etc. While dragging, we also keep visible the
+  // empty FORWARD lanes that are real gates on the dragged card (plus Ready), so it
+  // still has a drop target — without resurfacing stages the card doesn't have
+  // (e.g. a renewal never flashes Utility / Move-in mid-drag).
+  const dragCard = drag ? rows.find(r => r.id === drag.id) : null;
+  const dragTargetCols = dragCard
+    ? new Set<ColKey>([...dragCard.checklist.map(i => stageKeyToCol(i.key)), 'ready'])
+    : null;
+  const renderedCols = COLS.filter(c => {
+    if ((byColumn.get(c.key)?.length ?? 0) > 0) return true;
+    if (drag && isForward(drag.col, c.key) && dragTargetCols?.has(c.key)) return true;
+    return false;
+  });
 
   const hasFilters = filterAsset !== 'all' || filterYear !== 'all' || filterType !== 'all' || search !== '';
 
