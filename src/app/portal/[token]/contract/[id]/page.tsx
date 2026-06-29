@@ -294,11 +294,32 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const pos = (e: React.PointerEvent) => { const c = canvasRef.current!; const r = c.getBoundingClientRect(); return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) }; };
+  // Size the signature pad's backing store to its rendered CSS box (× DPR) so
+  // strokes aren't stretched and stay crisp — the pad is taller on mobile, so a
+  // fixed 520×150 buffer would squash the signature. Re-fits on resize/rotate.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const fit = () => {
+      const r = c.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      c.width = Math.round(r.width * dpr);
+      c.height = Math.round(r.height * dpr);
+      c.getContext('2d')!.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS-pixel units
+      dirty.current = false; // resizing the buffer clears it
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
+
+  // Pointer → CSS-pixel coords (the context is DPR-scaled, so no extra ratio).
+  const pos = (e: React.PointerEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const down = (e: React.PointerEvent) => { drawing.current = true; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
-  const move = (e: React.PointerEvent) => { if (!drawing.current) return; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.lineTo(x, y); ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke(); dirty.current = true; };
+  const move = (e: React.PointerEvent) => { if (!drawing.current) return; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.lineTo(x, y); ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke(); dirty.current = true; };
   const up = () => { drawing.current = false; };
-  const clear = () => { const c = canvasRef.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); dirty.current = false; };
+  const clear = () => { const c = canvasRef.current!; const ctx = c.getContext('2d')!; ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.restore(); dirty.current = false; };
 
   async function submit() {
     if (kind === 'contract' && !agreed) { setErr('Please confirm you have read the contract above.'); return; }
@@ -332,7 +353,8 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
       <input className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg" placeholder={asInspector ? 'Your full name (inspection manager)' : 'Full name'} value={name} onChange={e => setName(e.target.value)} />
       <div>
         <p className="text-xs text-[#6b6860] mb-1">Draw your signature</p>
-        <canvas ref={canvasRef} width={520} height={150} className="w-full border border-[#d8d6d0] rounded-lg bg-[#fafaf8] touch-none"
+        {/* Taller pad on mobile (easier finger signing); unchanged 150px on web (sm+). */}
+        <canvas ref={canvasRef} className="w-full h-52 sm:h-[150px] border border-[#d8d6d0] rounded-lg bg-[#fafaf8] touch-none cursor-crosshair"
           onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} />
         <button onClick={clear} className="text-[11px] text-[#6b6860] mt-1">Clear</button>
       </div>
