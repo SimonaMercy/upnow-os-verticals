@@ -3,9 +3,12 @@
  * @react-pdf/renderer approach as the tenancy-contract document (EjariContractPdf)
  * so it prints/downloads cleanly (no browser print-dialog chrome).
  *
- * Default export = a full-screen viewer (PDFViewer + PDFDownloadLink), loaded via
- * next/dynamic ssr:false from the print/receipt routes. The receipt model/logic
- * lives here too (shared by RP/manager + customer routes).
+ * Default export = a full-screen viewer that renders the receipt to raw PDF bytes
+ * and rasterises them onto a <canvas> with pdf.js — NOT an <iframe src="blob:…pdf">
+ * (that renders blank on mobile browsers and is unreliable in production; same fix
+ * the tenancy contract uses via EjariCanvas). Loaded via next/dynamic ssr:false from
+ * the print/receipt routes. The receipt model/logic lives here too (shared by
+ * RP/manager + customer routes).
  *
  * The contract issues THREE separate receipts, segmented exactly like the Payments
  * ledger. They are bundled into ONE document (one file → three pages) by default;
@@ -27,7 +30,9 @@
 'use client';
 
 import React from 'react';
-import { Document, Page, View, Text, Font, PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Font } from '@react-pdf/renderer';
+import EjariCanvas from '@/components/contract/EjariCanvas';
+import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 
 // Roboto — clean modern sans for the whole document (no Bold ttf shipped, so map
 // bold → Medium). Arabic falls back to Noto Naskh.
@@ -557,15 +562,19 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
           </View>
         </View>
 
-        {/* ── Payment details ── */}
-        <View style={{ paddingHorizontal: PAD, paddingTop: 18 }}>
-          <Text style={[st.metaLbl, { marginBottom: 7 }]}>Payment Details</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {single ? <Detail label="Method" value={methodLabel(single, contract)} /> : <Detail label="Mode" value={titleCase(contract.modeOfPayment) || 'Cheque'} />}
-            {single ? <Detail label="Cheque / Ref" value={single.chequeNumber} /> : <Detail label="No. of Cheques" value={String(receipt.scheduleCount ?? contract.numberOfInstallments ?? '—')} />}
-            {single ? <Detail label="Value Date" value={fmtDate(single.transactionDate)} /> : null}
+        {/* ── Payment details — single-payment receipts only. The aggregate
+             "Mode / No. of Cheques" line was removed (it just restated the
+             contract's mode + instalment count, adding nothing to the receipt). ── */}
+        {single ? (
+          <View style={{ paddingHorizontal: PAD, paddingTop: 18 }}>
+            <Text style={[st.metaLbl, { marginBottom: 7 }]}>Payment Details</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              <Detail label="Method" value={methodLabel(single, contract)} />
+              <Detail label="Cheque / Ref" value={single.chequeNumber} />
+              <Detail label="Value Date" value={fmtDate(single.transactionDate)} />
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {/* ── System-generated note ── */}
         <View style={{ paddingHorizontal: PAD, paddingTop: 14 }}>
@@ -629,11 +638,20 @@ const CLOSE_BTN = { padding: '6px 16px', border: '1px solid #ccc', borderRadius:
 const DL_BTN = { padding: '6px 16px', background: NAVY, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' } as const;
 
 export default function PaymentReceiptViewer({ contract, kind, selectedId, selectedIdx }: Props) {
-  const doc = <PaymentReceiptDoc contract={contract} kind={kind} selectedId={selectedId} selectedIdx={selectedIdx} />;
   const combined = isCombined(kind, selectedId);
   const receipt = combined ? null : resolveReceipt(contract, kind, selectedId, selectedIdx);
   // One file by default: "Receipts — <ref>.pdf" holding all three pages.
   const fileName = combined ? `Receipts-${contract.ref}.pdf` : `${receipt?.receiptNo ?? `receipt-${contract.ref}`}.pdf`;
+
+  // Render the receipt to PDF bytes and rasterise to <canvas> (pdf.js) — NOT a
+  // @react-pdf <PDFViewer> (iframe blob), which renders blank on mobile / in prod.
+  // Keyed on the route inputs: the print route fetches `contract` once, so its id is
+  // a stable content key.
+  const docKey = `${contract.id}|${kind ?? 'all'}|${selectedId ?? ''}|${selectedIdx ?? 0}`;
+  const { bytes, url: downloadUrl, error: genError } = useReactPdfDoc(
+    () => <PaymentReceiptDoc contract={contract} kind={kind} selectedId={selectedId} selectedIdx={selectedIdx} />,
+    docKey,
+  );
 
   // Tabs: All (the combined three-page file) + jump to a single segmented receipt
   // — mirrors the Payments ledger categories: Rental Income · Security Deposit ·
@@ -667,13 +685,15 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
             {hasManagement && <a href="?kind=management" style={tab(!combined && receipt?.kind === 'management')}>Management Fee</a>}
           </span>
           <button onClick={() => window.history.back()} style={CLOSE_BTN}>✕ Close</button>
-          <PDFDownloadLink document={doc} fileName={fileName} style={DL_BTN}>
-            {({ loading }) => (loading ? '⏳ Preparing…' : '⬇ Download PDF')}
-          </PDFDownloadLink>
+          {downloadUrl
+            ? <a href={downloadUrl} download={fileName} style={DL_BTN}>⬇ Download PDF</a>
+            : <span style={{ ...DL_BTN, opacity: 0.6, cursor: 'default' }}>⏳ Preparing…</span>}
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <PDFViewer width="100%" height="100%" style={{ border: 'none' }} showToolbar>{doc}</PDFViewer>
+        {genError
+          ? <div style={{ height: '100%', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 16, color: '#fff', fontSize: 13 }}>Preview unavailable — use “⬇ Download PDF” above.</div>
+          : <EjariCanvas bytes={bytes} fill />}
       </div>
     </div>
   );

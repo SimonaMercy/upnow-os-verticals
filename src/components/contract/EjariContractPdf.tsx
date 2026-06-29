@@ -4,17 +4,21 @@
  * law, rental-dispute body, utility authority (DEWA/ADDC/SEWA/FEWA) and header
  * branding are derived from the property's emirate via lib/tenancyJurisdiction
  * (defaults to Dubai). Reliable multi-page, crisp text, Arabic (Amiri). Client-only
- * (PDFViewer/PDFDownloadLink need the browser); load via next/dynamic ssr:false.
+ * (@react-pdf needs the browser); load via next/dynamic ssr:false. The full-screen
+ * viewers rasterise to <canvas> via pdf.js (EjariCanvas) — NOT an <iframe> blob,
+ * which renders blank on mobile browsers / in production.
  */
 'use client';
 
 import React from 'react';
 import {
-  Document, Page, View, Text, Image, Font, PDFViewer, PDFDownloadLink, pdf,
+  Document, Page, View, Text, Image, Font, pdf,
 } from '@react-pdf/renderer';
 import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
 import { isDubaiContract } from '@/lib/ejariFill';
 import { useFilledEjari } from './useFilledEjari';
+import { useReactPdfDoc } from './useReactPdfDoc';
+import EjariCanvas from './EjariCanvas';
 import { addendumTermsToLines, type AddendumTerms } from '@/lib/addendumTerms';
 
 Font.register({
@@ -586,33 +590,47 @@ export default function EjariContractViewer({ data, addendums = [], onClose }: {
     : <ReactPdfFullscreen data={data} addendums={addendums} onClose={onClose} />;
 }
 
+/** Stable regeneration key for the @react-pdf contract doc — changes only when the
+ *  printed content does (ref, signatures, addendum set). */
+export function ejariDocKey(data: EjariContractData, addendums: EjariAddendum[]): string {
+  return `${data.ref}|${(data.signatures || []).map((s) => `${s.role}:${s.signedAt}`).join(',')}|${addendums.map((a) => a.id).join(',')}`;
+}
+
 function DubaiFullscreen({ data, addendums, onClose }: { data: EjariContractData; addendums: EjariAddendum[]; onClose?: () => void }) {
-  const { url, error } = useFilledEjari(data, addendums);
+  // Dubai → the official DLD template filled with pdf-lib (raw bytes + a download
+  // URL). Rasterise the bytes to <canvas> (NOT an <iframe> blob → blank on mobile).
+  const { url, bytes, error } = useFilledEjari(data, addendums);
   return (
     <div style={VIEWER_WRAP}>
       <ViewerHeader data={data} onClose={onClose}>
         {url && <a href={url} download={`tenancy-contract-${data.ref}.pdf`} style={DL_BTN}>⬇ Download PDF</a>}
       </ViewerHeader>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {error ? <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#fff' }}>Failed to render contract: {error}</div>
-          : url ? <iframe src={url} title="Tenancy Contract" width="100%" height="100%" style={{ border: 'none' }} />
-            : <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#fff' }}>Preparing contract…</div>}
+        {error
+          ? <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#fff' }}>Failed to render contract: {error}</div>
+          : <EjariCanvas bytes={bytes} fill />}
       </div>
     </div>
   );
 }
 
 function ReactPdfFullscreen({ data, addendums, onClose }: { data: EjariContractData; addendums: EjariAddendum[]; onClose?: () => void }) {
-  const doc = <EjariContractDoc data={data} addendums={addendums} />;
+  // Non-Dubai → the @react-pdf vector doc → bytes (canvas) + a download URL.
+  const { bytes, url, error } = useReactPdfDoc(
+    () => <EjariContractDoc data={data} addendums={addendums} />,
+    ejariDocKey(data, addendums),
+  );
   return (
     <div style={VIEWER_WRAP}>
       <ViewerHeader data={data} onClose={onClose}>
-        <PDFDownloadLink document={doc} fileName={`tenancy-contract-${data.ref}.pdf`} style={DL_BTN}>
-          {({ loading }) => (loading ? '⏳ Preparing…' : '⬇ Download PDF')}
-        </PDFDownloadLink>
+        {url
+          ? <a href={url} download={`tenancy-contract-${data.ref}.pdf`} style={DL_BTN}>⬇ Download PDF</a>
+          : <span style={{ ...DL_BTN, opacity: 0.6, cursor: 'default' }}>⏳ Preparing…</span>}
       </ViewerHeader>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <PDFViewer width="100%" height="100%" style={{ border: 'none' }} showToolbar>{doc}</PDFViewer>
+        {error
+          ? <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#fff' }}>Failed to render contract: {error}</div>
+          : <EjariCanvas bytes={bytes} fill />}
       </div>
     </div>
   );

@@ -4,10 +4,13 @@
  * Live PDF preview of in-app addendum terms — renders just the addendum page(s)
  * via the real contract renderer (AddendumDoc), so the RP sees the exact output
  * INCLUDING the hardcoded, non-editable <Signatures> block before saving.
- * @react-pdf needs the browser → load via next/dynamic with ssr:false.
+ * Rasterised to <canvas> via pdf.js (EjariCanvas) — an <iframe> blob renders blank
+ * on mobile browsers / in production. @react-pdf needs the browser → load via
+ * next/dynamic with ssr:false.
  */
-import { PDFViewer } from '@react-pdf/renderer';
 import { AddendumDoc, type EjariContractData, type EjariAddendum } from './EjariContractPdf';
+import { useReactPdfDoc } from './useReactPdfDoc';
+import EjariCanvas from './EjariCanvas';
 import type { AddendumTerms } from '@/lib/addendumTerms';
 
 // Minimal placeholder contract — AddendumDoc only reads property.emirate (for
@@ -28,9 +31,12 @@ export default function AddendumTermsPreview({ terms, height = 520 }: { terms: A
     tenantSig: null, tenantSignedAt: null, landlordSig: null, landlordSignedAt: null,
     terms,
   };
-  return (
-    <PDFViewer width="100%" height={height} showToolbar style={{ border: '1px solid #e8e6e0', borderRadius: 12 }}>
-      <AddendumDoc data={PREVIEW_DATA} addendums={[addendum]} />
-    </PDFViewer>
+  // Re-render only when the terms change (their JSON is the stable content key).
+  const { bytes, error } = useReactPdfDoc(
+    () => <AddendumDoc data={PREVIEW_DATA} addendums={[addendum]} />,
+    JSON.stringify(terms),
   );
+  const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
+  if (error) return <div style={{ ...frame, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Failed to render preview: {error}</div>;
+  return <EjariCanvas bytes={bytes} height={height} />;
 }

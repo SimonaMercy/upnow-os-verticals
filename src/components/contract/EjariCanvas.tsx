@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * Renders a filled Ejari PDF (raw bytes from `fillEjariPdf`) onto a stack of
- * <canvas> elements with pdf.js.
+ * Renders raw PDF bytes (from `fillEjariPdf` or @react-pdf via `useReactPdfDoc`)
+ * onto a stack of <canvas> elements with pdf.js.
  *
  * Why not an <iframe> like before: mobile browsers (iOS Safari, all WebKit
  * browsers on iOS, Android Chrome) have no built-in inline PDF viewer, so an
@@ -32,9 +32,13 @@ const MAX_AREA = 16_000_000; // iOS total canvas-area limit (~16.7M px)
 
 type Status = 'loading' | 'ready' | 'error';
 
-export default function EjariCanvas({ bytes, height = 640 }: {
+export default function EjariCanvas({ bytes, height = 640, fill = false }: {
   bytes: Uint8Array | null;
   height?: number;
+  /** Full-height scrollable layout for full-screen viewers (pages centred on a
+   *  transparent backdrop with a drop shadow). Default = fixed-height framed card
+   *  for inline embedding. */
+  fill?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>('loading');
@@ -74,7 +78,16 @@ export default function EjariCanvas({ bytes, height = 640 }: {
         // Backing store is hi-dpi; CSS scales it down to container width → crisp.
         c.className = 'block w-full h-auto';
         c.style.maxWidth = '100%';
-        if (n > 1) c.style.marginTop = '8px';
+        if (fill) {
+          // Full-screen: each page is a white card with a drop shadow on the
+          // viewer's dark backdrop.
+          c.style.background = '#fff';
+          c.style.borderRadius = '4px';
+          c.style.boxShadow = '0 1px 12px rgba(0,0,0,0.4)';
+          if (n > 1) c.style.marginTop = '16px';
+        } else if (n > 1) {
+          c.style.marginTop = '8px';
+        }
         host.appendChild(c);
         await page.render({ canvasContext: c.getContext('2d')!, viewport: vp }).promise;
       }
@@ -86,7 +99,21 @@ export default function EjariCanvas({ bytes, height = 640 }: {
     });
 
     return () => { cancelled = true; };
-  }, [bytes]);
+  }, [bytes, fill]);
+
+  if (fill) {
+    return (
+      <div style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div ref={hostRef} style={{ maxWidth: 820, width: '100%', margin: '0 auto', padding: '20px 16px' }} />
+        {status === 'loading' && (
+          <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: '#e3f5ee', fontSize: 13 }}>Preparing preview…</div>
+        )}
+        {status === 'error' && (
+          <div style={{ flex: 1, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 16, color: '#fff', fontSize: 13 }}>Preview unavailable — use the download button above.</div>
+        )}
+      </div>
+    );
+  }
 
   const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
   return (

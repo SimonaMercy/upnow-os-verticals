@@ -9,7 +9,7 @@ import type { EjariContractData, EjariAddendum } from './EjariContractPdf';
  * pdf-lib) and returns an object-URL for the resulting PDF to embed in an
  * <iframe>. Re-runs when the contract ref / signature / addendum set changes.
  */
-export function useFilledEjari(data: EjariContractData, addendums: EjariAddendum[]) {
+export function useFilledEjari(data: EjariContractData, addendums: EjariAddendum[], enabled = true) {
   const [url, setUrl] = useState<string | null>(null);
   // Raw bytes are exposed alongside the object-URL so a canvas renderer (pdf.js)
   // can rasterise the PDF directly — mobile browsers don't render PDFs in an
@@ -27,6 +27,7 @@ export function useFilledEjari(data: EjariContractData, addendums: EjariAddendum
     // body) to avoid react-hooks/set-state-in-effect cascading renders.
     (async () => {
       setUrl(null); setBytes(null); setError(null);
+      if (!enabled) return;   // a non-Dubai contract uses a different renderer — skip the (expensive) DLD fill
       try {
         const b = await fillEjariPdf(data, addendums);
         if (cancelled) return;
@@ -39,7 +40,7 @@ export function useFilledEjari(data: EjariContractData, addendums: EjariAddendum
     })();
     return () => { cancelled = true; if (objUrl) URL.revokeObjectURL(objUrl); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, enabled]);
 
   return { url, bytes, error };
 }

@@ -2,35 +2,36 @@
 
 /**
  * Inline (embeddable) Ejari tenancy contract, sized for a page section.
- *  - Dubai  → the OFFICIAL DLD PDF filled with the contract data (pdf-lib),
- *             rasterised to <canvas> via pdf.js (EjariCanvas). An <iframe> blob
- *             PDF renders blank on mobile browsers, so we don't use one.
+ *  - Dubai  → the OFFICIAL DLD PDF filled with the contract data (pdf-lib).
  *  - others → the @react-pdf vector document (emirate-aware fallback).
+ * BOTH are rasterised to <canvas> via pdf.js (EjariCanvas); an <iframe> blob PDF
+ * renders blank on mobile browsers, so we never use one.
  * @react-pdf needs the browser, so load this via next/dynamic with ssr:false.
  */
-import { PDFViewer } from '@react-pdf/renderer';
-import { EjariContractDoc, type EjariContractData, type EjariAddendum } from './EjariContractPdf';
+import { EjariContractDoc, ejariDocKey, type EjariContractData, type EjariAddendum } from './EjariContractPdf';
 import { isDubaiContract } from '@/lib/ejariFill';
 import { useFilledEjari } from './useFilledEjari';
+import { useReactPdfDoc } from './useReactPdfDoc';
 import EjariCanvas from './EjariCanvas';
 
 export default function EjariInline({ data, addendums = [], height = 640 }: {
   data: EjariContractData; addendums?: EjariAddendum[]; height?: number;
 }) {
   const dubai = isDubaiContract(data);
-  // Hook must run unconditionally; it no-ops cheaply when not Dubai (bytes stay null and are unused).
-  const { bytes, error } = useFilledEjari(data, dubai ? addendums : []);
+  // Both hooks run unconditionally (rules of hooks); each takes an `enabled` flag so
+  // only the branch actually shown does work. Dubai → official DLD template (pdf-lib);
+  // others → @react-pdf vector doc.
+  const { bytes: dubaiBytes, error: dubaiErr } = useFilledEjari(data, addendums, dubai);
+  const { bytes: vectorBytes, error: vectorErr } = useReactPdfDoc(
+    () => <EjariContractDoc data={data} addendums={addendums} />,
+    ejariDocKey(data, addendums),
+    !dubai,
+  );
+  const bytes = dubai ? dubaiBytes : vectorBytes;
+  const error = dubai ? dubaiErr : vectorErr;
   const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
 
-  if (dubai) {
-    if (error) return <div style={{ ...frame, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Failed to render contract: {error}</div>;
-    // EjariCanvas shows its own "Preparing contract…" placeholder while bytes are null.
-    return <EjariCanvas bytes={bytes} height={height} />;
-  }
-
-  return (
-    <PDFViewer width="100%" height={height} showToolbar style={frame}>
-      <EjariContractDoc data={data} addendums={addendums} />
-    </PDFViewer>
-  );
+  if (error) return <div style={{ ...frame, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Failed to render contract: {error}</div>;
+  // EjariCanvas shows its own "Preparing contract…" placeholder while bytes are null.
+  return <EjariCanvas bytes={bytes} height={height} />;
 }
