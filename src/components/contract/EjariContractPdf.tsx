@@ -54,7 +54,10 @@ export interface EjariContractData {
   // Rent discount (rent line only). listedRent − discountAmount = annualRent.
   listedRent?: number | null; discountType?: 'percent' | 'fixed' | null; discountAmount?: number | null;
   modeOfPayment: string | null; numberOfInstallments?: number | null; customClauses?: string[]; notes?: string | null;
-  landlord: EjariParty;
+  // Lessor is the landlord, OR — when the RP holds a Power of Attorney — the POA
+  // representative. The official contract lists the POA holder's phone as the
+  // lessor's contact (see `lessorPhone` below).
+  landlord: EjariParty & { hasPoa?: boolean | null; poaPersonName?: string | null; poaPersonPhone?: string | null };
   tenant: EjariParty;
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
   unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
@@ -276,6 +279,11 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   const listed = data.listedRent != null ? Number(data.listedRent) : rent;
   const discount = data.discountAmount != null ? Number(data.discountAmount) : Math.max(0, listed - rent);
   const landlordName = data.landlord.companyName || data.landlord.name || '';
+  // Lessor's phone: when the RP acts under a Power of Attorney, the POA holder's
+  // phone is the lessor's contact on the contract; otherwise the landlord's own.
+  const lessorPhone = data.landlord.hasPoa && data.landlord.poaPersonPhone
+    ? data.landlord.poaPersonPhone
+    : data.landlord.phone;
   // Company tenants are named by their company; individuals by their person name.
   const tenantName = data.tenant.companyName || data.tenant.name || '';
   // Usage comes from the property's space category (residential/commercial/
@@ -318,7 +326,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           </View>
           <CompanyCaption />
           <Field label="Lessor's Email" ar="البريد الإلكتروني للمؤجر" value={data.landlord.email} />
-          <Field label="Lessor's Phone" ar="رقم هاتف المؤجر" value={data.landlord.phone} />
+          <Field label="Lessor's Phone" ar="رقم هاتف المؤجر" value={lessorPhone} />
         </Section>
         <Section en="Tenant Information" ar="معلومات المستأجر">
           <Field label="Tenant's Name" ar="اسم المستأجر" value={tenantName} />

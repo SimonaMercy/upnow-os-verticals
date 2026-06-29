@@ -55,6 +55,10 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
       emiratesId: c.landlord?.emiratesId ?? null,
       licenseNumber: c.landlord?.licenseNumber ?? null,
       licenseAuthority: c.landlord?.licenseAuthority ?? null,
+      // Power of Attorney: when set, the POA holder's phone is shown as the lessor's.
+      hasPoa: c.landlord?.hasPoa ?? null,
+      poaPersonName: c.landlord?.poaPersonName ?? null,
+      poaPersonPhone: c.landlord?.poaPersonPhone ?? null,
     },
     tenant: {
       name: c.tenant?.name ?? null,
