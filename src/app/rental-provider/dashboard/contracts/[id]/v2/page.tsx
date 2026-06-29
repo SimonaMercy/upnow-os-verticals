@@ -225,6 +225,9 @@ interface DerivedState {
   utilityDoc: boolean;
   moveIn: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
   moveOut: { rpSubmitted: boolean; tenantSig: boolean; rpCounterSig: boolean };
+  /** Move-in document escape hatch — an uploaded move-in report stands in for a
+   *  full inspection when clearing the backlog on an imported/active lease. */
+  moveInDoc: boolean;
   /** Move-out document escape hatch — an uploaded move-out report stands in for
    *  a full inspection on outdated/legacy leases. */
   moveOutDoc: boolean;
@@ -239,7 +242,7 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     case 'sign':    return st.tenantSigned && st.landlordSigned;
     case 'ejari':   return st.ejariStatus === 'registered';
     case 'utility': return st.utilityDoc;
-    case 'movein':  return st.moveIn.rpCounterSig;
+    case 'movein':  return st.moveIn.rpCounterSig || st.moveInDoc;
     case 'moveout': return st.moveOut.rpCounterSig || st.moveOutDoc;
     // Closeout is OPTIONAL — settlement stays reachable regardless.
     case 'closeout': return st.closeout.clearance && st.closeout.finalBill;
@@ -334,6 +337,7 @@ function spaceCategoryFromUnitType(unitType: string | null): string {
 
 function deriveState(contract: ContractDetail, signatures: { role: string; method?: string }[], insp: MoveInInsp | null, moveOutInsp: MoveInInsp | null, settlementStatus: DerivedState['settlementStatus']): DerivedState {
   const docs = contract.documents ?? [];
+  const moveInDoc = docs.some(d => /^move_?in/i.test(d.documentKey || '') || /move-?in/i.test(d.displayName || ''));
   const moveOutDoc = docs.some(d => /^move_?out/i.test(d.documentKey || '') || /move-?out/i.test(d.displayName || ''));
   const clearance = docs.some(d => (d.documentKey || '').startsWith('utility_clearance') || /clearance/i.test(d.displayName || ''));
   const finalBill = docs.some(d => (d.documentKey || '').startsWith('utility_final_bill') || /final.?bill/i.test(d.displayName || ''));
@@ -354,6 +358,7 @@ function deriveState(contract: ContractDetail, signatures: { role: string; metho
       tenantSig: !!moveOutInsp?.tenantSig,
       rpCounterSig: !!moveOutInsp?.rpCounterSig,
     },
+    moveInDoc,
     moveOutDoc,
     closeout: { clearance, finalBill },
     settlementStatus,
@@ -636,6 +641,8 @@ interface StepHandlers {
   onMarkEjari: () => Promise<void>;
   onUploadUtility: () => void;
   onMarkUtility: () => Promise<void>;
+  /** Bypass digital signing — record both signatures as on file (paper/imported). */
+  onMarkSignedOnFile: () => Promise<void>;
   onVerifyUtility: () => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
@@ -646,7 +653,8 @@ interface StepHandlers {
   /** Cancel/undo a termination — reverts the lease to active while it has not
    *  yet closed out. */
   onCancelTermination: () => Promise<void>;
-  /** Wind-down uploads — work even while the lease is active. */
+  /** Escape-hatch uploads — work even while the lease is active. */
+  onUploadMoveInDoc: () => void;
   onUploadMoveOutDoc: () => void;
   onUploadCloseoutClearance: () => void;
   onUploadCloseoutFinalBill: () => void;
@@ -744,24 +752,35 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       : {
           tone: 'action', icon: 'pen', sub: stopOf(2), label: 'Signatures',
           headline: 'Capture both signatures.',
-          body: `${TEN} signs from their portal and you countersign here.`,
+          body: `${TEN} signs from their portal and you countersign here — or, for a paper-signed / imported lease, mark both as already on file.`,
           timing: 'Takes ~2 min',
           node: (
-            <div className="chklist">
-              <ChkRow
-                on={st.tenantSigned}
-                label={`${TEN} signed`}
-                hint={st.tenantSigned ? undefined : 'awaiting customer'}
-                onToggle={() => h.setState({ tenantSigned: !st.tenantSigned })}
-              />
-              <ChkRow
-                on={st.landlordSigned}
-                label="Landlord signed (you)"
-                onToggle={() => h.setState({ landlordSigned: !st.landlordSigned })}
-                actionLabel={h.perms.signLandlord ? 'Sign now' : undefined}
-                onAction={h.perms.signLandlord ? () => h.openModal('sign') : undefined}
-              />
-            </div>
+            <>
+              <div className="chklist">
+                <ChkRow
+                  on={st.tenantSigned}
+                  label={`${TEN} signed`}
+                  hint={st.tenantSigned ? undefined : 'awaiting customer'}
+                  onToggle={() => h.setState({ tenantSigned: !st.tenantSigned })}
+                />
+                <ChkRow
+                  on={st.landlordSigned}
+                  label="Landlord signed (you)"
+                  onToggle={() => h.setState({ landlordSigned: !st.landlordSigned })}
+                  actionLabel={h.perms.signLandlord ? 'Sign now' : undefined}
+                  onAction={h.perms.signLandlord ? () => h.openModal('sign') : undefined}
+                />
+              </div>
+              {h.perms.signLandlord && (
+                <button
+                  className="ca"
+                  style={{ justifySelf: 'start', marginTop: 4, padding: 0 }}
+                  onClick={() => h.onMarkSignedOnFile()}
+                >
+                  Mark as signed on file (paper / imported)
+                </button>
+              )}
+            </>
           ),
         };
   }
@@ -825,13 +844,23 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
 
   if (key === 'movein') {
     const done = isDone('movein', st);
+    // Completed via the uploaded move-in document (backlog escape hatch) rather
+    // than a full counter-signed inspection — show the doc instead of the
+    // "counter-signed" panel so the UI never claims a signature that isn't there.
+    const moveInReport = (h.contract.documents ?? []).find(d =>
+      /^move_?in/i.test(d.documentKey || '') || /move-?in/i.test(d.displayName || ''));
+    const doneByDoc = done && !st.moveIn.rpCounterSig;
     return done
       ? {
           tone: 'celebrate', icon: 'key', sub: 'Stop 5 · complete', label: 'Move-in',
           headline: 'Move-in complete.',
-          body: 'Inspection signed by both parties — keys handed over.',
+          body: doneByDoc
+            ? 'Move-in document is on file — keys handed over.'
+            : 'Inspection signed by both parties — keys handed over.',
           timing: null,
-          node: <Completed title="Inspection counter-signed" sub="Keys handed to customer" />,
+          node: doneByDoc
+            ? <Completed title="Move-in document on file" sub={moveInReport?.displayName ?? 'Move-in-report.pdf'} onView={moveInReport?.fileUrl ? () => openDocViewer({ fileUrl: moveInReport.fileUrl, caption: moveInReport.displayName ?? 'Move-in report' }) : undefined} viewLabel="View document" />
+            : <Completed title="Inspection counter-signed" sub="Keys handed to customer" />,
         }
       : {
           tone: 'action', icon: 'key', sub: stopOf(5), label: 'Move-in',
@@ -848,6 +877,12 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               <Link href={h.inspectionUrl} className="btn btn-jade btn-block">
                 <ClipboardCheck size={14} /> Open inspection workspace
               </Link>
+              <p className="note" style={{ marginTop: 8 }}>
+                Lease already moved in? Upload the move-in document instead of a full inspection.
+              </p>
+              <button className="btn btn-ghost btn-block" onClick={h.onUploadMoveInDoc}>
+                <UploadCloud size={14} /> Upload move-in document instead
+              </button>
             </>
           ),
         };
@@ -3733,7 +3768,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // Wind-down doc uploads (move-out report + utility close-out). One shared
   // hidden input + a "pending kind" so a single onChange routes to the right key.
   const windDownInputRef = useRef<HTMLInputElement>(null);
-  const [windDownKind, setWindDownKind] = useState<'move_out' | 'clearance' | 'final_bill' | null>(null);
+  const [windDownKind, setWindDownKind] = useState<'move_in' | 'move_out' | 'clearance' | 'final_bill' | null>(null);
   const [ejariUploading, setEjariUploading] = useState(false);
   const [utilityUploading, setUtilityUploading] = useState(false);
   const [windDownUploading, setWindDownUploading] = useState(false);
@@ -4060,20 +4095,40 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch { setLocalState({ utilityDoc: true }); }
   };
+  // Bypass digital signing for a paper-signed / imported lease: record BOTH
+  // signatures as on-file (no signature image). Mirrors the Ejari/Utility
+  // "Mark as already on file" actions; the step re-renders into the
+  // "Signed on paper — on file" panel after reload.
+  const onMarkSignedOnFile = async () => {
+    if (!window.confirm('Mark this lease as signed on paper (already on file)? This records both signatures as on-file — use it for imported or physically-signed leases, not for contracts still awaiting a digital signature.')) return;
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/sign/mark-on-file`, { method: 'PATCH', credentials: 'include' });
+      if (!res.ok) throw new Error(`Mark signed-on-file failed: ${res.status}`);
+      void reload();
+    } catch (e) {
+      // Optimistic fallback so the step reflects the intent before the next
+      // reload; the on-file panel only confirms once the server round-trip lands.
+      setLocalState({ tenantSigned: true, landlordSigned: true });
+      void e;
+    }
+  };
 
-  // ── Wind-down document uploads (move-out report + utility close-out) ──
-  // These work even while the lease is active (they're part of the deferred
-  // close-out), so they do NOT gate on lock / readOnlyWorkflow. A single hidden
-  // input is reused; `windDownKind` routes the picked file to the right doc key.
-  const pickWindDownDoc = (kind: 'move_out' | 'clearance' | 'final_bill') => {
+  // ── Escape-hatch document uploads (move-in / move-out report + utility
+  // close-out) ── These stand in for a full inspection/workflow when clearing
+  // the backlog on an imported or active lease, so they do NOT gate on lock /
+  // readOnlyWorkflow. A single hidden input is reused; `windDownKind` routes the
+  // picked file to the right doc key.
+  const pickWindDownDoc = (kind: 'move_in' | 'move_out' | 'clearance' | 'final_bill') => {
     setWindDownKind(kind);
     windDownInputRef.current?.click();
   };
+  const onUploadMoveInDoc = () => pickWindDownDoc('move_in');
   const onUploadMoveOutDoc = () => pickWindDownDoc('move_out');
   const onUploadCloseoutClearance = () => pickWindDownDoc('clearance');
   const onUploadCloseoutFinalBill = () => pickWindDownDoc('final_bill');
-  const onWindDownFilePicked = async (file: File, kind: 'move_out' | 'clearance' | 'final_bill') => {
+  const onWindDownFilePicked = async (file: File, kind: 'move_in' | 'move_out' | 'clearance' | 'final_bill') => {
     const spec = {
+      move_in:    { name: 'Move-in report',      key: 'move_in_report' },
       move_out:   { name: 'Move-out report',     key: 'move_out_report' },
       clearance:  { name: 'Utility Clearance',   key: 'utility_clearance' },
       final_bill: { name: 'Utility Final Bill',  key: 'utility_final_bill' },
@@ -4081,9 +4136,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     setWindDownUploading(true);
     try {
       await uploadContractDoc(file, spec.name, spec.key);
-      // Guide the RP to the next wind-down step after each upload: the move-out
-      // document advances to the utility closeout; once both closeout docs are
-      // in, advance to the settlement.
+      // Guide the RP to the next step after each upload: the move-in document
+      // completes Stop 5 (the lease is already active — just reload in place);
+      // the move-out document advances to the utility closeout; once both
+      // closeout docs are in, advance to the settlement.
       if (kind === 'move_out') {
         setSelKey('closeout');
       } else if (kind === 'clearance' && derived?.closeout.finalBill) {
@@ -4283,13 +4339,20 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Respond failed'); }
   };
 
-  // Once the tenancy reaches a terminal lifecycle (active / expired /
-  // terminated) the workflow steps freeze — no "Revert to draft", no
-  // "Re-upload" on Ejari / Utility, no undo toggles on the Sign step.
-  // The Documents drawer tab stays editable (KYC approve/reject) and the
-  // active step's live-management actions (record payment, propose
-  // renewal, request termination) are unaffected.
-  const readOnlyWorkflow = contract.status === 'active' || contract.status === 'expired' || contract.status === 'terminated';
+  // Once the tenancy reaches a TERMINAL lifecycle (expired / terminated) the
+  // workflow steps freeze — no "Revert to draft", no "Re-upload" on Ejari /
+  // Utility, no undo toggles on the Sign step: an ended lease's activation
+  // history must not be rewritten after the fact.
+  //
+  // An ACTIVE lease is deliberately NOT frozen: imported / synced leases are
+  // routinely activated with setup steps still incomplete (the "Needs
+  // activation" banner explicitly promises you can backfill documents and
+  // cheques afterwards), so the RP must still be able to clear that backlog —
+  // register Ejari, confirm utility, upload the move-in document, and correct
+  // signatures on a live lease. The Documents drawer (KYC approve/reject) and
+  // the active step's live-management actions (record payment, propose renewal,
+  // request termination) were already always editable.
+  const readOnlyWorkflow = contract.status === 'expired' || contract.status === 'terminated';
 
   // Manager permission gates — RP owners always see every affordance; a manager
   // only sees one they hold the relevant flag for, for THIS contract's landlord.
@@ -4320,11 +4383,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onVerifyUtility, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,
-    onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
+    onUploadMoveInDoc, onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
     signActionUrl: `${contractsBase}/${contract.id}`,
     inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
     moveOutInspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_out`,
