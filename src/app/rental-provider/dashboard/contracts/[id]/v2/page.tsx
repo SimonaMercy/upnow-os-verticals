@@ -1385,7 +1385,7 @@ function SendTenantLinkButton({ tenantId, contractId, section = 'documents', lab
         <span style={{ fontSize: 10.5, color: 'var(--mute, #9b9890)' }}>
           {email ? `Emailed to ${email} · ` : ''}
           {role === 'inspector'
-            ? 'share this link with your inspection manager to counter-sign on site (valid 14 days)'
+            ? 'share this link with your inspection manager to fill the inspection, attach photos & counter-sign on site (valid 14 days)'
             : 'share this link with the customer to upload & sign (valid 14 days)'}
         </span>
       </div>
@@ -4898,12 +4898,13 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
               </div>
             )}
             {/* Move-in: second link for the on-site inspection manager — they
-                 counter-sign the RP side via the same no-login portal, so no
-                 separate account is needed. */}
+                 fill the move-in form, attach photos, submit and counter-sign
+                 the RP side via the same no-login portal, so no separate account
+                 is needed. */}
             {selStep.key === 'movein' && contract.tenant.id && !readOnlyWorkflow && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
-                  Inspection manager signing link
+                  Inspection manager link
                 </div>
                 <SendTenantLinkButton
                   tenantId={contract.tenant.id}

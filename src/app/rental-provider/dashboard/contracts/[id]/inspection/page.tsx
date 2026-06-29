@@ -215,7 +215,7 @@ function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: 
           type="button"
           onClick={() => onChange(value === o.v ? '' : o.v)}
           className={[
-            'w-7 h-7 rounded-md text-xs font-bold border transition-all',
+            'w-9 h-9 sm:w-7 sm:h-7 rounded-md text-sm sm:text-xs font-bold border transition-all',
             value === o.v ? o.active : 'border-[#e8e6e0] text-[#9b9890] hover:border-[#c8c6be] bg-white',
           ].join(' ')}
         >
@@ -370,63 +370,70 @@ function AreaBlock({
 
       {/* Items table */}
       <div className="px-5 pt-3 pb-2">
-        <div className="grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] grid-cols-[1fr_auto_auto_auto]">
+        {/* Column header — desktop only; on mobile each row is self-describing */}
+        <div className="hidden sm:grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] grid-cols-[1fr_6rem_auto_1.5rem]">
           <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Item</span>
-          <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide w-24 text-center">{isMoveOut ? 'Move-Out' : 'Condition'}</span>
+          <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide text-center">{isMoveOut ? 'Move-Out' : 'Condition'}</span>
           <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Attach</span>
-          <span className="w-6" />
+          <span />
         </div>
 
         {area.items.map(item => (
           <div
             key={item.id}
-            className="grid gap-2 items-center py-1.5 border-b border-[#f9f8f6] last:border-0 grid-cols-[1fr_auto_auto_auto]"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2 border-b border-[#f9f8f6] last:border-0 sm:grid sm:gap-2 sm:py-1.5 sm:grid-cols-[1fr_6rem_auto_1.5rem]"
           >
-            {item.isCustom && !isLocked ? (
-              <input
-                type="text"
-                value={item.name}
-                onChange={e => updateItem(item.id, { name: e.target.value })}
-                placeholder="Item name…"
-                className="text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5"
-              />
-            ) : (
-              <span className="text-sm text-[#1a1916]">{item.name}</span>
-            )}
-
-            {/* Single condition column — move-out edits `outCondition` (pre-filled from
-                the move-in baseline on load); move-in edits `inCondition`. */}
-            <div className="flex justify-center w-24">
-              <ConditionPicker
-                value={isMoveOut ? item.outCondition : item.inCondition}
-                onChange={v => !isLocked && updateItem(item.id, isMoveOut ? { outCondition: v } : { inCondition: v })}
-              />
-            </div>
-
-            {/* Per-item attachment — RP only, not shown to tenant */}
-            <div className="flex items-center">
-              <ItemAttachmentButton
-                contractId={contractId}
-                itemId={item.id}
-                attachments={item.itemAttachments ?? []}
-                onChange={updated => updateItem(item.id, { itemAttachments: updated })}
-                disabled={isLocked}
-                portalToken={portalToken}
-              />
-            </div>
-
-            <div className="w-6 flex justify-center">
-              {item.isCustom && !isLocked && (
-                <button type="button" onClick={() => removeItem(item.id)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors">
-                  <Trash2 size={12} />
-                </button>
+            {/* Item name — full width on its own line on mobile */}
+            <div className="w-full min-w-0 sm:w-auto">
+              {item.isCustom && !isLocked ? (
+                <input
+                  type="text"
+                  value={item.name}
+                  onChange={e => updateItem(item.id, { name: e.target.value })}
+                  placeholder="Item name…"
+                  className="w-full text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5"
+                />
+              ) : (
+                <span className="text-sm font-medium text-[#1a1916]">{item.name}</span>
               )}
+            </div>
+
+            {/* Controls — own line on mobile, individual grid cells on desktop */}
+            <div className="flex items-center gap-3 w-full sm:contents">
+              {/* Condition — move-out edits `outCondition` (pre-filled from the
+                  move-in baseline on load); move-in edits `inCondition`. */}
+              <div className="flex justify-center">
+                <ConditionPicker
+                  value={isMoveOut ? item.outCondition : item.inCondition}
+                  onChange={v => !isLocked && updateItem(item.id, isMoveOut ? { outCondition: v } : { inCondition: v })}
+                />
+              </div>
+
+              {/* Per-item attachment — RP / inspector only, not shown to tenant */}
+              <div className="flex items-center">
+                <ItemAttachmentButton
+                  contractId={contractId}
+                  itemId={item.id}
+                  attachments={item.itemAttachments ?? []}
+                  onChange={updated => updateItem(item.id, { itemAttachments: updated })}
+                  disabled={isLocked}
+                  portalToken={portalToken}
+                />
+              </div>
+
+              <div className="ml-auto sm:ml-0 flex justify-center sm:w-6">
+                {item.isCustom && !isLocked && (
+                  <button type="button" onClick={() => removeItem(item.id)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors p-1 -m-1">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}
 
         {!isLocked && (
-          <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75 mt-2 mb-1 transition-opacity">
+          <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75 mt-3 mb-1 transition-opacity">
             <Plus size={12} /> Add item
           </button>
         )}
@@ -1068,11 +1075,15 @@ export default function InspectionPage() {
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6 print:px-0 print:py-0">
 
       {/* Topbar */}
-      <div className="flex items-center justify-between print:hidden">
-        <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
-          <ArrowLeft size={15} /> Back to contract
-        </Link>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap print:hidden">
+        {/* Inspector links have nowhere to go "back" to (the contract page just
+            redirects here) — drop the link so it doesn't loop. */}
+        {portalToken ? <span /> : (
+          <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
+            <ArrowLeft size={15} /> Back to contract
+          </Link>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
           <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
             <Printer size={14} /> Print
           </button>
@@ -1139,9 +1150,13 @@ export default function InspectionPage() {
         <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3 print:hidden">
           <CheckCircle size={14} className="text-[#2e9f82] shrink-0 mt-0.5" />
           <div className="min-w-0">
-            <p className="font-semibold text-[#1a7a5a]">Inspection submitted — awaiting tenant counter-signature</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">Send the tenant a secure link to sign this {isMoveIn ? 'move-in' : 'move-out'} inspection from their portal. You can counter-sign once they do.</p>
-            {meta?.tenantId && contractId && (
+            <p className="font-semibold text-[#1a7a5a]">Inspection submitted — awaiting customer counter-signature</p>
+            <p className="text-xs text-[#1a7a5a] mt-0.5">
+              {portalToken
+                ? `The customer signs this ${isMoveIn ? 'move-in' : 'move-out'} inspection from their portal — you can counter-sign here once they do.`
+                : `Send the tenant a secure link to sign this ${isMoveIn ? 'move-in' : 'move-out'} inspection from their portal. You can counter-sign once they do.`}
+            </p>
+            {!portalToken && meta?.tenantId && contractId && (
               <PortalLinkButton
                 tenantId={meta.tenantId}
                 contractId={Number(contractId)}
@@ -1177,7 +1192,7 @@ export default function InspectionPage() {
 
         {/* Header info — editable inspection fields (tenant/property shown in the report header above) */}
         <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 print:hidden">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">{isMoveIn ? 'Move-In Date' : 'Move-Out Date'}</label>
               <input type="date" value={data.moveInDate}
@@ -1289,8 +1304,9 @@ export default function InspectionPage() {
 
       {/* ── Signature row: Customer Signature | Inspector Signature ─────────
            Customer column: always shown (placeholder until tenant signs).
-           Inspector column: sig pad when awaiting counter-sign, image once done. */}
-      <div className="grid grid-cols-2 gap-4">
+           Inspector column: sig pad when awaiting counter-sign, image once done.
+           Stacks on mobile so each pad is wide enough to actually sign. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
         {/* Customer Signature */}
         <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
