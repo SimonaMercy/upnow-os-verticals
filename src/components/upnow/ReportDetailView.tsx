@@ -17,6 +17,7 @@ import {
   Building2, Check, ChevronDown,
 } from 'lucide-react';
 import { apiPatch } from '@/lib/api';
+import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 
 type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'leases-by-month' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
@@ -68,6 +69,8 @@ interface Column {
   align?: 'left' | 'right' | 'center';
   type?: 'aed' | 'date' | 'number' | 'bucket' | 'stage' | 'rate' | 'delta';
   width?: string;
+  /** Show this column even when every value is 0 — its 0 is meaningful (e.g. "Days left"). */
+  keep?: boolean;
 }
 
 interface TotalSpec {
@@ -133,6 +136,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupiedUnits', label: 'Occupied', align: 'right', type: 'number' },
       { key: 'vacantUnits', label: 'Vacant', align: 'right', type: 'number' },
       { key: 'maintenanceUnits', label: 'Maintenance', align: 'right', type: 'number' },
+      { key: 'reservedUnits', label: 'Reserved', align: 'right', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
       { key: 'rentRollFils', label: 'Rent Roll', align: 'right', type: 'aed' },
       { key: 'activeContractedRentFils', label: 'Active leases', align: 'right', type: 'aed' },
@@ -142,6 +146,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'units', label: 'Units', type: 'number' },
       { key: 'occupied', label: 'Occupied', type: 'number' },
       { key: 'vacant', label: 'Vacant', type: 'number' },
+      { key: 'maintenance', label: 'Maintenance', type: 'number' },
+      { key: 'reserved', label: 'Reserved', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'rentRollFils', label: 'Rent Roll', type: 'aed' },
       { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
@@ -149,7 +155,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   receivables: {
     title: 'Receivables Summary',
-    description: 'Outstanding rent and admin-fee cheques, aged into buckets so you see what is overdue and by how long.',
+    description: 'Outstanding rent cheques, aged into buckets so you see what is overdue and by how long. Admin / ejari / commission fees are tracked in the Fee & VAT report.',
     endpoint: '/api/reports/receivables',
     dataNote: NEEDS_CHEQUE_DATA,
     columns: [
@@ -172,6 +178,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'overdue60Fils', label: 'Overdue 31-60', type: 'aed' },
       { key: 'overdue90Fils', label: 'Overdue 61-90', type: 'aed' },
       { key: 'overdue90PlusFils', label: 'Overdue 90+', type: 'aed' },
+      { key: 'undatedFils', label: 'No due date', type: 'aed' },
       { key: 'totalOutstandingFils', label: 'Total (incl. upcoming)', type: 'aed' },
     ],
   },
@@ -187,8 +194,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'buildingName', label: 'Property' },
       { key: 'startDate', label: 'Start', type: 'date' },
       { key: 'endDate', label: 'End', type: 'date' },
-      { key: 'daysUntilExpiry', label: 'Days left', align: 'right', type: 'number' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      { key: 'daysUntilExpiry', label: 'Days left', align: 'right', type: 'number', keep: true },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', keep: true },
       { key: 'renewalStatus', label: 'Renewal', type: 'stage' },
     ],
     totals: [
@@ -348,6 +355,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'scheduledFils', label: 'Scheduled', align: 'right', type: 'aed' },
       { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
       { key: 'outstandingFils', label: 'Outstanding', align: 'right', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
       { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
       { key: 'lastPaymentDate', label: 'Last payment', type: 'date' },
     ],
@@ -496,7 +504,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     endpoint: '/api/reports/fee-taxation',
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
-    dataNote: 'Commission is estimated from your fee rules (annual rent × commission %), since it is not stored per contract — a manually-overridden commission on an individual deal won\'t be reflected. Admin & ejari are the actual net fees on each contract. VAT uses your configured fee rules. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
+    dataNote: 'Admin, ejari and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT = annual rent × the contract\'s stored VAT rate (commercial / industrial only; residential is exempt). Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
     columns: [
       { key: 'periodLabel', label: 'Period' },
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
@@ -602,6 +610,7 @@ const BUCKET_STYLE: Record<string, string> = {
   '31-60':  'bg-[#fdba74] text-[#7c2d12]',
   '61-90':  'bg-[#fca5a5] text-[#7f1d1d]',
   '90+':    'bg-[#dc2626] text-white',
+  undated:  'bg-[#f4f3ef] text-[#6b6860]',  // pending cheque with no due date — age unknown
 };
 const STAGE_STYLE: Record<string, string> = {
   not_started: 'bg-[#f4f3ef] text-[#6b6860]',
@@ -616,6 +625,17 @@ const STAGE_STYLE: Record<string, string> = {
   returned:           'bg-[#dcfce7] text-[#166534]',
   partial_return:     'bg-[#e0e7ff] text-[#3730a3]',
   forfeited:          'bg-[#fee2e2] text-[#b91c1c]',
+  // listing-status lifecycle (vacancy-analysis)
+  draft:     'bg-[#f4f3ef] text-[#6b6860]',  // grey — not yet live
+  pending:   'bg-[#fef3c7] text-[#854d0e]',  // amber — awaiting review
+  in_review: 'bg-[#fef3c7] text-[#854d0e]',  // amber — under review
+  published: 'bg-[#dcfce7] text-[#166534]',  // green — live/listed
+  expired:   'bg-[#fee2e2] text-[#b91c1c]',  // red — lapsed (rejected already above)
+  // rent-vs-market position (gap to benchmark)
+  below_market: 'bg-[#d8f2e8] text-[#1a7a5a]',  // rent under market → recoverable uplift
+  at_market:    'bg-[#f4f3ef] text-[#6b6860]',  // within ±5% → neutral
+  above_market: 'bg-[#fee2e2] text-[#b91c1c]',  // rent over market → downside on renewal
+  no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market price set
 };
 
 function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
@@ -701,11 +721,13 @@ export function ReportDetailView({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [leaseWindow, setLeaseWindow] = useState<number>(() => Number(sp?.get('window') ?? 90));
   const [forecastMonths, setForecastMonths] = useState<number>(() => Number(sp?.get('months') ?? 12));
-  // Default every date-range report to the current calendar year (URL overrides).
-  const [from, setFrom] = useState<string>(sp?.get('from') ?? YEAR_START);
-  const [to, setTo]     = useState<string>(sp?.get('to') ?? YEAR_END);
-  // Matrix (rent-roll) year selector — defaults to the current year.
-  const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || CURRENT_YEAR);
+  // Default every date-range report to the hub-wide year chosen on the Reports
+  // landing page (persisted in localStorage); an explicit URL param still wins.
+  // "All years" → an empty range (no from/to), i.e. all-time.
+  const [from, setFrom] = useState<string>(() => sp?.get('from') ?? yearToRange(getReportsYear()).from);
+  const [to, setTo]     = useState<string>(() => sp?.get('to') ?? yearToRange(getReportsYear()).to);
+  // Matrix (rent-roll) year selector — defaults to the hub year (current if "All").
+  const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || yearForMatrix(getReportsYear()));
   // Tenant scope — show active customers only (default) or include ended tenants.
   const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
@@ -726,6 +748,24 @@ export function ReportDetailView({
   const [granularity, setGranularity] = useState<'year' | 'quarter'>(() => (sp?.get('groupBy') === 'quarter' ? 'quarter' : 'year'));
   // RP portal can reclassify a building's leasing model inline; managers can't.
   const canClassify = endpointBase === '/api/reports';
+
+  // Hub-wide year (Reports landing page). The useState defaults above seed from
+  // it on mount; this keeps a report in sync when the year is changed on the hub
+  // and the user returns to (or re-opens) the report — Next's router cache can
+  // re-serve the segment without remounting. An explicit URL param at mount pins
+  // the period and opts out. Reports without a year/date control simply ignore it.
+  const hubYear = useReportsYear();
+  const periodPinnedRef = useRef(!!(sp?.get('from') || sp?.get('to') || sp?.get('year')));
+  useEffect(() => {
+    if (periodPinnedRef.current || !def) return;
+    if (def.controlKey === 'dateRange' || def.controlKey === 'yearRange') {
+      const r = yearToRange(hubYear);
+      setFrom(r.from); setTo(r.to);
+    } else if (def.controlKey === 'year') {
+      setYear(yearForMatrix(hubYear));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hubYear, def]);
 
   useEffect(() => {
     if (!def) return;
@@ -880,10 +920,70 @@ export function ReportDetailView({
         const items = (row[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
         const matched = !needle ? items : items.filter(it =>
           dd.columns.some(c => String(it[c.key] ?? '').toLowerCase().includes(needle)));
-        return { row, items: matched };
+        // When a search is active, recompute the header summary columns from the
+        // visible (matched) items so the month chips equal the rows shown beneath:
+        // a count column → number of matched rows; a money column → their sum.
+        let summary = row;
+        if (needle) {
+          summary = { ...row };
+          for (const c of def.columns) {
+            if (c.key === dd.titleKey) continue;
+            if (c.type === 'number') summary[c.key] = matched.length;
+            else if (c.type === 'aed' || c.type === 'delta')
+              summary[c.key] = matched.reduce((s, it) => s + Number(it[c.key] ?? 0), 0);
+          }
+        }
+        return { row: summary, items: matched };
       })
       .filter(g => g.items.length > 0);
   }, [def, data, search]);
+
+  // KPI tiles for leases-by-month must follow the search filter too (count of
+  // matched leases, sum of their rent, count of months with matches). Other
+  // grouped reports (cashflow-forecast) keep their bucketed forecast KPIs.
+  const groupedTileTotals = useMemo(() => {
+    if (def.layout !== 'grouped' || slug !== 'leases-by-month' || !data || !search.trim()) return null;
+    const out: Record<string, number> = {};
+    for (const t of def.totals) {
+      if (t.key === 'months') out[t.key] = groups.length;
+      else if (t.type === 'number') out[t.key] = groups.reduce((n, g) => n + (g.items?.length ?? 0), 0);
+      else out[t.key] = groups.reduce((s, g) => s + Number((g.row as Record<string, unknown>)[t.key] ?? 0), 0);
+    }
+    return out;
+  }, [def, slug, data, search, groups]);
+
+  // Rent-roll matrix: when a search needle narrows the visible customers, the
+  // footer (per-month + grand total), the KPI chips and the CSV "Total" row must
+  // reflect the rows shown. Per-row totalFils/collectedFils/outstandingFils are
+  // exact; bounced is summed from the bounced-ranked cells (best available).
+  const matrixView = useMemo(() => {
+    if (def.layout !== 'matrix' || !data) return null;
+    const monthCount = (data.months ?? []).length;
+    if (!search.trim()) return { columnTotals: data.columnTotals ?? [], totals: data.totals };
+    const colTotals = new Array(monthCount).fill(0);
+    let scheduled = 0, collected = 0, outstanding = 0, bounced = 0;
+    sorted.forEach(row => {
+      scheduled += Number(row.totalFils ?? 0);
+      collected += Number(row.collectedFils ?? 0);
+      outstanding += Number(row.outstandingFils ?? 0);
+      const cells = (row.cells as { amountFils: number; status: string | null }[] | undefined) ?? [];
+      cells.forEach((c, ci) => {
+        if (ci < monthCount) colTotals[ci] += Number(c.amountFils) || 0;
+        if (c.status === 'bounced') bounced += Number(c.amountFils) || 0;
+      });
+    });
+    return {
+      columnTotals: colTotals,
+      totals: {
+        customers: sorted.length,
+        scheduledFils: scheduled,
+        collectedFils: collected,
+        outstandingFils: outstanding,
+        bouncedFils: bounced,
+        collectionRate: scheduled > 0 ? Math.round((collected / scheduled) * 1000) / 10 : 0,
+      } as Record<string, number>,
+    };
+  }, [def.layout, data, search, sorted]);
 
   // Auto-hide all-zero numeric tiles/columns so reports don't surface dead
   // columns (VAT, admin/ejari fees, bounced, ejari-registered …) full of zeros
@@ -905,7 +1005,7 @@ export function ReportDetailView({
     const dead = new Set<string>();
     if (!activeRows.length || def.layout) return dead; // plain table only
     for (const c of activeColumns) {
-      if (c.type === 'aed' || c.type === 'number') {
+      if (!c.keep && (c.type === 'aed' || c.type === 'number')) {
         const allZero = activeRows.every(r => { const v = r[c.key]; return v == null || Number(v) === 0; });
         if (allZero) dead.add(c.key);
       }
@@ -952,8 +1052,8 @@ export function ReportDetailView({
       });
       rows.push([
         'Total', '', '',
-        ...(data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
-        (Number(data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
+        ...(matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
+        (Number(matrixView?.totals?.scheduledFils ?? data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
       ]);
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
@@ -1264,7 +1364,8 @@ export function ReportDetailView({
       {data && visibleTotals.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 mb-6">
           {visibleTotals.map(t => {
-            const raw = data.totals[t.key];
+            const raw = (def.layout === 'matrix' && matrixView ? matrixView.totals
+              : groupedTileTotals ?? data.totals)[t.key];
             return (
               <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
                 <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
@@ -1409,10 +1510,10 @@ export function ReportDetailView({
               <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
                 <tr>
                   <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
-                  {(data?.columnTotals ?? []).map((t, ti) => (
+                  {(matrixView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
                     <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{fmtAmt(t)}</td>
                   ))}
-                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtAmt(data?.totals?.scheduledFils)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.scheduledFils ?? data?.totals?.scheduledFils)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -1499,7 +1600,7 @@ export function ReportDetailView({
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
                 <div>
                   <h3 className="text-base font-bold text-[#1a1916]">{String(drill[dd.titleKey] ?? '')}</h3>
-                  <p className="text-xs text-[#6b6860] mt-0.5">{items.length} {dd.countLabel} up for renewal</p>
+                  <p className="text-xs text-[#6b6860] mt-0.5">{items.length} {dd.countLabel}</p>
                 </div>
                 <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
                   <X size={16} />

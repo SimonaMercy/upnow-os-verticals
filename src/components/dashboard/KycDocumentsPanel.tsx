@@ -173,11 +173,13 @@ const RP_COMPANY_VARIANTS: Record<"landlord" | "brokerage" | "agents", DocReq[]>
 // ─── Status labels ────────────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  pending:   { label: "Requested",                  color: "var(--color-warning, #f59e0b)" },
   attached:  { label: "Uploaded — pending review", color: "var(--color-warning, #f59e0b)" },
   // processed = approved/verified (RP/manager/admin uploads are self-verified on
   // upload; admins set this when approving customer docs). It is NOT "in review".
   processed: { label: "Verified",                   color: "var(--color-success, #22c55e)" },
   complete:  { label: "Verified",                   color: "var(--color-success, #22c55e)" },
+  rejected:  { label: "Rejected — re-upload required", color: "var(--color-error)" },
   expired:   { label: "Expired — re-upload",        color: "var(--color-error)" },
 };
 
@@ -533,6 +535,9 @@ export function KycDocumentsPanel({
           <div className={compact ? "space-y-1.5" : "space-y-3"}>
           {checklist.map((item) => {
             const statusInfo = item.status ? STATUS_LABELS[item.status] : null;
+            const isRejected = item.status === 'rejected';
+            // A rejected doc is on file but must be re-collected — don't style it "done".
+            const onFile = item.uploaded && !isRejected;
             const isUploading = uploading === item.key;
             const local = localPreviews[item.key];
             const previewUrl = local?.url ?? item.fileUrl;
@@ -546,17 +551,23 @@ export function KycDocumentsPanel({
                   <div
                     className="flex items-center gap-2.5 border rounded-lg px-3 py-2 min-h-[44px]"
                     style={{
-                      borderColor: item.uploaded
-                        ? "var(--color-success, #22c55e)"
-                        : uploadErrors[item.key]
-                          ? "var(--color-error)"
-                          : "var(--color-base-200)",
-                      background: item.uploaded
-                        ? "color-mix(in srgb, var(--color-success, #22c55e) 4%, white)"
-                        : "white",
+                      borderColor: isRejected
+                        ? "var(--color-error)"
+                        : onFile
+                          ? "var(--color-success, #22c55e)"
+                          : uploadErrors[item.key]
+                            ? "var(--color-error)"
+                            : "var(--color-base-200)",
+                      background: isRejected
+                        ? "color-mix(in srgb, var(--color-error) 4%, white)"
+                        : onFile
+                          ? "color-mix(in srgb, var(--color-success, #22c55e) 4%, white)"
+                          : "white",
                     }}
                   >
-                    {item.uploaded ? (
+                    {isRejected ? (
+                      <AlertCircle className="w-4 h-4 shrink-0" style={{ color: "var(--color-error)" }} />
+                    ) : onFile ? (
                       <Check className="w-4 h-4 shrink-0" style={{ color: "var(--color-success, #22c55e)" }} />
                     ) : (
                       <FileText className="w-4 h-4 shrink-0" style={{ color: "var(--color-neutral-400)" }} />
@@ -614,12 +625,12 @@ export function KycDocumentsPanel({
                         disabled={isUploading}
                         className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all disabled:opacity-50"
                         style={{
-                          background: item.uploaded ? "var(--color-base-100)" : "var(--color-primary)",
-                          color: item.uploaded ? "var(--color-neutral-600)" : "#fff",
+                          background: isRejected ? "var(--color-error)" : onFile ? "var(--color-base-100)" : "var(--color-primary)",
+                          color: isRejected ? "#fff" : onFile ? "var(--color-neutral-600)" : "#fff",
                         }}
                       >
                         {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                        {item.uploaded ? "Replace" : "Upload"}
+                        {isRejected ? "Re-upload" : item.uploaded ? "Replace" : "Upload"}
                       </button>
                     </div>
                   </div>
@@ -638,26 +649,37 @@ export function KycDocumentsPanel({
                 key={item.key}
                 className="rounded-2xl border-2 p-5 flex items-center gap-5 transition-all"
                 style={{
-                  borderColor: item.uploaded
-                    ? "var(--color-success, #22c55e)"
-                    : uploadErrors[item.key]
-                      ? "var(--color-error)"
-                      : "var(--color-base-200)",
-                  background: item.uploaded
-                    ? "color-mix(in srgb, var(--color-success, #22c55e) 4%, white)"
-                    : "white",
+                  borderColor: isRejected
+                    ? "var(--color-error)"
+                    : onFile
+                      ? "var(--color-success, #22c55e)"
+                      : uploadErrors[item.key]
+                        ? "var(--color-error)"
+                        : "var(--color-base-200)",
+                  background: isRejected
+                    ? "color-mix(in srgb, var(--color-error) 4%, white)"
+                    : onFile
+                      ? "color-mix(in srgb, var(--color-success, #22c55e) 4%, white)"
+                      : "white",
                 }}
               >
                 {/* Status icon */}
                 <div
                   className="flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center"
                   style={{
-                    background: item.uploaded
-                      ? "color-mix(in srgb, var(--color-success, #22c55e) 12%, white)"
-                      : "var(--color-base-100)",
+                    background: isRejected
+                      ? "color-mix(in srgb, var(--color-error) 12%, white)"
+                      : onFile
+                        ? "color-mix(in srgb, var(--color-success, #22c55e) 12%, white)"
+                        : "var(--color-base-100)",
                   }}
                 >
-                  {item.uploaded ? (
+                  {isRejected ? (
+                    <AlertCircle
+                      className="w-5 h-5"
+                      style={{ color: "var(--color-error)" }}
+                    />
+                  ) : onFile ? (
                     <Check
                       className="w-5 h-5"
                       style={{ color: "var(--color-success, #22c55e)" }}
@@ -779,10 +801,12 @@ export function KycDocumentsPanel({
                   disabled={isUploading}
                   className="flex-shrink-0 flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all disabled:opacity-50"
                   style={{
-                    background: item.uploaded
-                      ? "var(--color-base-100)"
-                      : "var(--color-primary)",
-                    color: item.uploaded ? "var(--color-neutral-600)" : "#fff",
+                    background: isRejected
+                      ? "var(--color-error)"
+                      : onFile
+                        ? "var(--color-base-100)"
+                        : "var(--color-primary)",
+                    color: isRejected ? "#fff" : onFile ? "var(--color-neutral-600)" : "#fff",
                   }}
                 >
                   {isUploading ? (
@@ -791,7 +815,7 @@ export function KycDocumentsPanel({
                     <Upload className="w-4 h-4" />
                   )}
                   <span className="hidden sm:inline">
-                    {item.uploaded ? "Replace" : "Upload"}
+                    {isRejected ? "Re-upload" : item.uploaded ? "Replace" : "Upload"}
                   </span>
                 </button>
               </div>

@@ -46,6 +46,7 @@ import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import OfferReceiptModal, { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { openDocViewer } from '@/lib/docViewer';
+import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
@@ -2678,6 +2679,43 @@ function DetailsDrawer({
                     </p>
                   </div>
 
+                  {/* Customer KYC — review + approve / reject the identity docs on
+                      this contract. Approve = verify; Reject prompts for a reason
+                      the customer sees as their re-upload prompt (matches leads). */}
+                  {kycDocs.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                        Customer KYC · review
+                      </div>
+                      <div className="doclist">
+                        {kycDocs.map(d => {
+                          const ok = ['processed', 'complete'].includes(d.status);
+                          const rejected = d.status === 'rejected';
+                          const stt = ok ? 'approved' : rejected ? 'rejected' : 'pending';
+                          const lbl = docLabel(d, kycDocs);
+                          return (
+                            <div key={d.id} className={'docitem ' + stt}>
+                              <FileText size={14} />
+                              <div>
+                                <div className="dn">{lbl}</div>
+                                <div className="ds">{ok ? 'Approved' : rejected ? 'Rejected — re-upload requested' : 'Pending review'}</div>
+                              </div>
+                              <div className="dacts">
+                                <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: lbl })}><ExternalLink size={12} /> View</button>
+                                {!ok && (
+                                  <>
+                                    <button type="button" className="mini-btn ok cursor-pointer" onClick={() => onApproveDoc(d.id)}><Check size={12} /> Approve</button>
+                                    <button type="button" className="mini-btn view cursor-pointer" onClick={() => onRejectDoc(d.id)}><X size={12} /> Reject</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Upload document (Flow 5) — popup, matching the request modal */}
                   {showUpload && (
                     <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">
@@ -4159,19 +4197,22 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     } catch (e) { alert(e instanceof Error ? e.message : 'Could not confirm utility'); }
   };
 
-  // KYC approve / reject (uses existing /api/documents/:id endpoint)
+  // KYC approve / reject — use the dedicated verify/reject endpoints. A PATCH
+  // with a `status` field is rejected by the API's whitelist validation (it's
+  // not on UpdateDocumentDto) and silently does nothing, so this drawer's
+  // approve/reject previously never persisted. Reject captures a reason that the
+  // customer sees as their re-upload prompt (mirrors the leads page).
   const onApproveDoc = (id: number) => {
-    fetch(`/api/documents/${id}`, {
-      method: 'PATCH', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'approved' }),
-    }).then(r => { if (r.ok) void reload(); }).catch(() => {});
+    fetch(`/api/documents/${id}/verify`, { method: 'POST', credentials: 'include' })
+      .then(r => { if (r.ok) void reload(); }).catch(() => {});
   };
   const onRejectDoc = (id: number) => {
-    fetch(`/api/documents/${id}`, {
-      method: 'PATCH', credentials: 'include',
+    const reason = window.prompt('Reason for rejection (the customer will see this and be asked to re-upload):');
+    if (reason === null) return; // cancelled
+    fetch(`/api/documents/${id}/reject`, {
+      method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected' }),
+      body: JSON.stringify(reason.trim() ? { reason: reason.trim() } : {}),
     }).then(r => { if (r.ok) void reload(); }).catch(() => {});
   };
 

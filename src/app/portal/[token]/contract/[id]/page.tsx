@@ -7,7 +7,7 @@
  * section. No login.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
@@ -95,6 +95,16 @@ export default function ContractReviewPage() {
   }, [inspType, token, id]);
   useEffect(() => { loadInsp(); }, [loadInsp]);
 
+  // Inspector links are a work surface, not a review page — send the on-site
+  // inspection manager straight to the full inspection form (fill condition,
+  // attach photos, submit, then counter-sign) rather than the contract review.
+  const router = useRouter();
+  useEffect(() => {
+    if (!d) return;
+    const isInsp = (d.signerRole ?? 'tenant') === 'inspector';
+    if (isInsp && inspType) router.replace(`/portal/${token}/contract/${id}/inspection?type=${inspType}`);
+  }, [d, inspType, router, token, id]);
+
   if (loading) return <Centered><Loader2 className="animate-spin" /> Loading contract…</Centered>;
   if (error || !d) return (
     <Centered>
@@ -113,8 +123,17 @@ export default function ContractReviewPage() {
   // Each link is scoped to one action; 'all' = legacy link that shows everything.
   const purpose = d.purpose ?? 'all';
   const isInspector = (d.signerRole ?? 'tenant') === 'inspector';
+  // While the redirect effect above navigates the inspector to the form, show a
+  // loader instead of flashing the contract review they don't need to see.
+  if (isInspector && inspType) {
+    return <Centered><Loader2 className="animate-spin" /> Opening inspection…</Centered>;
+  }
   const showContract = (purpose === 'contract' || purpose === 'all') && !isInspector;
-  const showMoveIn = (purpose === 'move_in' || purpose === 'all') && d.moveInAvailable;
+  // Inspector links must reach the fill workspace even before any move-in
+  // inspection exists — moveInAvailable stays false until the first save, but
+  // generating that inspection on site is exactly the inspection manager's job.
+  // Tenants still only see the move-in section once the RP has recorded one.
+  const showMoveIn = (purpose === 'move_in' || purpose === 'all') && (d.moveInAvailable || isInspector);
   const showMoveOut = purpose === 'move_out';
 
   return (

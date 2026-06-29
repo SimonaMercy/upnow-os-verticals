@@ -359,6 +359,8 @@ interface TenantDoc {
   documentKey: string;
   displayName?: string | null;
   status?: string;
+  /** Rejection reason (set by the RP/admin on reject); lives in documents.notes. */
+  notes?: string | null;
   fileUrl?: string | null;
 }
 
@@ -1709,15 +1711,23 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
 }) {
   const existing   = myDocs.find(d => d.documentKey === req.key);
   const local      = localPreviews[req.key];
-  const uploaded   = !!existing || !!local;
+  // A just-uploaded local preview always wins over a stale server status
+  // (e.g. re-uploading over a rejected doc before the refetch lands).
+  const isRejected = existing?.status === 'rejected' && !local;
+  const isApproved = (existing?.status === 'complete' || existing?.status === 'processed') && !local;
+  // On-file = uploaded and not in a needs-action state.
+  const onFile     = (!!existing && existing.status !== 'rejected' && existing.status !== 'missing') || !!local;
+  const isPending  = onFile && !isApproved;
+  const uploaded   = onFile && !isRejected; // visual "done" / green
   const previewUrl = local?.url ?? (existing?.fileUrl ?? null);
   const mime       = local?.mime ?? (existing as { mimeType?: string } | undefined)?.mimeType ?? '';
   const isImg      = mime.startsWith('image/');
   const isUp       = docUploading === req.key;
+  const actionLabel = isRejected ? 'Re-upload' : uploaded ? 'Replace' : 'Upload';
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, background: uploaded ? 'rgba(46,159,130,0.06)' : 'var(--paper)', border: `1.5px solid ${uploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`, cursor: isUp ? 'progress' : 'pointer' }}>
-      <div style={{ width: 38, height: 38, borderRadius: 10, background: uploaded ? 'rgba(46,159,130,0.12)' : 'var(--mist)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        {uploaded ? <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} /> : <FileText size={18} style={{ color: 'var(--mute)' }} />}
+    <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, background: isRejected ? 'var(--brick-soft)' : uploaded ? 'rgba(46,159,130,0.06)' : 'var(--paper)', border: `1.5px solid ${isRejected ? 'var(--brick)' : uploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`, cursor: isUp ? 'progress' : 'pointer' }}>
+      <div style={{ width: 38, height: 38, borderRadius: 10, background: isRejected ? 'rgba(193,74,52,0.12)' : uploaded ? 'rgba(46,159,130,0.12)' : 'var(--mist)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        {isRejected ? <AlertCircle size={18} style={{ color: 'var(--brick)' }} /> : uploaded ? <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} /> : <FileText size={18} style={{ color: 'var(--mute)' }} />}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -1726,7 +1736,18 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
             ? <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--brick)', background: 'var(--brick-soft)', padding: '2px 7px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Required</span>
             : <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--mute)', background: 'var(--mist)', padding: '2px 7px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Optional</span>}
         </div>
-        {req.hint && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{req.hint}</p>}
+        {isRejected ? (
+          <p style={{ fontSize: 11, color: 'var(--brick)', fontWeight: 600, margin: '3px 0 0' }}>
+            Rejected — re-upload required
+            {existing?.notes && <span style={{ fontWeight: 400, color: 'var(--ink-2)' }}> · {existing.notes}</span>}
+          </p>
+        ) : isApproved ? (
+          <p style={{ fontSize: 11, color: 'var(--jade-deep)', fontWeight: 600, margin: '3px 0 0' }}>Approved ✓</p>
+        ) : isPending ? (
+          <p style={{ fontSize: 11, color: 'var(--mute)', margin: '3px 0 0' }}>Uploaded · awaiting review</p>
+        ) : req.hint ? (
+          <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{req.hint}</p>
+        ) : null}
         {previewUrl && (
           <div style={{ marginTop: 6 }}>
             {isImg
@@ -1735,9 +1756,12 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
           </div>
         )}
       </div>
-      {isUp
-        ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
-        : <UploadCloud size={16} style={{ color: uploaded ? 'var(--jade-deep)' : 'var(--mute)', flexShrink: 0 }} />}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, fontWeight: 700, color: isRejected ? 'var(--brick)' : uploaded ? 'var(--jade-deep)' : 'var(--mute)' }}>
+        {isUp
+          ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)' }} />
+          : <UploadCloud size={16} />}
+        {!isUp && (isRejected || uploaded) && <span>{actionLabel}</span>}
+      </span>
       <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={isUp}
         onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(req, f); }} />
     </label>
@@ -1893,7 +1917,10 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
     } finally { setDocUploading(null); }
   }
 
-  const uploadedKeys = useMemo(() => new Set(resolved.myDocs.map(d => d.documentKey)), [resolved.myDocs]);
+  // A rejected (or missing) doc does NOT count as satisfied — mirror the
+  // stage resolver so the in-form "Done ✓" pills and Submit gate agree with
+  // the top-level "Documents required" routing instead of contradicting it.
+  const uploadedKeys = useMemo(() => new Set(resolved.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey)), [resolved.myDocs]);
   const kycRequired      = KYC_DOCS;
   // Supporting documents always include Marriage Certificate alongside the
   // strictly-required Employment Letter + Bank Statement so families have
@@ -2184,7 +2211,9 @@ function RenewalDocumentsAction({
   const renewal = true;
 
   const requiredDocs: DocReq[] = useMemo(() => getRentalSectionDocs(unitType).filter(d => d.required), [unitType]);
-  const uploadedKeys = useMemo(() => new Set(resolved.myDocs.map(d => d.documentKey)), [resolved.myDocs]);
+  // Rejected/missing docs do NOT satisfy a requirement — keep the Continue gate
+  // honest so a rejected doc forces a re-upload before payment.
+  const uploadedKeys = useMemo(() => new Set(resolved.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey)), [resolved.myDocs]);
   // Occupants — only meaningful for residential. We don't persist count in
   // the DB; the uploaded `occupant_N_*` doc keys are the source of truth.
   const RESIDENTIAL_BLOCKLIST = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue','warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
@@ -2265,23 +2294,30 @@ function RenewalDocumentsAction({
 
   function DocRow({ req }: { req: DocReq }) {
     const rec = resolved.myDocs.find(d => d.documentKey === req.key);
-    const isUploaded = !!rec;
+    const isRejected = rec?.status === 'rejected';
+    const isApproved = rec?.status === 'complete' || rec?.status === 'processed';
+    const onFile     = !!rec && rec.status !== 'rejected' && rec.status !== 'missing';
     const isUploading = docUploading === req.key;
     return (
       <label style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
-        background: isUploaded ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
-        border: `1px solid ${isUploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
+        background: isRejected ? 'var(--brick-soft)' : onFile ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
+        border: `1px solid ${isRejected ? 'var(--brick)' : onFile ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
         cursor: isUploading ? 'progress' : 'pointer',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
-          <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>
-            {isUploaded ? (rec.displayName ?? 'Uploaded') : (req.hint ?? 'Tap to upload')}
+          <p style={{ fontSize: 11, color: isRejected ? 'var(--brick)' : 'var(--mute)', fontWeight: isRejected ? 600 : 400, margin: '2px 0 0' }}>
+            {isRejected
+              ? <>Rejected — re-upload required{rec?.notes && <span style={{ fontWeight: 400, color: 'var(--ink-2)' }}> · {rec.notes}</span>}</>
+              : isApproved ? 'Approved ✓'
+              : onFile ? (rec!.displayName ?? 'Uploaded · awaiting review')
+              : (req.hint ?? 'Tap to upload')}
           </p>
         </div>
         {isUploading ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
-          : isUploaded ? <CheckCircle2 size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+          : isRejected ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--brick)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><UploadCloud size={16} />Re-upload</span>
+          : onFile ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><CheckCircle2 size={16} />Replace</span>
           : <UploadCloud size={16} style={{ color: 'var(--mute)', flexShrink: 0 }} />}
         <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
           disabled={isUploading}
@@ -2300,7 +2336,7 @@ function RenewalDocumentsAction({
         <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px' }}>
           {renewal ? 'Renewal documents' : 'Required documents'}
           <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--mute)', textTransform: 'none', letterSpacing: 0 }}>
-            {allDocs.filter(d => resolved.myDocs.some(u => u.documentKey === d.key)).length}/{allDocs.length} uploaded
+            {allDocs.filter(d => resolved.myDocs.some(u => u.documentKey === d.key && u.status !== 'rejected' && u.status !== 'missing')).length}/{allDocs.length} uploaded
           </span>
         </p>
         {allDocs.length === 0

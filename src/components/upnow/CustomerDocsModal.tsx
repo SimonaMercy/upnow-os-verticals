@@ -15,7 +15,7 @@ import { docLabel } from '@/lib/docLabel';
 export type CustomerDoc = {
   id: number; documentKey: string; displayName: string | null; category: string | null;
   status: string | null; fileUrl: string | null; expiryDate?: string | null;
-  ownerType?: string | null; leaseId?: number | null;
+  ownerType?: string | null; leaseId?: number | null; notes?: string | null;
 };
 
 export type LeaseMeta = { id: number; ref: string; startDate: string | null; endDate: string | null };
@@ -165,8 +165,10 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                         every file is noise. Show "Requested" (no file yet) or "Pending review". */}
                     {!d.fileUrl ? (
                       <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#fef3c7] text-[#92400e]">Requested</span>
-                    ) : d.status === 'pending' ? (
-                      <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#fee2e2] text-[#b91c1c]">Pending review</span>
+                    ) : d.status === 'rejected' ? (
+                      <span title={d.notes ?? undefined} className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#fee2e2] text-[#b91c1c]">Rejected — re-upload</span>
+                    ) : (d.status === 'attached' || d.status === 'pending') ? (
+                      <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#dbeafe] text-[#1d4ed8]">Pending review</span>
                     ) : null}
                     {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
                     {d.fileUrl && (

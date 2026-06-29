@@ -12,13 +12,15 @@ import Link from 'next/link';
 import {
   Search, X, FileText, BarChart2, Building2, AlertCircle, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart, ScrollText,
-  Banknote, TrendingUp,
+  Banknote, TrendingUp, CalendarRange,
 } from 'lucide-react';
 import ExecutiveOverview from './ExecutiveOverview';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
+import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow/reportsYear';
 
 export default function ReportsPage() {
   const [search, setSearch] = useState('');
+  const year = useReportsYear();
   const filtered = REPORT_TILES.filter(r =>
     r.title.toLowerCase().includes(search.toLowerCase())
     || r.description.toLowerCase().includes(search.toLowerCase()),
@@ -36,10 +38,24 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">Where the portfolio stands right now — then drill into any report below.</p>
         </div>
+        {/* Hub-wide year — scopes the overview and the default period each
+            time-based report opens with (snapshots ignore it). */}
+        <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+          <CalendarRange size={15} className="text-[#2e9f82]" />
+          <span className="text-xs font-medium text-[#6b6860]">Year</span>
+          <select
+            value={year === 'all' ? 'all' : String(year)}
+            onChange={e => setReportsYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1"
+            aria-label="Reports year">
+            {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            <option value="all">All years</option>
+          </select>
+        </label>
       </div>
 
       {/* Executive overview — KPI tiles, exceptions, charts */}
-      <ExecutiveOverview />
+      <ExecutiveOverview year={year} />
 
       <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">All reports</h2>
       <div className="relative max-w-sm mb-6">

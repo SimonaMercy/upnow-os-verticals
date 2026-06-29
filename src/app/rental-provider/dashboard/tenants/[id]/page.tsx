@@ -11,7 +11,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, User, FileText, ExternalLink, Mail, Phone, IdCard,
   Globe, Calendar, Building2, AlertTriangle, TrendingUp, ShieldCheck, Pencil, History,
-  Upload, Check, Eye, Loader2, X, Landmark, StickyNote, Plus, Send,
+  Upload, Check, Eye, Loader2, X, Landmark, StickyNote, Plus, Send, Users, Minus,
 } from 'lucide-react';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { docLabel } from '@/lib/docLabel';
@@ -19,6 +19,7 @@ import { openDocViewer } from '@/lib/docViewer';
 import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/DocumentReaderModal';
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
+import { getOccupantDocs, deriveOccupantCount, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
 
 type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
@@ -120,6 +121,19 @@ const KYC_KEY_RE = /emirates|passport|visa|trade_license|moa|poa|labour|establis
 const isKycDoc = (d: Doc) =>
   (d.ownerType ?? 'customer') === 'customer' &&
   (d.category === 'identity' || d.category === 'license' || KYC_KEY_RE.test(d.documentKey));
+// Additional-occupant identity docs (occupant 2..N) hang off the customer with
+// `occupant_<n>_*` keys. They get their own section, not the primary KYC card —
+// otherwise they'd land in "extra" KYC docs as view-only rows with no upload.
+const isOccupantDoc = (d: Doc) => /^occupant_\d+_/.test(d.documentKey ?? '');
+// Optional residential supporting docs (Employment / Salary Certificate, Bank
+// Statement / Pay Slip, Marriage Certificate). None are required — they get their
+// own "Supporting Documents" card so an admin can backfill them; otherwise they
+// only appear view-only under "History Documents". (Individual customers only.)
+const SUPPORTING_DOCS = RESIDENTIAL_RENTAL_DOCS;
+// Tolerant key match — a "Replace" can append a `_<timestamp>` suffix.
+const supportingReqFor = (key: string) => SUPPORTING_DOCS.find(r => new RegExp(`^${r.key}(_|$)`).test(key));
+const isSupportingDoc = (d: Doc) =>
+  (d.ownerType ?? 'customer') === 'customer' && !!supportingReqFor(d.documentKey ?? '');
 
 export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -147,6 +161,10 @@ export default function CustomerDetailPage() {
   // "History Documents" preview.
   const [reader, setReader] = useState<{ title: string; summary?: string; slots: ReaderSlot[]; initialKey?: string } | null>(null);
   const [showDeposits, setShowDeposits] = useState(false);
+  // Occupant count has no DB column — it's derived from the uploaded `occupant_N_*`
+  // doc keys. The admin can bump it up here to reveal more upload slots for a
+  // backfill; the override never drops below the derived count (those docs exist).
+  const [occupantOverride, setOccupantOverride] = useState<number | null>(null);
 
   const load = useCallback(() => {
     if (!params?.id) return;
@@ -237,7 +255,29 @@ export default function CustomerDetailPage() {
   const customerSince = monthYear(
     data.leases.map(l => l.startDate).filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)))[0],
   );
-  const kycDocs = data.documents.filter(isKycDoc);
+  const kycDocs = data.documents.filter(d => isKycDoc(d) && !isOccupantDoc(d));
+  // ── Additional occupants (people living with the primary customer) ──
+  // Their identity docs hang off the customer with occupant_<n>_* keys; the count
+  // is derived from those keys (no DB column) and can be bumped up to backfill.
+  // The override is clamped to never hide an occupant that already has docs.
+  const occupantDocs = data.documents.filter(d => (d.ownerType ?? 'customer') === 'customer' && isOccupantDoc(d));
+  const derivedOccupants = deriveOccupantCount(data.documents.map(d => d.documentKey)); // ≥1, primary = occupant 1
+  const totalOccupants = Math.max(occupantOverride ?? derivedOccupants, derivedOccupants, 1);
+  const occupantGroups: { idx: number; reqs: DocReq[] }[] = (() => {
+    const reqs = getOccupantDocs(totalOccupants); // identity docs for occupants 2..N
+    const out: { idx: number; reqs: DocReq[] }[] = [];
+    for (let i = 2; i <= totalOccupants; i++) out.push({ idx: i, reqs: reqs.filter(r => r.key.startsWith(`occupant_${i}_`)) });
+    return out;
+  })();
+  // Tolerant match (an in-place "Replace" can append a `_<timestamp>` suffix).
+  const findOccupantDoc = (key: string) => occupantDocs.find(d => new RegExp(`^${key}(_|$)`).test(d.documentKey));
+  // ── Optional supporting documents (residential individuals) ──
+  // Employment letter / bank statement / marriage certificate — optional backfill
+  // slots so an admin can attach them. Not shown for companies (their supporting
+  // pack is the trade-license / MOA already in Company KYC).
+  const showSupporting = !isCompany;
+  const supportingDocsList = data.documents.filter(isSupportingDoc);
+  const findSupportingDoc = (key: string) => supportingDocsList.find(d => new RegExp(`^${key}(_|$)`).test(d.documentKey));
   // KYC checklist (RP view): the identity docs this customer should have on
   // file. Missing ones get an inline upload affordance. Mirrors the customer
   // requirements in the backend document-requirements matrix.
@@ -267,7 +307,8 @@ export default function CustomerDetailPage() {
   const kycUploadedCount = kycChecklist.filter(x => x.docs.length > 0).length;
   const kycViewable = kycDocs.filter(d => d.fileUrl);
   // Lease/contract paperwork (non-KYC) — shown contract-wise in "History Documents".
-  const otherDocsCount = data.documents.filter(d => !isKycDoc(d)).length;
+  // Optional supporting docs have their own card (for individuals), so exclude them.
+  const otherDocsCount = data.documents.filter(d => !isKycDoc(d) && !(showSupporting && isSupportingDoc(d))).length;
 
   // ── Document reader slots (shared sidebar + gallery popup) ──
   const toReaderFile = (d: Doc) => ({ id: d.id, name: docLabel(d, data.documents), url: d.fileUrl as string, mimeType: d.mimeType });
@@ -289,7 +330,7 @@ export default function CustomerDetailPage() {
     return `${l.ref}${l.unit.number ? ` · Unit ${l.unit.number}` : ''}${span ? ` · ${span}` : ''}`;
   };
   const historySlots: ReaderSlot[] = (() => {
-    const docs = data.documents.filter(d => !isKycDoc(d) && d.fileUrl);
+    const docs = data.documents.filter(d => !isKycDoc(d) && !(showSupporting && isSupportingDoc(d)) && d.fileUrl);
     const byLease = new Map(data.leases.map(l => [l.id, l]));
     const orderedLeases = [...data.leases].sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
     const out: ReaderSlot[] = [];
@@ -786,6 +827,146 @@ export default function CustomerDetailPage() {
         </div>
       )}
       </div>
+
+      {/* Additional occupants — other people living in the unit alongside the
+          primary customer. Their identity docs hang off the customer record
+          (occupant_N_* keys); the count is derived from the uploaded docs and can
+          be bumped up here so an admin can backfill each occupant's documents. */}
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
+        <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-5 py-4 border-b border-[#eeece6]">
+          <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><Users size={15} /></span>
+          <h2 className="text-sm font-bold text-[#1a1916]">
+            Additional Occupants <span className="font-normal text-[#9b9890]">({occupantGroups.length})</span>
+          </h2>
+          <div className="flex-1 min-w-[12px]" />
+          {/* Stepper — total occupants including the primary (occupant 1) */}
+          <div className="inline-flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890]">Occupants</span>
+            <div className="inline-flex items-center rounded-full border border-[#e8e6e0] bg-white overflow-hidden">
+              <button type="button" aria-label="Remove an occupant"
+                onClick={() => setOccupantOverride(Math.max(derivedOccupants, 1, totalOccupants - 1))}
+                disabled={totalOccupants <= Math.max(derivedOccupants, 1)}
+                title={totalOccupants <= Math.max(derivedOccupants, 1) ? 'An occupant with documents on file cannot be removed here' : 'Remove the last (empty) occupant'}
+                className="w-8 h-8 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                <Minus size={14} />
+              </button>
+              <span className="min-w-[2.25rem] text-center text-sm font-semibold text-[#1a1916] tabular-nums">{totalOccupants}</span>
+              <button type="button" aria-label="Add an occupant"
+                onClick={() => setOccupantOverride(Math.min(12, totalOccupants + 1))}
+                disabled={totalOccupants >= 12}
+                className="w-8 h-8 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 py-2.5 text-[11px] text-[#9b9890] border-b border-[#f1efe9]">
+          The primary customer is occupant 1 (their KYC is shown above). Use + to add the people living with them, then upload each occupant&apos;s identity documents.
+        </div>
+
+        {occupantGroups.length === 0 ? (
+          <div className="px-5 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#f4f3ef] text-[#9b9890] flex items-center justify-center mx-auto"><Users size={20} /></div>
+            <p className="text-sm text-[#6b6860] font-medium mt-3">No additional occupants</p>
+            <p className="text-xs text-[#9b9890] mt-1">Press + above to add an occupant, then upload their Emirates ID, passport and visa.</p>
+          </div>
+        ) : (
+          <div className="p-2 divide-y divide-[#f1efe9]">
+            {occupantGroups.map(({ idx, reqs }) => (
+              <div key={idx} className="px-1.5 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-[#6b6860] mb-1 px-2">Occupant {idx}</div>
+                {reqs.map(req => {
+                  const existing = findOccupantDoc(req.key);
+                  const uploaded = !!existing;
+                  const busy = directBusy === req.key;
+                  const onUpload = () => pickDirect({ label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) });
+                  return (
+                    <div key={req.key} className="flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-[#fafdfb]">
+                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                        {uploaded ? <Check size={16} /> : <FileText size={16} />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label.replace(/^Occupant \d+ — /, '')}</div>
+                        <div className="text-[11px] font-semibold mt-0.5">
+                          {uploaded
+                            ? <span className="text-[#1a7a5a]">{existing!.status === 'pending' ? 'Pending review' : 'On record'}</span>
+                            : <span className="text-[#b07415]">Not uploaded · optional</span>}
+                        </div>
+                        {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
+                      </div>
+                      {uploaded && existing!.fileUrl && (
+                        <button type="button" onClick={() => openDocViewer({ fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
+                          className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                          <Eye size={13} /> View
+                        </button>
+                      )}
+                      <button type="button" onClick={onUpload} disabled={busy}
+                        className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                        {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                        {uploaded ? 'Replace' : 'Upload'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Supporting documents (optional) — Employment / Salary Certificate, Bank
+          Statement / Pay Slip, Marriage Certificate. None are required; this card
+          just gives an admin a place to backfill them. Individuals only — a
+          company's supporting pack is the trade-license / MOA in Company KYC. */}
+      {showSupporting && (
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
+          <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-5 py-4 border-b border-[#eeece6]">
+            <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><FileText size={15} /></span>
+            <h2 className="text-sm font-bold text-[#1a1916]">
+              Supporting Documents <span className="font-normal text-[#9b9890]">· optional</span>
+            </h2>
+          </div>
+          <div className="px-5 py-2.5 text-[11px] text-[#9b9890] border-b border-[#f1efe9]">
+            Optional documents that strengthen the file — none are required to complete the tenancy.
+          </div>
+          <div className="p-2">
+            {SUPPORTING_DOCS.map(req => {
+              const existing = findSupportingDoc(req.key);
+              const uploaded = !!existing;
+              const busy = directBusy === req.key;
+              const onUpload = () => pickDirect({ label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) });
+              return (
+                <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
+                  <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                    {uploaded ? <Check size={16} /> : <FileText size={16} />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
+                    <div className="text-[11px] font-semibold mt-0.5">
+                      {uploaded
+                        ? <span className="text-[#1a7a5a]">{existing!.status === 'pending' ? 'Pending review' : 'On record'}</span>
+                        : <span className="text-[#9b9890]">{req.hint ?? 'Not uploaded'}</span>}
+                    </div>
+                    {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
+                  </div>
+                  {uploaded && existing!.fileUrl && (
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
+                      className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                      <Eye size={13} /> View
+                    </button>
+                  )}
+                  <button type="button" onClick={onUpload} disabled={busy}
+                    className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    {uploaded ? 'Replace' : 'Upload'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Lease notes — the running operational journal across EVERY lease this
           customer holds, in one chronological stream so the next person picking

@@ -22,6 +22,7 @@ import {
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
 } from 'recharts';
+import { CURRENT_YEAR, type ReportsYear } from '@/components/upnow/reportsYear';
 
 interface ExecutiveSummary {
   generatedAt: string;
@@ -35,7 +36,7 @@ interface ExecutiveSummary {
     expiring90: number; expiring90RentFils: number;
     renewalsOverdue: number;
     vacantAskingFils: number;
-    depositsHeld: number; depositLiabilityFils: number;
+    depositsHeld: number; depositsPartial: number; depositLiabilityFils: number;
     collectionYtdRate: number;
   };
   charts: {
@@ -125,23 +126,31 @@ const renewalTooltipLabel = (label: unknown, payload: unknown) => {
 export default function ExecutiveOverview({
   endpoint = '/api/reports/executive-summary',
   linkFor = (slug: string) => `/rental-provider/dashboard/reports/${slug}`,
+  year,
 }: {
   /** Manager portal passes '/api/manager/reports/executive-summary?rp=N'. */
   endpoint?: string;
   /** Builds exception-chip hrefs per portal. */
   linkFor?: (slug: string) => string;
+  /** Hub-wide year. "All years" / undefined → the current year (this strip is
+   *  a point-in-time snapshot with one year-bound chart). */
+  year?: ReportsYear;
 } = {}) {
   const [data, setData] = useState<ExecutiveSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const effectiveYear = year && year !== 'all' ? year : CURRENT_YEAR;
+
   useEffect(() => {
-    fetch(endpoint, { credentials: 'include' })
+    setLoading(true); setError(null);
+    const url = endpoint + (endpoint.includes('?') ? '&' : '?') + `year=${effectiveYear}`;
+    fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [endpoint]);
+  }, [endpoint, effectiveYear]);
 
   if (loading) {
     return (
@@ -172,6 +181,11 @@ export default function ExecutiveOverview({
 
   return (
     <div className="mb-10">
+      {/* Scope note — the headline tiles are a live snapshot; the Year filter
+          only scopes the time-based figures (cashflow chart + collection rate). */}
+      <p className="text-[11px] text-[#9b9890] mb-2">
+        Headline tiles are a live snapshot <span className="font-semibold text-[#6b6860]">as of today</span> — occupancy, rent roll, arrears and balances have no year. The <span className="font-semibold text-[#6b6860]">Year</span> filter scopes the cashflow &amp; collection figures below and the default period each report opens with.
+      </p>
       {/* KPI tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
         <KpiTile icon={Banknote} label="Rent roll / yr" value={`AED ${fmtAedShort(k.rentRollFils)}`}
@@ -187,7 +201,7 @@ export default function ExecutiveOverview({
           sub={`AED ${fmtAedShort(k.expiring90RentFils)} at stake · ${k.renewalsOverdue} already lapsed`}
           tone={k.renewalsOverdue > 0 ? 'warn' : 'neutral'} />
         <KpiTile icon={ShieldCheck} label="Deposit liability" value={`AED ${fmtAedShort(k.depositLiabilityFils)}`}
-          sub={`${k.depositsHeld} deposits held`} />
+          sub={k.depositsPartial ? `${k.depositsHeld} held · ${k.depositsPartial} partially returned` : `${k.depositsHeld} deposits held`} />
       </div>
 
       {/* Exceptions strip */}
@@ -222,7 +236,7 @@ export default function ExecutiveOverview({
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title={`Rent cashflow ${data.year}`}
-          sub={`Cheque schedule by month — collected so far ${k.collectionYtdRate.toFixed(0)}% of what fell due this year${arrearsOutsideChartFils > 0 ? ` · ${fmtAed(arrearsOutsideChartFils)} arrears from before ${data.year} not shown (see Arrears tile)` : ''}`}>
+          sub={`Cheque schedule by month — collected ${k.collectionYtdRate.toFixed(0)}% of what fell due ${data.year === CURRENT_YEAR ? 'this year' : `in ${data.year}`}${arrearsOutsideChartFils > 0 ? ` · ${fmtAed(arrearsOutsideChartFils)} arrears from before ${data.year} not shown (see Arrears tile)` : ''}`}>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={charts.cashflowByMonth} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />

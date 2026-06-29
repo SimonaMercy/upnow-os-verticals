@@ -8,21 +8,16 @@ import {
   Clock, CheckCircle2, MessageSquare, User, Calendar,
   FileText, ExternalLink, Loader2, MoreVertical, ArrowRight,
   StickyNote, ShieldAlert, Copy, Check, CreditCard, Plus, Trash2,
-  ClipboardList, BadgeCheck, Printer, Eye, ZoomIn, LayoutGrid, LayoutList,
+  ClipboardList, BadgeCheck, Printer, Eye, LayoutGrid, LayoutList, UploadCloud,
 } from 'lucide-react';
-import Lightbox from 'yet-another-react-lightbox';
-import Zoom from 'yet-another-react-lightbox/plugins/zoom';
-import Captions from 'yet-another-react-lightbox/plugins/captions';
-import Thumbnails from 'yet-another-react-lightbox/plugins/thumbnails';
-import 'yet-another-react-lightbox/styles.css';
-import 'yet-another-react-lightbox/plugins/captions.css';
-import 'yet-another-react-lightbox/plugins/thumbnails.css';
 import { toast } from 'sonner';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
-import { getRequiredDocs } from '@/lib/docRequirements';
+import { getRequiredDocs, type DocReq } from '@/lib/docRequirements';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
+import { putKycSlot } from '@/lib/kycSlotUpload';
+import { docLabel } from '@/lib/docLabel';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
@@ -235,6 +230,7 @@ interface ApiLead {
 type TenantDoc = {
   id: number; documentKey: string; displayName: string | null;
   fileUrl: string; mimeType: string | null; status: string;
+  notes?: string | null;
 };
 
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
@@ -589,12 +585,9 @@ function LeadRow({
   const [approveDocsError, setApproveDocsError] = useState<string | null>(null);
   const [tenantDocs, setTenantDocs]   = useState<TenantDoc[] | null>(null);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [viewAllOpen, setViewAllOpen]   = useState(false);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-  // Phase 5b — in-page preview for the customer's payment references.
-  // Stays inside the leads page (no new tab); handles images + PDFs.
-  const [chequePreview, setChequePreview] = useState<{ url: string; label: string } | null>(null);
+  // RP uploading a KYC document on the customer's behalf (keyed by requirement).
+  const [rpUploadingKey, setRpUploadingKey] = useState<string | null>(null);
+  const [rpUploadError, setRpUploadError]   = useState<string | null>(null);
   const [docActioning, setDocActioning]     = useState<number | null>(null);
   const [docActionError, setDocActionError] = useState<string | null>(null);
   const [rejectingDoc, setRejectingDoc]     = useState<{ id: number; label: string } | null>(null);
@@ -978,6 +971,35 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       if (!res.ok) { setDocActionError('Failed to reject'); return; }
       setTenantDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'rejected' } : d) : null);
     } finally { setDocActioning(null); }
+  }
+
+  // Refetch docs bypassing loadDocs's "already loaded" guard — used after an
+  // RP-side upload so the new file + recomputed checklist re-render. (loadDocs
+  // early-returns when tenantDocs !== null via a stale closure, so it can't.)
+  async function refetchDocs() {
+    if (!lead.convertedTenant?.id) return;
+    const res = await fetch(`/api/documents?ownerType=customer&ownerId=${lead.convertedTenant.id}`, { credentials: 'include' });
+    if (res.ok) setTenantDocs(await res.json());
+  }
+
+  // RP uploads a required document on the customer's behalf. Written under the
+  // customer owner (the same key the panel lists with) — the backend authorizes
+  // the RP via the lead relationship and auto-verifies RP/manager uploads.
+  async function handleRpUpload(req: { key: string; label: string; category: string }, file: File) {
+    const ownerId = lead.convertedTenant?.id;
+    if (!ownerId) { setRpUploadError('Convert the lead to a customer first.'); return; }
+    setRpUploadingKey(req.key); setRpUploadError(null);
+    try {
+      const existing = (tenantDocs ?? []).find(d => d.documentKey === req.key);
+      await putKycSlot({
+        ownerType: 'customer', ownerId,
+        canonicalKey: req.key, category: req.category, displayName: req.label,
+        file, existingDocId: existing?.id ?? null, existingKey: existing?.documentKey ?? null,
+      });
+      await refetchDocs();
+    } catch (e) {
+      setRpUploadError(e instanceof Error ? e.message : 'Upload failed');
+    } finally { setRpUploadingKey(null); }
   }
 
   async function handleMarkVisited() {
@@ -1406,10 +1428,16 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             <div className="flex items-center gap-2">
               {tenantDocs && tenantDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 && (
                 <button
-                  onClick={() => setViewAllOpen(true)}
+                  onClick={() => {
+                    const list = tenantDocs.filter(d => d.documentKey !== 'profile_picture');
+                    openDocViewer(
+                      list.map(d => ({ fileUrl: d.fileUrl, caption: docLabel(d, list), mimeType: d.mimeType })),
+                      lead.convertedTenant?.user?.name?.trim() || lead.customerName || 'Documents',
+                    );
+                  }}
                   className="flex items-center gap-1 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-2.5 py-1 hover:bg-[#f0faf6] transition-colors cursor-pointer"
                 >
-                  <Printer size={11} /> View All
+                  <Eye size={11} /> View All
                 </button>
               )}
               <button
@@ -1432,21 +1460,41 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             const req = all.filter(d => d.required);
             const opt = all.filter(d => !d.required);
             const received = req.filter(d => okKeys.has(d.key)).length;
-            const chipCls = (ok: boolean, optional: boolean) =>
-              ok
-                ? 'bg-[#dcfce7] text-[#15803d]'
-                : optional
-                  ? 'bg-[#f4f3ef] text-[#6b6860]'
-                  : 'bg-[#fef3c7] text-[#92400e]';
-            const Chip = (d: { key: string; label: string }, optional: boolean) => {
-              const ok = okKeys.has(d.key);
+            const canUpload = !!lead.convertedTenant?.id;
+            // One actionable row per requirement: status + label + an Upload /
+            // Replace / Re-upload control so the RP can complete the document
+            // series on the customer's behalf (written under the customer owner).
+            const ReqRow = (d: DocReq, optional: boolean) => {
+              const doc = (tenantDocs ?? []).find(x => x.documentKey === d.key);
+              const onFile = okKeys.has(d.key);
+              const isRejected = doc?.status === 'rejected';
+              const busy = rpUploadingKey === d.key;
               return (
-                <span
+                <label
                   key={d.key}
-                  className={`inline-flex items-center gap-1 text-[10px] font-medium rounded-full px-2 py-0.5 ${chipCls(ok, optional)}`}
+                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${busy ? 'cursor-progress' : canUpload ? 'cursor-pointer' : 'cursor-default'} ${
+                    isRejected ? 'border-[#fecaca] bg-[#fff5f5]'
+                    : onFile ? 'border-[#bbf7d0] bg-[#f0faf6]'
+                    : optional ? 'border-[#e8e6e0] bg-[#fafaf8]'
+                    : 'border-[#fde68a] bg-[#fffbeb]'}`}
                 >
-                  {ok ? <Check size={9} /> : <Clock size={9} />}{d.label}
-                </span>
+                  {onFile ? <Check size={12} className="text-[#16a34a] shrink-0" />
+                    : isRejected ? <X size={12} className="text-[#b91c1c] shrink-0" />
+                    : <Clock size={12} className={`shrink-0 ${optional ? 'text-[#9b9890]' : 'text-[#92400e]'}`} />}
+                  <span className="flex-1 min-w-0 text-[11px] font-medium text-[#1a1916] truncate">
+                    {d.label}{!optional && <span className="text-[#b91c1c]"> *</span>}
+                  </span>
+                  {canUpload && (
+                    <span className={`text-[10px] font-semibold shrink-0 inline-flex items-center gap-1 ${isRejected ? 'text-[#b91c1c]' : onFile ? 'text-[#2e9f82]' : 'text-[#92400e]'}`}>
+                      {busy ? <Loader2 size={11} className="animate-spin" /> : <UploadCloud size={11} />}
+                      {busy ? 'Uploading…' : isRejected ? 'Re-upload' : onFile ? 'Replace' : 'Upload'}
+                    </span>
+                  )}
+                  {canUpload && (
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={busy}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleRpUpload({ key: d.key, label: d.label, category: d.category }, f); e.target.value = ''; }} />
+                  )}
+                </label>
               );
             };
             return (
@@ -1454,19 +1502,21 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 <p className="text-[10px] font-bold uppercase tracking-wide text-[#6b6860] mb-1.5">
                   Requested Documents · {received}/{req.length} required received
                 </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {req.map(d => Chip(d, false))}
+                <div className="grid gap-1.5">
+                  {req.map(d => ReqRow(d, false))}
                 </div>
                 {opt.length > 0 && (
                   <>
                     <p className="text-[9px] font-semibold uppercase tracking-wide text-[#9b9890] mt-2 mb-1">
                       Supporting (optional)
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {opt.map(d => Chip(d, true))}
+                    <div className="grid gap-1.5">
+                      {opt.map(d => ReqRow(d, true))}
                     </div>
                   </>
                 )}
+                {rpUploadError && <p className="text-[10px] text-[#b91c1c] mt-2">{rpUploadError}</p>}
+                {!canUpload && <p className="text-[10px] text-[#9b9890] mt-2">Convert this lead to a customer to upload documents on their behalf.</p>}
               </div>
             );
           })()}
@@ -1476,21 +1526,32 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               <Loader2 size={12} className="animate-spin" /> Loading…
             </p>
           ) : (() => {
-            const KYC_1 = new Set(['emirates_id', 'passport']);
             const RENTAL = new Set(['employment_letter', 'bank_statement', 'marriage_certificate', 'rental_history', 'credit_report', 'utility_clearance', 'trade_license', 'tax_registration', 'moa', 'business_license', 'utility_proof_of_payment']);
             const docs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
 
-            const occ1Docs    = docs.filter(d => KYC_1.has(d.documentKey));
+            // Primary occupant (Occupant 1) identity keys. Emirates ID is stored
+            // as separate front/back rows (emirates_id_front / _back) plus a
+            // legacy combined `emirates_id` row from the Airtable import — all of
+            // these are Occupant-1 identity, not "Other". Occupants 2+ use the
+            // `occupant_N_*` key prefix.
+            const isEid     = (k: string) => /^emirates_id(_front|_back|_2|_\d{6,})?$/.test(k);
+            const isOcc1Id  = (k: string) => isEid(k) || k === 'passport' || k === 'uae_visa' || k === 'visa';
+
+            const occ1All     = docs.filter(d => isOcc1Id(d.documentKey));
+            // De-dup: if an explicit front exists, drop the legacy combined row so
+            // one physical ID doesn't render as three cards.
+            const hasFront    = occ1All.some(d => d.documentKey === 'emirates_id_front');
+            const occ1Docs    = hasFront ? occ1All.filter(d => d.documentKey !== 'emirates_id') : occ1All;
             const rentalDocs  = docs.filter(d => RENTAL.has(d.documentKey));
             const extraOccMap = new Map<number, TenantDoc[]>();
             const otherDocs: TenantDoc[]  = [];
             for (const d of docs) {
-              const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
+              const m = d.documentKey.match(/^occupant_(\d+)_/);
               if (m) {
-                const n = parseInt(m[2]);
+                const n = parseInt(m[1]);
                 if (!extraOccMap.has(n)) extraOccMap.set(n, []);
                 extraOccMap.get(n)!.push(d);
-              } else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) {
+              } else if (!isOcc1Id(d.documentKey) && !RENTAL.has(d.documentKey)) {
                 otherDocs.push(d);
               }
             }
@@ -1498,7 +1559,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             const hasAny  = occ1Docs.length > 0 || extraNs.length > 0 || rentalDocs.length > 0 || otherDocs.length > 0;
 
             function DocRow({ doc }: { doc: TenantDoc }) {
-              const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              const label = docLabel(doc, docs);
               const isPending    = ['pending', 'attached'].includes(doc.status);
               const isApproved   = doc.status === 'processed';
               const isRejected   = doc.status === 'rejected';
@@ -1510,6 +1571,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                     <p className="text-[11px] font-semibold text-[#1a1916] truncate">{label}</p>
                     <p className={`text-[10px] capitalize ${isApproved ? 'text-[#16a34a]' : isRejected ? 'text-[#b91c1c]' : 'text-[#9b9890]'}`}>
                       {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Uploaded'}
+                      {isRejected && doc.notes && <span className="normal-case text-[#9b9890]"> · {doc.notes}</span>}
                     </p>
                   </div>
                   <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
@@ -2613,7 +2675,7 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 </div>
                 {customerUploads.map((c, i) => {
                   const previewLabel = c.notes || `Payment ${i + 1}`;
-                  const openPreview = () => c.imageUrl && setChequePreview({ url: c.imageUrl, label: previewLabel });
+                  const openPreview = () => c.imageUrl && openDocViewer({ fileUrl: c.imageUrl, caption: previewLabel });
                   return (
                     <div key={c.id} className="bg-white border border-[#fde68a] rounded-xl overflow-hidden">
                       {/* Top band: thumbnail + meta — full width, no narrow column squeeze */}
@@ -2700,39 +2762,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         );
       })()}
 
-      {/* ── Phase 5b — in-page preview for customer payment references ── */}
-      {chequePreview && (
-        <div
-          onClick={() => setChequePreview(null)}
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[#ede9e3]">
-              <p className="text-sm font-semibold text-[#1a1916] truncate">{chequePreview.label}</p>
-              <button
-                onClick={() => setChequePreview(null)}
-                className="text-[#9b9890] hover:text-[#1a1916] transition-colors cursor-pointer"
-                aria-label="Close preview"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto bg-[#f4f3f0] flex items-center justify-center">
-              {chequePreview.url.toLowerCase().split('?')[0].endsWith('.pdf') ? (
-                <iframe src={chequePreview.url} className="w-full h-[80vh]" title={chequePreview.label} />
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={chequePreview.url} alt={chequePreview.label} className="max-w-full max-h-[80vh] object-contain" />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Payment-reference previews now open in the secure in-portal viewer
+          (openDocViewer) — no raw iframe/img, no download. */}
 
       {/* ── Notify Guard panel ── */}
       {panel === 'guard' && viewing && (
@@ -2852,149 +2883,6 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
         </div>
       )}
 
-      {/* ── Document viewer modal ── */}
-      {(() => {
-        const KYC_1  = new Set(['emirates_id', 'passport']);
-        const RENTAL = new Set(['employment_letter','bank_statement','marriage_certificate','rental_history','credit_report','utility_clearance','trade_license','tax_registration','moa','business_license','utility_proof_of_payment']);
-        const allDocs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
-
-        // Build ordered flat list of image-only docs for lightbox navigation
-        const imgDocs = allDocs.filter(d => {
-          const up = d.fileUrl.split('?')[0].toLowerCase();
-          const isPdf = d.mimeType === 'application/pdf' || up.endsWith('.pdf');
-          return !isPdf && (d.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(up));
-        });
-        const lightboxSlides = imgDocs.map(d => ({
-          src: d.fileUrl,
-          title: d.displayName ?? d.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-          description: d.status === 'processed' ? '✓ Approved' : d.status === 'rejected' ? '✗ Rejected' : 'Uploaded',
-        }));
-
-        if (!viewAllOpen) {
-          // Lightbox can still be open (opened from within modal, then modal closed) — keep it mounted
-          return lightboxOpen ? (
-            <Lightbox
-              open={lightboxOpen}
-              close={() => setLightboxOpen(false)}
-              index={lightboxIndex}
-              slides={lightboxSlides}
-              plugins={[Zoom, Captions, Thumbnails]}
-              zoom={{ maxZoomPixelRatio: 4 }}
-              captions={{ showToggle: true }}
-            />
-          ) : null;
-        }
-
-        // Group docs for the panel
-        const occ1   = allDocs.filter(d => KYC_1.has(d.documentKey));
-        const rental = allDocs.filter(d => RENTAL.has(d.documentKey));
-        const extraMap = new Map<number, TenantDoc[]>();
-        const other: TenantDoc[] = [];
-        for (const d of allDocs) {
-          const m = d.documentKey.match(/^(emirates_id|passport|uae_visa)_(\d+)$/);
-          if (m) { const n = parseInt(m[2]); if (!extraMap.has(n)) extraMap.set(n, []); extraMap.get(n)!.push(d); }
-          else if (!KYC_1.has(d.documentKey) && !RENTAL.has(d.documentKey)) other.push(d);
-        }
-        type DocGroup = { heading: string; sub?: string; docs: TenantDoc[] };
-        const groups: DocGroup[] = [];
-        if (occ1.length)   groups.push({ heading: 'Occupant 1 — Identity', docs: occ1 });
-        [...extraMap.keys()].sort((a,b) => a-b).forEach(n =>
-          groups.push({ heading: `Occupant ${n} — Identity`, sub: 'optional', docs: extraMap.get(n)! })
-        );
-        if (rental.length) groups.push({ heading: 'Rental Documents', docs: rental });
-        if (other.length)  groups.push({ heading: 'Other', docs: other });
-
-        const tenantName = lead.convertedTenant?.user?.name?.trim() || lead.customerName || '—';
-        const unitLabel  = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : '—');
-
-        function StatusChip({ status }: { status: string }) {
-          if (status === 'processed') return <span className="text-[9px] font-bold bg-[#dcfce7] text-[#16a34a] rounded px-1.5 py-0.5">Approved</span>;
-          if (status === 'rejected')  return <span className="text-[9px] font-bold bg-[#fee2e2] text-[#b91c1c] rounded px-1.5 py-0.5">Rejected</span>;
-          return <span className="text-[9px] font-bold bg-[#f4f3ef] text-[#6b6860] rounded px-1.5 py-0.5">Uploaded</span>;
-        }
-
-        function DocEntry({ doc }: { doc: TenantDoc }) {
-          const label = doc.displayName ?? doc.documentKey.replace(/_\d+$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          const urlPath = doc.fileUrl.split('?')[0].toLowerCase();
-          const isPdf = doc.mimeType === 'application/pdf' || urlPath.endsWith('.pdf');
-          const isImg = !isPdf && (doc.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/.test(urlPath));
-          const imgIdx = isImg ? imgDocs.findIndex(d => d.id === doc.id) : -1;
-          return (
-            <div className="mb-6">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[12px] font-semibold text-[#1a1916]">{label}</span>
-                <StatusChip status={doc.status} />
-                <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
-                  className="ml-auto flex items-center gap-1 text-[10px] text-[#2e9f82] hover:underline shrink-0 cursor-pointer">
-                  Open <ExternalLink size={10} />
-                </button>
-              </div>
-              {isPdf ? (
-                <iframe src={doc.fileUrl} className="w-full h-[480px] rounded-xl border border-[#e8e6e0]" />
-              ) : isImg ? (
-                /* Clickable thumbnail → opens YALR lightbox with zoom/nav */
-                <button type="button" onClick={() => { setLightboxIndex(imgIdx); setLightboxOpen(true); }}
-                  className="group relative block w-full rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f8f7f4] cursor-zoom-in">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={doc.fileUrl} alt={label} loading="lazy"
-                    className="max-h-[320px] w-full object-contain block transition-transform duration-200 group-hover:scale-[1.02]" />
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                    <span className="bg-white/90 rounded-full p-2 shadow"><ZoomIn size={18} className="text-[#1a1916]" /></span>
-                  </div>
-                </button>
-              ) : (
-                <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
-                  className="inline-flex items-center gap-1.5 text-sm text-[#2e9f82] hover:underline cursor-pointer">
-                  <FileText size={14} /> Open file
-                </button>
-              )}
-            </div>
-          );
-        }
-
-        return (
-          <>
-            <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4"
-              onClick={(e) => { if (e.target === e.currentTarget) setViewAllOpen(false); }}>
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
-                {/* Header */}
-                <div className="sticky top-0 bg-white rounded-t-2xl border-b border-[#e8e6e0] px-6 py-4 flex items-center justify-between z-10">
-                  <div>
-                    <p className="text-sm font-bold text-[#1a1916]">{tenantName}</p>
-                    <p className="text-[11px] text-[#9b9890]">{unitLabel} · {allDocs.length} document{allDocs.length !== 1 ? 's' : ''}</p>
-                  </div>
-                  <button onClick={() => setViewAllOpen(false)}
-                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-[#f4f3ef] text-[#6b6860] transition-colors cursor-pointer">
-                    <X size={16} />
-                  </button>
-                </div>
-                {/* Content */}
-                <div className="px-6 py-6 space-y-8">
-                  {groups.map((g, gi) => (
-                    <section key={gi}>
-                      <div className="flex items-baseline gap-2 mb-4 border-b-2 border-[#2e9f82] pb-1.5">
-                        <h2 className="text-[13px] font-bold text-[#1a1916]">{g.heading}</h2>
-                        {g.sub && <span className="text-[10px] text-[#9b9890]">{g.sub}</span>}
-                      </div>
-                      {g.docs.map(doc => <DocEntry key={doc.id} doc={doc} />)}
-                    </section>
-                  ))}
-                </div>
-              </div>
-            </div>
-            {/* Lightbox — rendered outside the scrollable modal so z-index stacks correctly */}
-            <Lightbox
-              open={lightboxOpen}
-              close={() => setLightboxOpen(false)}
-              index={lightboxIndex}
-              slides={lightboxSlides}
-              plugins={[Zoom, Captions, Thumbnails]}
-              zoom={{ maxZoomPixelRatio: 4 }}
-              captions={{ showToggle: true }}
-            />
-          </>
-        );
-      })()}
     </div>
   );
 }
