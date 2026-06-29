@@ -301,10 +301,30 @@ export default function CustomerDetailPage() {
         { key: 'passport', label: 'Passport', category: 'identity', required: true, match: keyMatcher('passport') },
         { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: k => /visa/.test(k) },
       ];
-  const kycChecklist = KYC_REQS.map(req => ({ req, docs: kycDocs.filter(d => req.match(d.documentKey)) }));
+  // Emirates ID counts as complete only with BOTH sides (front + back) — or a
+  // single combined scan — matching the Operations KYC gate. A front-only (or
+  // back-only) upload is a PARTIAL state, not "done", so the slot doesn't read as
+  // satisfied just because one image is on file. Every other slot is satisfied by
+  // any one matching upload.
+  const isEidFront = (k: string) => /^emirates_id_front(_|$)/.test(k);
+  const isEidBack = (k: string) => /^emirates_id_back(_|$)/.test(k);
+  const isEidCombined = (k: string) => isEidKey(k) && !isEidFront(k) && !isEidBack(k);
+  const kycChecklist = KYC_REQS.map(req => {
+    const docs = kycDocs.filter(d => req.match(d.documentKey));
+    let satisfied = docs.length > 0;
+    let partialHint: string | null = null;
+    if (req.key === 'emirates_id') {
+      const front = docs.some(d => isEidFront(d.documentKey));
+      const back = docs.some(d => isEidBack(d.documentKey));
+      const combined = docs.some(d => isEidCombined(d.documentKey));
+      satisfied = combined || (front && back);
+      if (!satisfied && docs.length > 0) partialHint = front ? 'Back side required' : 'Front side required';
+    }
+    return { req, docs, satisfied, partialHint };
+  });
   const matchedKycIds = new Set(kycChecklist.flatMap(x => x.docs.map(d => d.id)));
   const extraKycDocs = kycDocs.filter(d => !matchedKycIds.has(d.id)); // KYC docs outside the standard checklist
-  const kycUploadedCount = kycChecklist.filter(x => x.docs.length > 0).length;
+  const kycUploadedCount = kycChecklist.filter(x => x.satisfied).length;
   const kycViewable = kycDocs.filter(d => d.fileUrl);
   // Lease/contract paperwork (non-KYC) — shown contract-wise in "History Documents".
   // Optional supporting docs have their own card (for individuals), so exclude them.
@@ -719,10 +739,12 @@ export default function CustomerDetailPage() {
           )}
         </div>
         <div className="p-2 max-h-[480px] overflow-y-auto">
-          {kycChecklist.map(({ req, docs }) => {
-            const uploaded = docs.length > 0;
+          {kycChecklist.map(({ req, docs, satisfied, partialHint }) => {
+            const hasAnyFile = docs.length > 0;
+            const uploaded = satisfied;                 // "done" = the slot's requirement is fully met
+            const partial = hasAnyFile && !satisfied;   // e.g. Emirates ID front on file but back missing
             const hasFile = docs.some(d => d.fileUrl);
-            const pending = uploaded && docs[0].status === 'pending';
+            const pending = hasAnyFile && docs[0].status === 'pending';
             const twoSided = req.key === 'emirates_id';
             const busy = directBusy === req.key;
             // Emirates ID opens the Front/Back slot popup; everything else picks a file directly.
@@ -731,8 +753,8 @@ export default function CustomerDetailPage() {
               : () => pickDirect(slotsFor(req, docs)[0]);
             return (
               <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
-                  {uploaded ? <Check size={16} /> : <FileText size={16} />}
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                  {uploaded ? <Check size={16} /> : partial ? <AlertTriangle size={16} /> : <FileText size={16} />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
@@ -743,13 +765,18 @@ export default function CustomerDetailPage() {
                         {docs[0].expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(docs[0].expiryDate)}</span>}
                         <span className="text-[#1a7a5a]">{docs.length} file{docs.length !== 1 ? 's' : ''} on record</span>
                       </>
+                    ) : partial ? (
+                      <>
+                        <span className="text-[#b07415]">{partialHint}{req.required ? ' · required' : ''}</span>
+                        <span className="text-[#9b9890]">{docs.length} of 2 sides on file</span>
+                      </>
                     ) : (
                       <span className="text-[#b07415]">Not uploaded{req.required ? ' · required' : ' · optional'}</span>
                     )}
                   </div>
                   {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                 </div>
-                {uploaded && hasFile && (
+                {hasFile && (
                   <button type="button" onClick={() => openKycReader(req.key)}
                     className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
                     <Eye size={13} /> View
@@ -758,7 +785,7 @@ export default function CustomerDetailPage() {
                 <button type="button" onClick={onUpload} disabled={busy}
                   className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
                   {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                  {uploaded ? 'Replace' : 'Upload'}
+                  {uploaded ? 'Replace' : partial ? 'Add side' : 'Upload'}
                 </button>
               </div>
             );
