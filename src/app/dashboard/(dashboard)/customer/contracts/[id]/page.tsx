@@ -746,7 +746,9 @@ export default function TenantContractDetailPage() {
                               'bg-amber-50 text-amber-700'
                             }`}>{depositPayment.chequeStatus}</span>
                           } />
-                          {canReceipt(depositPayment) && (
+                          {/* Renewals carry the deposit forward (read-only) — no fresh deposit
+                              receipt, so don't advertise a "View Receipt" link for it. */}
+                          {contract.contractType !== 'renewal' && canReceipt(depositPayment) && (
                             <a
                               href={receiptHref(depositPayment)}
                               target="_blank"

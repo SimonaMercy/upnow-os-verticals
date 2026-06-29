@@ -191,6 +191,11 @@ const FEE_LABEL: Record<string, string> = {
 function isDeposit(p: ReceiptPayment): boolean {
   return (p.paymentType ?? '').toLowerCase() === 'security_deposit';
 }
+/** Renewals carry the deposit from the original lease (read-only, never re-collected),
+ *  so a renewal issues no security-deposit receipt — only rental income & management fee. */
+function isRenewalContract(c: ReceiptContract): boolean {
+  return (c.contractType ?? '').toLowerCase() === 'renewal';
+}
 
 interface LineItem { desc: string; net: number; vat: number; total: number; }
 interface Receipt {
@@ -343,6 +348,8 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
 
 /** Resolve the deposit pseudo-payment from the entity / held amount / column. */
 function resolveDeposit(contract: ReceiptContract): ReceiptPayment | undefined {
+  // Renewals carry the deposit forward (read-only) — never issue a fresh deposit receipt.
+  if (isRenewalContract(contract)) return undefined;
   const found = (contract.payments ?? []).find(isDeposit);
   if (found) return found;
   const sd = contract.securityDeposit;
@@ -376,6 +383,9 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   let sel: ReceiptPayment | undefined;
   if (selectedId != null) sel = all.find(p => p.id === selectedId);
   if (!sel) sel = payments[Math.min(Math.max(selectedIdx, 0), Math.max(payments.length - 1, 0))];
+  // Renewals carry the deposit forward (read-only) — never issue a deposit receipt,
+  // even via a direct ?pid=<depositRowId> / ?p=<idx> link (this branch bypasses resolveDeposit).
+  if (sel && isDeposit(sel) && isRenewalContract(contract)) return null;
   return sel ? buildSingleReceipt(sel, contract, rentals) : null;
 }
 
@@ -631,8 +641,8 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   const payments = contract.payments ?? [];
   const rentals = payments.filter(isRental);
   const hasRental = rentals.length > 0;
-  const hasDeposit = payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
-    || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0;
+  const hasDeposit = !isRenewalContract(contract) && (payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
+    || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0);
   const hasManagement = feeLinesOf(contract, rentals).lines.length > 0;
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
@@ -644,7 +654,9 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
             {combined ? `Receipts — ${contract.ref}` : `${receipt ? titleCase(receipt.title) : 'Receipt'} — ${receipt?.receiptNo ?? contract.ref}`}
           </p>
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
-            {combined ? 'Rental income · security deposit · management fee — one file, three receipts' : 'System-generated payment receipt'}
+            {combined
+              ? (isRenewalContract(contract) ? 'Rental income · management fee — one file' : 'Rental income · security deposit · management fee — one file, three receipts')
+              : 'System-generated payment receipt'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

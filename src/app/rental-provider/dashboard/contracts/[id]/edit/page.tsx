@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check } from 'lucide-react';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 interface Tenant {
@@ -195,6 +195,12 @@ export default function EditContractPage() {
   const [clauses, setClauses] = useState<string[]>([]);
   const [clauseInput, setClauseInput] = useState('');
   const [notes, setNotes] = useState('');
+  // Agreement Addendum — attach the unit's layout addendum onto this (possibly
+  // already-issued) contract; the draft-only file upload can't reach issued leases.
+  const [addendums, setAddendums] = useState<{ id: number; name: string | null }[]>([]);
+  const [addendumBusy, setAddendumBusy] = useState(false);
+  const [addendumErr, setAddendumErr] = useState<string | null>(null);
+  const [addendumRefresh, setAddendumRefresh] = useState(0);
 
   // Customer (tenant) — editable only before the contract is signed.
   const [tenantId, setTenantId] = useState('');
@@ -261,6 +267,26 @@ export default function EditContractPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [id]);
+
+  // Load any addendum currently attached to this contract.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    apiGet<{ id: number; name: string | null }[]>(`/contracts/${id}/addendums`)
+      .then((a) => { if (!cancelled) setAddendums(Array.isArray(a) ? a : []); })
+      .catch(() => { if (!cancelled) setAddendums([]); });
+    return () => { cancelled = true; };
+  }, [id, addendumRefresh]);
+
+  const attachAddendum = async () => {
+    setAddendumBusy(true); setAddendumErr(null);
+    try {
+      await apiPost(`/contracts/${id}/addendums/from-layout`);
+      setAddendumRefresh((n) => n + 1);
+    } catch (e) {
+      setAddendumErr(e instanceof Error ? e.message : 'Failed to attach addendum');
+    } finally { setAddendumBusy(false); }
+  };
 
   const applyStartDate = (v: string) => {
     setStartDate(v);
@@ -666,6 +692,39 @@ export default function EditContractPage() {
                   <label className={labelCls}>Notes</label>
                   <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls} />
                 </div>
+              </div>
+
+              {/* Agreement Addendum */}
+              <div className={cardCls}>
+                <h2 className="font-semibold text-sm text-[#1a1916]">Agreement Addendum</h2>
+                {addendums.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {addendums.map((a) => (
+                      <li key={a.id} className="flex items-center gap-2 rounded-lg bg-[#e6f7f1] border border-[#bfe9da] px-3 py-2 text-sm text-[#1a1916]">
+                        <Check size={14} className="shrink-0 text-[#2e9f82]" />
+                        <span className="flex-1">{a.name || 'Agreement Addendum'}</span>
+                        <span className="text-xs font-semibold text-[#2e9f82]">Attached</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (meta.status === 'terminated' || meta.status === 'expired') ? (
+                  <p className="text-sm text-[#6b6860]">No addendum attached.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    <p className="text-sm text-[#6b6860]">
+                      Attach this plan’s Agreement Addendum so it appears on the tenancy agreement. Works on issued and active contracts.
+                    </p>
+                    {addendumErr && (
+                      <div className="flex items-center gap-2 rounded-xl bg-[#fee2e2] px-4 py-2.5 text-sm text-[#b91c1c]">
+                        <Info className="h-4 w-4 shrink-0" /> {addendumErr}
+                      </div>
+                    )}
+                    <button type="button" onClick={attachAddendum} disabled={addendumBusy}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#e6f7f1] text-[#2e9f82] text-sm font-semibold px-4 py-2.5 hover:bg-[#d4f0e6] disabled:opacity-50">
+                      <Plus size={14} /> {addendumBusy ? 'Attaching…' : 'Attach Agreement Addendum'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {error && (

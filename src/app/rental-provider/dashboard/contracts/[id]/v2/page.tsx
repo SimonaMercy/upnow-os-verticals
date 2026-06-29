@@ -1607,6 +1607,37 @@ function DetailsDrawer({
     setClauseList(contract.customClauses ?? []);
     setClauseNotes(contract.notes ?? '');
   }, [contract.customClauses, contract.notes]);
+
+  // ── Agreement Addendum ── attach the unit's layout addendum onto an existing
+  //    contract. Unlike the draft-only file upload, this works on issued/active
+  //    leases (snapshots the plan's current Agreement Addendum onto the lease).
+  const [addendums, setAddendums] = useState<{ id: number; name: string | null }[]>([]);
+  const [addendumRefresh, setAddendumRefresh] = useState(0);
+  const [addendumBusy, setAddendumBusy] = useState(false);
+  const [addendumErr, setAddendumErr] = useState<string | null>(null);
+  useEffect(() => {
+    let ok = true;
+    fetch(`/api/contracts/${contract.id}/addendums`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : []))
+      .then((a) => { if (ok) setAddendums(Array.isArray(a) ? a : []); })
+      .catch(() => { if (ok) setAddendums([]); });
+    return () => { ok = false; };
+  }, [contract.id, addendumRefresh]);
+  const addendumEnded = contract.status === 'terminated' || contract.status === 'expired';
+  const onAttachLayoutAddendum = async () => {
+    setAddendumBusy(true); setAddendumErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/addendums/from-layout`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => null) as { message?: string } | null;
+        throw new Error(b?.message || `Error ${res.status}`);
+      }
+      setAddendumRefresh(n => n + 1);
+    } catch (e) {
+      setAddendumErr(e instanceof Error ? e.message : 'Failed to attach addendum');
+    } finally { setAddendumBusy(false); }
+  };
+
   const addClause = () => {
     const t = clauseInput.trim();
     if (t) { setClauseList(prev => [...prev, t]); setClauseInput(''); }
@@ -1729,8 +1760,12 @@ function DetailsDrawer({
   //    Replaces the old origin-lead "offer" snapshot in the receipt modal.
   //    Contract money is whole AED; the modal expects fils, so ×100. ──
   const toFils = (aed: number) => Math.round((aed || 0) * 100);
-  const depositForPlan = depositRow?.amount ?? contract.securityDeposit?.amount
-    ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0;
+  // Renewals carry the deposit from the original lease (read-only, never re-collected),
+  // so it must not appear as a new line/instalment in the renewal's payment plan.
+  const depositForPlan = contract.contractType === 'renewal'
+    ? 0
+    : (depositRow?.amount ?? contract.securityDeposit?.amount
+      ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0);
   let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commNet = 0, commVat = 0;
   const customFees: { label: string; netFils: number; vatFils: number }[] = [];
   for (const f of feeRows) {
@@ -2601,7 +2636,7 @@ function DetailsDrawer({
               { kind: 'link', key: 'offer',          label: 'Payment Plan', sub: 'Current payment plan', href: null },
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
               // One file → three receipts inside (Rental Income · Security Deposit · Management Fee).
-              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: 'Rental income, security deposit & management fee', href: receiptsReady ? receiptBase : null },
+              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: isRenewal ? 'Rental income & management fee' : 'Rental income, security deposit & management fee', href: receiptsReady ? receiptBase : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
               { kind: 'doc',  key: 'ejari_certificate', label: 'Ejari' },
             ];
@@ -2945,6 +2980,7 @@ function DetailsDrawer({
             );
           })()}
           {!inline && tab === 'clauses' && (
+            <>
             <div className="sec">
               <div className="sech"><span className="si"><ClipboardList size={16} /></span><span className="st">Clauses &amp; notes</span></div>
               <div className="secb">
@@ -3005,6 +3041,37 @@ function DetailsDrawer({
                 )}
               </div>
             </div>
+
+            <div className="sec">
+              <div className="sech"><span className="si"><FileText size={16} /></span><span className="st">Agreement Addendum</span></div>
+              <div className="secb">
+                {addendums.length > 0 ? (
+                  <>
+                    {addendums.map(a => (
+                      <div key={a.id} className="clause">
+                        <span className="ct" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <BadgeCheck size={14} style={{ color: 'var(--jade-deep)' }} /> {a.name || 'Agreement Addendum'}
+                        </span>
+                      </div>
+                    ))}
+                    <p className="note" style={{ marginTop: 8 }}>Attached — appears on the tenancy agreement.</p>
+                  </>
+                ) : addendumEnded ? (
+                  <p className="note">No addendum attached.</p>
+                ) : (
+                  <>
+                    <p className="note" style={{ marginBottom: 10 }}>
+                      No addendum is attached. Attach this plan’s Agreement Addendum so it shows on the tenancy agreement.
+                    </p>
+                    {addendumErr && <p className="note" style={{ color: 'var(--brick)' }}>{addendumErr}</p>}
+                    <button className="btn btn-jade btn-sm" disabled={addendumBusy} onClick={() => void onAttachLayoutAddendum()}>
+                      <Plus size={14} /> {addendumBusy ? 'Attaching…' : 'Attach Agreement Addendum'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            </>
           )}
 
           {/* ── Tenancy notes log ──────────────────────────────────────────────
@@ -3748,7 +3815,11 @@ function ContractPass({ contract, payments }: { contract: ContractDetail; paymen
   const rentVat = hasRentRows ? v(rentItems) : computedRentVat;
   const otherGross = g(otherItems);
   const feesGross = g(feeItems);
-  const deposit = rows.find(p => p.paymentType === 'security_deposit')?.amount ?? contract.securityDeposit?.amount ?? 0;
+  // Renewals carry the deposit from the original lease (read-only, never re-collected),
+  // so it must not appear as a payable line or inflate the headline Total payable here —
+  // mirrors the depositForPlan zeroing that feeds the "Payment Plan" modal. The legitimate
+  // "Security deposit held (refundable, not in rent total)" ledger footer keeps showing it.
+  const deposit = isRenewal ? 0 : (rows.find(p => p.paymentType === 'security_deposit')?.amount ?? contract.securityDeposit?.amount ?? 0);
   const totalVat = rentVat + v(otherItems) + v(feeItems);
   const totalPayable = rentGross + otherGross + feesGross + deposit;
   return (
@@ -3796,7 +3867,7 @@ function ContractPass({ contract, payments }: { contract: ContractDetail; paymen
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Rent{rentVat > 0 ? ' (incl. VAT)' : ''}</span><b style={{ color: 'var(--ink)' }}>{rentGross > 0 ? aed(rentGross) : '—'}</b></div>
             {otherGross > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Other charges</span><b style={{ color: 'var(--ink)' }}>{aed(otherGross)}</b></div>}
             {feesGross > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Fees (incl. VAT)</span><b style={{ color: 'var(--ink)' }}>{aed(feesGross)}</b></div>}
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Security deposit</span><b style={{ color: 'var(--ink)' }}>{deposit > 0 ? aed(deposit) : '—'}</b></div>
+            {!isRenewal && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Security deposit</span><b style={{ color: 'var(--ink)' }}>{deposit > 0 ? aed(deposit) : '—'}</b></div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderTop: '1px dashed var(--mist-strong)', paddingTop: 4, marginTop: 2 }}><span style={{ fontWeight: 700 }}>Total payable</span><b style={{ color: 'var(--jade-deep)', fontSize: 13 }}>{aed(totalPayable)}</b></div>
             {totalVat > 0 && <div style={{ fontSize: 9, color: 'var(--mute)', textAlign: 'right' }}>incl. {aed(totalVat)} VAT</div>}
           </div>
