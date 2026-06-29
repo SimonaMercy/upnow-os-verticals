@@ -291,7 +291,7 @@ export default function CustomerDetailPage() {
   const KYC_REQS: { key: string; label: string; category: string; required: boolean; match: (k: string) => boolean }[] = isCompany
     ? [
         { key: 'trade_license', label: 'Trade License', category: 'license', required: true, match: keyMatcher('trade_license') },
-        { key: 'moa', label: 'Memorandum of Association (MOA)', category: 'compliance', required: true, match: keyMatcher('moa') },
+        { key: 'moa', label: 'Memorandum of Association (MOA)', category: 'compliance', required: false, match: keyMatcher('moa') },
         { key: 'emirates_id', label: 'Authorised Signatory Emirates ID', category: 'identity', required: true, match: isEidKey },
         { key: 'passport', label: 'Passport', category: 'identity', required: false, match: keyMatcher('passport') },
         { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: k => /visa/.test(k) },

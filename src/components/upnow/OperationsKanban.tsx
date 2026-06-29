@@ -47,7 +47,7 @@ type ColKey = 'signatures' | 'kyc' | 'payment_plan' | 'pdc' | 'ejari' | 'utility
 interface ColDef { key: ColKey; title: string; hint: string; accent: string; soft: string; dot: string }
 const COLS: ColDef[] = [
   { key: 'signatures',   title: 'Signatures',        hint: 'Customer + landlord must sign on the contract page.', accent: '#9a4a44', soft: '#f7edea', dot: '#c0473a' },
-  { key: 'kyc',          title: 'KYC verification',  hint: 'Emirates ID + passport on file.',                     accent: '#4a5a8f', soft: '#eef0fa', dot: '#4a5a8f' },
+  { key: 'kyc',          title: 'KYC verification',  hint: 'Emirates ID on file.',                                accent: '#4a5a8f', soft: '#eef0fa', dot: '#4a5a8f' },
   { key: 'payment_plan', title: 'Payment plan',      hint: 'Cheque / rent schedule entered.',                     accent: '#a9791f', soft: '#fdf6ea', dot: '#e6a91e' },
   { key: 'pdc',          title: 'PDC',               hint: 'Post-dated cheques confirmed.',                       accent: '#3f6f8f', soft: '#e6f0f3', dot: '#3f6f8f' },
   { key: 'ejari',        title: 'Ejari',             hint: 'Tenancy registered with the certificate on file.',    accent: '#1a7a4f', soft: '#e7f3ec', dot: '#1a9a64' },

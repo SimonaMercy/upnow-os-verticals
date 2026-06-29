@@ -58,16 +58,17 @@ export const RESIDENTIAL_RENTAL_DOCS: DocReq[] = [
 
 /**
  * Commercial rental docs. The licensing pack (Trade License, Tax Registration
- * Certificate, MOA / MOM) is MANDATORY for any commercial lease — Ejari
- * registration of a commercial tenancy needs it, and it applies regardless of
- * whether the tenant is an individual or a company. Financial Statements /
- * Rental History / Previous Utility Closing were removed from the checklist
- * (Jun 2026); admin can still request them ad hoc via REQUESTABLE_DOCS.
+ * Certificate) is MANDATORY for any commercial lease — Ejari registration of a
+ * commercial tenancy needs it, and it applies regardless of whether the tenant
+ * is an individual or a company. MOA / MOM is OPTIONAL (collected when available
+ * but never a gate). Financial Statements / Rental History / Previous Utility
+ * Closing were removed from the checklist (Jun 2026); admin can still request
+ * them ad hoc via REQUESTABLE_DOCS.
  */
 export const COMMERCIAL_RENTAL_DOCS: DocReq[] = [
   { key: 'trade_license',     label: 'Trade License',                     category: 'license', required: true,  hint: 'Valid UAE trade license' },
   { key: 'tax_registration',  label: 'Tax Registration Certificate',      category: 'license', required: true,  hint: 'UAE VAT / tax registration certificate' },
-  { key: 'moa',               label: 'MOA / MOM',                         category: 'legal',   required: true,  hint: 'Memorandum of Association or Minutes of Meeting' },
+  { key: 'moa',               label: 'MOA / MOM',                         category: 'legal',   required: false, hint: 'Memorandum of Association or Minutes of Meeting (optional)' },
 ];
 
 /**
@@ -98,8 +99,9 @@ export const CONTRACT_DOCS: DocReq[] = [
 ];
 
 /** Keys that become REQUIRED for a company tenant on a commercial/industrial
- *  lease (the company's legal/licensing pack the Ejari registration needs). */
-const COMPANY_REQUIRED_KEYS = ['trade_license', 'moa', 'business_license'];
+ *  lease (the company's legal/licensing pack the Ejari registration needs).
+ *  MOA is intentionally excluded — it's collected when available but optional. */
+const COMPANY_REQUIRED_KEYS = ['trade_license', 'business_license'];
 
 export function getRentalSectionDocs(
   unitType: string | null | undefined,
