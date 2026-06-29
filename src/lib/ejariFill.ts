@@ -109,7 +109,10 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
   put('date', fmtDate(data.createdAt) || fmtDate(new Date().toISOString()));
   put('owner_name', landlordName); put('lessor_name', landlordName);
   put('lessor_id', lord.emiratesId); put('lessor_license', lord.licenseNumber); put('lessor_license_authority', lord.licenseAuthority);
-  put('lessor_email', lord.email); put('lessor_phone', lord.phone);
+  // Lessor's phone: when the RP acts under a Power of Attorney, the POA holder's
+  // phone is the lessor's contact on the official Ejari; otherwise the landlord's own.
+  const lessorPhone = lord.hasPoa && lord.poaPersonPhone ? lord.poaPersonPhone : lord.phone;
+  put('lessor_email', lord.email); put('lessor_phone', lessorPhone);
   put('tenant_name', tenantName); put('tenant_id', ten.emiratesId); put('tenant_license', ten.licenseNumber); put('tenant_license_authority', ten.licenseAuthority);
   put('tenant_email', ten.email); put('tenant_phone', ten.phone);
   put('plot_no', prop.plotNumber); put('makani_no', prop.makaniNumber);
