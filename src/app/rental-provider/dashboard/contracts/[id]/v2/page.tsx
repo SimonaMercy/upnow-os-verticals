@@ -1724,6 +1724,61 @@ function DetailsDrawer({
   const rentVat   = rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
+  // ── Current payment plan (live) — what the customer is actually paying NOW,
+  //    assembled from the contract's recorded rent cheques, fees, and deposit.
+  //    Replaces the old origin-lead "offer" snapshot in the receipt modal.
+  //    Contract money is whole AED; the modal expects fils, so ×100. ──
+  const toFils = (aed: number) => Math.round((aed || 0) * 100);
+  const depositForPlan = depositRow?.amount ?? contract.securityDeposit?.amount
+    ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0;
+  let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commNet = 0, commVat = 0;
+  const customFees: { label: string; netFils: number; vatFils: number }[] = [];
+  for (const f of feeRows) {
+    const vat = f.vatAmount ?? 0;
+    const net = (f.amount ?? 0) - vat;
+    if (f.paymentType === 'admin_fee') { adminNet += net; adminVat += vat; }
+    else if (f.paymentType === 'ejari_fee') { ejariNet += net; ejariVat += vat; }
+    else if (f.paymentType === 'commission') { commNet += net; commVat += vat; }
+    else customFees.push({ label: f.description || feeLabel(f.paymentType), netFils: toFils(net), vatFils: toFils(vat) });
+  }
+  const currentPlanItems: OfferPlan['items'] = [
+    ...rentRows.map(p => ({
+      amountFils: toFils(p.amount), vatFils: toFils(p.vatAmount ?? 0),
+      dueDate: p.transactionDate ?? '', description: p.description ?? 'Rent',
+      type: 'installment' as const,
+    })),
+    ...feeRows.map(f => ({
+      amountFils: toFils(f.amount), vatFils: toFils(f.vatAmount ?? 0),
+      dueDate: f.transactionDate ?? '', description: f.description || feeLabel(f.paymentType),
+      type: 'fee' as const,
+    })),
+    ...(depositForPlan > 0 ? [{
+      amountFils: toFils(depositForPlan), vatFils: 0,
+      dueDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? '',
+      description: 'Security deposit', type: 'security_deposit' as const,
+    }] : []),
+  ].map((it, i) => ({ ...it, index: i + 1 }));
+  // Headline rent = the contract's agreed current rent (annualRent is NET), so it
+  // stays correct even before every cheque is recorded; the schedule below still
+  // reflects the actual recorded cheques. VAT from the rate (commercial/industrial).
+  const planRentNet = contract.annualRent || 0;
+  const planRentVat = Math.round((planRentNet * (contract.rentVatRate ?? 0))) / 100;
+  const currentPlan: OfferPlan = {
+    totalAmountFils: toFils(planRentNet + planRentVat + feeGross + depositForPlan),
+    rentFils: toFils(planRentNet),
+    ...((contract.discountAmount ?? 0) > 0 && contract.listedRent != null
+      ? { originalRentFils: toFils(contract.listedRent), discountFils: toFils(contract.discountAmount!) }
+      : {}),
+    installmentCount: rentRows.length || (contract.numberOfInstallments ?? 0),
+    adminFeeFils: toFils(adminNet), adminFeeVatFils: toFils(adminVat),
+    ejariFils: toFils(ejariNet), ejariVatFils: toFils(ejariVat),
+    commissionFils: toFils(commNet), commissionVatFils: toFils(commVat),
+    securityDepositFils: toFils(depositForPlan),
+    rentVatRate: contract.rentVatRate ?? 0,
+    rentVatFils: toFils(planRentVat),
+    customFees,
+    items: currentPlanItems,
+  };
   // ── Upload document state (Flow 5) ──
   const docFileRef = useRef<HTMLInputElement>(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -2543,7 +2598,7 @@ function DetailsDrawer({
             const moveOutShown = contract.status === 'terminated' || contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
             const receiptsReady = contract.pdcConfirmed || contract.status === 'active' || contract.contractActive;
             const binderSeq: BinderSlot[] = [
-              { kind: 'link', key: 'offer',          label: 'Offer Receipt', sub: 'Offered during the lead phase', href: null },
+              { kind: 'link', key: 'offer',          label: 'Payment Plan', sub: 'Current payment plan', href: null },
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
               // One file → three receipts inside (Rental Income · Security Deposit · Management Fee).
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: 'Rental income, security deposit & management fee', href: receiptsReady ? receiptBase : null },
@@ -2560,8 +2615,8 @@ function DetailsDrawer({
               binderSeq.push({ kind: 'doc',  key: 'utility_final_bill', label: 'Utility Final Bill' });
               binderSeq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', fallbackHref: `${contractBase}/settlement`, fallbackSub: 'Security deposit settlement' });
             }
-            // Offer Receipt opens an in-app modal showing the offered plan
-            // (origin lead's plan), not an external link.
+            // Payment Plan opens an in-app modal showing the contract's CURRENT
+            // live plan (recorded rent cheques + fees + deposit), not an external link.
             const renderOfferSlot = (s: Extract<BinderSlot, { kind: 'link' }>) => (
               <div key={s.key} className="docitem approved">
                 <FileText size={14} />
@@ -2570,7 +2625,7 @@ function DetailsDrawer({
                   <div className="ds">{s.sub}</div>
                 </div>
                 <div className="dacts">
-                  {contract.offerPlan
+                  {currentPlan.totalAmountFils > 0
                     ? <button type="button" className="mini-btn view cursor-pointer" onClick={() => setShowOffer(true)}><ExternalLink size={12} /> View</button>
                     : <span className="ds" style={{ color: '#b8b5ae' }}>Not yet available</span>}
                 </div>
@@ -2789,11 +2844,13 @@ function DetailsDrawer({
                   onClose={() => setShowContractDocs(false)}
                 />
               )}
-              {/* Offer Receipt — the offered plan from the origin lead. */}
-              {showOffer && contract.offerPlan && (
+              {/* Payment Plan — the contract's current live plan. */}
+              {showOffer && (
                 <OfferReceiptModal
-                  plan={contract.offerPlan}
+                  plan={currentPlan}
                   contractRef={contract.ref}
+                  title="Payment Plan"
+                  subtitle="Current payment plan"
                   onClose={() => setShowOffer(false)}
                 />
               )}

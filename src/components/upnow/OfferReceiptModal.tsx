@@ -2,8 +2,9 @@
 
 import { X } from 'lucide-react';
 
-/** The offered payment plan (lead.payment_plan) surfaced on the contract via
- *  origin_lead_id. Money is in fils. */
+/** A payment-plan breakdown (cost lines + cheque schedule) rendered in a modal.
+ *  Originally the origin-lead offer snapshot; now also used for the contract's
+ *  CURRENT live plan (rent cheques + fees + deposit). Money is in fils. */
 export interface OfferPlanItem {
   index: number;
   amountFils: number;
@@ -43,7 +44,9 @@ const TYPE_LABEL: Record<string, string> = {
 
 export default function OfferReceiptModal({
   plan, contractRef, onClose,
-}: { plan: OfferPlan; contractRef?: string | null; onClose: () => void }) {
+  title = 'Payment Plan',
+  subtitle = 'Current payment plan',
+}: { plan: OfferPlan; contractRef?: string | null; onClose: () => void; title?: string; subtitle?: string }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
   ];
@@ -61,9 +64,9 @@ export default function OfferReceiptModal({
       <div style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '16px 18px', borderBottom: '1px solid #ece9e3' }}>
           <div>
-            <p style={{ fontSize: 15, fontWeight: 800, color: '#1a1916', margin: 0 }}>Offer Receipt</p>
+            <p style={{ fontSize: 15, fontWeight: 800, color: '#1a1916', margin: 0 }}>{title}</p>
             <p style={{ fontSize: 12, color: '#9b9890', margin: '2px 0 0' }}>
-              What was offered during the lead phase{contractRef ? ` · ${contractRef}` : ''}{plan.issuedAt ? ` · ${fmtD(plan.issuedAt)}` : ''}
+              {subtitle}{contractRef ? ` · ${contractRef}` : ''}{plan.issuedAt ? ` · ${fmtD(plan.issuedAt)}` : ''}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#9b9890', padding: 4 }}><X size={18} /></button>
