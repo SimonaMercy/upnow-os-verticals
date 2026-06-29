@@ -1,0 +1,103 @@
+'use client';
+
+/**
+ * Renders a filled Ejari PDF (raw bytes from `fillEjariPdf`) onto a stack of
+ * <canvas> elements with pdf.js.
+ *
+ * Why not an <iframe> like before: mobile browsers (iOS Safari, all WebKit
+ * browsers on iOS, Android Chrome) have no built-in inline PDF viewer, so an
+ * <iframe src="blob:…pdf"> renders BLANK on phones — which is exactly why the
+ * portal contract preview wasn't showing. Canvas rasterisation is plain 2D
+ * drawing and works identically on every browser. No cross-origin fetch here
+ * either (we already hold the bytes), so there's no CORS dependency.
+ *
+ * Scale is fit-to-width and retina-sharp, but clamped under iOS's canvas limits
+ * (~4096 px per side / ~16.7M px total) — exceed them and the page silently
+ * comes back blank on a phone.
+ */
+import { useEffect, useRef, useState } from 'react';
+import * as pdfjs from 'pdfjs-dist';
+
+// Bundled worker (Next/webpack emits it from the installed package, so its
+// version always matches the API — no CDN, no version skew). Same pattern as
+// the customer-document viewer (SecureDocCanvas).
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
+
+const MAX_W = 1500;          // fit-to-width backing-store cap (legibility vs memory)
+const MAX_SIDE = 4096;       // iOS per-side canvas limit
+const MAX_AREA = 16_000_000; // iOS total canvas-area limit (~16.7M px)
+
+type Status = 'loading' | 'ready' | 'error';
+
+export default function EjariCanvas({ bytes, height = 640 }: {
+  bytes: Uint8Array | null;
+  height?: number;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<Status>('loading');
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.replaceChildren();      // clear any prior render (incl. when bytes reset to null)
+    if (!bytes) return;          // nothing to draw until the filled PDF arrives
+
+    let cancelled = false;
+
+    (async () => {
+      // setStatus lives inside the async callback (not the effect body) so it
+      // doesn't trigger cascading renders — react-hooks/set-state-in-effect.
+      setStatus('loading');
+      // pdf.js may transfer (detach) the buffer to its worker — hand it a copy
+      // so the hook's `bytes` stay valid (the download link reuses them).
+      const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      for (let n = 1; n <= pdf.numPages; n++) {
+        if (cancelled) return;
+        const page = await pdf.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        let scale = Math.min(2, MAX_W / base.width) * dpr;
+        // Clamp under iOS canvas limits so the page never renders blank on a phone.
+        scale = Math.min(
+          scale,
+          MAX_SIDE / base.width,
+          MAX_SIDE / base.height,
+          Math.sqrt(MAX_AREA / (base.width * base.height)),
+        );
+        const vp = page.getViewport({ scale });
+        const c = document.createElement('canvas');
+        c.width = Math.ceil(vp.width);
+        c.height = Math.ceil(vp.height);
+        // Backing store is hi-dpi; CSS scales it down to container width → crisp.
+        c.className = 'block w-full h-auto';
+        c.style.maxWidth = '100%';
+        if (n > 1) c.style.marginTop = '8px';
+        host.appendChild(c);
+        await page.render({ canvasContext: c.getContext('2d')!, viewport: vp }).promise;
+      }
+      if (!cancelled) setStatus('ready');
+    })().catch((err) => {
+      if (cancelled) return;
+      console.warn('[ejari] canvas render failed', err);
+      setStatus('error');
+    });
+
+    return () => { cancelled = true; };
+  }, [bytes]);
+
+  const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
+  return (
+    <div style={{ ...frame, maxHeight: height, overflow: 'auto', background: '#fff' }}>
+      <div ref={hostRef} />
+      {status === 'loading' && (
+        <div style={{ height, display: 'grid', placeItems: 'center', color: '#888', fontSize: 13 }}>Preparing contract…</div>
+      )}
+      {status === 'error' && (
+        <div style={{ height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Preview unavailable.</div>
+      )}
+    </div>
+  );
+}

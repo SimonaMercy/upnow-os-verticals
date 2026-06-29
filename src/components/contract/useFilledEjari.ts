@@ -11,6 +11,11 @@ import type { EjariContractData, EjariAddendum } from './EjariContractPdf';
  */
 export function useFilledEjari(data: EjariContractData, addendums: EjariAddendum[]) {
   const [url, setUrl] = useState<string | null>(null);
+  // Raw bytes are exposed alongside the object-URL so a canvas renderer (pdf.js)
+  // can rasterise the PDF directly — mobile browsers don't render PDFs in an
+  // <iframe>, so the blob URL alone is blank on phones. Constructing the Blob
+  // copies the data, so `bytes` stays a valid, independent buffer.
+  const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Stable dependency key — avoids refetch loops when parents pass fresh objects.
   const key = `${data.ref}|${(data.signatures || []).map(s => `${s.role}:${s.signedAt}`).join(',')}|${addendums.map(a => a.id).join(',')}`;
@@ -18,17 +23,23 @@ export function useFilledEjari(data: EjariContractData, addendums: EjariAddendum
   useEffect(() => {
     let cancelled = false;
     let objUrl: string | null = null;
-    setUrl(null); setError(null);
-    fillEjariPdf(data, addendums)
-      .then(bytes => {
+    // Reset + fill inside an async callback (not synchronously in the effect
+    // body) to avoid react-hooks/set-state-in-effect cascading renders.
+    (async () => {
+      setUrl(null); setBytes(null); setError(null);
+      try {
+        const b = await fillEjariPdf(data, addendums);
         if (cancelled) return;
-        objUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }));
+        objUrl = URL.createObjectURL(new Blob([b as unknown as BlobPart], { type: 'application/pdf' }));
         setUrl(objUrl);
-      })
-      .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to render contract'); });
+        setBytes(b);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to render contract');
+      }
+    })();
     return () => { cancelled = true; if (objUrl) URL.revokeObjectURL(objUrl); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  return { url, error };
+  return { url, bytes, error };
 }
