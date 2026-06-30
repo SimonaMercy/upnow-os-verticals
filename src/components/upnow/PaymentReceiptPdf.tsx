@@ -35,20 +35,14 @@ import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 
 // Roboto — clean modern sans for the whole document (no Bold ttf shipped, so map
-// bold → Medium). Arabic falls back to Noto Naskh.
+// bold → Medium). Receipts are English-only — no Arabic font dependency (avoids the
+// NotoNaskh fetch + textkit ligature path that can fail PDF generation in prod).
 Font.register({
   family: 'Roboto',
   fonts: [
     { src: '/fonts/Roboto-Regular.ttf', fontWeight: 400 },
     { src: '/fonts/Roboto-Medium.ttf', fontWeight: 500 },
     { src: '/fonts/Roboto-Medium.ttf', fontWeight: 700 },
-  ],
-});
-Font.register({
-  family: 'NotoAr',
-  fonts: [
-    { src: '/fonts/NotoNaskhArabic-Regular.ttf' },
-    { src: '/fonts/NotoNaskhArabic-Bold.ttf', fontWeight: 700 },
   ],
 });
 Font.registerHyphenationCallback((w) => [w]);
@@ -63,7 +57,6 @@ const MUTE = '#9b9890';       // --mute (warm gray) — labels
 const LINE = '#e8e6e0';       // --mist-strong — borders
 const TINT = '#d8f2e8';       // --color-primary-light — total card bg
 const NAVY = INK; // keep references working
-const AR = 'NotoAr';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -206,7 +199,6 @@ interface LineItem { desc: string; net: number; vat: number; total: number; }
 interface Receipt {
   kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management';
   title: string;
-  titleAr: string;
   receiptNo: string;
   date: string | null;
   lines: LineItem[];
@@ -221,13 +213,13 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   const net = Math.max(0, gross - vat);
 
   if (type === 'security_deposit') {
-    return { kind: 'deposit', title: 'SECURITY DEPOSIT RECEIPT', titleAr: 'إيصال استلام التأمين',
+    return { kind: 'deposit', title: 'SECURITY DEPOSIT RECEIPT',
       receiptNo: `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
       lines: [{ desc: 'Refundable Security Deposit', net: gross, vat: 0, total: gross }] };
   }
   if (isFee(sel)) {
     const code = type === 'ejari_fee' ? 'EJR' : type === 'commission' ? 'COM' : 'ADM';
-    return { kind: 'fee', title: 'FEE RECEIPT', titleAr: 'إيصال رسوم',
+    return { kind: 'fee', title: 'FEE RECEIPT',
       receiptNo: `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross }] };
   }
@@ -250,7 +242,7 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     lines.push({ desc: `Rent — Instalment ${ordinal} of ${n}`, net, vat, total: gross });
   }
 
-  return { kind: 'rent', title: 'RENT RECEIPT', titleAr: 'إيصال إيجار',
+  return { kind: 'rent', title: 'RENT RECEIPT',
     receiptNo: `RCP-${contract.ref}-${String(ordinal).padStart(2, '0')}`, date: sel.transactionDate, single: sel, lines };
 }
 
@@ -311,7 +303,7 @@ function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]
     if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
     return { desc: `Rent — Instalment ${i + 1} of ${n}`, net, vat, total: round2(net + vat) };
   });
-  return { kind: 'rental', title: 'RENT INCOME RECEIPT', titleAr: 'إيصال إيجار',
+  return { kind: 'rental', title: 'RENT INCOME RECEIPT',
     receiptNo: `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: rentals.length };
 }
@@ -322,7 +314,7 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
   const { lines, feeCount } = feeLinesOf(contract, rentRows);
   if (lines.length === 0) return null;
   const feeRows = (contract.fees ?? []).filter(isFee);
-  return { kind: 'management', title: 'MANAGEMENT FEE RECEIPT', titleAr: 'إيصال رسوم الإدارة',
+  return { kind: 'management', title: 'MANAGEMENT FEE RECEIPT',
     receiptNo: `RCP-${contract.ref}-MGMT`,
     date: feeRows[0]?.transactionDate ?? rentRows[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: feeCount || lines.length };
@@ -346,7 +338,7 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   const lines: LineItem[] = [...feeLines,
     { desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) }];
 
-  return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT', titleAr: 'إيصال دفعات العقد',
+  return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT',
     receiptNo: `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
     lines, scheduleCount: rentRows.length + feeCount };
 }
@@ -464,17 +456,17 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const grandTotal = round2(receipt.lines.reduce((s, l) => s + l.total, 0));
   const showVat = totalVat > 0;
   const single = receipt.single;
-  const landlordName = contract.landlord.companyName || contract.landlord.name || '';
-  const propertyDesc = [contract.property.buildingName, contract.unit.number || contract.unit.name, contract.property.community || contract.property.emirate].filter(Boolean).join(', ');
+  const landlordName = contract.landlord?.companyName || contract.landlord?.name || '';
+  const propertyDesc = [contract.property?.buildingName, contract.unit?.number || contract.unit?.name, contract.property?.community || contract.property?.emirate].filter(Boolean).join(', ');
 
   const heroStatus = single
     ? statusLabel(single.chequeStatus, contract.pdcConfirmed)
     : 'Receipt';
   const issuerLines = [
-    (contract.landlord.licenseNumber || contract.landlord.licenseAuthority)
-      ? `Licence ${contract.landlord.licenseNumber || '—'}${contract.landlord.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
-    contract.landlord.phone ? `Tel ${contract.landlord.phone}` : null,
-    contract.landlord.email,
+    (contract.landlord?.licenseNumber || contract.landlord?.licenseAuthority)
+      ? `Licence ${contract.landlord?.licenseNumber || '—'}${contract.landlord?.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
+    contract.landlord?.phone ? `Tel ${contract.landlord.phone}` : null,
+    contract.landlord?.email,
   ].filter(Boolean) as string[];
 
   return (
@@ -487,8 +479,7 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
             {issuerLines.map((l, i) => <Text key={i} style={{ fontSize: 7.5, color: HEADER_SUB, marginTop: 2 }}>{l}</Text>)}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2 }}>{receipt.title}</Text>
-            <Text style={{ fontSize: 9, color: HEADER_SUB, fontFamily: AR, marginBottom: 9 }}>{receipt.titleAr}</Text>
+            <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2, marginBottom: 9 }}>{receipt.title}</Text>
             <View style={{ flexDirection: 'row', marginBottom: 2 }}>
               <Text style={{ fontSize: 7, color: HEADER_SUB, letterSpacing: 0.5, marginRight: 6 }}>RECEIPT NO.</Text>
               <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{receipt.receiptNo}</Text>
@@ -515,9 +506,9 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
         <View style={{ paddingHorizontal: PAD, paddingTop: 18, flexDirection: 'row' }}>
           <View style={{ flex: 1, paddingRight: 14 }}>
             <Text style={st.metaLbl}>Billed To</Text>
-            <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{contract.tenant.name || '—'}</Text>
-            {contract.tenant.emiratesId ? <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>Emirates ID {contract.tenant.emiratesId}</Text> : null}
-            {contract.tenant.phone ? <Text style={{ fontSize: 8, color: MUTE }}>{contract.tenant.phone}</Text> : null}
+            <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{contract.tenant?.name || '—'}</Text>
+            {contract.tenant?.emiratesId ? <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>Emirates ID {contract.tenant.emiratesId}</Text> : null}
+            {contract.tenant?.phone ? <Text style={{ fontSize: 8, color: MUTE }}>{contract.tenant.phone}</Text> : null}
           </View>
           <View style={{ flex: 1.25 }}>
             <Text style={st.metaLbl}>Property</Text>
@@ -580,7 +571,6 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
         <View style={{ paddingHorizontal: PAD, paddingTop: 14 }}>
           <View style={{ borderTopWidth: 1, borderTopColor: LINE, paddingTop: 12, alignItems: 'center' }}>
             <Text style={{ fontSize: 8.5, color: INK, fontWeight: 500 }}>This is a system-generated receipt — valid without a signature or stamp.</Text>
-            <Text style={{ fontSize: 8, color: MUTE, fontFamily: AR, marginTop: 3 }}>هذا إيصال صادر آليًا عن النظام، وهو صالح بدون توقيع أو ختم.</Text>
             <Text style={{ fontSize: 7.5, color: MUTE, marginTop: 5 }}>Please retain this receipt against tenancy contract {contract.ref} for your records.</Text>
           </View>
         </View>

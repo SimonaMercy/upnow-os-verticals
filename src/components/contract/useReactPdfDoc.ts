@@ -44,6 +44,10 @@ export function useReactPdfDoc(
         setBytes(buf);
         setUrl(objUrl);
       } catch (e) {
+        // Surface the real cause — this string is otherwise collapsed into a generic
+        // "unavailable" fallback in the UI, which makes prod-only failures impossible
+        // to diagnose. Logs the actual throw (missing relation, font/textkit, etc.).
+        console.error('[useReactPdfDoc] PDF generation failed:', e);
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to render PDF');
       }
     })();
