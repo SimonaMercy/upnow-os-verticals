@@ -71,3 +71,99 @@
     display: none;
   }
 }
+
+/* ── Payment-plan installment schedule ───────────────────────────────────────
+ * Desktop: a table-like single row per installment (# · Description · Due ·
+ *   Status · Amount).
+ * Mobile (≤768px): the old 5-column <table> overflowed and squashed on phones
+ *   (Safari worst), so each installment becomes a two-line card —
+ *     [#]  Description …………………… Amount
+ *     [#]  Due date ………………………… Status
+ *   which fits a ~340px screen cleanly. Grid-areas (not a reflowing table) keep
+ *   Safari happy. */
+.sched {
+  font-variant-numeric: tabular-nums;
+}
+
+.schedRow {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto auto;
+  grid-template-areas: 'num desc due status amt';
+  align-items: center;
+  column-gap: 8px;
+  padding: 7px 8px;
+  border-top: 1px solid #f2efe9;
+  font-size: 12.5px;
+}
+
+.schedHead {
+  border-top: 0;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid #ece9e3;
+}
+.schedHead span {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9b9890;
+}
+
+/* Cell placement + alignment (visual colour/weight stays inline on the spans). */
+.cNum    { grid-area: num;    text-align: center; }
+.cDesc   { grid-area: desc;   min-width: 0; }
+.cDue    { grid-area: due;    white-space: nowrap; }
+.cStatus { grid-area: status; text-align: center; white-space: nowrap; }
+.cAmt    { grid-area: amt;    text-align: right;  white-space: nowrap; }
+
+.schedBadge {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #eaf5f0;
+  color: #1f6f54;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.schedTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 8px 2px;
+  border-top: 2px solid #c5e8df;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #6b6860;
+}
+.schedTotalAmt {
+  font-weight: 800;
+  color: #15803d;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+  .schedHead {
+    display: none;
+  }
+  .schedRow {
+    grid-template-columns: 26px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'num desc amt'
+      'num due  status';
+    align-items: center;
+    row-gap: 3px;
+    column-gap: 10px;
+    padding: 9px 6px;
+  }
+  /* Second line sits under its first-line neighbour: due under description,
+     status under the amount (right-aligned). */
+  .cStatus {
+    text-align: right;
+  }
+}
+

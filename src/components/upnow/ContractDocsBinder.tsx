@@ -94,8 +94,6 @@ const idLabel = (d: BinderDoc) =>
 
 const cardCss: React.CSSProperties = { border: '1px solid #e3e0d9', borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: '#fff' };
 const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontWeight: 700, color: '#1a1916', background: '#faf9f7', borderBottom: '1px solid #efece6' };
-const schTh: React.CSSProperties = { textAlign: 'left', fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#9b9890', padding: '0 8px 6px', borderBottom: '1px solid #ece9e3' };
-const schTd: React.CSSProperties = { padding: '7px 8px', borderTop: '1px solid #f2efe9', verticalAlign: 'middle' };
 const chip: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: '#4a4742', cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto', lineHeight: 1.3 };
 const JUMP_OFFSET = 88;
 
@@ -175,38 +173,33 @@ function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: 
       {items.length > 0 && (
         <div style={{ borderTop: '1px solid #efece6', padding: '10px 14px 12px' }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', margin: '2px 0 8px' }}>Schedule · {plan.installmentCount} installment{plan.installmentCount === 1 ? '' : 's'}</div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>
-            <thead>
-              <tr style={{ color: '#9b9890' }}>
-                <th style={{ ...schTh, width: 30, textAlign: 'center' }}>#</th>
-                <th style={schTh}>Description</th>
-                <th style={{ ...schTh, whiteSpace: 'nowrap' }}>Due date</th>
-                <th style={{ ...schTh, textAlign: 'center' }}>Status</th>
-                <th style={{ ...schTh, textAlign: 'right' }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it, i) => (
-                <tr key={it.index ?? i} style={{ background: i % 2 ? '#faf9f6' : '#fff' }}>
-                  <td style={{ ...schTd, textAlign: 'center' }}>
-                    <span style={{ display: 'inline-grid', placeItems: 'center', width: 20, height: 20, borderRadius: 6, background: '#eaf5f0', color: '#1f6f54', fontSize: 11, fontWeight: 700 }}>{i + 1}</span>
-                  </td>
-                  <td style={{ ...schTd, color: '#1a1916' }}>{it.description ?? `Payment ${i + 1}`}</td>
-                  <td style={{ ...schTd, color: '#6b6860', whiteSpace: 'nowrap' }}>{fmtD(it.dueDate)}</td>
-                  <td style={{ ...schTd, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                    {(() => { const st = planStatus(it.status); return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.fg }}>{st.label}</span>; })()}
-                  </td>
-                  <td style={{ ...schTd, textAlign: 'right', fontWeight: 700, color: '#1a1916', whiteSpace: 'nowrap' }}>{aed(it.amountFils)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={4} style={{ ...schTd, borderTop: '2px solid #c5e8df', textAlign: 'right', fontWeight: 700, color: '#6b6860' }}>Schedule total</td>
-                <td style={{ ...schTd, borderTop: '2px solid #c5e8df', textAlign: 'right', fontWeight: 800, color: '#15803d', whiteSpace: 'nowrap' }}>{aed(items.reduce((s, it) => s + (it.amountFils ?? 0), 0))}</td>
-              </tr>
-            </tfoot>
-          </table>
+          {/* Grid (not a <table>): a row per installment on desktop, a two-line
+              card per installment on mobile — see ContractDocsBinder.module.css. */}
+          <div className={ds.sched}>
+            <div className={`${ds.schedRow} ${ds.schedHead}`}>
+              <span className={ds.cNum}>#</span>
+              <span className={ds.cDesc}>Description</span>
+              <span className={ds.cDue}>Due date</span>
+              <span className={ds.cStatus}>Status</span>
+              <span className={ds.cAmt}>Amount</span>
+            </div>
+            {items.map((it, i) => {
+              const st = planStatus(it.status);
+              return (
+                <div key={it.index ?? i} className={ds.schedRow} style={{ background: i % 2 ? '#faf9f6' : '#fff' }}>
+                  <span className={ds.cNum}><span className={ds.schedBadge}>{i + 1}</span></span>
+                  <span className={ds.cDesc} style={{ color: '#1a1916' }}>{it.description ?? `Payment ${i + 1}`}</span>
+                  <span className={ds.cDue} style={{ color: '#6b6860' }}>{fmtD(it.dueDate)}</span>
+                  <span className={ds.cStatus}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.fg, whiteSpace: 'nowrap' }}>{st.label}</span></span>
+                  <span className={ds.cAmt} style={{ fontWeight: 700, color: '#1a1916' }}>{aed(it.amountFils)}</span>
+                </div>
+              );
+            })}
+            <div className={ds.schedTotal}>
+              <span>Schedule total</span>
+              <span className={ds.schedTotalAmt}>{aed(items.reduce((s, it) => s + (it.amountFils ?? 0), 0))}</span>
+            </div>
+          </div>
         </div>
       )}
     </div>
