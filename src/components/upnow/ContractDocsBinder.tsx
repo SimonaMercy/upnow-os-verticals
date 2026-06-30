@@ -105,6 +105,16 @@ const PLAN_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
 };
 const planStatus = (s?: string | null) => PLAN_STATUS[(s ?? '').toLowerCase()] ?? { label: 'Pending', bg: '#fff7ed', fg: '#c2410c' };
 
+function PlanMeta({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1916' }}>{value}</div>
+    </div>
+  );
+}
+
 function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: { plan: OfferPlan; unitNumber?: string | null; buildingName?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
@@ -119,10 +129,10 @@ function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: 
     <div style={cardCss}>
       <div style={capCss}>Payment plan · current rent, fees &amp; deposit</div>
       {(buildingName || unitNumber || periodStart) && (
-        <div style={{ padding: '9px 14px 0', fontSize: 12, color: '#6b6860', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'baseline' }}>
-          {buildingName ? <span style={{ fontWeight: 700, color: '#1a1916' }}>{buildingName}</span> : null}
-          {unitNumber ? <span>· Unit {unitNumber}</span> : null}
-          {periodStart ? <span>· {fmtD(periodStart)} – {fmtD(periodEnd)}</span> : null}
+        <div style={{ padding: '11px 14px 2px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px' }}>
+          <PlanMeta label="Building" value={buildingName} />
+          <PlanMeta label="Unit" value={unitNumber} />
+          <PlanMeta label="Contract period" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
         </div>
       )}
       <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
