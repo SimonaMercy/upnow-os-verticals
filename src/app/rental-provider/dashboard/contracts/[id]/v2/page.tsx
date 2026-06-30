@@ -1691,7 +1691,7 @@ function DetailsDrawer({
     { value: 'ejari_fee', label: 'Ejari fee' },
     { value: 'commission', label: 'Commission' },
   ];
-  const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '' };
+  const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '', paymentMethod: 'cheque', chequeNumber: '' };
   const [showAddFee, setShowAddFee] = useState(false);
   const [feeAdd, setFeeAdd] = useState(emptyFeeForm);
   const [feeAddBusy, setFeeAddBusy] = useState(false);
@@ -1713,7 +1713,8 @@ function DetailsDrawer({
         vatAmount: vat,
         description: feeAdd.description.trim() || feeLabel(feeAdd.paymentType),
         transactionDate: feeAdd.transactionDate || undefined,
-        paymentMethod: 'cheque',
+        paymentMethod: feeAdd.paymentMethod,
+        chequeNumber: feeAdd.chequeNumber.trim() || undefined,
         chequeStatus: 'pending',
       });
       setFeeAdd(emptyFeeForm); setShowAddFee(false);
@@ -1729,6 +1730,8 @@ function DetailsDrawer({
       vatAmount: vat ? String(vat) : '',
       transactionDate: f.transactionDate ? f.transactionDate.slice(0, 10) : '',
       description: f.description ?? '',
+      paymentMethod: f.paymentMethod ?? 'cheque',
+      chequeNumber: f.chequeNumber ?? '',
     });
   };
   const saveFeeEdit = async (paymentId: number) => {
@@ -1742,6 +1745,8 @@ function DetailsDrawer({
         vatAmount: vat,
         description: feeEdit.description.trim() || null,
         transactionDate: feeEdit.transactionDate || null,
+        paymentMethod: feeEdit.paymentMethod,
+        chequeNumber: feeEdit.chequeNumber.trim() || null,
       });
       setFeeEditId(null);
     } catch (e) { setFeeEditErr(e instanceof Error ? e.message : 'Failed to save changes'); }
@@ -2344,7 +2349,7 @@ function DetailsDrawer({
                       )}
                     </div>
                     <table className="ptable">
-                      <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Due date</th><th>Status</th><th></th></tr></thead>
+                      <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                       <tbody>
                         {feeRows.map(f => (
                           <Fragment key={f.id}>
@@ -2355,57 +2360,59 @@ function DetailsDrawer({
                               {fmtAed(f.amount)}
                               {f.vatAmount ? <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(f.vatAmount)} VAT</span> : null}
                             </td>
+                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{f.chequeNumber ?? '—'}</td>
+                            <td>{f.paymentMethod ? fmtMethod(f.paymentMethod) : '—'}</td>
                             <td>{fmtDate(f.transactionDate)}</td>
                             <td>
-                              {perms.collections ? (
-                                <select
-                                  className={'cstat ' + (f.chequeStatus ?? 'pending')}
-                                  style={{ cursor: 'pointer' }}
-                                  value={f.chequeStatus ?? 'pending'}
-                                  disabled={statusBusy === f.id}
-                                  onChange={e => void changeStatus(f.id, e.target.value)}
-                                >
-                                  <option value="pending">Pending</option>
-                                  <option value="cleared">Cleared</option>
-                                  <option value="bounced">Bounced</option>
-                                  <option value="cancelled">Cancelled</option>
-                                </select>
-                              ) : (
-                                <span className={'cstat ' + (f.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
-                                  {f.chequeStatus ?? 'pending'}
-                                </span>
-                              )}
-                            </td>
-                            <td>
-                              {perms.collections && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  {f.chequeStatus !== 'cleared' && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                {perms.collections ? (
+                                  <select
+                                    className={'cstat ' + (f.chequeStatus ?? 'pending')}
+                                    style={{ cursor: 'pointer' }}
+                                    value={f.chequeStatus ?? 'pending'}
+                                    disabled={statusBusy === f.id}
+                                    onChange={e => void changeStatus(f.id, e.target.value)}
+                                  >
+                                    <option value="pending">Pending</option>
+                                    <option value="cleared">Cleared</option>
+                                    <option value="bounced">Bounced</option>
+                                    <option value="cancelled">Cancelled</option>
+                                  </select>
+                                ) : (
+                                  <span className={'cstat ' + (f.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
+                                    {f.chequeStatus ?? 'pending'}
+                                  </span>
+                                )}
+                                {perms.collections && (
+                                  <>
+                                    {f.chequeStatus !== 'cleared' && (
+                                      <button
+                                        type="button"
+                                        className="mini-btn view"
+                                        title="Edit fee amount / VAT / method / reference / date"
+                                        onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
+                                      >
+                                        <Pencil size={12} /> Edit
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
-                                      className="mini-btn view"
-                                      title="Edit fee amount / VAT / date"
-                                      onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
+                                      className="mini-btn"
+                                      title="Remove this fee"
+                                      disabled={feeDeleteBusy === f.id}
+                                      onClick={() => void deleteFee(f.id)}
+                                      style={{ color: 'var(--brick)' }}
                                     >
-                                      <Pencil size={12} /> Edit
+                                      <Trash2 size={12} /> {feeDeleteBusy === f.id ? '…' : 'Delete'}
                                     </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="mini-btn"
-                                    title="Remove this fee"
-                                    disabled={feeDeleteBusy === f.id}
-                                    onClick={() => void deleteFee(f.id)}
-                                    style={{ color: 'var(--brick)' }}
-                                  >
-                                    <Trash2 size={12} /> {feeDeleteBusy === f.id ? '…' : 'Delete'}
-                                  </button>
-                                </div>
-                              )}
+                                  </>
+                                )}
+                              </div>
                             </td>
                           </tr>
                           {feeEditId === f.id && (
                             <tr>
-                              <td colSpan={6} style={{ background: 'var(--jade-tint)' }}>
+                              <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
                                 <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
                                   <p className="subhead">Edit {feeLabel(f.paymentType).toLowerCase()}</p>
                                   <div className="grid2">
@@ -2416,6 +2423,18 @@ function DetailsDrawer({
                                     <div className="field"><label>VAT (AED, optional)</label>
                                       <input type="number" min="0" step="0.01" className="input" value={feeEdit.vatAmount} placeholder="0.00"
                                         onChange={e => setFeeEdit(v => ({ ...v, vatAmount: e.target.value }))} />
+                                    </div>
+                                  </div>
+                                  <div className="grid2">
+                                    <div className="field"><label>Payment method</label>
+                                      <select className="input" value={feeEdit.paymentMethod}
+                                        onChange={e => setFeeEdit(v => ({ ...v, paymentMethod: e.target.value }))}>
+                                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="field"><label>Cheque / reference no.</label>
+                                      <input className="input" value={feeEdit.chequeNumber} placeholder="Cheque #, transfer ID…"
+                                        onChange={e => setFeeEdit(v => ({ ...v, chequeNumber: e.target.value }))} />
                                     </div>
                                   </div>
                                   <div className="grid2">
@@ -2443,11 +2462,11 @@ function DetailsDrawer({
                           </Fragment>
                         ))}
                         {feeRows.length === 0 && !showAddFee && (
-                          <tr><td colSpan={6}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, ejari, or commission charges — amounts are not auto-calculated.</span></td></tr>
+                          <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, ejari, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
                       </tbody>
                       {feeRows.length > 0 && (
-                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross)}</td><td colSpan={3} /></tr></tfoot>
+                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross)}</td><td colSpan={4} /></tr></tfoot>
                       )}
                     </table>
 
@@ -2474,6 +2493,17 @@ function DetailsDrawer({
                           <div className="field"><label>Due date</label>
                             <input type="date" className="input" value={feeAdd.transactionDate}
                               onChange={e => setFeeAdd(v => ({ ...v, transactionDate: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="grid2">
+                          <div className="field"><label>Payment method</label>
+                            <select className="input" value={feeAdd.paymentMethod} onChange={e => setFeeAdd(v => ({ ...v, paymentMethod: e.target.value }))}>
+                              {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                            </select>
+                          </div>
+                          <div className="field"><label>Cheque / reference no.</label>
+                            <input className="input" value={feeAdd.chequeNumber} placeholder="Cheque #, transfer ID…"
+                              onChange={e => setFeeAdd(v => ({ ...v, chequeNumber: e.target.value }))} />
                           </div>
                         </div>
                         <div className="field"><label>Description (optional)</label>
@@ -5082,6 +5112,24 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                   contractId={contract.id}
                   section="move_out"
                   label="Send move-out link"
+                />
+              </div>
+            )}
+            {/* Move-out: second link for the on-site inspection manager — they
+                 fill the move-out form, attach photos, submit and counter-sign
+                 the RP side via the same no-login portal. Mirrors the move-in
+                 inspector link above; backend already supports move_out. */}
+            {selStep.key === 'moveout' && contract.tenant.id && !derived.moveOut.rpCounterSig && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+                  Inspection manager link
+                </div>
+                <SendTenantLinkButton
+                  tenantId={contract.tenant.id}
+                  contractId={contract.id}
+                  section="move_out"
+                  role="inspector"
+                  label="Send inspector link"
                 />
               </div>
             )}
