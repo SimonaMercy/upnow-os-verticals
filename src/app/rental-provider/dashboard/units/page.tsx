@@ -33,6 +33,7 @@ import { UnitFormModal, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModa
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { saveUnit, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
+import { feeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import ds from '@/components/upnow/unitForm.module.css';
 
 /** Tiny class-name joiner for the redesigned modal (drops falsy values). */
@@ -90,7 +91,6 @@ interface AddendumDefaultResp {
   unitType: string | null;
 }
 interface PropOpt { id: number; buildingName: string }
-interface FeeRuleLite { feeType: string; valueType: string; value: number; isActive: boolean }
 interface Resp {
   properties: PropOpt[];
   selectedPropertyId: number | null;
@@ -127,15 +127,6 @@ const ICON_MUTE = '#a0a8a1';
 const CHIP_COUNT = { fontSize: 11.5, fontWeight: 600, color: '#7d8780', background: '#eef1ec', padding: '4px 10px', borderRadius: 7 } as const;
 const UNITS_CHIP = { fontSize: 10.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '3px 9px', borderRadius: 6 } as const;
 
-// Fee key (units column) → fee-rule fee_type, and the rule-based default off rent.
-const FEE_RULE_TYPE: Record<string, string> = {
-  securityDeposit: 'security_deposit', adminFee: 'admin_fee', ejariFee: 'ejari_fee', commission: 'commission',
-};
-const feeFromRules = (rules: FeeRuleLite[] | undefined, key: string, rent: number): number | null => {
-  const r = rules?.find(x => x.feeType === FEE_RULE_TYPE[key]);
-  if (!r || !r.isActive) return null;
-  return r.valueType === 'fixed_aed' ? Math.round(r.value) : Math.round((rent * r.value) / 100);
-};
 const sizeLabel = (a: number | null | undefined, b: number | null | undefined) => {
   // Land / unsized units have no sqft (backend coerces missing → 0); show "—"
   // instead of "0", and never call .toLocaleString() on null (no crash).
@@ -1013,6 +1004,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           propertyStandalone={false}
           propertyId={unitModal.plan.propertyId}
           editingUnitId={unitModal.editingUnit?.id}
+          feeRules={data?.feeRules ?? null}
           planLabel={unitModal.plan.planLabel}
           manager={manager}
           rpQ={rpQ}
