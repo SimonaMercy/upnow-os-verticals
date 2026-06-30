@@ -12,6 +12,9 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
+import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
+import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
+import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
@@ -19,20 +22,29 @@ const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
 });
 
-interface Doc { documentKey: string; displayName: string | null; fileUrl: string }
+interface Doc { documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
 interface Detail {
-  contract: EjariContractData & { id: number; status: string | null };
+  contract: EjariContractData & { id: number; status: string | null; contractType?: string | null };
   documents: Doc[];
+  /** Full binder (contract docs + KYC + deposit receipts + cheques) — only sent
+   *  on landlord links, for the lessor's "all documents" review. */
+  allDocuments?: Doc[];
   signatures: Sig[];
   /** Addendum(s) attached to the contract — rendered combined into the contract PDF. */
   addendums?: EjariAddendum[];
   tenantSigned: boolean;
+  landlordSigned?: boolean;
+  /** Live payment-plan + receipts inputs (landlord links only). */
+  plan?: { payments: PlanPayment[]; fees: PlanPayment[] };
+  rentVatRate?: number;
+  pdcConfirmed?: boolean;
   moveInAvailable: boolean;
   purpose?: 'all' | 'documents' | 'contract' | 'move_in' | 'move_out';
   /** 'inspector' = link issued for the on-site inspection manager, who
-   *  counter-signs the RP side instead of signing as the customer. */
-  signerRole?: 'tenant' | 'inspector';
+   *  counter-signs the RP side instead of signing as the customer.
+   *  'landlord' = the lessor reviewing every document and signing as landlord. */
+  signerRole?: 'tenant' | 'inspector' | 'landlord';
 }
 
 interface InspPhoto { id: string; url: string; caption?: string }
@@ -79,8 +91,15 @@ export default function ContractReviewPage() {
   }, [token, id]);
   useEffect(() => { load(); }, [load]);
 
-  // No auth user on the magic link — stamp viewed documents with the tenant name.
-  useEffect(() => { setDocViewerWatermark(d?.contract?.tenant?.name ?? null); }, [d]);
+  // No auth user on the magic link — stamp viewed documents with the signer's
+  // name (the landlord on a landlord link, otherwise the tenant).
+  useEffect(() => {
+    const isLandlord = (d?.signerRole ?? 'tenant') === 'landlord';
+    const who = isLandlord
+      ? (d?.contract?.landlord?.name ?? d?.contract?.landlord?.companyName ?? null)
+      : (d?.contract?.tenant?.name ?? null);
+    setDocViewerWatermark(who);
+  }, [d]);
 
   // When the link is scoped to an inspection, the tenant should review the
   // inspection the RP recorded (not the tenancy contract) before signing.
@@ -119,6 +138,13 @@ export default function ContractReviewPage() {
   const ejari = toEjari(d.contract, d.signatures);
   // Combine the addendum into the contract PDF the tenant reads/signs.
   const addendums: EjariAddendum[] = d.addendums ?? [];
+
+  // Landlord links get a dedicated layout: the contract + every document in full
+  // preview (no download) with a sticky sign menu — the lessor's equivalent of
+  // the customer review-and-sign page.
+  if ((d.signerRole ?? 'tenant') === 'landlord') {
+    return <LandlordReview token={token} id={id} d={d} ejari={ejari} addendums={addendums} onSigned={load} />;
+  }
 
   // Each link is scoped to one action; 'all' = legacy link that shows everything.
   const purpose = d.purpose ?? 'all';
@@ -363,6 +389,65 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
         {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : asInspector ? (kind === 'move_out' ? 'Counter-sign move-out' : 'Counter-sign move-in') : kind === 'move_out' ? 'Sign move-out' : 'Sign move-in'}
       </button>
     </div>
+  );
+}
+
+/** Landlord review-and-sign: renders the SAME full-page binder as the RP's
+ *  authenticated "View all" page, fed from the token-scoped portal payload.
+ *  Reached only via a signerRole='landlord' magic link. */
+function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
+  token: string; id: number; d: Detail; ejari: EjariContractData; addendums: EjariAddendum[]; onSigned: () => void;
+}) {
+  const landlordName = d.contract.landlord?.companyName || d.contract.landlord?.name || 'Landlord';
+  // Stamp the landlord's identity + the moment opened into every preview, once.
+  const [watermark] = useState(() =>
+    `${landlordName} — Confidential · ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
+
+  const documents: BinderDoc[] = (d.allDocuments ?? []).map((doc, i) => ({
+    id: i + 1, documentKey: doc.documentKey, displayName: doc.displayName, fileUrl: doc.fileUrl,
+    category: doc.category ?? null, ownerType: doc.ownerType,
+  }));
+  const planContract: PlanContract = {
+    contractType: d.contract.contractType,
+    annualRent: d.contract.annualRent,
+    rentVatRate: d.rentVatRate ?? 0,
+    discountAmount: d.contract.discountAmount,
+    listedRent: d.contract.listedRent,
+    numberOfInstallments: d.contract.numberOfInstallments,
+    securityDepositAmount: d.contract.securityDepositAmount,
+    fees: d.plan?.fees ?? [],
+  };
+  const receipt = d.plan
+    ? ({ ...d.contract, payments: d.plan.payments, fees: d.plan.fees, pdcConfirmed: d.pdcConfirmed } as unknown as ReceiptContract)
+    : null;
+
+  const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
+    const res = await fetch(API(token, `/contracts/${id}/sign-landlord`), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatureImage, signatoryName }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
+    onSigned();
+  };
+
+  return (
+    <ContractDocsBinder
+      refLabel={`CID-${d.contract.id}`}
+      contractType={d.contract.contractType}
+      ended={d.contract.status === 'terminated'}
+      documents={documents}
+      tenant={d.contract.tenant}
+      ejari={ejari}
+      addendums={addendums}
+      planContract={planContract}
+      planPayments={d.plan?.payments ?? []}
+      receipt={receipt}
+      watermark={watermark}
+      signerName={landlordName}
+      signerDefaultName={d.contract.landlord?.name || d.contract.landlord?.companyName || ''}
+      landlordSigned={!!d.landlordSigned}
+      onSign={sign}
+    />
   );
 }
 

@@ -630,6 +630,20 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
   );
 }
 
+/** Inline (embeddable) receipts for the documents binder: the same receipts the
+ *  full-screen viewer shows, rasterised to stacked <canvas> pages at full height
+ *  — no toolbar, no download, no inner scroll (the page's outer scroll handles
+ *  it). Pass a large `height` so EjariCanvas never engages its scroll cap. */
+export function ReceiptInline({ contract, kind = 'all', height = 100000 }: { contract: ReceiptContract; kind?: Props['kind']; height?: number }) {
+  const docKey = `inline|${contract.id}|${kind ?? 'all'}`;
+  const { bytes, error } = useReactPdfDoc(
+    () => <PaymentReceiptDoc contract={contract} kind={kind} selectedId={null} selectedIdx={0} />,
+    docKey,
+  );
+  if (error) return <div style={{ padding: 24, textAlign: 'center', color: '#c00', fontSize: 13 }}>Receipts unavailable.</div>;
+  return <EjariCanvas bytes={bytes} height={height} />;
+}
+
 // ─── Full-screen viewer (default export) ──────────────────────────────────────
 
 const VIEWER_WRAP = { position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#52555a' } as const;

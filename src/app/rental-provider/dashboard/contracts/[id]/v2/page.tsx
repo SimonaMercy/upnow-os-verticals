@@ -1348,7 +1348,7 @@ type ContractNote = {
  *  relevant to where it's shown (documents vs the contract review/sign page),
  *  and shows the link so the RP can copy/share it directly (e.g. WhatsApp). */
 function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link', role = 'tenant', disabled = false }: {
-  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string; role?: 'tenant' | 'inspector'; disabled?: boolean;
+  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string; role?: 'tenant' | 'inspector' | 'landlord'; disabled?: boolean;
 }) {
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [link, setLink] = useState('');
@@ -1386,7 +1386,9 @@ function SendTenantLinkButton({ tenantId, contractId, section = 'documents', lab
           {email ? `Emailed to ${email} · ` : ''}
           {role === 'inspector'
             ? 'share this link with your inspection manager to fill the inspection, attach photos & counter-sign on site (valid 14 days)'
-            : 'share this link with the customer to upload & sign (valid 14 days)'}
+            : role === 'landlord'
+              ? 'share this link with the landlord / authorised signatory to review every document & sign as the lessor — no login (valid 14 days)'
+              : 'share this link with the customer to upload & sign (valid 14 days)'}
         </span>
       </div>
     );
@@ -5017,8 +5019,26 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 />
               </div>
             )}
-            {/* Inline landlord signature pad — placed after the customer signing
-                 link so the step reads top-to-bottom: statuses → send link →
+            {/* Landlord signing link — the lessor's counterpart to the customer
+                 link above. Opens the same no-login page (every document in full
+                 preview + a sticky sign menu) so the landlord / authorised
+                 signatory can review and sign as the lessor from any device. */}
+            {selStep.key === 'sign' && contract.tenant.id && !readOnlyWorkflow && perms.signLandlord && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+                  Rental provider contract signing link
+                </div>
+                <SendTenantLinkButton
+                  tenantId={contract.tenant.id}
+                  contractId={contract.id}
+                  section="contract"
+                  role="landlord"
+                  label="Send landlord link"
+                />
+              </div>
+            )}
+            {/* Inline landlord signature pad — placed after the signing links so
+                 the step reads top-to-bottom: statuses → send links →
                  countersign here. */}
             {selStep.key === 'sign' && canLandlordSign && perms.signLandlord && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
