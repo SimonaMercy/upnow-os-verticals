@@ -105,10 +105,10 @@ const PLAN_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
 };
 const planStatus = (s?: string | null) => PLAN_STATUS[(s ?? '').toLowerCase()] ?? { label: 'Pending', bg: '#fff7ed', fg: '#c2410c' };
 
-function PlanMeta({ label, value }: { label: string; value?: string | null }) {
+function PlanMeta({ label, value, align = 'left' }: { label: string; value?: string | null; align?: 'left' | 'right' }) {
   if (!value) return null;
   return (
-    <div>
+    <div style={align === 'right' ? { marginLeft: 'auto', textAlign: 'right' } : undefined}>
       <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1916' }}>{value}</div>
     </div>
@@ -132,7 +132,7 @@ function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: 
         <div style={{ padding: '11px 14px 2px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px' }}>
           <PlanMeta label="Building" value={buildingName} />
           <PlanMeta label="Unit" value={unitNumber} />
-          <PlanMeta label="Contract period" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
+          <PlanMeta label="Contract period" align="right" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
         </div>
       )}
       <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
