@@ -105,7 +105,7 @@ const PLAN_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
 };
 const planStatus = (s?: string | null) => PLAN_STATUS[(s ?? '').toLowerCase()] ?? { label: 'Pending', bg: '#fff7ed', fg: '#c2410c' };
 
-function OfferBlock({ plan, unitNumber, buildingName }: { plan: OfferPlan; unitNumber?: string | null; buildingName?: string | null }) {
+function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: { plan: OfferPlan; unitNumber?: string | null; buildingName?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
   ];
@@ -118,10 +118,11 @@ function OfferBlock({ plan, unitNumber, buildingName }: { plan: OfferPlan; unitN
   return (
     <div style={cardCss}>
       <div style={capCss}>Payment plan · current rent, fees &amp; deposit</div>
-      {(buildingName || unitNumber) && (
+      {(buildingName || unitNumber || periodStart) && (
         <div style={{ padding: '9px 14px 0', fontSize: 12, color: '#6b6860', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'baseline' }}>
           {buildingName ? <span style={{ fontWeight: 700, color: '#1a1916' }}>{buildingName}</span> : null}
           {unitNumber ? <span>· Unit {unitNumber}</span> : null}
+          {periodStart ? <span>· {fmtD(periodStart)} – {fmtD(periodEnd)}</span> : null}
         </div>
       )}
       <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
@@ -386,7 +387,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} /></Block>
               : <Missing label="Receipts" />;
