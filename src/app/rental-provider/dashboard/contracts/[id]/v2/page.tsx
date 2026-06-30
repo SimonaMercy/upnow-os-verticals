@@ -3800,7 +3800,7 @@ function RenewalProposeModal({
 // ────────────────────────────────────────────────────────────────────────────
 
 /** One labelled field on the boarding-pass (Tenant / Landlord / unit type). */
-function PassField({ label, value }: { label: string; value: string }) {
+function PassField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div style={{ minWidth: 0 }}>
       <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>{label}</p>
@@ -3815,7 +3815,7 @@ function PassField({ label, value }: { label: string; value: string }) {
  * = property / unit / parties; right stub = period + annual rent. Payment + KYC
  * detail render below it (the DetailsDrawer).
  */
-function ContractPass({ contract, payments }: { contract: ContractDetail; payments: ContractPayment[] }) {
+function ContractPass({ contract, payments, tenantHref }: { contract: ContractDetail; payments: ContractPayment[]; tenantHref?: string | null }) {
   const isRenewal = contract.contractType === 'renewal';
   const winding = contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
   const building = contract.property.buildingName ?? 'Property';
@@ -3875,7 +3875,13 @@ function ContractPass({ contract, payments }: { contract: ContractDetail; paymen
           <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}><MapPin size={12} /> {location}</p>
         </div>
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          {contract.tenant.name && <PassField label="Tenant" value={contract.tenant.name} />}
+          {contract.tenant.name && (
+            <PassField label="Tenant" value={
+              tenantHref
+                ? <Link href={tenantHref} className="chain-link" title="Open customer details">{contract.tenant.name}</Link>
+                : contract.tenant.name
+            } />
+          )}
           <PassField label="Landlord" value={landlordName} />
           {contract.unit.type && <PassField label={contract.unit.type.replace(/_/g, ' ')} value={contract.unit.bedrooms ? `${contract.unit.bedrooms} BR` : '—'} />}
         </div>
@@ -4773,9 +4779,16 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                   duplicated here). */}
               <div className="hsub">
                 <Building2 size={13} />
-                {/* Property name is plain text — the standalone property page was
-                    removed; property details live in the portfolio popup. */}
-                <span>{contract.property.buildingName ?? '—'}</span>
+                {/* Property name opens its details popup on the portfolio page
+                    (no standalone property page — the portfolio popup is the home
+                    for property details). Manager view stays plain (different base). */}
+                {contract.property.id && !isManagerView ? (
+                  <Link href={`/rental-provider/dashboard/portfolio?property=${contract.property.id}`} className="chain-link" title="Open property details">
+                    {contract.property.buildingName ?? '—'}
+                  </Link>
+                ) : (
+                  <span>{contract.property.buildingName ?? '—'}</span>
+                )}
                 <ChevronRight size={12} style={{ opacity: .5 }} />
                 {contract.property.id && contract.unit.id && !isManagerView ? (
                   <Link href={`/rental-provider/dashboard/units/${contract.unit.id}`} className="chain-link" title="Open unit details">
@@ -4901,7 +4914,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         {/* Record view: boarding-pass contract summary (Unit + parties + term +
             rent). Payment + document detail render below. The full/pipeline view
             keeps the compact info row instead. */}
-        {view === 'record' && <ContractPass contract={contract} payments={contract.payments ?? []} />}
+        {view === 'record' && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={!isManagerView && contract.tenant.id ? `/rental-provider/dashboard/tenants/${contract.tenant.id}` : null} />}
 
         {/* Customer + rental period — ONE info row under the header (replaces
             the old Parties and Rental period sections). */}

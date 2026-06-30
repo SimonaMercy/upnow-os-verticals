@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
 import {
   Building2, MapPin, Plus, Pencil, Trash2, Search,
   Loader2, AlertCircle,
@@ -317,6 +317,23 @@ export default function PortfolioPage() {
     queryKey: ['properties'],
     queryFn: () => apiGet<Property[]>('/properties'),
   });
+
+  // Deep-link ?property=<id> (e.g. from a contract's breadcrumb) opens that
+  // property's details popup once the list has loaded. Fires once per mount via
+  // a ref guard, so closing the popup doesn't immediately re-open it.
+  const deepLinkedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkedRef.current) return;
+    const pid = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('property') : null;
+    if (!pid) return;
+    const match = properties.find((p) => String(p.id) === pid);
+    if (match) {
+      deepLinkedRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDetailsProperty(match);
+    }
+  }, [properties]);
 
   // Type-filter options: the full canonical category list (so every property
   // type is always selectable, not just the ones currently in the portfolio),
