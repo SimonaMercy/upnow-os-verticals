@@ -60,7 +60,36 @@ const isOccupant = (d: BinderDoc) => /occupant/.test(norm(d.documentKey)) || /oc
 const isDependant = (d: BinderDoc) => /depend[ae]nt/.test(norm(d.documentKey)) || /depend[ae]nt/i.test(d.displayName || '');
 const occNum = (d: BinderDoc) => { const m = norm(d.documentKey).match(/occupant_?(\d+)/); return m ? Number(m[1]) : 1; };
 const idRank = (d: BinderDoc) => (isEid(d) ? 0 : isPassport(d) ? 1 : isVisa(d) ? 2 : 3);
-const idLabel = (d: BinderDoc) => isEid(d) ? 'Emirates ID' : isPassport(d) ? 'Passport' : isVisa(d) ? 'UAE Visa / Residency' : (d.displayName ?? d.documentKey.replace(/_/g, ' '));
+// A person has ONE Emirates ID (its front — plus a back only if a separate back
+// was uploaded), ONE Passport and ONE Visa. The same identity doc, though, gets
+// uploaded repeatedly — into the per-customer KYC store AND this lease's contract
+// store, and a passport can arrive as both `passport` and `passport_2` (same doc,
+// two captures) — so without collapsing them a tenant looks like they have 2-3× of
+// each. We key each doc by its logical SLOT (type + side) and keep ONE per slot.
+//   • Side matters only for the EID, and only an explicit BACK is its own slot — a
+//     bare `emirates_id` and an `emirates_id_front` are the same (front) side.
+//   • Occupant docs keep their occupant number so occupants never merge together.
+const idBaseKey = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
+const isEidBack = (d: BinderDoc) => /(^|_)back(_|$)/.test(idBaseKey(d));
+const idType = (d: BinderDoc) => (isEid(d) ? 'eid' : isPassport(d) ? 'passport' : isVisa(d) ? 'visa' : idBaseKey(d));
+const idSlot = (d: BinderDoc) => `${isOccupant(d) ? `occ${occNum(d)}:` : ''}${idType(d)}${isEid(d) && isEidBack(d) ? ':back' : ''}`;
+// Within a slot prefer the canonical customer-KYC copy, then the clean-key one
+// (no upload-timestamp suffix), then the most recent upload.
+const idSourceRank = (d: BinderDoc) => (d.ownerType === 'customer' ? 0 : norm(d.documentKey) === idBaseKey(d) ? 1 : 2);
+const dedupeIdentity = (docs: BinderDoc[]): BinderDoc[] => {
+  const best = new Map<string, BinderDoc>();
+  for (const d of docs) {
+    const k = idSlot(d);
+    const cur = best.get(k);
+    if (!cur || idSourceRank(d) < idSourceRank(cur) || (idSourceRank(d) === idSourceRank(cur) && d.id > cur.id)) best.set(k, d);
+  }
+  return Array.from(best.values());
+};
+const idLabel = (d: BinderDoc) =>
+  isEid(d) ? (isEidBack(d) ? 'Emirates ID — Back' : 'Emirates ID')
+  : isPassport(d) ? 'Passport'
+  : isVisa(d) ? 'UAE Visa / Residency'
+  : (d.displayName ?? d.documentKey.replace(/_/g, ' '));
 
 const cardCss: React.CSSProperties = { border: '1px solid #e3e0d9', borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: '#fff' };
 const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontWeight: 700, color: '#1a1916', background: '#faf9f7', borderBottom: '1px solid #efece6' };
@@ -338,9 +367,11 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     seq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', pending: true });
   }
 
-  // LEFT column — primary tenant identity first, then occupants.
-  const primaryId = all.filter(d => isIdentity(d) && !isOccupant(d)).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id);
-  const occDocs = all.filter(d => isIdentity(d) && isOccupant(d));
+  // LEFT column — primary tenant identity first, then occupants. Dedupe across
+  // owner scopes so the same EID/passport/visa stored on both the customer KYC
+  // record and this lease's contract record renders once (see dedupeIdentity).
+  const primaryId = dedupeIdentity(all.filter(d => isIdentity(d) && !isOccupant(d))).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id);
+  const occDocs = dedupeIdentity(all.filter(d => isIdentity(d) && isOccupant(d)));
   const occGroups = Array.from(new Set(occDocs.map(occNum))).sort((a, b) => a - b)
     .map(n => ({ n, docs: occDocs.filter(d => occNum(d) === n).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id) }));
 

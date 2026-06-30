@@ -41,6 +41,12 @@ interface FeeRuleDto {
 type CategoryMap = Record<FeeType, FeeRuleDto>;
 const FEE_CATEGORIES = ['residential', 'commercial', 'industrial', 'land', 'mixed_use'] as const;
 type FeeCategory = (typeof FEE_CATEGORIES)[number];
+// A mixed-use building holds BOTH residential and commercial units, so it has no
+// single fee/VAT rate — each unit is priced PER UNIT against the Residential or
+// Commercial rules below (resolved server-side from the unit type). There is no
+// separate "Mixed-use" rate to configure, so it is not shown as its own tab. The
+// type + defaults are kept only for back-compat with any rules saved before this.
+const FEE_TAB_CATEGORIES = FEE_CATEGORIES.filter((c) => c !== 'mixed_use');
 const FEE_ORDER: FeeType[] = ['ejari_fee', 'admin_fee', 'commission', 'security_deposit', 'rent_vat'];
 
 const FEE_META: Record<FeeType, { title: string; description: string; tag: string; tagStyle: 'default' | 'green'; refundable?: boolean; newOnly?: boolean }> = {
@@ -1899,7 +1905,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="text-[13px] font-semibold text-[#2b3a34]">Property type</span>
                   <div className="inline-flex p-[3px] bg-white border border-[#e6ebe7] rounded-[10px] gap-px">
-                    {FEE_CATEGORIES.map(cat => (
+                    {FEE_TAB_CATEGORIES.map(cat => (
                       <button
                         key={cat}
                         type="button"
@@ -1914,6 +1920,16 @@ export default function SettingsPage() {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              {/* Mixed-use explainer — there is no separate mixed-use rate; a
+                  mixed-use building's units are priced per unit against these
+                  Residential / Commercial rules (resolved from the unit type). */}
+              <div className="mx-6 mt-3.5 flex gap-3 items-start p-3.5 rounded-[12px] border border-[#dbe7e2]" style={{ background: '#f4f9f7' }}>
+                <span className="flex-shrink-0 w-[22px] h-[22px] rounded-full flex items-center justify-center font-extrabold text-[12px] text-[#1f7a5e]" style={{ background: '#cdeadf' }}>i</span>
+                <p className="text-[13px] text-[#2b4a40] leading-[1.45]">
+                  <strong className="text-[#194437]">Mixed-use buildings</strong> use these rules per unit — a residential unit follows your <strong>Residential</strong> rates (rent VAT-exempt) and a commercial unit follows your <strong>Commercial</strong> rates (5% rent VAT). There is no separate mixed-use rate to set.
+                </p>
               </div>
 
               {/* Renewal banner */}

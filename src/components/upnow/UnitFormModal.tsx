@@ -8,7 +8,8 @@ import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/li
 import { openDocViewer } from '@/lib/docViewer';
 import { type AddendumTerms } from '@/lib/addendumTerms';
 import AddendumLayoutSection from './AddendumLayoutSection';
-import { RESIDENTIAL_UNIT_TYPES, isLandUnitType, isResidentialUnitType } from '@/lib/unitTaxonomy';
+import { RESIDENTIAL_UNIT_TYPES, isLandUnitType, isResidentialUnitType, effectiveSpaceCategory } from '@/lib/unitTaxonomy';
+import { feeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import ds from './unitForm.module.css';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
@@ -308,6 +309,10 @@ const EMPTY_UNIT: UnitFormData = {
   description: '',
 };
 
+// The rule-driven fee fields that auto-fill from the RP's Fee Rules (resolved by
+// the unit's effective category) and recompute when the rent / unit type changes.
+const FEE_FIELDS = ['securityDeposit', 'adminFee', 'ejariFeeFils', 'commission'] as const;
+
 interface Props {
   open: boolean;
   propertyCategory: string;
@@ -322,6 +327,12 @@ interface Props {
    *  manager (photos upload/remove lives inside Edit, not a separate button). */
   propertyId?: number;
   editingUnitId?: number;
+  /** The RP's configured Fee Rules (Settings → Fee Rules), keyed by space
+   *  category. When provided, the deposit / admin / ejari / commission amounts
+   *  auto-fill from the rule for this unit's EFFECTIVE category (a mixed-use
+   *  building resolves per unit type) and recompute when the rent or unit type
+   *  changes. Omitted/null → falls back to the legacy 5%-of-rent heuristic. */
+  feeRules?: Record<string, FeeRuleLite[]> | null;
   /** Addendum / amendment files already attached to this unit (edit mode). */
   existingAddendums?: { id: number; name: string; url: string }[];
   /** Layout key — when provided (editing a unit in /units), the form shows the
@@ -534,8 +545,11 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
+  // Fee fields the user has typed in this session — they stop auto-recomputing
+  // off the rent / unit type (mirrors the plan-pricing editor's `overridden`).
+  const [overriddenFees, setOverriddenFees] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Partial<Record<keyof UnitFormData, string>>>({});
   const [saving, setSaving] = useState(false);
   const [floorPlan, setFloorPlan] = useState<File | null>(null);
@@ -565,15 +579,42 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
   const secRefs = useRef<Record<string, HTMLElement | null>>({});
   const scrollingRef = useRef(false);
 
+  // Suggested amount (string) for a fee field, resolved from the RP's Fee Rules by
+  // the unit's EFFECTIVE category — for a mixed-use building this derives
+  // residential vs commercial from the unit TYPE, so each unit is priced against
+  // the right rate. Falls back to the legacy heuristic (5% of rent; AED 220 ejari
+  // for residential) when no rule is configured or no feeRules were passed.
+  // Returns null when nothing can be suggested (caller keeps the current value).
+  const suggestFee = (field: (typeof FEE_FIELDS)[number], unitType: string, rent: number): string | null => {
+    const cat = effectiveSpaceCategory(unitType, propertyCategory);
+    const rules = feeRules?.[cat] ?? feeRules?.residential;
+    const ruleKey = field === 'ejariFeeFils' ? 'ejariFee' : field;
+    const ruled = feeFromRules(rules, ruleKey, rent);
+    if (ruled != null) return String(ruled);
+    // No active rule for this fee/category → legacy fallback.
+    if (field === 'ejariFeeFils') return cat === 'residential' ? '220' : null;
+    return rent > 0 ? String(Math.round(rent * 0.05)) : null;
+  };
+
   useEffect(() => {
     if (open) {
       const defaults = {
         ...EMPTY_UNIT,
         minLeaseMonths:  DEFAULT_MIN_LEASE[resolveBaseCategory(propertyCategory)] ?? '12',
         noticePeriodDays: DEFAULT_NOTICE[resolveBaseCategory(propertyCategory)] ?? '60',
-        ejariFeeFils: propertyCategory === 'residential' ? '220' : '',
       };
-      setForm({ ...defaults, ...initial });
+      const seeded: UnitFormData = { ...defaults, ...initial };
+      // Auto-fill any BLANK fee from the RP's rules (resolved per unit type) so a
+      // new unit starts pre-priced; stored / user-entered values are preserved.
+      const rent = Number(seeded.rentalPrice) || 0;
+      for (const f of FEE_FIELDS) {
+        if (!seeded[f]) {
+          const s = suggestFee(f, seeded.unitType, rent);
+          if (s != null) seeded[f] = s;
+        }
+      }
+      setForm(seeded);
+      setOverriddenFees(new Set());
       setErrors({});
       setFloorPlan(null);
       setTitleDeed(null);
@@ -583,18 +624,24 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
   }, [open]);
 
   const upd = <K extends keyof UnitFormData>(k: K, v: UnitFormData[K]) => {
+    // A fee the user types is theirs — stop auto-recomputing it off the rent/type.
+    if ((FEE_FIELDS as readonly string[]).includes(k as string)) {
+      setOverriddenFees(prev => new Set(prev).add(k as string));
+    }
     setForm(prev => {
       const next = { ...prev, [k]: v };
-      if (k === 'rentalPrice') {
-        const rent = Number(v);
-        if (!isNaN(rent) && rent > 0) {
-          // Only auto-fill fees that are still blank — never clobber values the
-          // user set (or that a stored unit already carries in edit mode).
-          if (!prev.securityDeposit) next.securityDeposit = String(Math.round(rent * 0.05));
-          if (!prev.adminFee)        next.adminFee        = String(Math.round(rent * 0.05));
-          if (!prev.commission)      next.commission      = String(Math.round(rent * 0.05));
-          // Ejari fee: AED 220 for residential only; 0 for all others
-          if (!prev.ejariFeeFils && propertyCategory === 'residential') next.ejariFeeFils = '220';
+      // Re-suggest the rule-driven fees the user hasn't overridden whenever the
+      // rent OR the unit type changes — so editing either keeps the amounts in
+      // sync (the old code only filled blanks, so edits never refreshed them).
+      if (k === 'rentalPrice' || k === 'unitType') {
+        const rent = Number(k === 'rentalPrice' ? v : prev.rentalPrice);
+        const unitType = (k === 'unitType' ? v : prev.unitType) as string;
+        if (!isNaN(rent)) {
+          for (const f of FEE_FIELDS) {
+            if (overriddenFees.has(f)) continue;
+            const s = suggestFee(f, unitType, rent);
+            if (s != null) next[f] = s;
+          }
         }
       }
       return next;

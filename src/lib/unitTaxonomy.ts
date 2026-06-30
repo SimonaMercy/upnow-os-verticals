@@ -46,3 +46,55 @@ export function isLandUnitType(unitType: string | null | undefined): boolean {
 export function unitHasBathrooms(unitType: string | null | undefined): boolean {
   return !isLandUnitType(unitType);
 }
+
+/** Unit types that attract COMMERCIAL fee/VAT treatment (5% rent VAT) — the
+ *  commercial bucket plus workspaces + venues. Mirrors COMMERCIAL_UNIT_TYPES in
+ *  the backend `src/shared/enums.ts`. */
+export const COMMERCIAL_UNIT_TYPES: string[] = [
+  'retail_shop', 'showroom', 'office_fitted', 'office_shell_core', 'restaurant_fnb', 'clinic_medical',
+  'coworking_desk', 'private_office', 'meeting_room', 'day_office',
+  'event_hall', 'wedding_venue', 'conference_hall', 'private_dining', 'outdoor_venue',
+];
+
+/** Unit types that attract INDUSTRIAL fee/VAT treatment (5% rent VAT). */
+export const INDUSTRIAL_UNIT_TYPES: string[] = [
+  'warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility',
+];
+
+/**
+ * Derive the fee/VAT space category from a unit's TYPE alone. Residential rent is
+ * VAT-exempt; commercial / industrial rent is VATable (5%). A missing/unknown type
+ * defaults to residential (the exempt, safe default). Mirrors
+ * `deriveSpaceCategoryFromUnitType` in the backend `src/shared/enums.ts`.
+ */
+export function deriveSpaceCategoryFromUnitType(
+  unitType: string | null | undefined,
+): 'residential' | 'commercial' | 'industrial' {
+  if (!unitType) return 'residential';
+  if (INDUSTRIAL_UNIT_TYPES.includes(unitType)) return 'industrial';
+  if (COMMERCIAL_UNIT_TYPES.includes(unitType)) return 'commercial';
+  return 'residential';
+}
+
+/**
+ * Effective fee/VAT category for a unit — the SINGLE chokepoint, mirroring the
+ * backend `effectiveSpaceCategory`. For every property category EXCEPT mixed_use,
+ * the property's own space_category wins; a MIXED-USE building (which holds both
+ * residential and commercial units) resolves PER UNIT from the unit type
+ * (residential = exempt, commercial = 5% VAT).
+ */
+export function effectiveSpaceCategory(
+  unitType: string | null | undefined,
+  propertySpaceCategory?: string | null,
+): string {
+  if (propertySpaceCategory && propertySpaceCategory !== 'mixed_use') return propertySpaceCategory;
+  return deriveSpaceCategoryFromUnitType(unitType);
+}
+
+/** True when the rent is VAT-able (commercial / industrial) — i.e. not residential. */
+export function isRentVatable(
+  unitType: string | null | undefined,
+  propertySpaceCategory?: string | null,
+): boolean {
+  return effectiveSpaceCategory(unitType, propertySpaceCategory) !== 'residential';
+}

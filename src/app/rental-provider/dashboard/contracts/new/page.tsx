@@ -22,6 +22,7 @@ import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2, Sen
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
+import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1311,6 +1312,22 @@ export default function NewContractPage() {
                     </span>
                   </div>
                 )}
+
+                {/* Tax treatment — derived from the unit type so a mixed-use
+                    building's units show their own basis (residential = exempt,
+                    commercial = 5% VAT). The authoritative rate is computed on the
+                    server at creation; this is a read-only preview. */}
+                {selectedUnit && (() => {
+                  const vatable = deriveSpaceCategoryFromUnitType(selectedUnit.unitType) !== 'residential';
+                  return (
+                    <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
+                      <span className="text-xs text-[#9b9890]">Tax treatment</span>
+                      <span className={`text-xs font-semibold ${vatable ? 'text-[#b45309]' : 'text-[#2e9f82]'}`}>
+                        {vatable ? 'Commercial · 5% VAT' : 'Residential · VAT exempt'}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {/* Dates row */}
                 {form.contractStartDate && (
