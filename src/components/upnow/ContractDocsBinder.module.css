@@ -1,0 +1,73 @@
+/*
+ * Responsive layout for the contract documents binder.
+ *
+ * Desktop (default): two independently-scrolling panes side by side —
+ *   LEFT = Tenant & KYC, RIGHT = Rental documents in order.
+ * Mobile (≤768px): the two panes collapse into ONE continuous vertical
+ *   scroll (KYC first, then rental docs, document-by-document full previews)
+ *   so a phone reads the whole binder top-to-bottom; the sticky sign bar
+ *   (rendered separately, position:fixed) stays docked at the bottom.
+ *
+ * The layout-determining properties live here (not inline) so the media
+ * query can override them — inline styles would win over a class.
+ */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.pane {
+  overflow-y: auto;
+  padding: 0 20px 140px;
+  min-width: 0;
+}
+
+.paneLeft {
+  border-right: 1px solid #e3e0d9;
+}
+
+/* Quick-nav chip strip — wraps on desktop, single swipeable row on mobile. */
+.navChips {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  column-gap: 6px;
+}
+
+@media (max-width: 768px) {
+  /* The grid becomes the single scroll container; panes stop scrolling
+     on their own and just stack as content blocks. */
+  .body {
+    display: block;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .pane {
+    overflow-y: visible;
+    padding: 14px 16px 0;
+  }
+
+  /* No vertical divider between the now-stacked sections; keep the gap tight. */
+  .paneLeft {
+    border-right: 0;
+    padding-bottom: 8px;
+  }
+
+  /* Rental docs follow KYC directly — a thin rule marks the handover, and
+     the bottom room clears the fixed sign bar. */
+  .paneRight {
+    padding-top: 16px;
+    padding-bottom: 160px;
+    border-top: 1px solid #e7e3dc;
+  }
+
+  /* On mobile the binder is a plain top-to-bottom read — drop the sticky
+     section quick-nav entirely so it's document-by-document, no chrome. */
+  .quickNav {
+    display: none;
+  }
+}

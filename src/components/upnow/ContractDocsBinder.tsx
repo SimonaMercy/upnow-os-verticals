@@ -25,6 +25,7 @@ import type { EjariContractData, EjariAddendum } from '@/components/contract/Eja
 import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
+import ds from './ContractDocsBinder.module.css';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
@@ -219,10 +220,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function QuickNav({ title, items }: { title: string; items: { id: string; label: string }[] }) {
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f4f3ef', padding: '14px 0 10px', borderBottom: '1px solid #e7e3dc', marginBottom: 14 }}>
+    <div className={ds.quickNav} style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f4f3ef', padding: '14px 0 10px', borderBottom: '1px solid #e7e3dc', marginBottom: 14 }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: items.length ? 8 : 0 }}>{title}</div>
       {items.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', rowGap: 8, columnGap: 6 }}>
+        <div className={ds.navChips}>
           {items.map(it => <button key={it.id} type="button" onClick={() => go(it.id)} style={chip}>{it.label}</button>)}
         </div>
       )}
@@ -395,16 +396,17 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#f4f3ef', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6, gap: 10 }}>
         <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>All documents</span>
         <span style={{ fontSize: 12.5, color: '#9b9890' }}>{refLabel}</span>
         <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>
         {headerRight && <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{headerRight}</div>}
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-        {/* LEFT — fixed pane: tenant identity + KYC */}
-        <section style={{ overflowY: 'auto', padding: '0 20px 140px', borderRight: '1px solid #e3e0d9', minWidth: 0 }}>
+      <div className={ds.body}>
+        {/* LEFT — tenant identity + KYC. On desktop a fixed scrolling pane; on
+            mobile the first block of the single top-to-bottom scroll. */}
+        <section className={`${ds.pane} ${ds.paneLeft}`}>
           <QuickNav title="Tenant &amp; KYC" items={leftNav} />
           <TenantCard t={tenant} isCompany={!!(tenant.companyName || tenant.licenseNumber)} />
           {primaryId.length === 0 ? <p style={{ fontSize: 13, color: '#9b9890' }}>No identity documents on file.</p>
@@ -423,8 +425,9 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           ))}
         </section>
 
-        {/* RIGHT — scrolling pane: rental / financial documents */}
-        <section style={{ overflowY: 'auto', padding: '0 20px 140px', minWidth: 0 }}>
+        {/* RIGHT — rental / financial documents. Desktop: its own scrolling
+            pane; mobile: continues the single scroll below Tenant & KYC. */}
+        <section className={`${ds.pane} ${ds.paneRight}`}>
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
