@@ -27,8 +27,10 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
-/** Cap the backing-store resolution so big scans don't blow up memory. */
+/** Absolute cap on the backing-store width so big scans don't blow up memory. */
 const MAX_W = 1500;
+const MAX_SIDE = 4096;       // iOS per-side canvas limit
+const MAX_AREA = 16_000_000; // iOS total canvas-area limit (~16.7M px)
 /** Guard against pathological page counts. */
 const MAX_PAGES = 20;
 
@@ -85,6 +87,14 @@ export function SecureDocCanvas({
     host.replaceChildren();
     setStatus('loading');
 
+    // Backing store sized to the ACTUAL display width (× dpr), capped — so a
+    // phone doesn't allocate desktop-sized canvases. Stacking many full-res
+    // document canvases on a small screen exhausts iOS Safari's per-tab memory
+    // and kills the page ("a problem repeatedly occurred").
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = host.clientWidth || Math.min(window.innerWidth || 360, 900);
+    const targetW = Math.min(Math.round(cssW * dpr), MAX_W);
+
     const addCanvas = (w: number, h: number, gap = false) => {
       const c = document.createElement('canvas');
       c.width = w;
@@ -108,7 +118,8 @@ export function SecureDocCanvas({
       if (cancelled) return;
       const natW = img.naturalWidth || MAX_W;
       const natH = img.naturalHeight || MAX_W;
-      const scale = Math.min(1, MAX_W / natW);
+      // Down to display width; never upscale past the source.
+      const scale = Math.min(1, targetW / natW);
       const w = Math.round(natW * scale);
       const h = Math.round(natH * scale);
       const ctx = addCanvas(w, h);
@@ -128,7 +139,14 @@ export function SecureDocCanvas({
         if (cancelled) return;
         const page = await pdf.getPage(n);
         const base = page.getViewport({ scale: 1 });
-        const scale = Math.min(2, MAX_W / base.width);
+        // Render at display width, clamped under iOS's per-canvas limits so a
+        // tall/large page never comes back blank on a phone.
+        const scale = Math.min(
+          targetW / base.width,
+          MAX_SIDE / base.width,
+          MAX_SIDE / base.height,
+          Math.sqrt(MAX_AREA / (base.width * base.height)),
+        );
         const vp = page.getViewport({ scale });
         const ctx = addCanvas(Math.ceil(vp.width), Math.ceil(vp.height), n > 1);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;

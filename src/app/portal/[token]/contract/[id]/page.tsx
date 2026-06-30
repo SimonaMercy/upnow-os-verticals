@@ -189,7 +189,7 @@ export default function ContractReviewPage() {
               </div>
             )
           ) : (
-            <EjariInline data={ejari} addendums={addendums} height={680} />
+            <EjariInline data={ejari} addendums={addendums} height={680} fluid />
           )}
         </div>
 

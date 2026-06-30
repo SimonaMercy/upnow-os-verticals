@@ -14,8 +14,11 @@ import { useFilledEjari } from './useFilledEjari';
 import { useReactPdfDoc } from './useReactPdfDoc';
 import EjariCanvas from './EjariCanvas';
 
-export default function EjariInline({ data, addendums = [], height = 640 }: {
+export default function EjariInline({ data, addendums = [], height = 640, fluid = false }: {
   data: EjariContractData; addendums?: EjariAddendum[]; height?: number;
+  /** Flow to full height on mobile so the host page scrolls as one (no internal
+   *  scroll box). Desktop keeps the capped, internally-scrolling card. */
+  fluid?: boolean;
 }) {
   const dubai = isDubaiContract(data);
   // Both hooks run unconditionally (rules of hooks); each takes an `enabled` flag so
@@ -33,5 +36,5 @@ export default function EjariInline({ data, addendums = [], height = 640 }: {
 
   if (error) return <div style={{ ...frame, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Failed to render contract: {error}</div>;
   // EjariCanvas shows its own "Preparing contract…" placeholder while bytes are null.
-  return <EjariCanvas bytes={bytes} height={height} />;
+  return <EjariCanvas bytes={bytes} height={height} fluid={fluid} />;
 }

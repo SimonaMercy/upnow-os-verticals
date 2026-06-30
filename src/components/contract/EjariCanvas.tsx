@@ -15,8 +15,9 @@
  * (~4096 px per side / ~16.7M px total) — exceed them and the page silently
  * comes back blank on a phone.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import * as pdfjs from 'pdfjs-dist';
+import styles from './EjariCanvas.module.css';
 
 // Bundled worker (Next/webpack emits it from the installed package, so its
 // version always matches the API — no CDN, no version skew). Same pattern as
@@ -32,13 +33,17 @@ const MAX_AREA = 16_000_000; // iOS total canvas-area limit (~16.7M px)
 
 type Status = 'loading' | 'ready' | 'error';
 
-export default function EjariCanvas({ bytes, height = 640, fill = false }: {
+export default function EjariCanvas({ bytes, height = 640, fill = false, fluid = false }: {
   bytes: Uint8Array | null;
   height?: number;
   /** Full-height scrollable layout for full-screen viewers (pages centred on a
    *  transparent backdrop with a drop shadow). Default = fixed-height framed card
    *  for inline embedding. */
   fill?: boolean;
+  /** Inline embed that flows to its full height on mobile (≤768px) so the host
+   *  page scrolls as one — no internal scroll box. Desktop keeps the capped box.
+   *  Ignored when `fill` is set. */
+  fluid?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>('loading');
@@ -59,11 +64,19 @@ export default function EjariCanvas({ bytes, height = 640, fill = false }: {
       // so the hook's `bytes` stay valid (the download link reuses them).
       const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Size each page's backing store to the ACTUAL display width (× dpr),
+      // capped — NOT a fixed oversample. The old `min(2, …) * dpr` built a
+      // ~2400px-wide (~32MB) canvas per A4 page no matter the screen; a few of
+      // those stacked exhaust iOS Safari's per-tab memory and the page is killed
+      // ("a problem repeatedly occurred"). Matching display width stays crisp
+      // (≈2× density) at a fraction of the memory.
+      const cssW = host.clientWidth || Math.min(window.innerWidth || 360, 820);
+      const targetW = Math.min(Math.round(cssW * dpr), MAX_W);
       for (let n = 1; n <= pdf.numPages; n++) {
         if (cancelled) return;
         const page = await pdf.getPage(n);
         const base = page.getViewport({ scale: 1 });
-        let scale = Math.min(2, MAX_W / base.width) * dpr;
+        let scale = targetW / base.width;
         // Clamp under iOS canvas limits so the page never renders blank on a phone.
         scale = Math.min(
           scale,
@@ -117,7 +130,12 @@ export default function EjariCanvas({ bytes, height = 640, fill = false }: {
 
   const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
   return (
-    <div style={{ ...frame, maxHeight: height, overflow: 'auto', background: '#fff' }}>
+    <div
+      className={fluid ? styles.fluidFrame : undefined}
+      style={fluid
+        ? ({ '--ejari-max': `${height}px` } as unknown as CSSProperties)
+        : { ...frame, maxHeight: height, overflow: 'auto', background: '#fff' }}
+    >
       <div ref={hostRef} />
       {status === 'loading' && (
         <div style={{ height, display: 'grid', placeItems: 'center', color: '#888', fontSize: 13 }}>Preparing contract…</div>

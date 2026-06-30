@@ -1,0 +1,26 @@
+/*
+ * "Fluid" inline contract frame.
+ *
+ * Desktop: a capped box (max-height = the passed height) that scrolls the
+ *   contract internally — same as the default inline embed.
+ * Mobile (≤768px): the cap is removed so the contract renders at its full
+ *   natural height and the HOST PAGE scrolls as one continuous flow, landing
+ *   the sign card at the very end (instead of scrolling inside the contract).
+ *
+ * The dynamic height comes in as the --ejari-max custom property (it can't be
+ * an inline max-height, or it would win over the media-query override).
+ */
+.fluidFrame {
+  border: 1px solid #e8e6e0;
+  border-radius: 12px;
+  background: #fff;
+  max-height: var(--ejari-max, 640px);
+  overflow: auto;
+}
+
+@media (max-width: 768px) {
+  .fluidFrame {
+    max-height: none;
+    overflow: hidden; /* container grows to fit; clip keeps the rounded corners */
+  }
+}
