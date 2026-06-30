@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import { Search, ChevronDown, LayoutGrid, Rows3, SlidersHorizontal, X, Check, MapPin, Home, Building2, Factory, Mountain } from 'lucide-react';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 /* ── Sub-category data ────────────────────────────────────────── */
 const SPACE_TYPES: Record<string, { label: string; value: string }[]> = {
@@ -29,6 +30,22 @@ const SPACE_TYPES: Record<string, { label: string; value: string }[]> = {
     { label: 'Storage Unit',       value: 'storage_unit' },
     { label: 'Cold Storage',       value: 'cold_storage' },
     { label: 'Logistics Facility', value: 'logistics_facility' },
+  ],
+  // Mixed-use buildings hold both — offer residential + commercial sub-types so a
+  // browser can narrow to either; the residential facets below then follow the pick.
+  mixed_use: [
+    { label: 'Apartment',     value: 'apartment' },
+    { label: 'Villa',         value: 'villa' },
+    { label: 'Townhouse',     value: 'townhouse' },
+    { label: 'Studio',        value: 'studio' },
+    { label: 'Penthouse',     value: 'penthouse' },
+    { label: 'Duplex / Loft', value: 'duplex_loft' },
+    { label: 'Retail Shop',         value: 'retail_shop' },
+    { label: 'Showroom',            value: 'showroom' },
+    { label: 'Fitted Office',       value: 'office_fitted' },
+    { label: 'Shell & Core Office', value: 'office_shell_core' },
+    { label: 'Restaurant / F&B',    value: 'restaurant_fnb' },
+    { label: 'Clinic / Medical',    value: 'clinic_medical' },
   ],
 };
 
@@ -270,9 +287,14 @@ export function FilterSidebar(
   const subTypes   = SPACE_TYPES[category] ?? [];
   const amenPool   = AMENITIES[category] ?? null;
   // Beds / baths / furnishing are residential-only facets — they make no sense
-  // when browsing commercial / industrial / land (a shop has no bedrooms). They
-  // stay on for "All" and mixed-use (which contains residential units).
-  const residentialFacets = !category || category === 'residential' || category === 'mixed_use';
+  // when browsing commercial / industrial / land (a shop has no bedrooms). For a
+  // MIXED-USE browse they apply only while the user hasn't narrowed to commercial
+  // sub-types: shown when no sub-type is picked or any picked sub-type is
+  // residential, hidden once the selection is commercial-only.
+  const selectedTypes = spaceType ? spaceType.split(',').filter(Boolean) : [];
+  const mixedShowsResidential = selectedTypes.length === 0 || selectedTypes.some(isResidentialUnitType);
+  const residentialFacets = !category || category === 'residential'
+    || (category === 'mixed_use' && mixedShowsResidential);
   const showBeds   = residentialFacets;
   const showBaths  = residentialFacets;
   const showFurn   = residentialFacets;

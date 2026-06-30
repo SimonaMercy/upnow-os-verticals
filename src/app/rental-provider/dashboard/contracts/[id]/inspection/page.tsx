@@ -208,14 +208,14 @@ function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: 
     { v: 'D' as Condition, active: 'bg-[#ef4444] text-white border-transparent' },
   ];
   return (
-    <div className="flex gap-1">
+    <div className="flex gap-1.5 sm:gap-1">
       {opts.map(o => (
         <button
           key={o.v}
           type="button"
           onClick={() => onChange(value === o.v ? '' : o.v)}
           className={[
-            'w-9 h-9 sm:w-7 sm:h-7 rounded-md text-sm sm:text-xs font-bold border transition-all',
+            'w-11 h-11 sm:w-7 sm:h-7 rounded-lg sm:rounded-md text-base sm:text-xs font-bold border transition-all',
             value === o.v ? o.active : 'border-[#e8e6e0] text-[#9b9890] hover:border-[#c8c6be] bg-white',
           ].join(' ')}
         >
@@ -226,27 +226,60 @@ function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: 
   );
 }
 
-// ─── Per-item attachment upload ───────────────────────────────────────────────
+// ─── Per-item photo preview strip ──────────────────────────────────────────────
+// Uniform, neatly-wrapped thumbnails shown full-width below an item so the row
+// stays tidily aligned no matter how many photos are attached. Tap to enlarge;
+// the ✕ stays visible on touch and fades-in on hover for desktop.
+function ItemThumbStrip({ attachments, onRemove }: {
+  attachments: ItemAttachment[];
+  onRemove?: (id: string) => void;
+}) {
+  if (!attachments.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {attachments.map(a => (
+        <div key={a.id} className="group relative w-16 h-16 sm:w-14 sm:h-14 rounded-lg border border-[#e8e6e0] overflow-hidden shrink-0 bg-[#f4f3ef]">
+          <button type="button" onClick={() => openDocViewer({ fileUrl: a.url, caption: 'Attachment' })} className="block w-full h-full">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={a.url} alt="attachment" className="w-full h-full object-cover" />
+          </button>
+          {onRemove && (
+            <button type="button" onClick={() => onRemove(a.id)} aria-label="Remove photo"
+              className="absolute top-0.5 right-0.5 w-6 h-6 sm:w-5 sm:h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
+// ─── Per-item attachment upload (add button only — previews live in the strip) ──
 function ItemAttachmentButton({
-  contractId, itemId, attachments, onChange, disabled, portalToken,
+  contractId, itemId, count, onAdd, portalToken,
 }: {
   contractId: number;
   itemId: string;
-  attachments: ItemAttachment[];
-  onChange: (updated: ItemAttachment[]) => void;
-  disabled?: boolean;
+  count: number;
+  // Hands back ONLY the newly-uploaded attachments; the parent appends them to
+  // LIVE state via a functional update. This avoids two losses: (1) appending
+  // per-file onto a stale array (only the last survives) and (2) a slow upload
+  // resolving with a stale snapshot and clobbering edits made to other items
+  // while it was in flight.
+  onAdd: (added: ItemAttachment[]) => void;
   portalToken?: string | null;
 }) {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function upload(file: File) {
-    setUploading(true); setErr(null);
+  // Uploads ONE file and returns the new attachment (or null). uid() in the key
+  // guards against same-ms documentKey collisions when several files are picked.
+  async function uploadOne(file: File): Promise<ItemAttachment | null> {
     try {
       const docBody = {
-        documentKey: `insp_item_${itemId}_${Date.now()}`,
+        documentKey: `insp_item_${itemId}_${Date.now()}_${uid()}`,
         mimeType: file.type, originalName: file.name,
       };
       const urlRes = await fetch(portalToken
@@ -258,62 +291,44 @@ function ItemAttachmentButton({
           ? docBody
           : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
       });
-      if (!urlRes.ok) { setErr('Upload URL failed'); return; }
+      if (!urlRes.ok) { setErr('Upload failed — please retry'); return null; }
       const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
       const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
       const put = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-      if (!put.ok) { setErr('Upload failed'); return; }
-      onChange([...attachments, { id: uid(), url: fileUrl }]);
-    } catch { setErr('Unexpected error'); }
-    finally { setUploading(false); }
+      if (!put.ok) { setErr('Upload failed — please retry'); return null; }
+      return { id: uid(), url: fileUrl };
+    } catch { setErr('Unexpected error — please retry'); return null; }
   }
 
-  if (disabled) {
-    return attachments.length > 0 ? (
-      <div className="flex gap-1 flex-wrap">
-        {attachments.map(a => (
-          <button key={a.id} type="button" onClick={() => openDocViewer({ fileUrl: a.url, caption: 'Attachment' })}
-            className="block w-8 h-8 rounded-md border border-[#e8e6e0] overflow-hidden shrink-0 hover:border-[#2e9f82] cursor-pointer">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={a.url} alt="attachment" className="w-full h-full object-cover" />
-          </button>
-        ))}
-      </div>
-    ) : null;
+  async function handleFiles(files: File[]) {
+    if (!files.length) return;
+    setUploading(true); setErr(null);
+    const uploaded: ItemAttachment[] = [];
+    for (const f of files) { const r = await uploadOne(f); if (r) uploaded.push(r); }
+    if (uploaded.length) onAdd(uploaded);
+    setUploading(false);
   }
 
   return (
-    <div className="flex items-center gap-1 flex-wrap">
-      {attachments.map(a => (
-        <div key={a.id} className="relative group w-8 h-8 rounded-md border border-[#e8e6e0] overflow-hidden shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={a.url} alt="attachment" className="w-full h-full object-cover" />
-          <button
-            type="button"
-            onClick={() => onChange(attachments.filter(x => x.id !== a.id))}
-            className="absolute inset-0 bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <X size={10} />
-          </button>
-        </div>
-      ))}
-      <input ref={inputRef} type="file" accept="image/*,application/pdf" multiple className="hidden"
-        onChange={async e => {
-          const files = Array.from(e.target.files ?? []);
-          for (const f of files) await upload(f);
-          if (inputRef.current) inputRef.current.value = '';
-        }}
+    <div className="flex flex-col gap-1">
+      {/* image-only: per-item attachments are condition photos; the OS sheet still
+          offers Camera + Library, and it keeps thumbnails from breaking on PDFs */}
+      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden"
+        onChange={async e => { await handleFiles(Array.from(e.target.files ?? [])); if (inputRef.current) inputRef.current.value = ''; }}
       />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={uploading}
-        title="Attach photos to this item (RP only)"
-        className="w-8 h-8 rounded-md border border-dashed border-[#c8c6be] text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] flex items-center justify-center disabled:opacity-50 transition-colors shrink-0"
+        title="Attach photos to this item"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#c8c6be] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] disabled:opacity-50 transition-colors h-11 px-4 text-xs font-semibold sm:h-8 sm:px-3"
       >
-        {uploading ? <Loader2 size={11} className="animate-spin" /> : <Paperclip size={11} />}
+        {uploading
+          ? <Loader2 size={15} className="animate-spin" />
+          : <><Camera size={16} className="sm:hidden" /><Paperclip size={13} className="hidden sm:block" /></>}
+        <span>{uploading ? 'Uploading…' : (count ? 'Add more' : 'Add photo')}</span>
       </button>
-      {err && <p className="text-[9px] text-red-500">{err}</p>}
+      {err && <p className="text-[11px] text-red-500">{err}</p>}
     </div>
   );
 }
@@ -322,6 +337,7 @@ function ItemAttachmentButton({
 
 function AreaBlock({
   area, areaIndex, inspType, contractId, onChange, onRemove, canRemove, isLocked, portalToken,
+  onItemPhotosAdd, onItemPhotosRemove,
 }: {
   area: InspectionArea;
   areaIndex: number;
@@ -332,6 +348,10 @@ function AreaBlock({
   canRemove: boolean;
   isLocked: boolean;
   portalToken?: string | null;
+  // Photo add/remove are routed through the parent so they apply as functional
+  // updates against LIVE state (resilient to slow uploads racing other edits).
+  onItemPhotosAdd: (itemId: string, added: ItemAttachment[]) => void;
+  onItemPhotosRemove: (itemId: string, photoId: string) => void;
 }) {
   function updateItem(itemId: string, patch: Partial<InspectionItem>) {
     onChange({ ...area, items: area.items.map(i => i.id === itemId ? { ...i, ...patch } : i) });
@@ -348,89 +368,119 @@ function AreaBlock({
   return (
     <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef]">
-        <div className="flex-1 flex items-center gap-3">
-          <span className="text-xs font-bold text-[#9b9890] uppercase tracking-wide w-14 shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef]">
+        <div className="flex-1 flex items-center gap-2 sm:gap-3 min-w-0">
+          <span className="text-[11px] sm:text-xs font-bold text-[#9b9890] uppercase tracking-wide w-12 sm:w-14 shrink-0">
             Area {areaIndex + 1}
           </span>
           <input
             type="text"
             value={area.name}
             onChange={e => onChange({ ...area, name: e.target.value })}
-            placeholder="e.g. Bedroom 1, Kitchen, Bathroom…"
-            className="flex-1 text-sm font-semibold text-[#1a1916] bg-transparent border-b border-transparent focus:border-[#2e9f82] focus:outline-none pb-0.5 transition-colors"
+            placeholder="e.g. Bedroom 1, Kitchen…"
+            className="flex-1 min-w-0 text-base sm:text-sm font-semibold text-[#1a1916] bg-transparent border-b border-transparent focus:border-[#2e9f82] focus:outline-none pb-0.5 transition-colors"
           />
         </div>
         {canRemove && !isLocked && (
-          <button type="button" onClick={onRemove} className="text-[#9b9890] hover:text-[#ef4444] transition-colors shrink-0">
-            <Trash2 size={14} />
+          <button type="button" onClick={onRemove} aria-label="Remove area" className="text-[#9b9890] hover:text-[#ef4444] transition-colors shrink-0 p-1.5 -m-1.5">
+            <Trash2 size={16} />
           </button>
         )}
       </div>
 
       {/* Items table */}
-      <div className="px-5 pt-3 pb-2">
+      <div className="px-4 sm:px-5 pt-3 pb-2">
         {/* Column header — desktop only; on mobile each row is self-describing */}
-        <div className="hidden sm:grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] grid-cols-[1fr_6rem_auto_1.5rem]">
+        <div className="hidden sm:grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] grid-cols-[1fr_6rem_7rem_1.5rem]">
           <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Item</span>
           <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide text-center">{isMoveOut ? 'Move-Out' : 'Condition'}</span>
-          <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Attach</span>
+          <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide text-center">Attach</span>
           <span />
         </div>
 
-        {area.items.map(item => (
+        {area.items.map(item => {
+          const itemPhotos = item.itemAttachments ?? [];
+          return (
           <div
             key={item.id}
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2 border-b border-[#f9f8f6] last:border-0 sm:grid sm:gap-2 sm:py-1.5 sm:grid-cols-[1fr_6rem_auto_1.5rem]"
+            // Mobile: a self-describing stacked card. Desktop: a 4-col grid
+            // (Item | Condition | Attach | delete) with a full-width photo strip
+            // wrapping onto its own row beneath. Every direct child is an explicit
+            // grid cell (no display:contents) so locked/empty states can't drop a
+            // cell and shift the columns.
+            className="flex flex-col gap-3 py-3 border-b border-[#f9f8f6] last:border-0 sm:gap-2 sm:py-1.5 sm:items-center sm:grid sm:grid-cols-[1fr_6rem_7rem_1.5rem]"
           >
-            {/* Item name — full width on its own line on mobile */}
-            <div className="w-full min-w-0 sm:w-auto">
+            {/* Item name */}
+            <div className="min-w-0">
               {item.isCustom && !isLocked ? (
                 <input
                   type="text"
                   value={item.name}
                   onChange={e => updateItem(item.id, { name: e.target.value })}
                   placeholder="Item name…"
-                  className="w-full text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5"
+                  className="w-full text-base sm:text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5"
                 />
               ) : (
-                <span className="text-sm font-medium text-[#1a1916]">{item.name}</span>
+                <span className="text-[15px] sm:text-sm font-medium text-[#1a1916]">{item.name}</span>
               )}
             </div>
 
-            {/* Controls — own line on mobile, individual grid cells on desktop */}
-            <div className="flex items-center gap-3 w-full sm:contents">
-              {/* Condition — move-out edits `outCondition` (pre-filled from the
-                  move-in baseline on load); move-in edits `inCondition`. */}
-              <div className="flex justify-center">
-                <ConditionPicker
-                  value={isMoveOut ? item.outCondition : item.inCondition}
-                  onChange={v => !isLocked && updateItem(item.id, isMoveOut ? { outCondition: v } : { inCondition: v })}
-                />
-              </div>
+            {/* Condition (custom-item delete rides this row on mobile).
+                Move-out edits `outCondition` (pre-filled from the move-in
+                baseline on load); move-in edits `inCondition`. */}
+            <div className="flex items-center gap-3 sm:justify-center">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-16 shrink-0 sm:hidden">Condition</span>
+              <ConditionPicker
+                value={isMoveOut ? item.outCondition : item.inCondition}
+                onChange={v => !isLocked && updateItem(item.id, isMoveOut ? { outCondition: v } : { inCondition: v })}
+              />
+              {item.isCustom && !isLocked && (
+                <button type="button" onClick={() => removeItem(item.id)} aria-label="Remove item"
+                  className="ml-auto sm:hidden text-[#c8c6be] hover:text-[#ef4444] transition-colors p-2 -m-2">
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
 
-              {/* Per-item attachment — RP / inspector only, not shown to tenant */}
-              <div className="flex items-center">
+            {/* Attach control */}
+            <div className="flex items-center gap-3 sm:justify-center">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-16 shrink-0 sm:hidden">Photos</span>
+              {!isLocked ? (
                 <ItemAttachmentButton
                   contractId={contractId}
                   itemId={item.id}
-                  attachments={item.itemAttachments ?? []}
-                  onChange={updated => updateItem(item.id, { itemAttachments: updated })}
-                  disabled={isLocked}
+                  count={itemPhotos.length}
+                  onAdd={added => onItemPhotosAdd(item.id, added)}
                   portalToken={portalToken}
                 />
-              </div>
-
-              <div className="ml-auto sm:ml-0 flex justify-center sm:w-6">
-                {item.isCustom && !isLocked && (
-                  <button type="button" onClick={() => removeItem(item.id)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors p-1 -m-1">
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
+              ) : (
+                <span className="text-xs text-[#9b9890] sm:hidden">
+                  {itemPhotos.length ? `${itemPhotos.length} photo${itemPhotos.length > 1 ? 's' : ''}` : 'No photos'}
+                </span>
+              )}
             </div>
+
+            {/* Custom-item delete — desktop grid cell only */}
+            <div className="hidden sm:flex sm:justify-center sm:w-6">
+              {item.isCustom && !isLocked && (
+                <button type="button" onClick={() => removeItem(item.id)} aria-label="Remove item" className="text-[#c8c6be] hover:text-[#ef4444] transition-colors p-1 -m-1">
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Photo previews — full-width strip beneath the item (own grid row on desktop) */}
+            {itemPhotos.length > 0 && (
+              <div className="sm:col-span-full">
+                <ItemThumbStrip
+                  attachments={itemPhotos}
+                  onRemove={isLocked ? undefined : id => onItemPhotosRemove(item.id, id)}
+                />
+              </div>
+            )}
           </div>
-        ))}
+          );
+        })}
 
         {!isLocked && (
           <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75 mt-3 mb-1 transition-opacity">
@@ -440,14 +490,14 @@ function AreaBlock({
       </div>
 
       {/* Remarks */}
-      <div className="px-5 pb-4">
+      <div className="px-4 sm:px-5 pb-4">
         <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1">Remarks</label>
         <textarea
           value={area.remarks}
           onChange={e => onChange({ ...area, remarks: e.target.value })}
           placeholder="Notes, damages, or specific observations for this area…"
           rows={2}
-          className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none bg-[#fafaf8]"
+          className="w-full text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none bg-[#fafaf8]"
         />
       </div>
     </div>
@@ -549,12 +599,15 @@ function SignaturePad({
 // ─── Photos section ───────────────────────────────────────────────────────────
 
 function PhotosSection({
-  contractId, inspType, photos, onChange, disabled, portalToken,
+  contractId, inspType, photos, onChange, onAdd, disabled, portalToken,
 }: {
   contractId: number;
   inspType: InspType;
   photos: InspectionPhoto[];
+  // onChange = caption edit / remove (synchronous). onAdd = upload result, applied
+  // functionally by the parent so a slow upload can't clobber concurrent edits.
   onChange: (photos: InspectionPhoto[]) => void;
+  onAdd: (added: InspectionPhoto[]) => void;
   disabled?: boolean;
   portalToken?: string | null;
 }) {
@@ -565,13 +618,15 @@ function PhotosSection({
   const isMoveIn = inspType === 'move_in';
   const heading = isMoveIn ? 'Move-In Photos' : 'Move-Out Photos';
 
-  async function uploadFile(file: File) {
-    if (disabled) return;
-    if (!file.type.startsWith('image/')) { setUploadError('Please upload an image file.'); return; }
-    setUploading(true); setUploadError(null);
+  // Uploads ONE file and returns the new photo (or null) without touching parent
+  // state, so a multi-file selection is appended in a single onChange() — calling
+  // onChange per-file appends onto the same stale `photos` and only the last
+  // file would survive. uid() in the documentKey avoids same-ms collisions.
+  async function uploadOne(file: File): Promise<InspectionPhoto | null> {
+    if (!file.type.startsWith('image/')) { setUploadError('Please upload image files only.'); return null; }
     try {
       const docBody = {
-        documentKey: `inspection_${inspType}_${Date.now()}`,
+        documentKey: `inspection_${inspType}_${Date.now()}_${uid()}`,
         mimeType: file.type, originalName: file.name,
       };
       const urlRes = await fetch(portalToken
@@ -583,14 +638,22 @@ function PhotosSection({
           ? docBody
           : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
       });
-      if (!urlRes.ok) { setUploadError('Failed to get upload URL'); return; }
+      if (!urlRes.ok) { setUploadError('Failed to get upload URL'); return null; }
       const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
       const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
       const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-      if (!putRes.ok) { setUploadError('File upload failed'); return; }
-      onChange([...photos, { id: uid(), url: fileUrl, caption: '' }]);
-    } catch { setUploadError('Unexpected upload error'); }
-    finally { setUploading(false); }
+      if (!putRes.ok) { setUploadError('File upload failed'); return null; }
+      return { id: uid(), url: fileUrl, caption: '' };
+    } catch { setUploadError('Unexpected upload error'); return null; }
+  }
+
+  async function handleFiles(files: File[]) {
+    if (disabled || !files.length) return;
+    setUploading(true); setUploadError(null);
+    const added: InspectionPhoto[] = [];
+    for (const f of files) { const r = await uploadOne(f); if (r) added.push(r); }
+    if (added.length) onAdd(added);
+    setUploading(false);
   }
 
   return (
@@ -609,15 +672,15 @@ function PhotosSection({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.url} alt={p.caption || 'Inspection photo'} className="w-full h-32 object-cover" />
               {!disabled && (
-                <button type="button" onClick={() => onChange(photos.filter(x => x.id !== p.id))}
-                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 print:hidden">
-                  <X size={12} />
+                <button type="button" onClick={() => onChange(photos.filter(x => x.id !== p.id))} aria-label="Remove photo"
+                  className="absolute top-1.5 right-1.5 w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:bg-red-600 print:hidden">
+                  <X size={13} />
                 </button>
               )}
               <input type="text" value={p.caption} readOnly={disabled} disabled={disabled}
                 onChange={e => onChange(photos.map(x => x.id === p.id ? { ...x, caption: e.target.value } : x))}
                 placeholder={disabled ? '' : 'Caption (e.g. living room)'}
-                className="w-full text-[10px] px-2 py-1 border-t border-[#e8e6e0] focus:outline-none focus:bg-[#f0faf6] bg-white disabled:bg-[#f4f3ef] disabled:text-[#6b6860]"
+                className="w-full text-xs sm:text-[10px] px-2 py-1.5 sm:py-1 border-t border-[#e8e6e0] focus:outline-none focus:bg-[#f0faf6] bg-white disabled:bg-[#f4f3ef] disabled:text-[#6b6860]"
               />
             </div>
           ))}
@@ -626,16 +689,16 @@ function PhotosSection({
 
       {!disabled && (
         <>
-          <input ref={fileInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden"
+          {/* No `capture` attr — lets the OS sheet offer both Camera and Photo Library */}
+          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
             onChange={async e => {
-              const files = Array.from(e.target.files ?? []);
-              for (const f of files) await uploadFile(f);
+              await handleFiles(Array.from(e.target.files ?? []));
               if (fileInputRef.current) fileInputRef.current.value = '';
             }}
           />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-2 w-full justify-center py-3 rounded-xl border-2 border-dashed border-[#d8d6d0] text-sm font-semibold text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] disabled:opacity-50 transition-colors print:hidden">
-            {uploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : <><UploadCloud size={14} /> Upload {photos.length === 0 ? heading.toLowerCase() : 'more photos'}</>}
+            className="flex items-center gap-2 w-full justify-center py-4 sm:py-3 rounded-xl border-2 border-dashed border-[#d8d6d0] text-sm font-semibold text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] active:border-[#2e9f82] active:text-[#2e9f82] disabled:opacity-50 transition-colors print:hidden">
+            {uploading ? <><Loader2 size={16} className="animate-spin" /> Uploading…</> : <><Camera size={16} /> {photos.length === 0 ? `Add ${heading.toLowerCase()}` : 'Add more photos'}</>}
           </button>
           {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
         </>
@@ -730,7 +793,9 @@ function BillClearanceSection({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const items = value.items ?? [];
-  const totalOutstanding = items.reduce((s, i) => s + (Number(i.outstanding) || 0), 0);
+  // Cleared utilities don't count toward the deductible total (we keep their typed
+  // figure so toggling Cleared on/off never silently wipes it).
+  const totalOutstanding = items.reduce((s, i) => s + (i.cleared ? 0 : Number(i.outstanding) || 0), 0);
   const allCleared = items.length > 0 && items.every(i => i.cleared);
 
   function patchItem(id: string, patch: Partial<UtilityClearance>) {
@@ -781,30 +846,47 @@ function BillClearanceSection({
         <span>Provider</span><span className="text-center">Cleared</span><span>Outstanding (AED)</span><span>Account / ref</span><span className="w-5" />
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3 sm:space-y-2">
         {items.map(it => (
-          <div key={it.id} className="grid gap-2 items-center grid-cols-[1fr_auto_7rem_8rem_auto]">
-            <input type="text" value={it.provider} disabled={disabled}
-              onChange={e => patchItem(it.id, { provider: e.target.value })}
-              placeholder="Utility provider"
-              className="text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5 disabled:opacity-70" />
-            <button type="button" disabled={disabled}
-              onClick={() => patchItem(it.id, { cleared: !it.cleared, outstanding: !it.cleared ? '' : it.outstanding })}
-              title={it.cleared ? 'Cleared' : 'Mark cleared'}
-              className={'w-7 h-7 rounded-md border flex items-center justify-center justify-self-center transition-colors ' + (it.cleared ? 'bg-[#2e9f82] border-transparent text-white' : 'border-[#e8e6e0] text-[#c8c6be] hover:border-[#2e9f82]')}>
-              <Check size={14} />
-            </button>
-            <input type="number" min="0" step="0.01" value={it.outstanding} disabled={disabled || it.cleared}
-              onChange={e => patchItem(it.id, { outstanding: e.target.value })}
-              placeholder="0.00"
-              className="text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:text-[#b0ae9a]" />
-            <input type="text" value={it.reference} disabled={disabled}
-              onChange={e => patchItem(it.id, { reference: e.target.value })}
-              placeholder="Acct / ref no."
-              className="text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:opacity-70" />
-            <div className="w-5 flex justify-center">
+          <div key={it.id} className="rounded-xl border border-[#e8e6e0] p-3 space-y-2.5 sm:space-y-0 sm:border-0 sm:py-0 sm:px-1 sm:rounded-none sm:grid sm:gap-2 sm:items-center sm:grid-cols-[1fr_auto_7rem_8rem_auto]">
+            {/* Provider + cleared toggle (+ mobile delete) */}
+            <div className="flex items-center gap-3 sm:contents">
+              <input type="text" value={it.provider} disabled={disabled}
+                onChange={e => patchItem(it.id, { provider: e.target.value })}
+                placeholder="Utility provider"
+                className="flex-1 min-w-0 text-base sm:text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5 disabled:opacity-70" />
+              <button type="button" disabled={disabled}
+                onClick={() => patchItem(it.id, { cleared: !it.cleared })}
+                aria-pressed={it.cleared} aria-label={it.cleared ? 'Mark not cleared' : 'Mark cleared'}
+                title={it.cleared ? 'Cleared' : 'Mark cleared'}
+                className={'shrink-0 w-9 h-9 sm:w-7 sm:h-7 rounded-md border flex items-center justify-center sm:justify-self-center transition-colors ' + (it.cleared ? 'bg-[#2e9f82] border-transparent text-white' : 'border-[#e8e6e0] text-[#c8c6be] hover:border-[#2e9f82]')}>
+                <Check className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              </button>
               {!disabled && (
-                <button type="button" onClick={() => removeItem(it.id)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={12} /></button>
+                <button type="button" onClick={() => removeItem(it.id)} aria-label="Remove utility"
+                  className="sm:hidden text-[#c8c6be] hover:text-[#ef4444] transition-colors p-2 -m-1"><Trash2 size={16} /></button>
+              )}
+            </div>
+            {/* Outstanding */}
+            <label className="flex items-center gap-2 sm:contents">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-28 shrink-0 sm:hidden">Outstanding (AED)</span>
+              <input type="number" min="0" step="0.01" value={it.outstanding} disabled={disabled || it.cleared}
+                onChange={e => patchItem(it.id, { outstanding: e.target.value })}
+                placeholder="0.00"
+                className="flex-1 sm:flex-none min-w-0 text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-2 sm:py-1 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:text-[#b0ae9a]" />
+            </label>
+            {/* Account / reference */}
+            <label className="flex items-center gap-2 sm:contents">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-28 shrink-0 sm:hidden">Account / ref</span>
+              <input type="text" value={it.reference} disabled={disabled}
+                onChange={e => patchItem(it.id, { reference: e.target.value })}
+                placeholder="Acct / ref no."
+                className="flex-1 sm:flex-none min-w-0 text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-2 sm:py-1 focus:outline-none focus:border-[#2e9f82] disabled:opacity-70" />
+            </label>
+            {/* Delete — desktop grid cell only */}
+            <div className="hidden sm:flex w-5 justify-center">
+              {!disabled && (
+                <button type="button" onClick={() => removeItem(it.id)} aria-label="Remove utility" className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={12} /></button>
               )}
             </div>
           </div>
@@ -849,7 +931,7 @@ function BillClearanceSection({
         onChange={e => onChange({ ...value, notes: e.target.value })}
         placeholder="Notes — final meter readings, pending closures, who will settle…"
         rows={2}
-        className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] resize-none bg-[#fafaf8] disabled:opacity-70" />
+        className="w-full text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] resize-none bg-[#fafaf8] disabled:opacity-70" />
     </div>
   );
 }
@@ -893,6 +975,14 @@ export default function InspectionPage() {
   const [countering, setCountering]   = useState(false);
   const [counterError, setCounterError] = useState<string | null>(null);
   const [counterDone, setCounterDone] = useState(false);
+  // Draft autosave — persists progress (photos/conditions/notes) as the inspector
+  // works so a reload never loses work. The first explicit Submit finalizes+locks.
+  const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Always-current snapshot so a debounced autosave sends the LATEST data, not a
+  // value captured when the timer was scheduled. Kept in sync via an effect (a
+  // debounced save reads it ≥1.5s later, well after commit).
+  const dataRef = useRef(data);
 
   const contractId = params?.id;
   const isMoveIn   = inspType === 'move_in';
@@ -977,17 +1067,68 @@ export default function InspectionPage() {
   }, [contractId, inspType]);
 
   useEffect(() => { void load(); }, [load]);
+  // Keep the autosave snapshot current without touching the ref during render.
+  useEffect(() => { dataRef.current = data; }, [data]);
+  // Clear any pending autosave timer when leaving the page.
+  useEffect(() => () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); }, []);
 
-  async function handleSave() {
-    if (!contractId) return;
-    setSaving(true); setError(null);
+  const saveUrl = portalToken
+    ? `/api/portal/${portalToken}/contracts/${contractId}/inspection`
+    : `/api/contracts/${contractId}/inspection`;
+
+  // Debounced draft save (finalize:false) — never locks the form, just persists.
+  const saveDraft = useCallback(async () => {
+    if (!contractId || dataRef.current.rpSubmittedAt) return;
+    setAutosaveState('saving');
     try {
       const res = await fetch(portalToken
         ? `/api/portal/${portalToken}/contracts/${contractId}/inspection`
         : `/api/contracts/${contractId}/inspection`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: inspType, data }),
+        body: JSON.stringify({ type: inspType, data: dataRef.current, finalize: false }),
+      });
+      setAutosaveState(res.ok ? 'saved' : 'error');
+    } catch { setAutosaveState('error'); }
+  }, [contractId, portalToken, inspType]);
+
+  const scheduleAutosave = useCallback(() => {
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => { void saveDraft(); }, 1500);
+  }, [saveDraft]);
+
+  // Wrapper used by every USER edit (not by load() / submit / counter-sign, which
+  // write state-machine flags) so each change schedules a draft autosave.
+  const updateData = useCallback((update: Parameters<typeof setData>[0]) => {
+    setData(update);
+    if (!dataRef.current.rpSubmittedAt) scheduleAutosave();
+  }, [scheduleAutosave]);
+
+  // Photo add/remove apply as functional updates against LIVE state, so a slow
+  // upload that resolves after the inspector has edited another item/area appends
+  // to the current data rather than overwriting it with a stale snapshot.
+  const addItemPhotos = useCallback((areaId: string, itemId: string, added: ItemAttachment[]) => {
+    updateData(d => ({ ...d, areas: d.areas.map(a => a.id !== areaId ? a : {
+      ...a, items: a.items.map(it => it.id !== itemId ? it : { ...it, itemAttachments: [...(it.itemAttachments ?? []), ...added] }),
+    }) }));
+  }, [updateData]);
+  const removeItemPhoto = useCallback((areaId: string, itemId: string, photoId: string) => {
+    updateData(d => ({ ...d, areas: d.areas.map(a => a.id !== areaId ? a : {
+      ...a, items: a.items.map(it => it.id !== itemId ? it : { ...it, itemAttachments: (it.itemAttachments ?? []).filter(x => x.id !== photoId) }),
+    }) }));
+  }, [updateData]);
+
+  async function handleSave() {
+    if (!contractId) return;
+    // Cancel any queued draft save — this finalize supersedes it (and a late draft
+    // would be rejected by the server once submitted anyway).
+    if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch(saveUrl, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: inspType, data, finalize: true }),
       });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
@@ -995,6 +1136,7 @@ export default function InspectionPage() {
         return;
       }
       setSaved(true);
+      setAutosaveState('idle');
       setData(d => ({ ...d, rpSubmittedAt: new Date().toISOString() }));
       setTimeout(() => setSaved(false), 3000);
     } catch {
@@ -1072,24 +1214,41 @@ export default function InspectionPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6 print:px-0 print:py-0">
+    <div className="max-w-3xl mx-auto px-4 pt-6 pb-[calc(7rem+env(safe-area-inset-bottom,0px))] sm:py-8 space-y-6 print:px-0 print:py-0 print:pb-0">
 
       {/* Topbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap print:hidden">
-        {/* Inspector links have nowhere to go "back" to (the contract page just
-            redirects here) — drop the link so it doesn't loop. */}
-        {portalToken ? <span /> : (
-          <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
-            <ArrowLeft size={15} /> Back to contract
-          </Link>
-        )}
+        <div className="flex items-center gap-3 min-w-0">
+          {/* Inspector links have nowhere to go "back" to (the contract page just
+              redirects here) — drop the link so it doesn't loop. */}
+          {portalToken ? null : (
+            <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
+              <ArrowLeft size={15} /> Back to contract
+            </Link>
+          )}
+          {/* Draft autosave status — reassures the inspector their work is saved as
+              they go, so leaving before tapping Submit won't lose photos/conditions. */}
+          {!formLocked && autosaveState !== 'idle' && (
+            autosaveState === 'error' ? (
+              <button type="button" onClick={() => void saveDraft()} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#dc2626]">
+                <AlertCircle size={12} /> Couldn’t save — retry
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#9b9890]">
+                {autosaveState === 'saving'
+                  ? <><Loader2 size={12} className="animate-spin" /> Saving…</>
+                  : <><CheckCircle size={12} className="text-[#2e9f82]" /> Draft saved</>}
+              </span>
+            )
+          )}
+        </div>
         <div className="flex items-center gap-2 ml-auto">
           <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
             <Printer size={14} /> Print
           </button>
           {!formLocked && (
             <button onClick={handleSave} disabled={saving}
-              className="flex items-center gap-2 px-5 py-2 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
+              className="hidden sm:flex items-center gap-2 px-5 py-2 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               {saving ? 'Saving…' : 'Submit Inspection'}
             </button>
@@ -1180,10 +1339,12 @@ export default function InspectionPage() {
       )}
 
       {/* Form (locked when RP has submitted) */}
-      <fieldset disabled={formLocked} className={`space-y-6 ${formLocked ? 'opacity-95' : ''}`}>
+      {/* Disabled while submitting too, so no edit can slip in (and re-arm an
+          autosave) during the finalize request before the form locks. */}
+      <fieldset disabled={formLocked || saving} className={`space-y-6 ${formLocked ? 'opacity-95' : ''}`}>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 bg-[#f9f8f6] rounded-xl px-4 py-3 print:bg-white print:border print:border-gray-200">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-[#f9f8f6] rounded-xl px-4 py-3 print:bg-white print:border print:border-gray-200">
           <span className="text-xs font-semibold text-[#6b6860] uppercase tracking-wide">Condition:</span>
           <LegendChip letter="G" label="Good"    color="bg-[#2e9f82]" />
           <LegendChip letter="F" label="Fair"    color="bg-[#f59e0b]" />
@@ -1196,16 +1357,16 @@ export default function InspectionPage() {
             <div>
               <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">{isMoveIn ? 'Move-In Date' : 'Move-Out Date'}</label>
               <input type="date" value={data.moveInDate}
-                onChange={e => setData(d => ({ ...d, moveInDate: e.target.value }))}
-                className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
+                onChange={e => updateData(d => ({ ...d, moveInDate: e.target.value }))}
+                className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 sm:py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
               />
             </div>
             <div>
               <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Inspector Name</label>
               <input type="text" value={data.inspectorName}
-                onChange={e => setData(d => ({ ...d, inspectorName: e.target.value }))}
+                onChange={e => updateData(d => ({ ...d, inspectorName: e.target.value }))}
                 placeholder="Inspector full name"
-                className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
+                className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 sm:py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
               />
             </div>
             <div>
@@ -1213,8 +1374,8 @@ export default function InspectionPage() {
                 Report Generated Date
               </label>
               <input type="date" value={data.reportGeneratedDate}
-                onChange={e => setData(d => ({ ...d, reportGeneratedDate: e.target.value }))}
-                className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
+                onChange={e => updateData(d => ({ ...d, reportGeneratedDate: e.target.value }))}
+                className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 sm:py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
               />
             </div>
             {/* Inspection date is auto-set when RP counter-signs — shown read-only if set */}
@@ -1237,8 +1398,10 @@ export default function InspectionPage() {
               areaIndex={idx}
               inspType={inspType}
               contractId={Number(contractId)}
-              onChange={updated => setData(d => ({ ...d, areas: d.areas.map(a => a.id === area.id ? updated : a) }))}
-              onRemove={() => setData(d => ({ ...d, areas: d.areas.filter(a => a.id !== area.id) }))}
+              onChange={updated => updateData(d => ({ ...d, areas: d.areas.map(a => a.id === area.id ? updated : a) }))}
+              onRemove={() => updateData(d => ({ ...d, areas: d.areas.filter(a => a.id !== area.id) }))}
+              onItemPhotosAdd={(itemId, added) => addItemPhotos(area.id, itemId, added)}
+              onItemPhotosRemove={(itemId, photoId) => removeItemPhoto(area.id, itemId, photoId)}
               canRemove={data.areas.length > 1}
               isLocked={formLocked}
               portalToken={portalToken}
@@ -1247,7 +1410,7 @@ export default function InspectionPage() {
 
           {!formLocked && (
             <button type="button"
-              onClick={() => setData(d => ({ ...d, areas: [...d.areas, makeDefaultArea(d.areas.length + 1)] }))}
+              onClick={() => updateData(d => ({ ...d, areas: [...d.areas, makeDefaultArea(d.areas.length + 1)] }))}
               className="flex items-center gap-2 w-full justify-center py-3 rounded-2xl border-2 border-dashed border-[#d8d6d0] text-sm font-semibold text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors print:hidden">
               <Plus size={15} /> Add area
             </button>
@@ -1261,10 +1424,10 @@ export default function InspectionPage() {
             <span className="text-[#9b9890] font-normal text-xs ml-2">meter readings, key handover, damages, etc.</span>
           </label>
           <textarea value={data.generalNotes}
-            onChange={e => setData(d => ({ ...d, generalNotes: e.target.value }))}
+            onChange={e => updateData(d => ({ ...d, generalNotes: e.target.value }))}
             placeholder="Overall observations, utility meter readings, keys handed over…"
             rows={3}
-            className="w-full text-sm border border-[#e8e6e0] rounded-xl px-4 py-3 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none"
+            className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-4 py-3 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none"
           />
         </div>
 
@@ -1273,15 +1436,15 @@ export default function InspectionPage() {
           <BillClearanceSection
             contractId={Number(contractId)}
             value={data.billClearance ?? makeDefaultBillClearance()}
-            onChange={bc => setData(d => ({ ...d, billClearance: bc }))}
+            onChange={bc => updateData(d => ({ ...d, billClearance: bc }))}
             disabled={formLocked}
             portalToken={portalToken}
           />
         )}
 
-        {/* Bottom submit bar */}
+        {/* Bottom submit bar — hidden on mobile (the sticky bar carries it there) */}
         {!formLocked && (
-          <div className="flex justify-end pt-2 pb-8 print:hidden">
+          <div className="hidden sm:flex justify-end pt-2 pb-8 print:hidden">
             <button onClick={handleSave} disabled={saving}
               className="flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -1400,11 +1563,24 @@ export default function InspectionPage() {
           contractId={Number(contractId)}
           inspType={inspType}
           photos={data.photos}
-          onChange={photos => setData(d => ({ ...d, photos }))}
+          onChange={photos => updateData(d => ({ ...d, photos }))}
+          onAdd={added => updateData(d => ({ ...d, photos: [...d.photos, ...added] }))}
           disabled={formLocked}
           portalToken={portalToken}
         />
       </div>
+
+      {/* ── Sticky submit (mobile only) — keeps the primary action reachable
+           on a long, scrolling form without hunting for the button. ───────── */}
+      {!formLocked && (
+        <div className="fixed inset-x-0 bottom-0 z-30 sm:hidden print:hidden bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.08)] px-4 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)]">
+          <button onClick={handleSave} disabled={saving}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white bg-[#2e9f82] active:bg-[#267a65] disabled:opacity-60 transition-colors">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {saving ? 'Saving…' : 'Submit Inspection'}
+          </button>
+        </div>
+      )}
 
     </div>
   );
