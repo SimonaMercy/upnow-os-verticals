@@ -107,6 +107,9 @@ export interface ReceiptContract {
     emiratesId?: string | null;
     licenseNumber?: string | null;
     licenseAuthority?: string | null;
+    hasPoa?: boolean | null;
+    poaPersonName?: string | null;
+    poaPersonPhone?: string | null;
   };
   tenant: { name: string | null; emiratesId?: string | null; phone?: string | null };
   unit: { number: string | null; name: string | null };
@@ -466,10 +469,15 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const heroStatus = receipt.kind === 'deposit' && (rawStatus === 'Collected (PDC)' || rawStatus === 'Pending')
     ? 'Receipt'
     : rawStatus;
+  // When the lessor acts under a Power of Attorney, the contact number on the
+  // receipt is the POA holder's (mirrors the Ejari contract renderer).
+  const lessorPhone = contract.landlord?.hasPoa
+    ? (contract.landlord?.poaPersonPhone || contract.landlord?.phone)
+    : contract.landlord?.phone;
   const issuerLines = [
     (contract.landlord?.licenseNumber || contract.landlord?.licenseAuthority)
       ? `Licence ${contract.landlord?.licenseNumber || '—'}${contract.landlord?.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
-    contract.landlord?.phone ? `Tel ${contract.landlord.phone}` : null,
+    lessorPhone ? `Tel ${lessorPhone}` : null,
     contract.landlord?.email,
   ].filter(Boolean) as string[];
 
