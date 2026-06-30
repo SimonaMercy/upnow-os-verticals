@@ -3533,6 +3533,63 @@ function DirectTerminateModal({
   );
 }
 
+// Clean void of a NOT-YET-ACTIVE (pending / issued) lease — the tenant never
+// started, so there is no move-out / settlement wind-down. Distinct from
+// DirectTerminateModal (which ends a live tenancy). Posts to /contracts/:id/cancel.
+function CancelLeaseModal({
+  contract, onClose, onSubmitted,
+}: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/cancel`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (!res.ok) throw new Error(`Cancel failed: ${res.status}`);
+      onSubmitted();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Cancel failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mscrim" onClick={onClose}>
+      <div className="modal sm" onClick={e => e.stopPropagation()}>
+        <div className="mh">
+          <span className="mt">
+            <span className="mti" style={{ background: 'var(--brick)' }}><AlertCircle size={17} /></span>
+            Cancel lease
+          </span>
+          <button className="x" onClick={onClose}><X size={17} /></button>
+        </div>
+        <div className="mb">
+          <p className="note" style={{ marginBottom: 14 }}>
+            This lease has not started yet, so cancelling voids it cleanly — no move-out or settlement. The contract is marked terminated and any pending cheques are voided. This cannot be undone.
+          </p>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Reason (optional)</label>
+            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Why are you cancelling this lease?" />
+          </div>
+          {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+        </div>
+        <div className="mf">
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Keep lease</button>
+          <button className="btn btn-brick btn-sm" disabled={busy} onClick={submit}>
+            Cancel lease
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RenewalProposeModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
@@ -3953,7 +4010,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
-  const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | null>(null);
+  const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | 'cancel-lease' | null>(null);
 
   // Deep-link from the Leases (record) view: ?action=renew / ?action=terminate
   // jumps here into the full Operations view and opens that action directly, so
@@ -4843,6 +4900,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 && perms.renewals;
               const canTerminate = (contract.status === 'active' || contract.status === 'expired')
                 && contract.termination?.response !== 'accepted' && perms.agreements;
+              // Not-yet-active leases (pending/issued) can be cancelled cleanly
+              // (no move-out/settlement) — a void rather than a wind-down.
+              const canCancel = (contract.status === 'pending' || contract.status === 'issued')
+                && perms.agreements;
               return (
                 <>
                   {canRenew && (
@@ -4854,6 +4915,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                     <Link href={`${opsBase}?action=terminate`} className="btn btn-ghost btn-sm" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}>
                       <X size={14} /> Terminate
                     </Link>
+                  )}
+                  {canCancel && (
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => setModal('cancel-lease')}>
+                      <X size={14} /> Cancel lease
+                    </button>
                   )}
                 </>
               );
@@ -4888,6 +4954,19 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 onClick={() => setModal('direct-terminate')}
               >
                 <X size={14} /> Terminate directly
+              </button>
+            )}
+            {/* Clean void for a not-yet-active (pending/issued) lease — the
+                tenant never started, so this cancels without a move-out/
+                settlement wind-down. Distinct from "Terminate directly". */}
+            {showPipeline && (contract.status === 'pending' || contract.status === 'issued')
+              && perms.agreements && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
+                onClick={() => setModal('cancel-lease')}
+              >
+                <X size={14} /> Cancel lease
               </button>
             )}
             {/* Cancel/undo a termination that is still winding down (not yet
@@ -5203,6 +5282,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
       {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); }} />}
+      {modal === 'cancel-lease' && perms.agreements && <CancelLeaseModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
       {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
       {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
