@@ -184,7 +184,7 @@ function isRental(p: ReceiptPayment): boolean {
   return t !== 'security_deposit' && !FEE_TYPES.has(t);
 }
 const FEE_LABEL: Record<string, string> = {
-  admin_fee: 'Administration Fee', ejari_fee: 'Ejari Registration Fee', commission: 'Agency Commission',
+  admin_fee: 'Administration Fee', ejari_fee: 'Ejari Registration Fee', commission: 'Commission',
 };
 function isDeposit(p: ReceiptPayment): boolean {
   return (p.paymentType ?? '').toLowerCase() === 'security_deposit';
@@ -195,7 +195,7 @@ function isRenewalContract(c: ReceiptContract): boolean {
   return (c.contractType ?? '').toLowerCase() === 'renewal';
 }
 
-interface LineItem { desc: string; net: number; vat: number; total: number; }
+interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; }
 interface Receipt {
   kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management';
   title: string;
@@ -215,7 +215,7 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   if (type === 'security_deposit') {
     return { kind: 'deposit', title: 'SECURITY DEPOSIT RECEIPT',
       receiptNo: `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
-      lines: [{ desc: 'Refundable Security Deposit', net: gross, vat: 0, total: gross }] };
+      lines: [{ desc: 'Security Deposit', net: gross, vat: 0, total: gross }] };
   }
   if (isFee(sel)) {
     const code = type === 'ejari_fee' ? 'EJR' : type === 'commission' ? 'COM' : 'ADM';
@@ -237,9 +237,9 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     if (admin > 0) lines.push({ desc: 'Administration Fee', net: admin, vat: 0, total: admin });
     if (ejari > 0) lines.push({ desc: 'Ejari Registration Fee', net: ejari, vat: 0, total: ejari });
     const rentNet = Math.max(0, net - admin - ejari);
-    lines.push({ desc: `Rent — Instalment ${ordinal} of ${n}`, net: rentNet, vat, total: rentNet + vat });
+    lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net: rentNet, vat, total: rentNet + vat, date: sel.transactionDate ?? null });
   } else {
-    lines.push({ desc: `Rent — Instalment ${ordinal} of ${n}`, net, vat, total: gross });
+    lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net, vat, total: gross, date: sel.transactionDate ?? null });
   }
 
   return { kind: 'rent', title: 'RENT RECEIPT',
@@ -283,7 +283,7 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
   const lines: LineItem[] = [];
   if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat) });
   if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat) });
-  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Agency Commission',      net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat) });
+  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Commission',             net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat) });
   return { lines, legacyBundle, feeCount: feeRows.length };
 }
 
@@ -301,7 +301,7 @@ function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]
     const vat = p.vatAmount || 0;
     let net = Math.max(0, round2(gross - vat));
     if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
-    return { desc: `Rent — Instalment ${i + 1} of ${n}`, net, vat, total: round2(net + vat) };
+    return { desc: `Rent — Installment ${i + 1} of ${n}`, net, vat, total: round2(net + vat), date: p.transactionDate ?? null };
   });
   return { kind: 'rental', title: 'RENT INCOME RECEIPT',
     receiptNo: `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
@@ -459,9 +459,13 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const landlordName = contract.landlord?.companyName || contract.landlord?.name || '';
   const propertyDesc = [contract.property?.buildingName, contract.unit?.number || contract.unit?.name, contract.property?.community || contract.property?.emirate].filter(Boolean).join(', ');
 
-  const heroStatus = single
-    ? statusLabel(single.chequeStatus, contract.pdcConfirmed)
-    : 'Receipt';
+  // A receipt acknowledges money received. On the SECURITY DEPOSIT receipt an
+  // un-cleared PDC reads as "Receipt" (the deposit is in hand) rather than the
+  // ledger's "Collected (PDC)" / "Pending"; cleared/bounced/cancelled keep their label.
+  const rawStatus = single ? statusLabel(single.chequeStatus, contract.pdcConfirmed) : 'Receipt';
+  const heroStatus = receipt.kind === 'deposit' && (rawStatus === 'Collected (PDC)' || rawStatus === 'Pending')
+    ? 'Receipt'
+    : rawStatus;
   const issuerLines = [
     (contract.landlord?.licenseNumber || contract.landlord?.licenseAuthority)
       ? `Licence ${contract.landlord?.licenseNumber || '—'}${contract.landlord?.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
@@ -528,7 +532,10 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
           </View>
           {receipt.lines.map((l, i) => (
             <View key={i} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: LINE }}>
-              <Text style={[st.td, { flex: 1, color: INK }]}>{l.desc}</Text>
+              <View style={{ flex: 1, paddingVertical: 8 }}>
+                <Text style={{ fontSize: 9, color: INK }}>{l.desc}</Text>
+                {l.date ? <Text style={{ fontSize: 7, color: MUTE, marginTop: 1 }}>Due {fmtDate(l.date)}</Text> : null}
+              </View>
               {showVat ? <Text style={[st.td, { width: 78, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
               {showVat ? <Text style={[st.td, { width: 60, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
               <Text style={[st.td, { width: 92, textAlign: 'right', color: INK, fontWeight: 500 }]}>{fmtAmt(l.total)}</Text>

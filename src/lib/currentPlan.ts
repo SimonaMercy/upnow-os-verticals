@@ -18,6 +18,7 @@ export interface PlanPayment {
   transactionDate?: string | null;
   description?: string | null;
   paymentType?: string | null;
+  chequeStatus?: string | null;
 }
 
 export interface PlanContract {
@@ -63,9 +64,9 @@ export function buildCurrentPlan(contract: PlanContract, payments: PlanPayment[]
   }
 
   const items: OfferPlan['items'] = [
-    ...rentRows.map(p => ({ amountFils: toFils(p.amount ?? 0), vatFils: toFils(p.vatAmount ?? 0), dueDate: p.transactionDate ?? '', description: p.description ?? 'Rent', type: 'installment' as const })),
-    ...feeRows.map(f => ({ amountFils: toFils(f.amount ?? 0), vatFils: toFils(f.vatAmount ?? 0), dueDate: f.transactionDate ?? '', description: f.description || feeLabel(f.paymentType), type: 'fee' as const })),
-    ...(depositForPlan > 0 ? [{ amountFils: toFils(depositForPlan), vatFils: 0, dueDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? '', description: 'Security deposit', type: 'security_deposit' as const }] : []),
+    ...rentRows.map(p => ({ amountFils: toFils(p.amount ?? 0), vatFils: toFils(p.vatAmount ?? 0), dueDate: p.transactionDate ?? '', description: p.description ?? 'Rent', type: 'installment' as const, status: p.chequeStatus ?? null })),
+    ...feeRows.map(f => ({ amountFils: toFils(f.amount ?? 0), vatFils: toFils(f.vatAmount ?? 0), dueDate: f.transactionDate ?? '', description: f.description || feeLabel(f.paymentType), type: 'fee' as const, status: f.chequeStatus ?? null })),
+    ...(depositForPlan > 0 ? [{ amountFils: toFils(depositForPlan), vatFils: 0, dueDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? '', description: 'Security deposit', type: 'security_deposit' as const, status: depositRow?.chequeStatus ?? null }] : []),
   ].map((it, i) => ({ ...it, index: i + 1 }));
 
   // Headline rent = the contract's agreed current rent (annualRent is NET), so it
