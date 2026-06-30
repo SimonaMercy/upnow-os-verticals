@@ -98,7 +98,14 @@ function PendingLink({ label }: { label: string }) {
   );
 }
 
-function OfferBlock({ plan }: { plan: OfferPlan }) {
+const PLAN_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
+  cleared:   { label: 'Cleared',   bg: '#e6f5ee', fg: '#1f6f54' },
+  bounced:   { label: 'Bounced',   bg: '#fdece7', fg: '#9a3520' },
+  cancelled: { label: 'Cancelled', bg: '#f0ede8', fg: '#6b6860' },
+};
+const planStatus = (s?: string | null) => PLAN_STATUS[(s ?? '').toLowerCase()] ?? { label: 'Pending', bg: '#fff7ed', fg: '#c2410c' };
+
+function OfferBlock({ plan, unitNumber, buildingName }: { plan: OfferPlan; unitNumber?: string | null; buildingName?: string | null }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
   ];
@@ -111,6 +118,12 @@ function OfferBlock({ plan }: { plan: OfferPlan }) {
   return (
     <div style={cardCss}>
       <div style={capCss}>Payment plan · current rent, fees &amp; deposit</div>
+      {(buildingName || unitNumber) && (
+        <div style={{ padding: '9px 14px 0', fontSize: 12, color: '#6b6860', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'baseline' }}>
+          {buildingName ? <span style={{ fontWeight: 700, color: '#1a1916' }}>{buildingName}</span> : null}
+          {unitNumber ? <span>· Unit {unitNumber}</span> : null}
+        </div>
+      )}
       <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
         {lines.map((l, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#334155' }}><span>{l.label}</span><span style={{ fontWeight: 600 }}>{aed(l.fils)}</span></div>
@@ -127,6 +140,7 @@ function OfferBlock({ plan }: { plan: OfferPlan }) {
                 <th style={{ ...schTh, width: 30, textAlign: 'center' }}>#</th>
                 <th style={schTh}>Description</th>
                 <th style={{ ...schTh, whiteSpace: 'nowrap' }}>Due date</th>
+                <th style={{ ...schTh, textAlign: 'center' }}>Status</th>
                 <th style={{ ...schTh, textAlign: 'right' }}>Amount</th>
               </tr>
             </thead>
@@ -138,13 +152,16 @@ function OfferBlock({ plan }: { plan: OfferPlan }) {
                   </td>
                   <td style={{ ...schTd, color: '#1a1916' }}>{it.description ?? `Payment ${i + 1}`}</td>
                   <td style={{ ...schTd, color: '#6b6860', whiteSpace: 'nowrap' }}>{fmtD(it.dueDate)}</td>
+                  <td style={{ ...schTd, textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    {(() => { const st = planStatus(it.status); return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.fg }}>{st.label}</span>; })()}
+                  </td>
                   <td style={{ ...schTd, textAlign: 'right', fontWeight: 700, color: '#1a1916', whiteSpace: 'nowrap' }}>{aed(it.amountFils)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={3} style={{ ...schTd, borderTop: '2px solid #c5e8df', textAlign: 'right', fontWeight: 700, color: '#6b6860' }}>Schedule total</td>
+                <td colSpan={4} style={{ ...schTd, borderTop: '2px solid #c5e8df', textAlign: 'right', fontWeight: 700, color: '#6b6860' }}>Schedule total</td>
                 <td style={{ ...schTd, borderTop: '2px solid #c5e8df', textAlign: 'right', fontWeight: 800, color: '#15803d', whiteSpace: 'nowrap' }}>{aed(items.reduce((s, it) => s + (it.amountFils ?? 0), 0))}</td>
               </tr>
             </tfoot>
@@ -317,7 +334,11 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     .map(n => ({ n, docs: occDocs.filter(d => occNum(d) === n).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id) }));
 
   const seqIds = new Set(seq.flatMap(s => (s.kind === 'doc' ? matchDocs(s.key).map(d => d.id) : [])));
-  const leftover = all.filter(d => !isIdentity(d) && !isOccupant(d) && !seqIds.has(d.id));
+  // Renewals drop the salary-certificate slot (income re-verification lives on the
+  // original lease) — also drop any uploaded salary cert so it doesn't resurface
+  // under "Other documents".
+  const isSalaryDoc = (d: BinderDoc) => /salary/.test(norm(d.documentKey)) || /salary/i.test(d.displayName || '');
+  const leftover = all.filter(d => !isIdentity(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && isSalaryDoc(d)));
 
   const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'agreement' ? 'Agreement' : s.label;
   const slotId = (s: Slot) => s.kind === 'doc' ? `r-${s.key}` : `r-${s.kind}`;
@@ -365,7 +386,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} /></Block>
               : <Missing label="Receipts" />;

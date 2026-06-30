@@ -12,6 +12,7 @@ export interface OfferPlanItem {
   dueDate: string;
   description?: string;
   type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+  status?: string | null;
 }
 export interface OfferPlan {
   totalAmountFils: number;
