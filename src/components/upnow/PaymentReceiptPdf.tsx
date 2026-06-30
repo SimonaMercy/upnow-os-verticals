@@ -491,7 +491,9 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
             {issuerLines.map((l, i) => <Text key={i} style={{ fontSize: 7.5, color: HEADER_SUB, marginTop: 2 }}>{l}</Text>)}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2, marginBottom: 9 }}>{receipt.title}</Text>
+            {!['rental', 'management', 'deposit'].includes(receipt.kind)
+              ? <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2, marginBottom: 9 }}>{receipt.title}</Text>
+              : null}
             <View style={{ flexDirection: 'row', marginBottom: 2 }}>
               <Text style={{ fontSize: 7, color: HEADER_SUB, letterSpacing: 0.5, marginRight: 6 }}>RECEIPT NO.</Text>
               <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{receipt.receiptNo}</Text>
