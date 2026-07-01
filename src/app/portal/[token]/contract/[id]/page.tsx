@@ -193,8 +193,8 @@ export default function ContractReviewPage() {
           )}
         </div>
 
-        {/* Any extra signed/official copies attached */}
-        {d.documents.length > 0 && (
+        {/* Any extra signed/official copies attached — hidden on the move-out signing view */}
+        {inspType !== 'move_out' && d.documents.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">
             {d.documents.map(x => (
               <button key={x.documentKey} type="button"
@@ -474,7 +474,9 @@ function PhotoGrid({ photos }: { photos: InspPhoto[] }) {
 /** Read-only inspection report the tenant reviews before signing on the portal. */
 function InspectionPreview({ insp, type }: { insp: Inspection; type: 'move_in' | 'move_out' }) {
   const isOut = type === 'move_out';
-  const cols = isOut ? 'grid-cols-[1fr_5rem_5rem]' : 'grid-cols-[1fr_5rem]';
+  // Single condition column for both flows — the move-out view shows only the
+  // move-out condition (the move-in reference column is intentionally omitted).
+  const cols = 'grid-cols-[1fr_5rem]';
   const Pill = ({ v }: { v?: string }) => {
     const m = condMeta(v);
     return <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded ${m.cls}`}>{m.label}</span>;
@@ -497,19 +499,12 @@ function InspectionPreview({ insp, type }: { insp: Inspection; type: 'move_in' |
           <div className="px-5 py-3">
             <div className={`grid ${cols} gap-3 pb-1.5 border-b border-[#f4f3ef] text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]`}>
               <span>Item</span>
-              {isOut ? <><span className="text-center">Move-in</span><span className="text-center">Move-out</span></> : <span className="text-center">Condition</span>}
+              <span className="text-center">{isOut ? 'Move-out' : 'Condition'}</span>
             </div>
             {(area.items ?? []).map((it, ii) => (
               <div key={ii} className={`grid ${cols} gap-3 items-center py-1.5 border-b border-[#f9f8f6] last:border-0`}>
                 <span className="text-sm text-[#1a1916]">{it.name}</span>
-                {isOut ? (
-                  <>
-                    <span className="text-center"><Pill v={it.inCondition} /></span>
-                    <span className="text-center"><Pill v={it.outCondition} /></span>
-                  </>
-                ) : (
-                  <span className="text-center"><Pill v={it.inCondition} /></span>
-                )}
+                <span className="text-center"><Pill v={isOut ? it.outCondition : it.inCondition} /></span>
               </div>
             ))}
             {area.remarks && <p className="text-xs text-[#6b6860] mt-2"><span className="font-semibold">Remarks:</span> {area.remarks}</p>}
