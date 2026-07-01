@@ -71,14 +71,16 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
           phone: phone.trim() || null, email: email.trim() || undefined,
           emiratesIdNumber: emiratesIdNumber.trim() || null,
           entityType, companyName: entityType === 'company' ? (companyName.trim() || null) : null,
-          // Company tenants are licensed entities, not people: capture trade
-          // license + authority and leave the personal attributes untouched
-          // (they don't apply). Individuals capture nationality/gender/DOB and
-          // clear any stray license fields.
+          // Company tenants capture the trade license + authority AND the
+          // authorised signatory's identity (name + Emirates ID above, plus
+          // nationality here) — the signatory is the person who signs the
+          // tenancy contract on the company's behalf. Individuals capture their
+          // own nationality/gender/DOB and clear any stray license fields.
           ...(entityType === 'company'
             ? {
                 tradeLicenseNumber: tradeLicenseNumber.trim() || null,
                 tradeLicenseAuthority: tradeLicenseAuthority.trim() || null,
+                nationality: nationality.trim() || null,
               }
             : {
                 nationality: nationality.trim() || null,
@@ -102,8 +104,8 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <div><label className={label}>First name</label><input className={field} value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="First name" /></div>
-        <div><label className={label}>Last name</label><input className={field} value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Last name" /></div>
+        <div><label className={label}>{entityType === 'company' ? 'Signatory first name' : 'First name'}</label><input className={field} value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="First name" /></div>
+        <div><label className={label}>{entityType === 'company' ? 'Signatory last name' : 'Last name'}</label><input className={field} value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Last name" /></div>
         <div><label className={label}>Email</label><input className={field} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" /></div>
         <div><label className={label}>Phone</label><input className={field} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+9715…" /></div>
         <div>
@@ -118,11 +120,15 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
         )}
         {mode === 'edit' && (
           <>
-            <div><label className={label}>Emirates ID</label><input className={field} value={emiratesIdNumber} onChange={e => setEid(e.target.value)} placeholder="784-YYYY-NNNNNNN-D" /></div>
+            <div><label className={label}>{entityType === 'company' ? 'Signatory Emirates ID' : 'Emirates ID'}</label><input className={field} value={emiratesIdNumber} onChange={e => setEid(e.target.value)} placeholder="784-YYYY-NNNNNNN-D" /></div>
+            {entityType === 'company' && (
+              <div><label className={label}>Signatory nationality</label><input className={field} value={nationality} onChange={e => setNationality(e.target.value)} placeholder="e.g. Emirati" /></div>
+            )}
             {entityType === 'company' ? (
               <>
-                {/* Companies are licensed entities — capture the trade license
-                    and its issuing authority instead of personal attributes. */}
+                {/* Company = trade license + issuing authority. The authorised
+                    signatory's identity (name + Emirates ID + nationality) is
+                    captured in the person fields above. */}
                 <div><label className={label}>Trade license no.</label><input className={field} value={tradeLicenseNumber} onChange={e => setTradeLicenseNumber(e.target.value)} placeholder="License number" /></div>
                 <div>
                   <label className={label}>License authority</label>

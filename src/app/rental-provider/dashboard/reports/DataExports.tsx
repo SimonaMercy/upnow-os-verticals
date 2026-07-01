@@ -15,13 +15,12 @@ import {
   FileSpreadsheet, Building2, Users, Building, Boxes, Loader2, Download, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { downloadCsv } from '@/lib/csv';
+import { downloadXlsx } from '@/lib/xlsx';
 
 interface ExportResponse {
   filename: string;
-  headers: string[];
-  rows: string[][];
   count: number;
+  xlsxBase64: string;
 }
 
 interface ExportDef {
@@ -96,7 +95,7 @@ export default function DataExports() {
         setError(`No ${def.title.toLowerCase()} data to export.`);
         return;
       }
-      downloadCsv(data.filename, data.headers, data.rows);
+      downloadXlsx(data.filename, data.xlsxBase64);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Export failed.');
     } finally {
@@ -112,7 +111,7 @@ export default function DataExports() {
         </span>
         <h2 className="text-sm font-bold text-[#1a1916]">Data Exports</h2>
         <span className="text-xs text-[#9b9890]">
-          Download full datasets as CSV · {scopeLabel}
+          Download full datasets as Excel — incomplete rows highlighted · {scopeLabel}
         </span>
       </div>
 
@@ -143,7 +142,7 @@ export default function DataExports() {
                     {loading ? (
                       <><Loader2 size={13} className="animate-spin" /> Preparing…</>
                     ) : (
-                      <><Download size={13} /> Download CSV</>
+                      <><Download size={13} /> Download Excel</>
                     )}
                   </span>
                 </div>
