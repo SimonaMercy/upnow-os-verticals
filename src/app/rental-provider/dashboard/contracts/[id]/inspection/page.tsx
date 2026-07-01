@@ -101,6 +101,32 @@ function fmtDate(d: string | null | undefined): string {
   return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// `<input type="date">` only renders a value in strict YYYY-MM-DD form; a full
+// ISO timestamp (e.g. the API's "2026-06-29T20:00:00.000Z") makes it show blank.
+// Normalise to the Dubai-local calendar day so the control shows the right date
+// (and doesn't drift a day back for a UTC-midnight-Dubai value). en-CA yields
+// YYYY-MM-DD.
+function toDateInput(d: string | null | undefined): string {
+  if (!d) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;           // already date-only
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+}
+
+// Freshly-uploaded inspection photos are stored with their RAW private-bucket URL
+// (so the backend's read-time re-signing keeps working), but that raw URL 403s
+// until the next reload. The upload response also returns a short-lived SIGNED
+// `viewUrl`; we stash it here keyed by the raw URL so the just-uploaded photo
+// previews immediately in the same session. Never persisted — after a reload the
+// API returns already-signed URLs and this map is empty (falls through to `url`).
+const freshViewUrls = new Map<string, string>();
+function rememberViewUrl(rawUrl: string, viewUrl?: string | null) {
+  if (rawUrl && viewUrl) freshViewUrls.set(rawUrl, viewUrl);
+}
+function displayUrl(u: string | null | undefined): string {
+  return (u && freshViewUrls.get(u)) || u || '';
+}
+
 function InfoCell({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -189,16 +215,6 @@ function makeBlankData(): InspectionData {
   };
 }
 
-// Default UAE utility accounts a tenant must close/settle before deposit refund.
-const DEFAULT_UTILITIES = ['DEWA (Electricity & Water)', 'District Cooling', 'Gas', 'Internet / Telecom'];
-function makeDefaultBillClearance(): BillClearanceData {
-  return {
-    items: DEFAULT_UTILITIES.map(p => ({ id: uid(), provider: p, cleared: false, outstanding: '', reference: '' })),
-    certificateUrl: null,
-    notes: '',
-  };
-}
-
 // ─── Condition picker ─────────────────────────────────────────────────────────
 
 function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: Condition) => void }) {
@@ -239,9 +255,9 @@ function ItemThumbStrip({ attachments, onRemove }: {
     <div className="flex flex-wrap gap-2">
       {attachments.map(a => (
         <div key={a.id} className="group relative w-16 h-16 sm:w-14 sm:h-14 rounded-lg border border-[#e8e6e0] overflow-hidden shrink-0 bg-[#f4f3ef]">
-          <button type="button" onClick={() => openDocViewer({ fileUrl: a.url, caption: 'Attachment' })} className="block w-full h-full">
+          <button type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(a.url), caption: 'Attachment' })} className="block w-full h-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={a.url} alt="attachment" className="w-full h-full object-cover" />
+            <img src={displayUrl(a.url)} alt="attachment" className="w-full h-full object-cover" />
           </button>
           {onRemove && (
             <button type="button" onClick={() => onRemove(a.id)} aria-label="Remove photo"
@@ -257,11 +273,12 @@ function ItemThumbStrip({ attachments, onRemove }: {
 
 // ─── Per-item attachment upload (add button only — previews live in the strip) ──
 function ItemAttachmentButton({
-  contractId, itemId, count, onAdd, portalToken,
+  contractId, itemId, count, onAdd, portalToken, inspType,
 }: {
   contractId: number;
   itemId: string;
   count: number;
+  inspType: InspType;
   // Hands back ONLY the newly-uploaded attachments; the parent appends them to
   // LIVE state via a functional update. This avoids two losses: (1) appending
   // per-file onto a stale array (only the last survives) and (2) a slow upload
@@ -287,15 +304,20 @@ function ItemAttachmentButton({
         : '/api/documents/upload-url', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        // Only the portal (inspector-link) endpoint takes `type` — it matches the
+        // request to the link's purpose (a move-out link 403s on a move_in default).
+        // The logged-in /api/documents endpoint whitelists its DTO and 400s on any
+        // extra field, so `type` must NOT leak into that branch.
         body: JSON.stringify(portalToken
-          ? docBody
+          ? { type: inspType, ...docBody }
           : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
       });
       if (!urlRes.ok) { setErr('Upload failed — please retry'); return null; }
-      const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+      const { uploadUrl, fileUrl, viewUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string; viewUrl?: string };
       const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
       const put = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
       if (!put.ok) { setErr('Upload failed — please retry'); return null; }
+      rememberViewUrl(fileUrl, viewUrl);   // preview immediately (raw fileUrl 403s until reload)
       return { id: uid(), url: fileUrl };
     } catch { setErr('Unexpected error — please retry'); return null; }
   }
@@ -452,6 +474,7 @@ function AreaBlock({
                   count={itemPhotos.length}
                   onAdd={added => onItemPhotosAdd(item.id, added)}
                   portalToken={portalToken}
+                  inspType={inspType}
                 />
               ) : (
                 <span className="text-xs text-[#9b9890] sm:hidden">
@@ -634,15 +657,18 @@ function PhotosSection({
         : '/api/documents/upload-url', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        // `type` only on the portal branch (see ItemAttachmentButton) — the
+        // /api/documents DTO 400s on any non-whitelisted field.
         body: JSON.stringify(portalToken
-          ? docBody
+          ? { type: inspType, ...docBody }
           : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
       });
       if (!urlRes.ok) { setUploadError('Failed to get upload URL'); return null; }
-      const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
+      const { uploadUrl, fileUrl, viewUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string; viewUrl?: string };
       const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
       const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
       if (!putRes.ok) { setUploadError('File upload failed'); return null; }
+      rememberViewUrl(fileUrl, viewUrl);   // preview immediately (raw fileUrl 403s until reload)
       return { id: uid(), url: fileUrl, caption: '' };
     } catch { setUploadError('Unexpected upload error'); return null; }
   }
@@ -670,7 +696,7 @@ function PhotosSection({
           {photos.map(p => (
             <div key={p.id} className="relative group rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f4f3ef]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={p.caption || 'Inspection photo'} className="w-full h-32 object-cover" />
+              <img src={displayUrl(p.url)} alt={p.caption || 'Inspection photo'} className="w-full h-32 object-cover" />
               {!disabled && (
                 <button type="button" onClick={() => onChange(photos.filter(x => x.id !== p.id))} aria-label="Remove photo"
                   className="absolute top-1.5 right-1.5 w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:bg-red-600 print:hidden">
@@ -764,174 +790,15 @@ function PhotoGallery({ areas, globalPhotos }: { areas: InspectionArea[]; global
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {displayed.map(p => (
-            <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })}
+            <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(p.url), caption: p.caption })}
               className="block w-full text-left rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors cursor-pointer">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={p.caption || 'photo'} className="w-full h-32 object-cover" />
+              <img src={displayUrl(p.url)} alt={p.caption || 'photo'} className="w-full h-32 object-cover" />
               {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
             </button>
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── Bill & utility clearance (move-out only) ──────────────────────────────────
-
-function BillClearanceSection({
-  contractId, value, onChange, disabled, portalToken,
-}: {
-  contractId: number;
-  value: BillClearanceData;
-  onChange: (v: BillClearanceData) => void;
-  disabled?: boolean;
-  portalToken?: string | null;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const items = value.items ?? [];
-  // Cleared utilities don't count toward the deductible total (we keep their typed
-  // figure so toggling Cleared on/off never silently wipes it).
-  const totalOutstanding = items.reduce((s, i) => s + (i.cleared ? 0 : Number(i.outstanding) || 0), 0);
-  const allCleared = items.length > 0 && items.every(i => i.cleared);
-
-  function patchItem(id: string, patch: Partial<UtilityClearance>) {
-    onChange({ ...value, items: items.map(i => i.id === id ? { ...i, ...patch } : i) });
-  }
-  function addItem() {
-    onChange({ ...value, items: [...items, { id: uid(), provider: '', cleared: false, outstanding: '', reference: '' }] });
-  }
-  function removeItem(id: string) {
-    onChange({ ...value, items: items.filter(i => i.id !== id) });
-  }
-
-  async function uploadCert(file: File) {
-    setUploading(true); setErr(null);
-    try {
-      const docBody = { documentKey: `bill_clearance_${Date.now()}`, mimeType: file.type, originalName: file.name };
-      const urlRes = await fetch(portalToken
-        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/upload-url`
-        : '/api/documents/upload-url', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(portalToken ? docBody : { ownerType: 'tenancy_contract', ownerId: contractId, ...docBody }),
-      });
-      if (!urlRes.ok) { setErr('Upload URL failed'); return; }
-      const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
-      const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
-      const put = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-      if (!put.ok) { setErr('Upload failed'); return; }
-      onChange({ ...value, certificateUrl: fileUrl });
-    } catch { setErr('Unexpected error'); }
-    finally { setUploading(false); }
-  }
-
-  return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
-            <Receipt size={14} className="text-[#2e9f82]" /> Bill &amp; Utility Clearance
-          </h2>
-          <p className="text-xs text-[#9b9890] mt-0.5">Confirm the tenant has closed / settled all utility accounts before the deposit is refunded. Any outstanding may be deducted at settlement.</p>
-        </div>
-        <span className={'shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ' + (allCleared ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef3c7] text-[#92400e]')}>
-          {allCleared ? 'All cleared' : 'Pending'}
-        </span>
-      </div>
-
-      <div className="hidden sm:grid gap-2 px-1 grid-cols-[1fr_auto_7rem_8rem_auto] text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">
-        <span>Provider</span><span className="text-center">Cleared</span><span>Outstanding (AED)</span><span>Account / ref</span><span className="w-5" />
-      </div>
-
-      <div className="space-y-3 sm:space-y-2">
-        {items.map(it => (
-          <div key={it.id} className="rounded-xl border border-[#e8e6e0] p-3 space-y-2.5 sm:space-y-0 sm:border-0 sm:py-0 sm:px-1 sm:rounded-none sm:grid sm:gap-2 sm:items-center sm:grid-cols-[1fr_auto_7rem_8rem_auto]">
-            {/* Provider + cleared toggle (+ mobile delete) */}
-            <div className="flex items-center gap-3 sm:contents">
-              <input type="text" value={it.provider} disabled={disabled}
-                onChange={e => patchItem(it.id, { provider: e.target.value })}
-                placeholder="Utility provider"
-                className="flex-1 min-w-0 text-base sm:text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5 disabled:opacity-70" />
-              <button type="button" disabled={disabled}
-                onClick={() => patchItem(it.id, { cleared: !it.cleared })}
-                aria-pressed={it.cleared} aria-label={it.cleared ? 'Mark not cleared' : 'Mark cleared'}
-                title={it.cleared ? 'Cleared' : 'Mark cleared'}
-                className={'shrink-0 w-9 h-9 sm:w-7 sm:h-7 rounded-md border flex items-center justify-center sm:justify-self-center transition-colors ' + (it.cleared ? 'bg-[#2e9f82] border-transparent text-white' : 'border-[#e8e6e0] text-[#c8c6be] hover:border-[#2e9f82]')}>
-                <Check className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-              </button>
-              {!disabled && (
-                <button type="button" onClick={() => removeItem(it.id)} aria-label="Remove utility"
-                  className="sm:hidden text-[#c8c6be] hover:text-[#ef4444] transition-colors p-2 -m-1"><Trash2 size={16} /></button>
-              )}
-            </div>
-            {/* Outstanding */}
-            <label className="flex items-center gap-2 sm:contents">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-28 shrink-0 sm:hidden">Outstanding (AED)</span>
-              <input type="number" min="0" step="0.01" value={it.outstanding} disabled={disabled || it.cleared}
-                onChange={e => patchItem(it.id, { outstanding: e.target.value })}
-                placeholder="0.00"
-                className="flex-1 sm:flex-none min-w-0 text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-2 sm:py-1 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:text-[#b0ae9a]" />
-            </label>
-            {/* Account / reference */}
-            <label className="flex items-center gap-2 sm:contents">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-28 shrink-0 sm:hidden">Account / ref</span>
-              <input type="text" value={it.reference} disabled={disabled}
-                onChange={e => patchItem(it.id, { reference: e.target.value })}
-                placeholder="Acct / ref no."
-                className="flex-1 sm:flex-none min-w-0 text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-2 sm:py-1 focus:outline-none focus:border-[#2e9f82] disabled:opacity-70" />
-            </label>
-            {/* Delete — desktop grid cell only */}
-            <div className="hidden sm:flex w-5 justify-center">
-              {!disabled && (
-                <button type="button" onClick={() => removeItem(it.id)} aria-label="Remove utility" className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={12} /></button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {!disabled && (
-        <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75 transition-opacity">
-          <Plus size={12} /> Add utility
-        </button>
-      )}
-
-      {totalOutstanding > 0 && (
-        <div className="flex items-center justify-between text-sm bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-3 py-2">
-          <span className="font-semibold text-[#9a3412]">Total outstanding (deductible at settlement)</span>
-          <span className="font-bold text-[#9a3412]">AED {totalOutstanding.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 flex-wrap">
-        {value.certificateUrl ? (
-          <button type="button" onClick={() => openDocViewer({ fileUrl: value.certificateUrl!, caption: 'Clearance certificate' })}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#f0faf6] border border-[#c5e8df] text-[#1a7a5a]">
-            <FileSignature size={12} /> View clearance certificate
-          </button>
-        ) : null}
-        {!disabled && (
-          <>
-            <input ref={inputRef} type="file" accept="image/*,application/pdf" className="hidden"
-              onChange={async e => { const f = e.target.files?.[0]; if (f) await uploadCert(f); if (inputRef.current) inputRef.current.value = ''; }} />
-            <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#2e9f82] text-[#2e9f82] disabled:opacity-60 print:hidden">
-              {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
-              {value.certificateUrl ? 'Replace certificate' : 'Upload clearance certificate'}
-            </button>
-          </>
-        )}
-        {err && <span className="text-[11px] text-red-500">{err}</span>}
-      </div>
-
-      <textarea value={value.notes ?? ''} disabled={disabled}
-        onChange={e => onChange({ ...value, notes: e.target.value })}
-        placeholder="Notes — final meter readings, pending closures, who will settle…"
-        rows={2}
-        className="w-full text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] resize-none bg-[#fafaf8] disabled:opacity-70" />
     </div>
   );
 }
@@ -1019,7 +886,9 @@ export default function InspectionPage() {
         // effective date (when the tenancy winds down), not the original lease end.
         const termEffective = c.termination?.effectiveDate ?? null;
         const moveOutDate = termEffective ?? endDate;
-        defaultDate = (inspType === 'move_out' ? moveOutDate : startDate) ?? '';
+        // The API returns these as full ISO timestamps; the date <input> needs
+        // a bare YYYY-MM-DD (in Dubai time) or it renders blank.
+        defaultDate = toDateInput((inspType === 'move_out' ? moveOutDate : startDate) ?? '');
         setMeta({
           property:    c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit:        c.unit?.number ?? c.unit?.unitNumber ?? '',
@@ -1053,8 +922,10 @@ export default function InspectionPage() {
             areas,
             // Move-out always shows the bill-clearance section; seed the default
             // UAE utility rows when the saved record doesn't carry them yet.
-            billClearance: loaded.billClearance ?? (inspType === 'move_out' ? makeDefaultBillClearance() : undefined),
-            moveInDate: seedMoveOut ? defaultDate : (loaded.moveInDate || defaultDate),
+            billClearance: loaded.billClearance ?? undefined,
+            // Prefer the contract's date, but fall back to any saved draft date so a
+            // transient contract-fetch failure (defaultDate = '') never blanks it.
+            moveInDate: seedMoveOut ? (defaultDate || toDateInput(loaded.moveInDate)) : (toDateInput(loaded.moveInDate) || defaultDate),
             photos: Array.isArray(loaded.photos) ? loaded.photos : [],
             reportGeneratedDate: loaded.reportGeneratedDate ?? new Date().toISOString().split('T')[0],
           });
@@ -1431,17 +1302,6 @@ export default function InspectionPage() {
           />
         </div>
 
-        {/* Bill & utility clearance — move-out only */}
-        {!isMoveIn && (
-          <BillClearanceSection
-            contractId={Number(contractId)}
-            value={data.billClearance ?? makeDefaultBillClearance()}
-            onChange={bc => updateData(d => ({ ...d, billClearance: bc }))}
-            disabled={formLocked}
-            portalToken={portalToken}
-          />
-        )}
-
         {/* Bottom submit bar — hidden on mobile (the sticky bar carries it there) */}
         {!formLocked && (
           <div className="hidden sm:flex justify-end pt-2 pb-8 print:hidden">
@@ -1546,10 +1406,10 @@ export default function InspectionPage() {
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {data.moveInPhotos!.map(p => (
-              <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })}
+              <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(p.url), caption: p.caption })}
                 className="block w-full text-left rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors cursor-pointer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.url} alt={p.caption || 'Move-in photo'} className="w-full h-32 object-cover" />
+                <img src={displayUrl(p.url)} alt={p.caption || 'Move-in photo'} className="w-full h-32 object-cover" />
                 {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
               </button>
             ))}

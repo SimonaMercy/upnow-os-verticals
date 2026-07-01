@@ -86,7 +86,7 @@ export default function InspectionReportPdf({ data }: { data: InspectionPdfData 
           <View style={s.metaCol}><Text style={s.metaLabel}>Property</Text><Text style={s.metaVal}>{data.property || '—'}</Text></View>
           <View style={s.metaCol}><Text style={s.metaLabel}>Unit</Text><Text style={s.metaVal}>{data.unit || '—'}</Text></View>
           <View style={s.metaCol}><Text style={s.metaLabel}>Inspector</Text><Text style={s.metaVal}>{data.inspectorName || '—'}</Text></View>
-          <View style={s.metaCol}><Text style={s.metaLabel}>Move-in date</Text><Text style={s.metaVal}>{fmt(data.moveInDate)}</Text></View>
+          <View style={s.metaCol}><Text style={s.metaLabel}>{isOut ? 'Move-out date' : 'Move-in date'}</Text><Text style={s.metaVal}>{fmt(data.moveInDate)}</Text></View>
           <View style={s.metaCol}><Text style={s.metaLabel}>Inspection date</Text><Text style={s.metaVal}>{fmt(data.inspectionDate)}</Text></View>
         </View>
 
