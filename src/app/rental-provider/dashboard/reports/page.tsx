@@ -15,6 +15,7 @@ import {
   Banknote, TrendingUp, CalendarRange,
 } from 'lucide-react';
 import ExecutiveOverview from './ExecutiveOverview';
+import DataExports from './DataExports';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow/reportsYear';
 
@@ -56,6 +57,9 @@ export default function ReportsPage() {
 
       {/* Executive overview — KPI tiles, exceptions, charts */}
       <ExecutiveOverview year={year} />
+
+      {/* Full-dataset CSV downloads (customers / properties / units) */}
+      <DataExports />
 
       <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">All reports</h2>
       <div className="relative max-w-sm mb-6">
