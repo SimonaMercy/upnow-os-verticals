@@ -45,9 +45,12 @@ export interface OpsContract {
   /** Active lease whose termination was accepted — back on Operations for
    *  move-out + settlement (NOT a setup card; no "Mark active"). */
   windDown?: boolean;
+  /** Active lease with a termination request pending acceptance (Terminated pipeline, "Requested"). */
+  terminationRequested?: boolean;
   lockedAt: string | null;
   contractSent: boolean;
   createdAt: string;
+  updatedAt?: string;
   tenant: { id: number | null; name: string | null; entityType: string | null; companyName: string | null; email: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
