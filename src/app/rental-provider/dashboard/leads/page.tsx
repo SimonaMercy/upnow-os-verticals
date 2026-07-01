@@ -75,8 +75,8 @@ const STAGE_LABELS: Record<LeadStage, string> = {
   documents_collection: 'Docs Collection',
   payment_plan_shared:  'Plan Shared',
   interested:           'Interested',
-  cheques_submitted:    'Cheques Ready',
-  cheques_collected:    'Cheques Collected',
+  cheques_submitted:    'Payment Advice Ready',
+  cheques_collected:    'Payment Advice Collected',
   contract_issued:      'Contract Issued',
   rejected:             'Rejected',
   converted:            'Converted',
@@ -292,7 +292,7 @@ function getUrgency(lead: ApiLead): Urgency | null {
     case 'interested':
       return idle >= 3 ? { level: idle >= 7 ? 'red' : 'amber', label: `No next step ${idle}d` } : null;
     case 'cheques_submitted':
-      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Cheques ready ${idle}d — collect` } : null;
+      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Payment advice ready ${idle}d — collect` } : null;
     default:
       return null;
   }
@@ -309,7 +309,7 @@ const URGENCY_PHRASE: Partial<Record<LeadStage, [string, string]>> = {
   interested:           ['no next step', 'no next step'],
   documents_collection: ['docs pending', 'docs pending'],
   payment_plan_shared:  ['stale plan', 'stale plans'],
-  cheques_submitted:    ['cheques to collect', 'cheques to collect'],
+  cheques_submitted:    ['payment advice to collect', 'payment advice to collect'],
 };
 
 // Pipeline header columns, in funnel order; terminal stages last.
@@ -318,9 +318,13 @@ const FUNNEL_COLS: [LeadStage, string][] = [
   ['interested',           'Interested'],
   ['documents_collection', 'Docs'],
   ['payment_plan_shared',  'Plan'],
-  ['cheques_submitted',    'Cheques'],
+  ['cheques_submitted',    'Payment Advice'],
+  // `cheques_collected` is normally transient — the contract auto-issues and the
+  // lead jumps straight to `converted`. It only ever rests here if the auto-create
+  // failed (e.g. unit still occupied), so it stays in the funnel as the recovery
+  // lane (its "Issue Contract" CTA re-runs the conversion). `contract_issued` is
+  // retired from the UI: a lead with a contract now lives under Converted.
   ['cheques_collected',    'Collected'],
-  ['contract_issued',      'Contract'],
   ['converted',            'Converted'],
   ['rejected',             'Rejected'],
 ];
@@ -359,12 +363,11 @@ function getPrimary(lead: ApiLead): PrimaryAction | null {
       return { kind: 'record_cheques', label: 'Payment Review & Approve',
         cls: 'bg-[#fef9c3] text-[#854d0e] hover:bg-[#fef08a]' };
     case 'cheques_collected':
+      // Recovery lane only: on the happy path the contract auto-issues and the lead
+      // is already `converted` by the time it reloads, so this CTA is never seen.
+      // It surfaces if the auto-create failed — "Issue Contract" re-runs conversion.
       return lead.unit?.id && lead.convertedTenant?.id
         ? { kind: 'convert', label: 'Issue Contract', cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' }
-        : null;
-    case 'contract_issued':
-      return lead.unit?.id && lead.convertedTenant?.id
-        ? { kind: 'convert', label: 'Convert', cls: 'bg-[#2e9f82] text-white hover:bg-[#1f6655]' }
         : null;
     case 'rejected':
       return { kind: 'stage', label: 'Reopen', target: 'viewing_scheduled',
@@ -870,8 +873,10 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setChequeError(body.message ?? 'Failed'); return; }
       setPanel('none');
+      // Success ⇒ the contract auto-issued and the lead is now CONVERTED (server
+      // truth). Move it straight to the Converted column.
       setLeads(prev => prev.map(l =>
-        l.id !== lead.id ? l : { ...l, stage: 'cheques_collected' as LeadStage },
+        l.id !== lead.id ? l : { ...l, stage: 'converted' as LeadStage },
       ));
     } finally { setConfirmingCollection(false); }
   }
@@ -2733,7 +2738,8 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                       const body = await res.json().catch(() => ({}));
                       if (!res.ok) { setChequeError(body.message ?? 'Failed'); return; }
                       setPanel('none');
-                      setLeads(prev => prev.map(l => l.id !== lead.id ? l : { ...l, stage: 'cheques_collected' as LeadStage }));
+                      // Success ⇒ contract auto-issued, lead is now CONVERTED (server truth).
+                      setLeads(prev => prev.map(l => l.id !== lead.id ? l : { ...l, stage: 'converted' as LeadStage }));
                     } finally { setConfirmingCollection(false); }
                   }}
                   className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
