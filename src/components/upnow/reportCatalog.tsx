@@ -60,7 +60,7 @@ export const REPORT_TILES: ReportTile[] = [
   // ── Missing Data Worklists (separate live report per entity) ────────────
   { slug: 'missing-properties', title: 'Missing Properties Data',   description: 'Properties missing location or descriptive fields — geo, floors, street, makani, plot, description.', Icon: MapPin,      available: true, group: 'missingdata' },
   { slug: 'missing-units',      title: 'Missing Units Data',        description: 'Units missing pricing, fees, specs or media — rent, deposit, admin/ejari/commission, beds/baths, size, floor plan, images.', Icon: Building2,  available: true, group: 'missingdata' },
-  { slug: 'missing-customers',  title: 'Missing Customers Data',    description: 'Customers missing KYC — Emirates ID, ID document, nationality, DOB, gender, phone, occupation, trade licence.', Icon: Users,       available: true, group: 'missingdata' },
+  { slug: 'missing-customers',  title: 'Missing Customers Data',    description: 'Customers missing KYC — Emirates ID, ID document, nationality, DOB, gender, phone, trade licence.', Icon: Users,       available: true, group: 'missingdata' },
   { slug: 'missing-contracts',  title: 'Missing Contract Data',     description: 'Contracts missing a document, payment plan, security deposit or Ejari number — active & pending first.', Icon: FileText,    available: true, group: 'missingdata' },
   { slug: 'missing-landlord',   title: 'Missing Landlord Profile Data', description: 'Landlord profile & configuration still unset — bank, trade licence, title-deed & EID docs, renewal %, preferred days, POA.', Icon: ShieldCheck, available: true, group: 'missingdata' },
 ];

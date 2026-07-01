@@ -259,7 +259,6 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
       { key: 'noEid', label: 'Emirates ID no.' }, { key: 'noIdentityDoc', label: 'ID document' },
       { key: 'noNationality', label: 'Nationality' }, { key: 'noDob', label: 'Date of birth' },
       { key: 'noGender', label: 'Gender' }, { key: 'noPhone', label: 'Phone' },
-      { key: 'noOccupation', label: 'Occupation' }, { key: 'noPhoto', label: 'Photo' },
       { key: 'noTradeLicense', label: 'Trade licence' },
     ],
   },

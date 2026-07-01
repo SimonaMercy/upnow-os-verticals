@@ -28,7 +28,7 @@ interface ContractGap { contractId: number; customer: string | null; property: s
 interface PropertyGap { id: number; property: string | null; category: string | null; noPhotos: boolean; noGeo: boolean; noFloors: boolean; noDescription: boolean; noStreet: boolean; noCountry: boolean; noEmirate: boolean; noCity: boolean; noCommunity: boolean; noSubCommunity: boolean; noMakani: boolean; noPlot: boolean; noAddress: boolean; noFeatures: boolean; }
 interface Landlord { name: string | null; entityType: string | null; noCompanyName: boolean; noContactAddress: boolean; noBank: boolean; noTradeLicense: boolean; noEid: boolean; noPassport: boolean; noNationality: boolean; noDob: boolean; noGender: boolean; noTitleDeedDoc: boolean; noEidDoc: boolean; noLegalNoticesAddr: boolean; noRenewalPct: boolean; noPreferredStartDays: boolean; noPreferredChequeDays: boolean; noPoa: boolean; }
 interface RenewalPending { customer: string | null; property: string | null; unit: string | null; expiredOn: string | null; daysOverdue: number | null; annualRent: number | null; overdue: boolean; }
-interface KycIndividual { customer: string | null; units: string | null; noEid: boolean; noNationality: boolean; noDob: boolean; noGender: boolean; noPhone: boolean; noOccupation: boolean; noPhoto: boolean; noIdentityDoc: boolean; }
+interface KycIndividual { customer: string | null; units: string | null; noEid: boolean; noNationality: boolean; noDob: boolean; noGender: boolean; noPhone: boolean; noIdentityDoc: boolean; }
 interface KycCompany { customer: string | null; units: string | null; noTradeLicense: boolean; noEid: boolean; noPhone: boolean; noIdentityDoc: boolean; }
 interface DocGap { customer: string | null; unit: string | null; hasBank: boolean; expiredIds: string | null; }
 interface UnitMissing { unitId: number; propertyId: number; property: string | null; unit: string | null; type: string | null; noFloorPlan: boolean; noMarketPrice: boolean; noRentalPrice: boolean; noDeposit: boolean; noAdminFee: boolean; noEjariFee: boolean; noCommission: boolean; noBedrooms: boolean; noBathrooms: boolean; noSize: boolean; noFloor: boolean; noKitchen: boolean; noView: boolean; noFurnishing: boolean; noParking: boolean; noPremise: boolean; noDescription: boolean; noImages: boolean; }
@@ -321,7 +321,6 @@ export function DataGapsView({
                         <MissingChip label="Emirates ID no." on={k.noEid} /><MissingChip label="ID document" on={k.noIdentityDoc} />
                         <MissingChip label="Nationality" on={k.noNationality} /><MissingChip label="Date of birth" on={k.noDob} />
                         <MissingChip label="Gender" on={k.noGender} /><MissingChip label="Phone" on={k.noPhone} />
-                        <MissingChip label="Occupation" on={k.noOccupation} /><MissingChip label="Photo" on={k.noPhoto} />
                       </td>
                     </tr>
                   ))}
