@@ -201,9 +201,14 @@ const ACT_ICON: Record<ActivityItem['kind'], typeof CheckCircle2> = {
   contract: FileText,
 };
 
-export default function RentalProviderDashboard() {
+export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   const { user } = useAuth();
   const name = user?.name ?? user?.firstName ?? 'there';
+  // Manager mode: reuse the landlord-scoped /manager/* endpoints (?rp=) and link
+  // into the manager portal. Fee-rules nudge is RP-only.
+  const rpQ = manager ? `rp=${manager.rp}&` : '';
+  const contractBase = manager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
+  const receivablesHref = manager ? '/dashboard/manager/receivables' : '/rental-provider/dashboard/receivables';
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [fin, setFin] = useState<FinancialSummary | null>(null);
   const [extras, setExtras] = useState<DashboardExtras | null>(null);
@@ -222,7 +227,7 @@ export default function RentalProviderDashboard() {
   const fetchStats = useCallback(async (preset: RangePreset, signal?: AbortSignal) => {
     const { from, to } = presetToDates(preset);
     try {
-      const r = await fetch(`/api/properties/dashboard-stats?from=${from}&to=${to}`, { credentials: 'include', signal });
+      const r = await fetch(`/api/${manager ? 'manager/dashboard-stats' : 'properties/dashboard-stats'}?${rpQ}from=${from}&to=${to}`, { credentials: 'include', signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (data && typeof data.totalUnits === 'number') {
@@ -235,12 +240,13 @@ export default function RentalProviderDashboard() {
       if ((e as Error).name === 'AbortError') return;
       setStatsErr((e as Error).message || 'Failed to load portfolio stats');
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rpQ]);
 
   const fetchFinancial = useCallback(async (preset: RangePreset, signal?: AbortSignal) => {
     const { from, to } = presetToDates(preset);
     try {
-      const r = await fetch(`/api/contracts/financial-summary?from=${from}&to=${to}`, { credentials: 'include', signal });
+      const r = await fetch(`/api/${manager ? 'manager/financial-summary' : 'contracts/financial-summary'}?${rpQ}from=${from}&to=${to}`, { credentials: 'include', signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (data && typeof data.receivablesInRange === 'number') {
@@ -253,12 +259,13 @@ export default function RentalProviderDashboard() {
       if ((e as Error).name === 'AbortError') return;
       setFinErr((e as Error).message || 'Failed to load financials');
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rpQ]);
 
   const fetchExtras = useCallback(async (preset: RangePreset, signal?: AbortSignal) => {
     const { from, to } = presetToDates(preset);
     try {
-      const r = await fetch(`/api/contracts/dashboard-extras?from=${from}&to=${to}`, { credentials: 'include', signal });
+      const r = await fetch(`/api/${manager ? 'manager/dashboard-extras' : 'contracts/dashboard-extras'}?${rpQ}from=${from}&to=${to}`, { credentials: 'include', signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data: DashboardExtras = await r.json();
       if (data && Array.isArray(data.recentActivity)) {
@@ -271,9 +278,11 @@ export default function RentalProviderDashboard() {
       if ((e as Error).name === 'AbortError') return;
       setExtrasErr((e as Error).message || 'Failed to load activity');
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rpQ]);
 
   const fetchFeeRules = useCallback(async (signal?: AbortSignal) => {
+    if (manager) return; // fee-rules nudge is RP-only
     try {
       const r = await fetch('/api/fee-rules/configured', { credentials: 'include', signal });
       if (!r.ok) return;
@@ -363,7 +372,7 @@ export default function RentalProviderDashboard() {
           key: x.contractId,
           title: x.unitLabel,
           subtitle: `Ends ${new Date(x.endDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} · ${x.tenantName ?? 'Tenant'}`,
-          href: `/rental-provider/dashboard/contracts/${x.contractId}/v2`,
+          href: `${contractBase}/${x.contractId}/v2`,
           badges: [renewalStatusInfo(x.renewalStatus), daysBadge(x.daysUntilEnd)],
         })),
       }));
@@ -376,7 +385,7 @@ export default function RentalProviderDashboard() {
   const drillOverdue = async () => {
     setDrill({ title: 'Overdue / bounced', loading: true, groups: [] });
     try {
-      const res = await fetch('/api/contracts/receivables', { credentials: 'include' });
+      const res = await fetch(`/api/${manager ? `manager/receivables?rp=${manager.rp}` : 'contracts/receivables'}`, { credentials: 'include' });
       const data = res.ok ? await res.json() : [];
       const rows = (Array.isArray(data) ? data : []).filter((p: { status?: string }) => p.status === 'overdue');
       setDrill({
@@ -386,7 +395,7 @@ export default function RentalProviderDashboard() {
           key: p.id,
           title: `${p.tenant ?? 'Tenant'} — AED ${Number(p.amount ?? 0).toLocaleString()}`,
           subtitle: `${p.unit ? `Unit ${p.unit} · ` : ''}${p.building ?? ''} · due ${p.transactionDate ? new Date(p.transactionDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: '2-digit' }) : '—'}${p.chequeNumber ? ` · #${p.chequeNumber}` : ''}`,
-          href: p.contractId ? `/rental-provider/dashboard/contracts/${p.contractId}/v2` : '/rental-provider/dashboard/receivables',
+          href: p.contractId ? `${contractBase}/${p.contractId}/v2` : receivablesHref,
           badges: [{ label: p.status ?? 'overdue', tone: 'red' as BadgeTone }],
         })) }],
       });
@@ -434,7 +443,7 @@ export default function RentalProviderDashboard() {
             <Building2 size={16} /> List Property
           </Link>
           <Link
-            href="/rental-provider/dashboard/contracts/new"
+            href={`${contractBase}/new`}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-[var(--neutral-700)] bg-white border border-[var(--base-200)] hover:border-[var(--neutral-500)] transition-colors"
           >
             <ClipboardList size={16} /> New Contract
@@ -615,7 +624,7 @@ export default function RentalProviderDashboard() {
               <h3 className="text-base font-bold text-[var(--neutral-900)]">Receivables vs Collected</h3>
               <p className="text-xs text-[var(--neutral-400)] mt-0.5">{rangeLabel}</p>
             </div>
-            <Link href="/rental-provider/dashboard/receivables" className="text-xs font-semibold text-[var(--neutral-700)] underline decoration-[var(--base-200)] underline-offset-4 hover:decoration-[var(--neutral-400)]">View all</Link>
+            <Link href={receivablesHref} className="text-xs font-semibold text-[var(--neutral-700)] underline decoration-[var(--base-200)] underline-offset-4 hover:decoration-[var(--neutral-400)]">View all</Link>
           </div>
           {finErr && !fin ? (
             <SectionError message="Couldn't load financial data." onRetry={() => fetchFinancial(selectedRange)} />
@@ -673,7 +682,7 @@ export default function RentalProviderDashboard() {
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[15px] font-bold text-[var(--neutral-900)]">Recent Activity</h3>
             {extras && extras.recentActivity.length > 0 && (
-              <Link href="/rental-provider/dashboard/receivables" className="text-xs font-semibold text-[var(--neutral-500)] hover:text-[var(--neutral-900)]">View all</Link>
+              <Link href={receivablesHref} className="text-xs font-semibold text-[var(--neutral-500)] hover:text-[var(--neutral-900)]">View all</Link>
             )}
           </div>
           {extrasErr && !extras ? (
@@ -718,7 +727,7 @@ export default function RentalProviderDashboard() {
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)]">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[15px] font-bold text-[var(--neutral-900)]">Upcoming Renewals</h3>
-            <Link href="/rental-provider/dashboard/contracts" className="text-xs font-semibold text-[var(--neutral-500)] hover:text-[var(--neutral-900)]">All contracts</Link>
+            <Link href={contractBase} className="text-xs font-semibold text-[var(--neutral-500)] hover:text-[var(--neutral-900)]">All contracts</Link>
           </div>
           {extrasErr && !extras ? (
             <SectionError message="Couldn't load renewals." onRetry={() => fetchExtras(selectedRange)} />
@@ -733,7 +742,7 @@ export default function RentalProviderDashboard() {
                 return (
                   <Link
                     key={r.contractId}
-                    href={`/rental-provider/dashboard/contracts/${r.contractId}/v2`}
+                    href={`${contractBase}/${r.contractId}/v2`}
                     className="flex items-center justify-between gap-3 py-3 border-b border-[var(--base-200)] last:border-0 hover:bg-[var(--base-100)]/40 -mx-2 px-2 rounded-md transition-colors"
                   >
                     <div className="min-w-0 flex-1">
@@ -915,4 +924,9 @@ function ActivitySkeleton({ rows = 5 }: { rows?: number }) {
       ))}
     </div>
   );
+}
+
+/** RP route entry point — the landlord's own dashboard home. */
+export default function RentalProviderDashboard() {
+  return <RpDashboardHome />;
 }
