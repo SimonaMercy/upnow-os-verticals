@@ -2002,6 +2002,12 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const supportingAllDone = supportingDocs.every(d => uploadedKeys.has(d.key));
   const occupantsAllDone  = occupantDocList.length > 0 && occupantDocList.every(d => uploadedKeys.has(d.key));
 
+  // Identity details (name + Emirates ID number) must be present before the
+  // customer can submit. Auto-filled by OCR when the Emirates ID is readable;
+  // otherwise the customer types them into the Personal Details fallback form.
+  const personalDetailsComplete = !!(user?.firstName?.trim() && user?.lastName?.trim() && user?.emiratesIdNumber?.trim());
+  const eidUploaded = uploadedKeys.has('emirates_id') || uploadedKeys.has('emirates_id_front');
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {uploadErr && <ErrorBox msg={uploadErr} />}
@@ -2043,20 +2049,34 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>Personal details</p>
               {populated
-                ? <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Verified by admin</span>
-                : <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--mute)', background: 'var(--mist)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Awaiting review</span>}
+                ? <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Provided</span>
+                : eidReading
+                  ? <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--mute)', background: 'var(--mist)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Reading…</span>
+                  : <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brick)', background: 'var(--brick-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Required</span>}
             </div>
             {populated ? (
               <>
                 <p style={{ fontSize: 11, color: 'var(--mute)', margin: '0 0 10px', lineHeight: 1.4 }}>
-                  An UpNow admin filled these in from your uploaded documents. Tap any field to correct a typo.
+                  Filled from your Emirates ID. Tap any field to fix a mistake — make sure they match your Emirates ID exactly.
                 </p>
                 <PersonalDetailsEditor user={user} onSaved={refreshUser} />
               </>
-            ) : (
+            ) : eidReading ? (
               <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-                Your details will be auto-filled.
+                Reading your Emirates ID… your details will fill in automatically. If they don&apos;t, you can type them in below.
               </p>
+            ) : (
+              /* Fallback — Emirates ID couldn't be read: let the customer enter
+                 their details manually (as per their Emirates ID) so they aren't
+                 blocked waiting on OCR/admin. */
+              <>
+                <p style={{ fontSize: 11.5, color: 'var(--brick)', fontWeight: 600, margin: '0 0 10px', lineHeight: 1.45 }}>
+                  {eidUploaded
+                    ? "We couldn't read your Emirates ID automatically. Please enter your details exactly as they appear on it before continuing."
+                    : "Enter your name and details exactly as they appear on your Emirates ID before continuing. We'll fill these in automatically if your uploaded Emirates ID is readable."}
+                </p>
+                <PersonalDetailsEditor user={user} onSaved={refreshUser} />
+              </>
             )}
           </div>
         );
@@ -2218,11 +2238,15 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
       {/* Submit — explicit gate. Uploading the last file no longer auto-advances;
           the customer must click here to submit their documents for review. */}
       <PrimaryBtn
-        onClick={() => { if (allRequiredDone) writeDocsSubmitted(resolved.spaceKey); onRefresh(); }}
-        disabled={!allRequiredDone}
+        onClick={() => { if (allRequiredDone && personalDetailsComplete) writeDocsSubmitted(resolved.spaceKey); onRefresh(); }}
+        disabled={!allRequiredDone || !personalDetailsComplete}
       >
-        {allRequiredDone ? <CheckCircle2 size={16} /> : <Info size={16} />}
-        {allRequiredDone ? 'Submit documents for review' : `Upload all required docs (${doneCount}/${totalCount} done)`}
+        {allRequiredDone && personalDetailsComplete ? <CheckCircle2 size={16} /> : <Info size={16} />}
+        {!allRequiredDone
+          ? `Upload all required docs (${doneCount}/${totalCount} done)`
+          : !personalDetailsComplete
+            ? 'Enter your name & Emirates ID above'
+            : 'Submit documents for review'}
       </PrimaryBtn>
     </div>
   );
