@@ -12,29 +12,40 @@ import { EjariContractDoc, ejariDocKey, type EjariContractData, type EjariAddend
 import { isDubaiContract } from '@/lib/ejariFill';
 import { useFilledEjari } from './useFilledEjari';
 import { useReactPdfDoc } from './useReactPdfDoc';
+import { InlineDownloadRow } from './InlineDownloadRow';
 import EjariCanvas from './EjariCanvas';
 
-export default function EjariInline({ data, addendums = [], height = 640, fluid = false }: {
+export default function EjariInline({ data, addendums = [], height = 640, fluid = false, showDownload = false }: {
   data: EjariContractData; addendums?: EjariAddendum[]; height?: number;
   /** Flow to full height on mobile so the host page scrolls as one (no internal
    *  scroll box). Desktop keeps the capped, internally-scrolling card. */
   fluid?: boolean;
+  /** Render a "⬇ Download PDF" row above the preview (the tenancy contract is the
+   *  customer's own document — clean, no watermark). */
+  showDownload?: boolean;
 }) {
   const dubai = isDubaiContract(data);
   // Both hooks run unconditionally (rules of hooks); each takes an `enabled` flag so
   // only the branch actually shown does work. Dubai → official DLD template (pdf-lib);
-  // others → @react-pdf vector doc.
-  const { bytes: dubaiBytes, error: dubaiErr } = useFilledEjari(data, addendums, dubai);
-  const { bytes: vectorBytes, error: vectorErr } = useReactPdfDoc(
+  // others → @react-pdf vector doc. Each hook also exposes a blob object-URL for the
+  // download link (the SAME bytes it rasterises — no extra generation).
+  const { bytes: dubaiBytes, url: dubaiUrl, error: dubaiErr } = useFilledEjari(data, addendums, dubai);
+  const { bytes: vectorBytes, url: vectorUrl, error: vectorErr } = useReactPdfDoc(
     () => <EjariContractDoc data={data} addendums={addendums} />,
     ejariDocKey(data, addendums),
     !dubai,
   );
   const bytes = dubai ? dubaiBytes : vectorBytes;
+  const url = dubai ? dubaiUrl : vectorUrl;
   const error = dubai ? dubaiErr : vectorErr;
   const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
 
   if (error) return <div style={{ ...frame, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Failed to render contract: {error}</div>;
   // EjariCanvas shows its own "Preparing contract…" placeholder while bytes are null.
-  return <EjariCanvas bytes={bytes} height={height} fluid={fluid} />;
+  return (
+    <>
+      {showDownload && <InlineDownloadRow url={url} fileName={`Tenancy-contract-${data.ref ?? 'contract'}.pdf`} />}
+      <EjariCanvas bytes={bytes} height={height} fluid={fluid} />
+    </>
+  );
 }

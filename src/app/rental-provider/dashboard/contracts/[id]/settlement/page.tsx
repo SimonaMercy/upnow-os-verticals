@@ -5,8 +5,9 @@ import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
-  Wallet, BadgeCheck, Banknote, Coins,
+  Wallet, BadgeCheck, Banknote, Coins, Download,
 } from 'lucide-react';
+import { triggerBrowserDownload } from '@/lib/downloadDoc';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -255,6 +256,32 @@ export default function SettlementPage() {
     finally { setActing(null); }
   }
 
+  // Clean, watermark-free download of the settlement statement (the same react-pdf
+  // document the snapshot uses). The live-fallback download for the binder, plus a
+  // download from the settlement page itself. Fetches the latest figures on demand.
+  async function downloadSettlementPdf() {
+    try {
+      const sres = await fetch(`/api/contracts/${contractId}/settlement`, { credentials: 'include' });
+      if (!sres.ok) return;
+      const sd = await sres.json() as ApiSettlement;
+      const [{ pdf }, mod] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/contract/DepositSettlementPdf'),
+      ]);
+      const pdfData = {
+        ref: `CID-${contractId}`, property: meta?.property ?? '', unit: meta?.unit ?? '', tenantName: meta?.tenantName ?? '',
+        depositHeld: sd.depositHeld, lines: sd.lines, chargesTotal: sd.chargesTotal, refundAmount: sd.refundAmount,
+        payments: sd.payments, paymentsReceivedTotal: sd.paymentsReceivedTotal, balance: sd.balance,
+        paidAt: sd.paidAt, rpSignature: sd.rpSignature, tenantSignature: sd.tenantSignature, notes: sd.notes,
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blob = await pdf(createElement(mod.default, { data: pdfData as any }) as any).toBlob();
+      const url = URL.createObjectURL(blob);
+      triggerBrowserDownload(url, `Deposit-settlement-CID-${contractId}.pdf`);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch { /* best-effort download */ }
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center min-h-screen"><Loader2 className="animate-spin text-[#2e9f82]" size={28} /></div>;
   }
@@ -268,7 +295,12 @@ export default function SettlementPage() {
         <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
           <ArrowLeft size={15} /> Back to contract
         </Link>
-        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sm.cls}`}>{sm.label}</span>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={downloadSettlementPdf} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
+            <Download size={13} /> Download PDF
+          </button>
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sm.cls}`}>{sm.label}</span>
+        </div>
       </div>
 
       {/* Title */}

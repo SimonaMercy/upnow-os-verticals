@@ -22,7 +22,7 @@ const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
 });
 
-interface Doc { documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
+interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
 interface Detail {
   contract: EjariContractData & { id: number; status: string | null; contractType?: string | null };
@@ -404,7 +404,9 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
     `${landlordName} — Confidential · ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
 
   const documents: BinderDoc[] = (d.allDocuments ?? []).map((doc, i) => ({
-    id: i + 1, documentKey: doc.documentKey, displayName: doc.displayName, fileUrl: doc.fileUrl,
+    // Real document id (needed for the token-scoped download); synthetic rows
+    // (cheque images) arrive with a negative id — fall back to index only if absent.
+    id: doc.id ?? i + 1, documentKey: doc.documentKey, displayName: doc.displayName, fileUrl: doc.fileUrl,
     category: doc.category ?? null, ownerType: doc.ownerType,
   }));
   const planContract: PlanContract = {
@@ -443,6 +445,7 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
       planPayments={d.plan?.payments ?? []}
       receipt={receipt}
       watermark={watermark}
+      portalToken={token}
       signerName={landlordName}
       signerDefaultName={d.contract.landlord?.name || d.contract.landlord?.companyName || ''}
       landlordSigned={!!d.landlordSigned}

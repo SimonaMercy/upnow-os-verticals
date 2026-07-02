@@ -5,11 +5,12 @@ import { useState, useEffect, useCallback, useRef, createElement } from 'react';
 import { useParams, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Plus, Trash2, Save, Printer, ArrowLeft, CheckCircle, Loader2,
+  Plus, Trash2, Save, Printer, Download, ArrowLeft, CheckCircle, Loader2,
   AlertCircle, RotateCcw, UploadCloud, X, Camera, Paperclip, Images,
   FileSignature, Send, Receipt, Check,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
+import { triggerBrowserDownload } from '@/lib/downloadDoc';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1040,6 +1041,42 @@ export default function InspectionPage() {
     }
   }
 
+  // Single source of truth for the InspectionReportPdf payload — used both for the
+  // stored snapshot (on counter-sign) and the on-demand "Download PDF" (live copy).
+  const buildInspectionPdfData = (overrides?: Record<string, unknown>) => ({
+    type: inspType, ref: `CID-${contractId}`,
+    property: meta?.property ?? '', unit: meta?.unit ?? '', tenantName: meta?.tenantName ?? '',
+    inspectorName: data.inspectorName,
+    inspectionDate: data.inspectionDate ?? null,
+    moveInDate: data.moveInDate || meta?.moveInDate || null,
+    areas: data.areas.map(a => ({ name: a.name, items: a.items.map(it => ({ name: it.name, inCondition: it.inCondition, outCondition: it.outCondition, photoCount: it.itemAttachments?.length ?? 0 })), remarks: a.remarks })),
+    generalNotes: data.generalNotes,
+    photoCaptions: data.photos.map(p => p.caption?.trim() || 'Photo'),
+    utilities: (data.billClearance?.items ?? []).map(u => ({ provider: u.provider, cleared: u.cleared, outstanding: u.outstanding, reference: u.reference })),
+    billNotes: data.billClearance?.notes,
+    tenantSig: data.tenantSig, tenantSignedAt: data.tenantSignedAt ?? null,
+    rpCounterSig: data.rpCounterSig ?? null, rpCounterSignedAt: data.rpCounterSignedAt ?? null,
+    ...overrides,
+  });
+
+  // On-demand clean download of the inspection report (no watermark). The live
+  // fallback for the documents binder when no stored snapshot exists yet, and the
+  // customer/RP's own downloadable copy from the inspection page.
+  async function downloadInspectionPdf() {
+    if (!meta) return;
+    try {
+      const [{ pdf }, mod] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/contract/InspectionReportPdf'),
+      ]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blob = await pdf(createElement(mod.default, { data: buildInspectionPdfData() as any }) as any).toBlob();
+      const url = URL.createObjectURL(blob);
+      triggerBrowserDownload(url, `${inspType === 'move_out' ? 'Move-out' : 'Move-in'}-report-CID-${contractId}.pdf`);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch { /* best-effort download */ }
+  }
+
   async function handleCounterSign() {
     if (!counterSig) { setCounterError('Please draw your signature first.'); return; }
     if (!contractId) return;
@@ -1077,18 +1114,11 @@ export default function InspectionPage() {
             documentKey: inspType === 'move_out' ? 'move_out_report' : 'move_in_report',
             category: 'inspection',
             displayName: inspType === 'move_out' ? 'Move-out Inspection Checklist' : 'Move-in Inspection Checklist',
-            element: createElement(mod.default, { data: {
-              type: inspType, ref: `CID-${contractId}`,
-              property: meta.property, unit: meta.unit, tenantName: meta.tenantName,
-              inspectorName: data.inspectorName, inspectionDate: data.inspectionDate ?? nowIso, moveInDate: data.moveInDate || meta.moveInDate,
-              areas: data.areas.map(a => ({ name: a.name, items: a.items.map(it => ({ name: it.name, inCondition: it.inCondition, outCondition: it.outCondition, photoCount: it.itemAttachments?.length ?? 0 })), remarks: a.remarks })),
-              generalNotes: data.generalNotes,
-              photoCaptions: data.photos.map(p => p.caption?.trim() || 'Photo'),
-              utilities: (data.billClearance?.items ?? []).map(u => ({ provider: u.provider, cleared: u.cleared, outstanding: u.outstanding, reference: u.reference })),
-              billNotes: data.billClearance?.notes,
-              tenantSig: data.tenantSig, tenantSignedAt: data.tenantSignedAt ?? null,
+            element: createElement(mod.default, { data: buildInspectionPdfData({
+              inspectionDate: data.inspectionDate ?? nowIso,
               rpCounterSig: counterSig, rpCounterSignedAt: nowIso,
-            } }),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            }) as any }),
           });
         } catch { /* PDF snapshot is best-effort */ }
       }
@@ -1140,6 +1170,11 @@ export default function InspectionPage() {
           <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
             <Printer size={14} /> Print
           </button>
+          {meta && (
+            <button onClick={downloadInspectionPdf} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
+              <Download size={14} /> Download PDF
+            </button>
+          )}
           {!formLocked && (
             <button onClick={handleSave} disabled={saving}
               className="hidden sm:flex items-center gap-2 px-5 py-2 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
