@@ -3745,6 +3745,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <div style={{ display: 'grid', gap: 8 }}>
               {[
                 { label: 'Signed tenancy contract',   href: `/dashboard/customer/contracts/${c.id}/print`, newTab: false },
+                { label: 'Payment plan',              href: `/dashboard/customer/contracts/${c.id}/print/plan`, newTab: true },
                 { label: 'Move-in inspection report', href: `/dashboard/customer/contracts/${c.id}/inspection?type=move_in`, newTab: false },
                 // One receipts file → three receipts inside (rental income · security deposit · management fee).
                 { label: 'Payment receipts',          href: `/dashboard/customer/contracts/${c.id}/print/receipt`, newTab: true },

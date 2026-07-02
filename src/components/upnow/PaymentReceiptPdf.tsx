@@ -33,6 +33,7 @@ import React from 'react';
 import { Document, Page, View, Text, Font } from '@react-pdf/renderer';
 import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
+import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
 
 // Roboto — clean modern sans for the whole document (no Bold ttf shipped, so map
 // bold → Medium). Receipts are English-only — no Arabic font dependency (avoids the
@@ -641,14 +642,19 @@ function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
  *  full-screen viewer shows, rasterised to stacked <canvas> pages at full height
  *  — no toolbar, no download, no inner scroll (the page's outer scroll handles
  *  it). Pass a large `height` so EjariCanvas never engages its scroll cap. */
-export function ReceiptInline({ contract, kind = 'all', height = 100000 }: { contract: ReceiptContract; kind?: Props['kind']; height?: number }) {
+export function ReceiptInline({ contract, kind = 'all', height = 100000, showDownload = false }: { contract: ReceiptContract; kind?: Props['kind']; height?: number; showDownload?: boolean }) {
   const docKey = `inline|${contract.id}|${kind ?? 'all'}`;
-  const { bytes, error } = useReactPdfDoc(
+  const { bytes, url, error } = useReactPdfDoc(
     () => <PaymentReceiptDoc contract={contract} kind={kind} selectedId={null} selectedIdx={0} />,
     docKey,
   );
   if (error) return <div style={{ padding: 24, textAlign: 'center', color: '#c00', fontSize: 13 }}>Receipts unavailable.</div>;
-  return <EjariCanvas bytes={bytes} height={height} />;
+  return (
+    <>
+      {showDownload && <InlineDownloadRow url={url} fileName={`Receipts-${contract.ref}.pdf`} />}
+      <EjariCanvas bytes={bytes} height={height} />
+    </>
+  );
 }
 
 // ─── Full-screen viewer (default export) ──────────────────────────────────────

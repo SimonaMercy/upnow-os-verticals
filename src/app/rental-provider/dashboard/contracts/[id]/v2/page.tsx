@@ -43,6 +43,7 @@ import {
   Trash2, Plus,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
+import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import OfferReceiptModal, { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { openDocViewer } from '@/lib/docViewer';
@@ -2693,7 +2694,10 @@ function DetailsDrawer({
                 </div>
                 <div className="dacts">
                   {currentPlan.totalAmountFils > 0
-                    ? <button type="button" className="mini-btn view cursor-pointer" onClick={() => setShowOffer(true)}><ExternalLink size={12} /> View</button>
+                    ? <>
+                        <button type="button" className="mini-btn view cursor-pointer" onClick={() => setShowOffer(true)}><ExternalLink size={12} /> View</button>
+                        <Link href={`${contractBase}/print/plan`} target="_blank" className="mini-btn view"><Download size={12} /> PDF</Link>
+                      </>
                     : <span className="ds" style={{ color: '#b8b5ae' }}>Not yet available</span>}
                 </div>
               </div>
@@ -2748,6 +2752,10 @@ function DetailsDrawer({
                   </div>
                   <div className="dacts">
                     <button type="button" onClick={() => multi ? openDocsTogether(docs) : openDocViewer({ fileUrl: doc.fileUrl, caption: s.label })} className="mini-btn view cursor-pointer"><ExternalLink size={12} /> {multi ? 'View all' : 'View'}</button>
+                    {/* Generated tenancy artifacts get a clean, watermark-free download of the stored snapshot. */}
+                    {['move_in_report', 'move_out_report', 'deposit_settlement'].includes(s.key) && (
+                      <DownloadDocButton documentId={doc.id} label="PDF" className="mini-btn view" />
+                    )}
                     <button type="button" className="mini-btn view" title={`Upload a newer ${s.label}`} onClick={() => prefillUpload(req)}><UploadCloud size={12} /> {multi ? 'Add' : 'Replace'}</button>
                   </div>
                 </div>
@@ -3606,7 +3614,12 @@ function RenewalProposeModal({
     return v > 0 ? String(v) : '';
   };
   const [f, setF] = useState({
-    listedRent: String(Math.round(contract.annualRent * 1.05)),
+    // Default the renewal to the parent lease's current NET rent (annualRent is
+    // net; the cheque schedule adds VAT on top). The RP explicitly enters any
+    // increase — never seed a hidden uplift here. (Previously `* 1.05`, which
+    // dropped a VAT-inclusive figure into the net field → the backend then added
+    // VAT again, double-counting it and silently hiking the rent 5%.)
+    listedRent: String(contract.annualRent),
     discountType: 'none' as 'none' | 'percent' | 'fixed',
     discountValue: '',
     newStartDate: iso(ns),

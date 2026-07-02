@@ -10,10 +10,11 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, createElement } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature, Printer } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature, Printer, Download } from 'lucide-react';
+import { triggerBrowserDownload } from '@/lib/downloadDoc';
 
 /**
  * Back link that works whether the page was opened in a new tab (no history)
@@ -218,6 +219,37 @@ export default function TenantInspectionPage() {
   }, [contractId, inspType]);
   useEffect(() => { void load(); }, [load]);
 
+  // Clean, watermark-free download of the inspection report (the tenant's own
+  // document). Builds the same react-pdf report the RP snapshot uses, from the
+  // live data, on demand.
+  async function downloadInspectionPdf() {
+    if (!data || !meta) return;
+    try {
+      const [{ pdf }, mod] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/contract/InspectionReportPdf'),
+      ]);
+      const pdfData = {
+        type: inspType, ref: `CID-${contractId}`,
+        property: meta.buildingName ?? '', unit: meta.unitNumber ?? '', tenantName: meta.tenantName ?? '',
+        inspectorName: data.inspectorName,
+        inspectionDate: data.inspectionDate ?? null,
+        moveInDate: data.moveInDate || meta.handoverDate || null,
+        areas: data.areas.map(a => ({ name: a.name, items: a.items.map(it => ({ name: it.name, inCondition: it.inCondition, outCondition: it.outCondition, photoCount: 0 })), remarks: a.remarks })),
+        generalNotes: data.generalNotes,
+        photoCaptions: data.photos.map(p => p.caption?.trim() || 'Photo'),
+        utilities: [] as { provider: string; cleared: boolean; outstanding: string; reference: string }[],
+        tenantSig: data.tenantSig, tenantSignedAt: data.tenantSignedAt ?? null,
+        rpCounterSig: data.rpCounterSig ?? null, rpCounterSignedAt: data.rpCounterSignedAt ?? null,
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blob = await pdf(createElement(mod.default, { data: pdfData as any }) as any).toBlob();
+      const url = URL.createObjectURL(blob);
+      triggerBrowserDownload(url, `${inspType === 'move_out' ? 'Move-out' : 'Move-in'}-report-CID-${contractId}.pdf`);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch { /* best-effort download */ }
+  }
+
   async function handleSign() {
     if (!sigImg) { setSignError('Please draw your signature first.'); return; }
     setSigning(true); setSignError(null);
@@ -271,10 +303,18 @@ export default function TenantInspectionPage() {
           <h1 className="text-xl font-bold text-[#1a1916]">{title}</h1>
           <p className="text-xs text-[#9b9890] mt-1">Review the recorded condition, then sign to confirm.</p>
         </div>
-        <button type="button" onClick={() => window.print()}
-          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
-          <Printer size={13} /> Print
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => window.print()}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
+            <Printer size={13} /> Print
+          </button>
+          {data && meta && (
+            <button type="button" onClick={downloadInspectionPdf}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
+              <Download size={13} /> Download PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Printable header — tenant, property + key dates */}

@@ -24,8 +24,14 @@ import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
+import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
+import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
 import ds from './ContractDocsBinder.module.css';
+
+// Generated tenancy artifacts (NOT uploaded KYC/ID) are the counterparty's own
+// documents and get a clean, watermark-free "Download PDF" — the stored snapshot.
+const DOWNLOADABLE_ARTIFACT_KEYS = new Set(['move_in_report', 'move_out_report', 'deposit_settlement']);
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
@@ -143,7 +149,7 @@ function PlanMeta({ label, value, align = 'left' }: { label: string; value?: str
   );
 }
 
-function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: { plan: OfferPlan; unitNumber?: string | null; buildingName?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
+function OfferBlock({ plan, refLabel, unitNumber, buildingName, periodStart, periodEnd }: { plan: OfferPlan; refLabel?: string | null; unitNumber?: string | null; buildingName?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
   ];
@@ -156,6 +162,7 @@ function OfferBlock({ plan, unitNumber, buildingName, periodStart, periodEnd }: 
   return (
     <div style={cardCss}>
       <div style={capCss}>Payment plan · current rent, fees &amp; deposit</div>
+      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} meta={{ buildingName, unitNumber, periodStart, periodEnd }} />
       {(buildingName || unitNumber || periodStart) && (
         <div style={{ padding: '11px 14px 2px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px' }}>
           <PlanMeta label="Building" value={buildingName} />
@@ -313,6 +320,9 @@ export interface ContractDocsBinderProps {
   /** When provided, the Receipts slot renders; null/omitted hides it. */
   receipt?: ReceiptContract | null;
   watermark: string;
+  /** No-login magic-link token → stored-artifact downloads use the token-scoped
+   *  endpoint. Omitted (authed RP/manager) → the JWT /documents endpoint. */
+  portalToken?: string | null;
   headerRight?: React.ReactNode;
   signerName: string;
   signerDefaultName: string;
@@ -327,7 +337,7 @@ type Slot =
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
-  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, receipt, watermark, headerRight, signerName, signerDefaultName, landlordSigned, onSign } = props;
+  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, receipt, watermark, portalToken, headerRight, signerName, signerDefaultName, landlordSigned, onSign } = props;
 
   const all = documents.filter(d => !!d.fileUrl && !isDependant(d));
   const matchDocs = (key: string): BinderDoc[] => {
@@ -424,18 +434,28 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} refLabel={refLabel} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
-              ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} /></Block>
+              ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;
-            else if (s.kind === 'agreement') inner = <Block label="Agreement"><EjariInline data={ejari} addendums={addendums} height={FULL} /></Block>;
+            else if (s.kind === 'agreement') inner = <Block label="Agreement"><EjariInline data={ejari} addendums={addendums} height={FULL} showDownload /></Block>;
             else {
               const docs = matchDocs(s.key);
               if (!docs.length) {
                 if (s.optional) return null;
                 inner = s.pending ? <PendingLink label={s.label} /> : <Missing label={s.label} />;
               } else {
-                inner = docs.map((d, i) => <SecurePreview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} watermark={watermark} />);
+                // Generated artifacts (move-in/out report, settlement) → clean download
+                // of the stored snapshot; uploaded KYC/other docs stay view-only.
+                const previews = docs.map((d, i) => <SecurePreview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} watermark={watermark} />);
+                inner = DOWNLOADABLE_ARTIFACT_KEYS.has(s.key)
+                  ? <>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                        <DownloadDocButton documentId={docs[0].id} portalToken={portalToken} style={{ ...linkBtnGhost, textDecoration: 'none' }} />
+                      </div>
+                      {previews}
+                    </>
+                  : previews;
               }
             }
             return <div key={slotId(s)} id={slotId(s)} style={{ scrollMarginTop: JUMP_OFFSET }}>{inner}</div>;
