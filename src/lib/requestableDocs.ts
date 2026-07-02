@@ -50,3 +50,25 @@ export const REQUESTABLE_DOCS = [
   'Police Clearance',
   'Guarantor Documents',
 ];
+
+/**
+ * RP-requested additional documents are stored as a JSON array of free-text
+ * names on `lead.additionalDocsNote`. Both the customer journey (upload slots)
+ * and the RP leads page (status/approve) derive a STABLE, deterministic
+ * document_key from each name so an uploaded file links back to the request.
+ * e.g. "Bank Statement" → "additional_bank_statement".
+ */
+export function additionalDocKey(name: string): string {
+  return 'additional_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/** Parse the requested-additional-docs list stored on `additionalDocsNote`. */
+export function parseAdditionalDocs(note: string | null | undefined): string[] {
+  if (!note) return [];
+  try {
+    const parsed = JSON.parse(note);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}

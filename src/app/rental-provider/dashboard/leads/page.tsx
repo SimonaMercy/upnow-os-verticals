@@ -18,7 +18,7 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { docLabel } from '@/lib/docLabel';
-import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
@@ -595,10 +595,7 @@ function LeadRow({
   const [docActionError, setDocActionError] = useState<string | null>(null);
   const [rejectingDoc, setRejectingDoc]     = useState<{ id: number; label: string } | null>(null);
   const [rejectReason, setRejectReason]     = useState('');
-  const [docsNoteItems, setDocsNoteItems] = useState<string[]>(() => {
-    try { const p = JSON.parse(lead.additionalDocsNote ?? ''); return Array.isArray(p) ? p : []; }
-    catch { return []; }
-  });
+  const [docsNoteItems, setDocsNoteItems] = useState<string[]>(() => parseAdditionalDocs(lead.additionalDocsNote));
   const [docSearch, setDocSearch]         = useState('');
   const [docMenuOpen, setDocMenuOpen]     = useState(false);
   // Add a document (a standard one, or a typed custom name) to the request list.
@@ -1661,21 +1658,63 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               Each document appears as an individual upload slot in the customer's journey.
             </p>
 
-            {/* Existing items */}
+            {/* Existing items — each shows the customer's upload status with
+                approve / reject / upload-on-behalf, matched by additionalDocKey. */}
             {docsNoteItems.length > 0 && (
               <div className="space-y-1.5 mb-3">
-                {docsNoteItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-lg px-3 py-2">
-                    <FileText size={12} className="text-[#2e9f82] shrink-0" />
-                    <span className="flex-1 text-xs text-[#1a1916]">{item}</span>
-                    <button
-                      onClick={() => { setDocsNoteItems(prev => prev.filter((_, i) => i !== idx)); setDocsNoteSaved(false); }}
-                      className="text-[#9b9890] hover:text-[#b91c1c] transition-colors cursor-pointer"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
+                {docsNoteItems.map((item, idx) => {
+                  const key = additionalDocKey(item);
+                  const doc = (tenantDocs ?? []).find(d => d.documentKey === key);
+                  const approved = doc?.status === 'processed' || doc?.status === 'complete';
+                  const rejected = doc?.status === 'rejected';
+                  const uploaded = !!doc && !approved && !rejected;   // attached, awaiting review
+                  const busyDoc  = doc ? docActioning === doc.id : false;
+                  const busyUp   = rpUploadingKey === key;
+                  const canUpload = !!lead.convertedTenant?.id;
+                  return (
+                    <div key={idx} className="bg-white border border-[#e8e6e0] rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        {approved ? <Check size={12} className="text-[#16a34a] shrink-0" />
+                          : rejected ? <X size={12} className="text-[#b91c1c] shrink-0" />
+                          : uploaded ? <Clock size={12} className="text-[#92400e] shrink-0" />
+                          : <FileText size={12} className="text-[#9b9890] shrink-0" />}
+                        <span className="flex-1 min-w-0 text-xs text-[#1a1916] truncate">{item}</span>
+                        <span className={`text-[9px] font-bold uppercase tracking-wide shrink-0 ${approved ? 'text-[#16a34a]' : rejected ? 'text-[#b91c1c]' : uploaded ? 'text-[#92400e]' : 'text-[#9b9890]'}`}>
+                          {approved ? 'Approved' : rejected ? 'Rejected' : uploaded ? 'Uploaded' : 'Awaiting'}
+                        </span>
+                        <button
+                          onClick={() => { setDocsNoteItems(prev => prev.filter((_, i) => i !== idx)); setDocsNoteSaved(false); }}
+                          className="text-[#9b9890] hover:text-[#b91c1c] transition-colors cursor-pointer shrink-0" title="Remove request"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                      {(doc || canUpload) && (
+                        <div className="flex items-center gap-3 mt-1.5 pl-5 flex-wrap">
+                          {doc?.fileUrl && (
+                            <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType ?? undefined })}
+                              className="text-[10px] font-semibold text-[#2e9f82] hover:underline cursor-pointer inline-flex items-center gap-1"><Eye size={11} /> View</button>
+                          )}
+                          {uploaded && (
+                            <>
+                              <button type="button" disabled={busyDoc} onClick={() => handleApproveDoc(doc!.id)}
+                                className="text-[10px] font-semibold text-[#16a34a] hover:underline cursor-pointer disabled:opacity-50">Approve</button>
+                              <button type="button" disabled={busyDoc} onClick={() => setRejectingDoc({ id: doc!.id, label: item })}
+                                className="text-[10px] font-semibold text-[#b91c1c] hover:underline cursor-pointer disabled:opacity-50">Reject</button>
+                            </>
+                          )}
+                          {canUpload && (
+                            <label className={`text-[10px] font-semibold text-[#6b6860] hover:text-[#2e9f82] cursor-pointer inline-flex items-center gap-1 ${busyUp ? 'opacity-50' : ''}`}>
+                              {busyUp ? <Loader2 size={11} className="animate-spin" /> : <UploadCloud size={11} />} {doc ? 'Replace' : 'Upload for customer'}
+                              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={busyUp}
+                                onChange={e => { const f = e.target.files?.[0]; if (f) handleRpUpload({ key, label: item, category: 'other' }, f); e.target.value = ''; }} />
+                            </label>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 

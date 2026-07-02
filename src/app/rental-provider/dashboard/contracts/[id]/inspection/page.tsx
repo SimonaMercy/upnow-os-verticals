@@ -842,6 +842,7 @@ export default function InspectionPage() {
   const [countering, setCountering]   = useState(false);
   const [counterError, setCounterError] = useState<string | null>(null);
   const [counterDone, setCounterDone] = useState(false);
+  const [reopening, setReopening]     = useState(false);
   // Draft autosave — persists progress (photos/conditions/notes) as the inspector
   // works so a reload never loses work. The first explicit Submit finalizes+locks.
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -1014,6 +1015,28 @@ export default function InspectionPage() {
       setError('Unexpected error. Please try again.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Undo a submission so the form is editable again — allowed only while the
+  // customer hasn't signed (the server enforces the same guard). RP-only.
+  async function handleReopen() {
+    if (!contractId || portalToken) return;
+    setReopening(true); setError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/inspection/reopen?type=${inspType}`, {
+        method: 'POST', credentials: 'include',
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setError((b as { message?: string }).message ?? 'Could not reopen the inspection.');
+        return;
+      }
+      await load();   // re-fetch: rpSubmittedAt gone → formLocked=false → editable
+    } catch {
+      setError('Unexpected error. Please try again.');
+    } finally {
+      setReopening(false);
     }
   }
 
@@ -1193,6 +1216,14 @@ export default function InspectionPage() {
                 purpose={inspType}
                 label={`Send ${isMoveIn ? 'move-in' : 'move-out'} signing link`}
               />
+            )}
+            {/* Reopen for editing — only while the customer hasn't signed. */}
+            {!portalToken && (
+              <button type="button" onClick={handleReopen} disabled={reopening}
+                className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#c2410c] text-[#c2410c] disabled:opacity-60 print:hidden">
+                {reopening ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                Undo submission &amp; edit
+              </button>
             )}
           </div>
         </div>

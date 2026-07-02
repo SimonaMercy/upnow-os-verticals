@@ -40,6 +40,7 @@ import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
+import { additionalDocKey, parseAdditionalDocs } from '@/lib/requestableDocs';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -380,6 +381,17 @@ interface Resolved {
   docsSubmitted?: boolean;
   tenantProfileId: number | null;
   myDocs: TenantDoc[];
+  /** Extra documents the RP requested (free-text names from additionalDocsNote).
+   *  Rendered as their own upload slots; while any is unfulfilled the customer is
+   *  held at the Documents step (see deriveStateKey). */
+  requestedAdditionalDocs: string[];
+}
+
+/** Requested additional docs still needing a (non-rejected) upload from the customer. */
+function pendingAdditionalDocs(r: Resolved): number {
+  if (!r.requestedAdditionalDocs.length) return 0;
+  const ok = new Set(r.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
+  return r.requestedAdditionalDocs.filter(name => !ok.has(additionalDocKey(name))).length;
 }
 
 // Customer "submit documents" gate — persisted per-space in localStorage. The
@@ -490,6 +502,24 @@ function deriveStateKey(r: Resolved): StateKey {
   if (stage === 'rejected') return 'rejected';
   if (viewing?.outcome === 'not_interested') return 'rejected';
   if (viewing?.status === 'no_show' || viewing?.status === 'cancelled') return 'rejected';
+
+  // ── 4b. Additional-docs gate. If the RP requested extra documents that aren't
+  // yet on file, roll the customer back to the Documents step — even if a payment
+  // plan was shared or cheques submitted — until every requested doc is uploaded.
+  // Clears automatically (→ resumes payment/cheques below) once all are on file.
+  if (pendingAdditionalDocs(r) > 0) return 'docs_required';
+
+  // ── 4c. Rejected-doc gate. When the RP rejects ANY document (KYC, supporting,
+  // optional or additional) the customer must go back to the upload step to
+  // replace it — even past "submitted"/payment. `allRequiredDocsUploaded` only
+  // covers required KYC, so a rejected supporting/optional doc would otherwise
+  // leave them stuck on "Your documents are with our team". A rejection is
+  // "unresolved" until a NON-rejected file exists under the same key (i.e. they
+  // re-uploaded), at which point the gate clears and normal resolution resumes.
+  {
+    const okDocKeys = new Set(r.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
+    if (r.myDocs.some(d => d.status === 'rejected' && !okDocKeys.has(d.documentKey))) return 'docs_required';
+  }
 
   // ── 5. Steps 1–3 (pre-contract). Order matters here.
 
@@ -1748,7 +1778,11 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
         ) : req.hint ? (
           <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{req.hint}</p>
         ) : null}
-        {previewUrl && (
+        {/* Hide the preview for a REJECTED doc: its thumbnail is a viewer button
+            that would intercept the row's click and open the old file instead of
+            the file picker — so the customer couldn't re-attach. With it hidden,
+            tapping the row (a <label>) opens the file dialog to re-upload. */}
+        {previewUrl && !isRejected && (
           <div style={{ marginTop: 6 }}>
             {isImg
               ? <button type="button" onClick={() => openDocViewer({ fileUrl: previewUrl, caption: req.label, mimeType: mime })} style={{ display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><img src={previewUrl} alt={req.label} style={{ width: 80, height: 54, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--mist-strong)' }} /></button>
@@ -1942,10 +1976,18 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const financialOpt     = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => !SUPPORTING_SHOWN_KEYS.includes(d.key));
   const occupantDocList  = isRes && occupantCount > 1 ? getOccupantDocs(occupantCount) : [];
 
-  // Gate counts only the KYC identity rows. Adding occupant or financial
-  // rows to this list would block submission for customers who upload
-  // their KYC but don't (e.g.) have an employment letter handy.
-  const allRequired      = [...kycRequired];
+  // RP-requested additional documents → their own required upload slots, keyed
+  // deterministically (additional_<slug>) so each upload links back to the
+  // request on the RP side. These DO gate submission (unlike optional docs).
+  const additionalDocReqs: DocReq[] = (resolved.requestedAdditionalDocs ?? []).map(name => ({
+    key: additionalDocKey(name), label: name, category: 'other', required: true,
+    hint: 'Requested by your rental provider',
+  }));
+  const additionalAllDone = additionalDocReqs.length > 0 && additionalDocReqs.every(d => uploadedKeys.has(d.key));
+
+  // Gate counts the KYC identity rows PLUS any RP-requested additional docs.
+  // (Occupant / financial rows stay non-blocking.)
+  const allRequired      = [...kycRequired, ...additionalDocReqs];
   // Emirates ID counts as done via a combined file OR both sides (isDocKeySatisfied).
   const allRequiredDone  = allRequired.every(d => isDocKeySatisfied(d.key, uploadedKeys));
 
@@ -2161,6 +2203,15 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
       {occupantDocList.length > 0 && (
         <KycSection title={`Additional occupants (${occupantCount - 1} more)`} allDone={occupantsAllDone}>
           {occupantDocList.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
+        </KycSection>
+      )}
+
+      {/* Documents your rental provider specifically asked for — each is an
+          individual required upload slot. Until they're all on file the journey
+          is held at this step (see deriveStateKey's additional-docs gate). */}
+      {additionalDocReqs.length > 0 && (
+        <KycSection title="Requested by your rental provider" accent allDone={additionalAllDone}>
+          {additionalDocReqs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
         </KycSection>
       )}
 
@@ -4609,7 +4660,8 @@ export default function CustomerSpaceV2Page() {
       const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => isDocKeySatisfied(k, uploadedKeys));
       const paymentPlan = lead?.paymentPlan ?? viewing?.lead?.paymentPlan ?? null;
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
-      setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, docsSubmitted: readDocsSubmitted(spaceKey), tenantProfileId, myDocs: docs });
+      const requestedAdditionalDocs = parseAdditionalDocs(lead?.additionalDocsNote ?? viewing?.lead?.additionalDocsNote);
+      setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, docsSubmitted: readDocsSubmitted(spaceKey), tenantProfileId, myDocs: docs, requestedAdditionalDocs });
       setLoading(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
