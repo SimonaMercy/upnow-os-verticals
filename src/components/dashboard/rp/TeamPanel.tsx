@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -10,37 +10,49 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
+import { REPORT_TILES } from '@/components/upnow/reportCatalog';
+
+/** Reports a manager can be granted access to (the live, available ones). */
+const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available).map((r) => ({ slug: r.slug, title: r.title }));
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ManagerPermissions {
   id: number;
   managerUserId: number;
-  // Properties
+  // Properties & listings
   canListProperties:    boolean;
   canEditProperties:    boolean;
   canPublishListings:   boolean;
-  // Viewings
+  canManageDocuments:   boolean;
+  // Leads & viewings
   canManageViewings:    boolean;
-  // Contracts & signing
+  // Customers & contracts
   canManageAgreements:  boolean;
   canCreateContracts:   boolean;
+  canManageContractLifecycle: boolean;
   canManageRenewals:    boolean;
+  canManageTermination: boolean;
+  canManageInspections: boolean;
+  canManageTemplates:   boolean;
+  // Signing
   canSignDocuments:     boolean;
   canSignAddenda:       boolean;
+  canManageEjari:       boolean;
   canActAsPoa:          boolean;
   // Finance
   canManageDeposits:    boolean;
+  canSettleDeposits:    boolean;
+  canRecordPayments:    boolean;
+  canClearCheques:      boolean;
   canManageCollections: boolean;
   canViewFinancials:    boolean;
   canViewReports:       boolean;
-  // Operations
-  canManageDocuments:   boolean;
+  // Maintenance & communication
   canManageMaintenance: boolean;
-  // Communication & admin
   canCommunicateTenants: boolean;
-  canEscalateToAdmin:    boolean;
-  canInviteManager:      boolean;
+  // Per-report access — report slugs (empty = all reports)
+  reportAccess:         string[];
 }
 
 interface ManagerMember {
@@ -63,114 +75,163 @@ interface Invitation {
 
 // ─── Permission groups for the UI ────────────────────────────────────────────
 
+// Groups mirror the Rental Provider sidebar navigation so an RP can adjust a
+// team member's access section-by-section, exactly as they see their own menu.
 export const PERM_GROUPS = [
   {
-    label: 'Properties',
-    description: 'Listing and property management',
+    label: 'Leads & Viewings',
+    description: 'The Leads section',
     perms: [
-      { key: 'canListProperties',    label: 'View properties',        meta: 'can_list_properties' },
-      { key: 'canEditProperties',    label: 'Edit property details',  meta: 'can_edit_properties' },
+      { key: 'canManageViewings',    label: 'Manage leads & viewings',      meta: 'can_manage_viewings' },
+    ],
+  },
+  {
+    label: 'Properties & Units',
+    description: 'The Properties and Units sections',
+    perms: [
+      { key: 'canListProperties',    label: 'View properties & units',      meta: 'can_list_properties' },
+      { key: 'canEditProperties',    label: 'Edit property & unit details', meta: 'can_edit_properties' },
       { key: 'canPublishListings',   label: 'Publish / unpublish listings', meta: 'can_publish_listings' },
+      { key: 'canManageDocuments',   label: 'Upload & manage documents',    meta: 'can_manage_documents' },
     ],
   },
   {
-    label: 'Viewings',
-    description: 'Customer appointments',
+    label: 'Leases & Contracts',
+    description: 'Also unlocks the Customers, Operations & Ended-Leases sections',
     perms: [
-      { key: 'canManageViewings',    label: 'Schedule & manage viewings', meta: 'can_manage_viewings' },
-    ],
-  },
-  {
-    label: 'Contracts & Signing',
-    description: 'Tenancy agreements and legal documents',
-    perms: [
-      { key: 'canManageAgreements',  label: 'View & manage contracts',       meta: 'can_manage_agreements' },
-      { key: 'canCreateContracts',   label: 'Create new contracts',          meta: 'can_create_contracts' },
-      { key: 'canManageRenewals',    label: 'Manage contract renewals',      meta: 'can_manage_renewals' },
-      { key: 'canSignDocuments',     label: 'Sign tenancy contracts',        meta: 'can_sign_documents' },
-      { key: 'canSignAddenda',       label: 'Sign addenda & amendments',     meta: 'can_sign_addenda' },
+      { key: 'canManageAgreements',  label: 'View & manage leases + customers', meta: 'can_manage_agreements' },
+      { key: 'canCreateContracts',   label: 'Create new contracts',         meta: 'can_create_contracts' },
+      { key: 'canManageContractLifecycle', label: 'Issue / activate / cancel leases', meta: 'can_manage_contract_lifecycle' },
+      { key: 'canManageRenewals',    label: 'Manage contract renewals',     meta: 'can_manage_renewals' },
+      { key: 'canManageTermination', label: 'Terminate leases',             meta: 'can_manage_termination' },
+      { key: 'canManageInspections', label: 'Move-in / move-out inspections', meta: 'can_manage_inspections' },
+      { key: 'canSignDocuments',     label: 'Sign tenancy contracts',       meta: 'can_sign_documents' },
+      { key: 'canSignAddenda',       label: 'Sign addenda & amendments',    meta: 'can_sign_addenda' },
+      { key: 'canManageEjari',       label: 'Register / manage Ejari',      meta: 'can_manage_ejari' },
       { key: 'canActAsPoa',          label: 'Act with full POA (Power of Attorney)', meta: 'can_act_as_poa' },
     ],
   },
   {
-    label: 'Finance',
-    description: 'Payments, collections and reports',
+    label: 'Payments & Deposits',
+    description: 'The Payments and Deposits sections',
     perms: [
-      { key: 'canManageDeposits',    label: 'Manage security deposits',   meta: 'can_manage_deposits' },
-      { key: 'canManageCollections', label: 'Manage rent collections',    meta: 'can_manage_collections' },
-      { key: 'canViewFinancials',    label: 'View financial statements',  meta: 'can_view_financials' },
-      { key: 'canViewReports',       label: 'View analytics & reports',   meta: 'can_view_reports' },
+      { key: 'canManageDeposits',    label: 'Manage security deposits',     meta: 'can_manage_deposits' },
+      { key: 'canSettleDeposits',    label: 'Settle deposits (refund / deduct)', meta: 'can_settle_deposits' },
+      { key: 'canRecordPayments',    label: 'Record & edit payments',       meta: 'can_record_payments' },
+      { key: 'canClearCheques',      label: 'Change cheque status (cleared / bounced)', meta: 'can_clear_cheques' },
+      { key: 'canManageCollections', label: 'Manage rent collections',      meta: 'can_manage_collections' },
+      { key: 'canViewFinancials',    label: 'View financial statements',    meta: 'can_view_financials' },
     ],
   },
   {
-    label: 'Operations',
-    description: 'Documents and maintenance',
+    label: 'Templates',
+    description: 'The Templates section',
     perms: [
-      { key: 'canManageDocuments',    label: 'Upload & manage documents',   meta: 'can_manage_documents' },
-      { key: 'canManageMaintenance',  label: 'Handle maintenance requests', meta: 'can_manage_maintenance' },
+      { key: 'canManageTemplates',   label: 'Manage addendum templates',    meta: 'can_manage_templates' },
     ],
   },
   {
-    label: 'Communication & Admin',
-    description: 'Tenant communication and delegation',
+    label: 'AMC & Vendors',
+    description: 'The AMC & Vendors section',
     perms: [
-      { key: 'canCommunicateTenants', label: 'Communicate with tenants',  meta: 'can_communicate_tenants' },
-      { key: 'canEscalateToAdmin',    label: 'Escalate issues to admin',  meta: 'can_escalate_to_admin' },
-      { key: 'canInviteManager',      label: 'Invite sub-managers',       meta: 'can_invite_manager' },
+      { key: 'canManageMaintenance', label: 'Handle AMC & maintenance',     meta: 'can_manage_maintenance' },
     ],
   },
+  {
+    label: 'Communications',
+    description: 'The Communications section',
+    perms: [
+      { key: 'canCommunicateTenants', label: 'Communicate with tenants (coming soon)', meta: 'can_communicate_tenants' },
+    ],
+  },
+  {
+    label: 'Reports',
+    description: 'The Reports section (per-report access below)',
+    perms: [
+      { key: 'canViewReports',       label: 'Access reports section',       meta: 'can_view_reports' },
+    ],
+  },
+  // NOTE: Settings (Fee/VAT rules, penalty/installment rules, Team) is
+  // rental-provider-only — intentionally NOT delegatable to managers.
 ] as const;
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
 export const metaDefaults = {
-  can_list_properties:    false,
+  // Properties & listings — a fresh manager can VIEW but not mutate.
+  can_list_properties:    true,
   can_edit_properties:    false,
   can_publish_listings:   false,
-  can_manage_viewings:    false,
-  can_manage_agreements:  false,
+  can_manage_documents:   false,
+  // Leads & viewings
+  can_manage_viewings:    true,
+  // Customers & contracts
+  can_manage_agreements:  true,
   can_create_contracts:   false,
+  can_manage_contract_lifecycle: false,
   can_manage_renewals:    false,
+  can_manage_termination: false,
+  can_manage_inspections: false,
+  can_manage_templates:   false,
+  // Signing
   can_sign_documents:     false,
   can_sign_addenda:       false,
+  can_manage_ejari:       false,
   can_act_as_poa:         false,
+  // Finance
   can_manage_deposits:    false,
+  can_settle_deposits:    false,
+  can_record_payments:    false,
+  can_clear_cheques:      false,
   can_manage_collections: false,
   can_view_financials:    false,
-  can_view_reports:       false,
-  can_manage_documents:   false,
+  can_view_reports:       true,
+  // Maintenance & communication
   can_manage_maintenance: false,
   can_communicate_tenants: false,
-  can_escalate_to_admin:  false,
-  can_invite_manager:     false,
 };
+
+// ─── Role presets (editable starting templates) ──────────────────────────────
+// Each preset pre-selects a sensible bundle of flags; the RP can still adjust
+// individual toggles afterwards. Keyed by the camelCase permission key.
+export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
+  {
+    id: 'leasing_agent',
+    label: 'Leasing Agent',
+    keys: ['canListProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canManageAgreements', 'canCreateContracts', 'canCommunicateTenants'],
+  },
+  {
+    id: 'accountant',
+    label: 'Accountant / Finance',
+    keys: ['canListProperties', 'canManageDeposits', 'canSettleDeposits', 'canRecordPayments', 'canClearCheques', 'canManageCollections', 'canViewFinancials', 'canViewReports'],
+  },
+  {
+    id: 'operations',
+    label: 'Operations / Property Manager',
+    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canViewFinancials', 'canViewReports'],
+  },
+  {
+    id: 'maintenance',
+    label: 'Maintenance Coordinator',
+    keys: ['canListProperties', 'canManageMaintenance'],
+  },
+];
+
+/** Every permission entry (key + meta) flattened — used to apply a role preset. */
+const ALL_PERMS: { key: string; label: string; meta: string }[] = PERM_GROUPS.flatMap(
+  (g) => g.perms as readonly { key: string; label: string; meta: string }[],
+);
 
 const inviteSchema = z.object({
   email: z.string().email('Valid email required'),
   firstName: z.string().min(1, 'First name required').max(100),
   lastName: z.string().max(100).optional(),
   phone: z.string().optional(),
-  metadata: z.object({
-    can_list_properties:    z.boolean(),
-    can_edit_properties:    z.boolean(),
-    can_publish_listings:   z.boolean(),
-    can_manage_viewings:    z.boolean(),
-    can_manage_agreements:  z.boolean(),
-    can_create_contracts:   z.boolean(),
-    can_manage_renewals:    z.boolean(),
-    can_sign_documents:     z.boolean(),
-    can_sign_addenda:       z.boolean(),
-    can_act_as_poa:         z.boolean(),
-    can_manage_deposits:    z.boolean(),
-    can_manage_collections: z.boolean(),
-    can_view_financials:    z.boolean(),
-    can_view_reports:       z.boolean(),
-    can_manage_documents:   z.boolean(),
-    can_manage_maintenance: z.boolean(),
-    can_communicate_tenants: z.boolean(),
-    can_escalate_to_admin:  z.boolean(),
-    can_invite_manager:     z.boolean(),
-  }),
+  // Flag map (snake_case → boolean). Kept as a record so it stays in sync with
+  // metaDefaults / PERM_GROUPS without re-enumerating every flag here.
+  metadata: z.record(z.string(), z.boolean()),
+  // Per-report access — report slugs (empty = all reports).
+  reportAccess: z.array(z.string()),
 }).refine(
   (d) => Object.values(d.metadata).some(Boolean),
   { message: 'Select at least one permission', path: ['metadata'] },
@@ -203,6 +264,130 @@ function PermToggle({
   );
 }
 
+/** Row of quick role-preset buttons. `onApply` receives the set of camelCase
+ *  permission keys the preset turns on (everything else turns off). */
+function RolePresets({ onApply }: { onApply: (keys: Set<string>) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4">
+      <span className="text-[11px] font-medium" style={{ color: 'var(--color-neutral-500)' }}>Quick role:</span>
+      {ROLE_PRESETS.map((r) => (
+        <button
+          key={r.id}
+          type="button"
+          onClick={() => onApply(new Set(r.keys))}
+          className="text-[11px] font-medium px-2.5 py-1 rounded-full hover:bg-[var(--color-base-200)]"
+          style={{ border: '1px solid var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Per-report access checklist. Empty selection = access to ALL reports. */
+function ReportAccessChecklist({
+  selected, onChange,
+}: { selected: string[]; onChange: (slugs: string[]) => void }) {
+  const toggle = (slug: string) =>
+    onChange(selected.includes(slug) ? selected.filter((s) => s !== slug) : [...selected, slug]);
+  return (
+    <div>
+      <p className="text-[11px] mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+        {selected.length === 0
+          ? 'All reports — leave unchecked for full access, or pick specific reports.'
+          : `${selected.length} of ${AVAILABLE_REPORTS.length} reports selected.`}
+      </p>
+      <div className="grid grid-cols-1 gap-1.5 max-h-52 overflow-y-auto pr-1">
+        {AVAILABLE_REPORTS.map((r) => (
+          <label key={r.slug} className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-neutral-700)' }}>
+            <input
+              type="checkbox"
+              checked={selected.includes(r.slug)}
+              onChange={() => toggle(r.slug)}
+              style={{ accentColor: 'var(--color-primary)' }}
+            />
+            {r.title}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type PermEntry = { key: string; label: string; meta: string };
+
+/** Collapsible, nav-aligned permission sections shared by the invite modal and
+ *  the edit panel. Each section shows a granted-count badge and a select-all. */
+function PermissionSections({
+  getValue,
+  onToggle,
+  onToggleGroup,
+}: {
+  getValue: (perm: PermEntry) => boolean;
+  onToggle: (perm: PermEntry, v: boolean) => void;
+  onToggleGroup: (perms: PermEntry[], v: boolean) => void;
+}) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  return (
+    <div className="space-y-2">
+      {PERM_GROUPS.map((group) => {
+        const perms = group.perms as readonly PermEntry[];
+        const granted = perms.filter((p) => getValue(p)).length;
+        const total = perms.length;
+        const allOn = granted === total;
+        const isOpen = open[group.label] ?? granted > 0;
+        return (
+          <div key={group.label} className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--color-base-200)' }}>
+            <button
+              type="button"
+              onClick={() => setOpen((o) => ({ ...o, [group.label]: !isOpen }))}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left"
+              style={{ background: 'var(--color-base-100)' }}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <ChevronRight className="w-4 h-4 shrink-0 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'none', color: 'var(--color-neutral-400)' }} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-700)' }}>{group.label}</p>
+                  {'description' in group && (
+                    <p className="text-[10px] truncate" style={{ color: 'var(--color-neutral-400)' }}>
+                      {(group as { description?: string }).description}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                style={{
+                  background: granted > 0 ? 'color-mix(in srgb, var(--color-primary) 14%, white)' : 'var(--color-base-200)',
+                  color: granted > 0 ? 'var(--color-primary)' : 'var(--color-neutral-400)',
+                }}
+              >
+                {granted}/{total}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 pt-2 space-y-2.5 border-t" style={{ borderColor: 'var(--color-base-200)', background: 'color-mix(in srgb, var(--color-base-200) 30%, white)' }}>
+                <button
+                  type="button"
+                  onClick={() => onToggleGroup([...perms], !allOn)}
+                  className="text-[11px] font-medium"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {allOn ? 'Clear all' : 'Select all'}
+                </button>
+                {perms.map((perm) => (
+                  <PermToggle key={perm.key} label={perm.label} value={getValue(perm)} onChange={(v) => onToggle(perm, v)} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Invite Manager Modal ─────────────────────────────────────────────────────
 
 export interface InviteManagerModalProps {
@@ -214,6 +399,7 @@ export interface InviteManagerModalProps {
     email?: string;
     phone?: string;
     metadata?: Partial<InviteForm['metadata']>;
+    reportAccess?: string[];
   };
   /** Optional heading override (e.g. "Invite POA holder as manager"). */
   title?: string;
@@ -223,7 +409,7 @@ export interface InviteManagerModalProps {
 
 export function InviteManagerModal({ onClose, initialValues, title = 'Invite Manager', onInvited }: InviteManagerModalProps) {
   const qc = useQueryClient();
-  const { register, handleSubmit, control, formState: { errors } } = useForm<InviteForm>({
+  const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<InviteForm>({
     resolver: zodResolver(inviteSchema),
     defaultValues: {
       firstName: initialValues?.firstName ?? '',
@@ -231,10 +417,13 @@ export function InviteManagerModal({ onClose, initialValues, title = 'Invite Man
       email: initialValues?.email ?? '',
       phone: initialValues?.phone ?? '',
       metadata: { ...metaDefaults, ...(initialValues?.metadata ?? {}) },
+      reportAccess: initialValues?.reportAccess ?? [],
     },
   });
 
   const metaError = (errors as { metadata?: { message?: string } }).metadata?.message;
+  // Subscribe to the whole flag map so the sections re-render on any toggle.
+  const md = watch('metadata') ?? {};
 
   const mutation = useMutation({
     mutationFn: (data: InviteForm) =>
@@ -319,41 +508,31 @@ export function InviteManagerModal({ onClose, initialValues, title = 'Invite Man
             {metaError && (
               <p className="text-xs mb-2" style={{ color: 'var(--color-error)' }}>{metaError}</p>
             )}
-            <div className="space-y-5">
-              {PERM_GROUPS.map((group) => (
-                <div key={group.label}>
-                  <div className="mb-2">
-                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-neutral-500)' }}>
-                      {group.label}
-                    </p>
-                    {'description' in group && (
-                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>
-                        {(group as { description?: string }).description}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2.5 pl-1">
-                    {group.perms.map((perm) => {
-                      const metaKey = perm.meta as keyof typeof metaDefaults;
-                      return (
-                        <Controller
-                          key={perm.key}
-                          control={control}
-                          name={`metadata.${metaKey}` as `metadata.${keyof typeof metaDefaults}`}
-                          render={({ field }) => (
-                            <PermToggle
-                              label={perm.label}
-                              value={field.value}
-                              onChange={field.onChange}
-                            />
-                          )}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <RolePresets
+              onApply={(keys) =>
+                ALL_PERMS.forEach((p) =>
+                  setValue(`metadata.${p.meta}`, keys.has(p.key), { shouldDirty: true }),
+                )
+              }
+            />
+            <PermissionSections
+              getValue={(p) => !!md[p.meta]}
+              onToggle={(p, v) => setValue(`metadata.${p.meta}`, v, { shouldDirty: true })}
+              onToggleGroup={(perms, v) =>
+                perms.forEach((p) => setValue(`metadata.${p.meta}`, v, { shouldDirty: true }))
+              }
+            />
+            {watch('metadata.can_view_reports') && (
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-neutral-500)' }}>
+                  Reports access
+                </p>
+                <ReportAccessChecklist
+                  selected={watch('reportAccess') ?? []}
+                  onChange={(slugs) => setValue('reportAccess', slugs, { shouldDirty: true })}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-2">
@@ -433,26 +612,35 @@ function PermissionsPanel({
         </div>
 
         <div className="p-5 space-y-6 flex-1">
-          {PERM_GROUPS.map((group) => (
-            <div key={group.label}>
+          <RolePresets
+            onApply={(keys) =>
+              updateMutation.mutate(
+                Object.fromEntries(
+                  ALL_PERMS.map((p) => [p.key, keys.has(p.key)]),
+                ) as Partial<ManagerPermissions>,
+              )
+            }
+          />
+          <PermissionSections
+            getValue={(p) => !!perms[p.key as keyof ManagerPermissions]}
+            onToggle={(p, v) => updateMutation.mutate({ [p.key]: v })}
+            onToggleGroup={(gp, v) =>
+              updateMutation.mutate(
+                Object.fromEntries(gp.map((p) => [p.key, v])) as Partial<ManagerPermissions>,
+              )
+            }
+          />
+          {perms.canViewReports && (
+            <div>
               <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--color-neutral-400)' }}>
-                {group.label}
+                Reports access
               </p>
-              <div className="space-y-3">
-                {group.perms.map(({ key, label }) => {
-                  const val = perms[key as keyof ManagerPermissions] as boolean;
-                  return (
-                    <PermToggle
-                      key={key}
-                      label={label}
-                      value={val}
-                      onChange={(v) => updateMutation.mutate({ [key]: v })}
-                    />
-                  );
-                })}
-              </div>
+              <ReportAccessChecklist
+                selected={perms.reportAccess ?? []}
+                onChange={(slugs) => updateMutation.mutate({ reportAccess: slugs })}
+              />
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

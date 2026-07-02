@@ -210,8 +210,8 @@ function statusLabel(c: Contract): string {
 // ────────────────────────────────────────────────────────────────────────────
 
 function Row({
-  contract, now, soonBy, onEdit,
-}: { contract: Contract; now: Date; soonBy: Date; onEdit: (id: number) => void }) {
+  contract, now, soonBy, onEdit, basePath,
+}: { contract: Contract; now: Date; soonBy: Date; onEdit: (id: number) => void; basePath: string }) {
   const c = contract;
   const ds = displayStatusOf(c);
   const soon = isInForce(c) && endsSoon(c, soonBy);
@@ -221,7 +221,7 @@ function Row({
   // instead of expanding an inline body — the v2 page already provides
   // the full contract context (timeline, parties, payments, addendums,
   // etc.) we'd otherwise duplicate inside the row.
-  const href = `/rental-provider/dashboard/contracts/${c.id}/v2`;
+  const href = `${basePath}/${c.id}/v2`;
 
   const tenantLabel = tenantDisplayName(c.tenant);
 
@@ -276,7 +276,12 @@ function Row({
 // Main page
 // ────────────────────────────────────────────────────────────────────────────
 
-export default function OrdersPage() {
+export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
+  // Base route for detail/edit/new links + the API source. In manager mode the
+  // page reuses the landlord-scoped /manager/contracts endpoints and links into
+  // the manager portal, mirroring UnitsWorkspace.
+  const contractBase = manager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
+  const opsHref = manager ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations';
   const [contracts, setContracts] = useState<Contract[]>([]);
   // Ids of contracts still in the Operations worklist (drafts + active-but-
   // incomplete). The Leases register is the EXACT COMPLEMENT: a lease shows here
@@ -291,16 +296,17 @@ export default function OrdersPage() {
   const router = useRouter();
 
   useEffect(() => {
+    const q = manager ? `?rp=${manager.rp}` : '';
     Promise.all([
-      fetch('/api/contracts', { credentials: 'include' }).then(r => r.json()).catch(() => null),
-      fetch('/api/contracts/operations', { credentials: 'include' }).then(r => r.json()).catch(() => null),
+      fetch(`/api/${manager ? 'manager/contracts' : 'contracts'}${q}`, { credentials: 'include' }).then(r => r.json()).catch(() => null),
+      fetch(`/api/${manager ? 'manager/contracts/operations' : 'contracts/operations'}${q}`, { credentials: 'include' }).then(r => r.json()).catch(() => null),
     ])
       .then(([list, ops]) => {
         if (Array.isArray(list)) setContracts(list);
         if (Array.isArray(ops)) setOpsIds(new Set(ops.map((c: { id: number }) => c.id)));
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [manager]);
 
   useEffect(() => { setPage(1); }, [activeTab, search, filterAsset, filterYear]);
 
@@ -460,7 +466,7 @@ export default function OrdersPage() {
               </select>
             </div>
             <button type="button" className="btn btn-ghost"><Download size={14} /> Export</button>
-            <Link href="/rental-provider/dashboard/contracts/new" className="btn btn-primary"><Plus size={14} /> New contract</Link>
+            <Link href={`${contractBase}/new`} className="btn btn-primary"><Plus size={14} /> New contract</Link>
           </div>
         </div>
 
@@ -480,7 +486,7 @@ export default function OrdersPage() {
             deduped per unit so it reflects real tenancies, not raw rows. */}
         <div className="today-strip">
           <b>{currentLeases.length}</b> locked leases{filterYear === 'all' ? '' : ` in ${filterYear}`} — one per unit ·
-          {' '}contracts still being set up live in <Link href="/rental-provider/dashboard/operations" className="ops-link">Operations →</Link>
+          {' '}contracts still being set up live in <Link href={opsHref} className="ops-link">Operations →</Link>
         </div>
 
         {/* Tabs */}
@@ -553,8 +559,8 @@ export default function OrdersPage() {
             </div>
             <div className="rows">
               {rows.map(c => (
-                <Row key={c.id} contract={c} now={now} soonBy={soonBy}
-                  onEdit={(cid) => router.push(`/rental-provider/dashboard/contracts/${cid}/edit`)} />
+                <Row key={c.id} contract={c} now={now} soonBy={soonBy} basePath={contractBase}
+                  onEdit={(cid) => router.push(`${contractBase}/${cid}/edit`)} />
               ))}
             </div>
             {totalPages > 1 && (
@@ -1151,4 +1157,9 @@ function GlobalStyle() {
       }
     `}</style>
   );
+}
+
+/** RP route entry point — the landlord's own Leases register. */
+export default function OrdersPage() {
+  return <OrdersWorkspace />;
 }
