@@ -18,7 +18,7 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { docLabel } from '@/lib/docLabel';
-import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
@@ -114,6 +114,8 @@ interface ApiViewing {
   desiredMoveIn?: string | null;
   notes?: string | null;
   outcome?: string | null;
+  reopenNote?: string | null;   // RP → customer message on reopen
+  declineNote?: string | null;  // customer → RP reason on "not interested"
   preferredChequeCount?: number | null;
   paymentType?: string | null;
 }
@@ -497,6 +499,12 @@ function LeadRow({
   /** 'row' = full-width horizontal row (default); 'grid' = compact card for the grid view. */
   layout?: 'row' | 'grid';
 }) {
+  const rowRouter = useRouter();
+  // Open the full Lead Detail page. RP → /rental-provider/dashboard/leads/:id;
+  // manager acts on the same route with ?rp=<landlord> so leadUrl() rewrites the
+  // API calls to /api/manager/leads.
+  const openDetail = () =>
+    rowRouter.push(`/rental-provider/dashboard/leads/${lead.id}${manager ? `?rp=${manager.rp}` : ''}`);
   const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
   const [visitRemarks, setVisitRemarks] = useState('');
   const [markingVisit, setMarkingVisit] = useState(false);
@@ -855,6 +863,19 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setApproveDocsError(body.message ?? 'Failed to approve'); return; }
+      // approve-documents now lands on the RP-only "approved" plan-draft stage.
+      // The list keeps its one-click "approve & share" (the granular review-then-
+      // share two-step lives on the lead detail page), so immediately share the
+      // plan with the customer.
+      const shareRes = await fetch(leadUrl(`/api/leads/${lead.id}/share-plan`, manager), {
+        method: 'PATCH', credentials: 'include',
+      });
+      if (!shareRes.ok) {
+        const sb = await shareRes.json().catch(() => ({}));
+        setApproveDocsError(sb.message ?? 'Approved, but sharing the plan failed');
+        setLeads(prev => prev.map(l => l.id !== lead.id ? l : { ...l, stage: 'approved' as LeadStage }));
+        return;
+      }
       setLeads(prev => prev.map(l =>
         l.id !== lead.id ? l : { ...l, stage: 'payment_plan_shared' as LeadStage },
       ));
@@ -1043,6 +1064,15 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
   // verbatim by the row layout and the grid card so behaviour is identical.
   const actionCluster = (
     <>
+      {/* Open the full Lead Detail page (journey + action card). */}
+      <button
+        onClick={openDetail}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium border border-[#e8e6e0] bg-white text-[#6b6860] hover:border-[#2e9f82] hover:text-[#1a7a5a] transition-colors cursor-pointer whitespace-nowrap"
+      >
+        <ExternalLink size={11} />
+        Open
+      </button>
+
       {/* Viewing details button — visible whenever there is any viewing */}
       {anyViewing && (
         <button
@@ -1255,9 +1285,9 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
           {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
             <p
               className="text-[10px] text-[#b91c1c] truncate mt-1"
-              title={anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+              title={anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
             >
-              {anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+              {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
             </p>
           )}
 
@@ -1324,9 +1354,9 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
               {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
                 <p
                   className="text-[10px] text-[#b91c1c] truncate mt-1"
-                  title={anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+                  title={anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
                 >
-                  {anyViewing.notes?.trim() ? anyViewing.notes : 'Customer declined'}
+                  {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
                 </p>
               )}
             </div>
@@ -1663,7 +1693,9 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
             {docsNoteItems.length > 0 && (
               <div className="space-y-1.5 mb-3">
                 {docsNoteItems.map((item, idx) => {
-                  const key = additionalDocKey(item);
+                  // A request that maps to a standard slot (e.g. UAE Visa) is fulfilled
+                  // by that existing upload — track the same key the customer uploads to.
+                  const key = resolveRequestedDocKey(item) ?? additionalDocKey(item);
                   const doc = (tenantDocs ?? []).find(d => d.documentKey === key);
                   const approved = doc?.status === 'processed' || doc?.status === 'complete';
                   const rejected = doc?.status === 'rejected';
@@ -1929,14 +1961,16 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
                 <div>
                   <p className="text-[10px] text-[#b91c1c] uppercase font-semibold tracking-wide mb-0.5">Declined by Customer</p>
                   <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">
-                    {anyViewing.notes?.trim() ? anyViewing.notes : 'No reason provided.'}
+                    {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'No reason provided.'}
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Tenant notes from booking (viewing level) — suppressed when notes hold the decline reason */}
-            {anyViewing.notes && !(anyViewing.status === 'cancelled' && anyViewing.outcome === 'not_interested') && (
+            {/* Tenant notes from booking (viewing level). The decline reason now
+                lives in its own declineNote field, so booking notes are always
+                shown when present — they no longer collide with the decline text. */}
+            {anyViewing.notes && (
               <div className="flex items-start gap-2">
                 <MessageSquare size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
                 <div>

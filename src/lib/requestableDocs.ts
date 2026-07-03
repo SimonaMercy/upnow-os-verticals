@@ -62,6 +62,38 @@ export function additionalDocKey(name: string): string {
   return 'additional_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+/**
+ * Some requestable names are just another wording of a document we ALREADY
+ * collect as a standard slot (e.g. "UAE Visa / Residence Visa" ⇢ the KYC
+ * `uae_visa` slot, "Salary Certificate" ⇢ the `employment_letter` slot). When an
+ * RP requests one of these we do NOT spawn a duplicate upload slot — we promote
+ * the existing slot to required. Keyed by the requestable NAME (lowercased);
+ * value is the canonical document_key the rest of the app already uses.
+ */
+export const REQUESTED_NAME_TO_DOC_KEY: Record<string, string> = {
+  'emirates id': 'emirates_id',
+  'passport': 'passport',
+  'uae visa / residence visa': 'uae_visa',
+  'marriage certificate': 'marriage_certificate',
+  'bank statement': 'bank_statement',
+  'pay slip': 'bank_statement',
+  'salary certificate': 'employment_letter',
+  'employment / offer letter': 'employment_letter',
+  'trade license': 'trade_license',
+  'vat / tax registration (trn)': 'tax_registration',
+  'memorandum of association (moa)': 'moa',
+};
+
+/**
+ * Resolve a requested doc name to a standard document_key we already collect, or
+ * null when it's a genuinely new (additional) document. Used on BOTH sides so a
+ * request for a doc we already have promotes the existing slot instead of
+ * creating a duplicate, and the RP's fulfilment check tracks the same upload.
+ */
+export function resolveRequestedDocKey(name: string): string | null {
+  return REQUESTED_NAME_TO_DOC_KEY[name.trim().toLowerCase()] ?? null;
+}
+
 /** Parse the requested-additional-docs list stored on `additionalDocsNote`. */
 export function parseAdditionalDocs(note: string | null | undefined): string[] {
   if (!note) return [];

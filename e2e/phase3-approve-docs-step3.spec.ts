@@ -139,18 +139,23 @@ test.describe.serial('Phase 3 — auto-plan, Approve Docs, Step 3 cheque uploads
 
   // ─── 4. Guard — approve-documents rejected from wrong stage ──────────────
 
-  test('4. guard — approve-documents from payment_plan_shared rejects', async ({ request }) => {
-    // Run approval once to move to payment_plan_shared, then try again
+  test('4. guard — a second approve-documents rejects once past documents, then share', async ({ request }) => {
+    // First approval: interested → approved (RP-only plan draft).
     const ok = await request.patch(`${BACKEND}/leads/${leadId}/approve-documents`, { headers: auth(rpToken) });
     expect(ok.ok(), `First approve-documents: ${ok.status()}`).toBeTruthy();
 
+    // Second approval is rejected — the lead has left the documents stage.
     const again = await request.patch(`${BACKEND}/leads/${leadId}/approve-documents`, { headers: auth(rpToken) });
-    expect(again.status(), 'second approve-documents must reject from payment_plan_shared').toBe(400);
+    expect(again.status(), 'second approve-documents must reject once past documents').toBe(400);
+
+    // Share the reviewed plan → payment_plan_shared (unlocks the customer's Step 3).
+    const shared = await request.patch(`${BACKEND}/leads/${leadId}/share-plan`, { headers: auth(rpToken) });
+    expect(shared.ok(), `share-plan: ${shared.status()}`).toBeTruthy();
   });
 
   // ─── 5. Lead is now at payment_plan_shared with plan intact ───────────────
 
-  test('5. after approve-documents → stage payment_plan_shared, plan still attached', async ({ request }) => {
+  test('5. after approve + share → stage payment_plan_shared, plan still attached', async ({ request }) => {
     const lead = await (await request.get(`${BACKEND}/leads/${leadId}`, { headers: auth(rpToken) })).json() as {
       stage: string; paymentPlan: { installmentCount: number } | null;
     };
