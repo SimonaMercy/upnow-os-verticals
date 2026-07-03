@@ -40,7 +40,7 @@ import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
-import { additionalDocKey, parseAdditionalDocs } from '@/lib/requestableDocs';
+import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -152,6 +152,8 @@ interface ApiViewing {
   desiredMoveIn?: string | null;
   preferredChequeCount?: number | null;
   paymentType?: string | null;
+  /** RP's message when they reopened the lead (e.g. a revised price offer). */
+  reopenNote?: string | null;
   occupantsAdults?: number | null;
   occupantsChildren?: number | null;
   occupantsPets?: number | null;
@@ -387,11 +389,16 @@ interface Resolved {
   requestedAdditionalDocs: string[];
 }
 
-/** Requested additional docs still needing a (non-rejected) upload from the customer. */
+/** Requested additional docs still needing a (non-rejected) upload from the customer.
+ *  A request that maps to a standard slot we already collect (e.g. UAE Visa) is
+ *  fulfilled by that standard upload, not a duplicate `additional_*` file. */
 function pendingAdditionalDocs(r: Resolved): number {
   if (!r.requestedAdditionalDocs.length) return 0;
   const ok = new Set(r.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
-  return r.requestedAdditionalDocs.filter(name => !ok.has(additionalDocKey(name))).length;
+  return r.requestedAdditionalDocs.filter(name => {
+    const std = resolveRequestedDocKey(name);
+    return std ? !isDocKeySatisfied(std, ok) : !ok.has(additionalDocKey(name));
+  }).length;
 }
 
 // Customer "submit documents" gate — persisted per-space in localStorage. The
@@ -551,11 +558,14 @@ function deriveStateKey(r: Resolved): StateKey {
     return (r.allRequiredDocsUploaded && r.docsSubmitted) ? 'docs_under_review' : 'docs_required';
   }
 
-  // 5d. Plan-issued / approved — RP has explicitly shared the plan or
-  // accepted the application; review is complete. Customer unlocks
-  // Step 3 (`payment_review`) with the cheque schedule + contract
-  // preview.
-  if (stage === 'payment_plan_shared' || stage === 'approved' || stage === 'converted') return 'payment_review';
+  // 5d-i. Documents approved but the plan is NOT shared yet — the RP is still
+  // reviewing/editing the payment plan (two-step flow). Keep the customer on the
+  // "under review" waiting state; the plan must not appear until it's shared.
+  if (stage === 'approved') return 'docs_under_review';
+
+  // 5d. Plan shared — the RP has explicitly shared the plan. Customer unlocks
+  // Step 3 (`payment_review`) with the cheque schedule + contract preview.
+  if (stage === 'payment_plan_shared' || stage === 'converted') return 'payment_review';
 
   // 5e. Stale auto-generated plan with no stage transition — we still
   // hold the customer at docs_under_review until RP/admin signals
@@ -1000,7 +1010,7 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'booked':                        return <BookedAction resolved={resolved} onRefresh={onRefresh} />;
     // PHASE 3 → conditional hide + KYC recommendation; reuses existing DocumentsAction
     case 'docs_required':                 return <DocumentsAction resolved={resolved} onRefresh={onRefresh} />;
-    case 'docs_under_review':             return <DocsUnderReviewAction resolved={resolved} />;
+    case 'docs_under_review':             return <DocsUnderReviewAction />;
     // PHASE 4 → replace with new PaymentReviewAction (cheque photos + AI extraction)
     case 'payment_review':                return <PaymentPlanAction resolved={resolved} onRefresh={onRefresh} />;
     case 'awaiting_rp_confirm':           return <ChequesReviewWaitAction resolved={resolved} />;
@@ -1114,6 +1124,13 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
+      {/* Message from the RP when they reopened this lead (e.g. a revised price) */}
+      {v?.reopenNote && (
+        <div style={{ background: 'var(--jade-tint, #eef8f4)', border: '1px solid #bfe3d6', borderRadius: 14, padding: '14px 16px' }}>
+          <p style={{ fontSize: 10, color: 'var(--jade-deep, #1f5a3f)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Message from your rental provider</p>
+          <p style={{ fontSize: 14, color: 'var(--ink-2)', margin: '6px 0 0', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{v.reopenNote}</p>
+        </div>
+      )}
       {/* Viewing summary */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 20px' }}>
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 600 }}>Your viewing</p>
@@ -1722,6 +1739,49 @@ function PersonalChip({ label, value, mono }: { label: string; value: string; mo
   );
 }
 
+/** Blank, NON-editable placeholder for the Personal details section shown
+ *  BEFORE the Emirates ID is uploaded/read. The five fields stay empty and
+ *  locked — they fill in automatically once the Emirates ID is read. Only if
+ *  that auto-read fails, or the customer flags a mistake, do the fields become
+ *  editable (see the manual-entry and edit-toggle paths). */
+function PersonalDetailsPlaceholder() {
+  const fields = ['First name', 'Last name', 'Gender', 'Nationality', 'Emirates ID'];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }} aria-hidden>
+      {fields.map(label => (
+        <div key={label} style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>{label}</span>
+          <div style={{ padding: '8px 10px', borderRadius: 9, border: '1px dashed var(--mist-strong)', background: 'var(--mist)', fontSize: 13, color: 'var(--mute)', minHeight: 35, display: 'flex', alignItems: 'center' }}>—</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Populated personal details shown as READ-ONLY chips (auto-filled from the
+ *  Emirates ID). The customer confirms them at a glance; if something is wrong
+ *  they tap "Edit details" to switch the fields into the editable form. */
+function PersonalDetailsConfirm({ user, onSaved }: { user: AuthUser; onSaved: () => Promise<unknown> | void }) {
+  const [editing, setEditing] = useState(false);
+  if (editing) return <PersonalDetailsEditor user={user} onSaved={onSaved} />;
+  const gender = user?.gender ? user.gender.charAt(0).toUpperCase() + user.gender.slice(1) : '—';
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+        <PersonalChip label="First name"  value={user?.firstName ?? '—'} />
+        <PersonalChip label="Last name"   value={user?.lastName ?? '—'} />
+        <PersonalChip label="Gender"      value={gender} />
+        <PersonalChip label="Nationality" value={user?.nationality ?? '—'} />
+        <PersonalChip label="Emirates ID" value={user?.emiratesIdNumber ?? '—'} mono />
+      </div>
+      <button type="button" onClick={() => setEditing(true)}
+        style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--jade-deep)', fontSize: 12, fontWeight: 700, fontFamily: 'inherit' }}>
+        <Pen size={12} /> Something not right? Edit details
+      </button>
+    </>
+  );
+}
+
 function KycContactChip({ icon, value, verified }: { icon: React.ReactNode; value: string; verified: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '8px 11px', borderRadius: 9, background: verified ? 'rgba(46,159,130,0.06)' : 'var(--mist)', border: `1px solid ${verified ? 'rgba(46,159,130,0.3)' : 'var(--mist-strong)'}` }}>
@@ -1955,16 +2015,10 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   // stage resolver so the in-form "Done ✓" pills and Submit gate agree with
   // the top-level "Documents required" routing instead of contradicting it.
   const uploadedKeys = useMemo(() => new Set(resolved.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey)), [resolved.myDocs]);
-  const kycRequired      = KYC_DOCS;
-  // Supporting documents always include Marriage Certificate alongside the
-  // strictly-required Employment Letter + Bank Statement so families have
-  // a visible slot. It stays non-blocking — `allRequired` below only
-  // counts `required: true` docs for the docs-complete gate.
-  // v1 launch policy: KYC trio is the ONLY mandatory gate. Everything
-  // else (financial/business docs, marriage cert, occupant identity)
-  // is voluntary but still visible so customers know they CAN upload
-  // and admin gets richer context for review.
 
+  // Base rendered doc lists (keys are stable — promotion below only flips the
+  // `required` flag, never the set of rows shown).
+  const kycBase = KYC_DOCS;
   // Always render these rows in the Supporting Documents section, even
   // though `required: false`. The customer's natural mental model is
   // "Employment Letter + Bank Statement + Marriage Cert" — hiding them
@@ -1972,22 +2026,50 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const SUPPORTING_SHOWN_KEYS = isRes
     ? ['employment_letter', 'bank_statement', 'marriage_certificate']
     : getRentalSectionDocs(unitType).slice(0, 3).map(d => d.key);
-  const financialReq     = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => SUPPORTING_SHOWN_KEYS.includes(d.key));
+  const financialReqBase = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => SUPPORTING_SHOWN_KEYS.includes(d.key));
   const financialOpt     = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => !SUPPORTING_SHOWN_KEYS.includes(d.key));
-  const occupantDocList  = isRes && occupantCount > 1 ? getOccupantDocs(occupantCount) : [];
+  const occupantDocBase  = isRes && occupantCount > 1 ? getOccupantDocs(occupantCount) : [];
 
-  // RP-requested additional documents → their own required upload slots, keyed
+  // ── RP-requested additional docs + promotion ────────────────────────────
+  // A request that's just another wording of a doc we ALREADY collect (e.g.
+  // "UAE Visa / Residence Visa" → the KYC `uae_visa` slot) does NOT create a
+  // duplicate slot — it PROMOTES the existing slot to required. We only promote
+  // when that slot is actually visible & gateable here, so a request is never
+  // silently dropped; anything else becomes its own additional slot as before.
+  const requestedNames = resolved.requestedAdditionalDocs ?? [];
+  const gateableKeys = new Set<string>([...kycBase.map(d => d.key), 'emirates_id', ...financialReqBase.map(d => d.key), ...occupantDocBase.map(d => d.key)]);
+  const promotedKeys = new Set<string>();
+  const extraNames: string[] = [];
+  for (const name of requestedNames) {
+    const std = resolveRequestedDocKey(name);
+    const eidSlot = std === 'emirates_id' && (gateableKeys.has('emirates_id_front') || gateableKeys.has('emirates_id'));
+    if (std && (eidSlot || gateableKeys.has(std))) {
+      promotedKeys.add(std);
+      if (std === 'emirates_id') { promotedKeys.add('emirates_id_front'); promotedKeys.add('emirates_id_back'); }
+    } else {
+      extraNames.push(name);
+    }
+  }
+  const promote = (docs: DocReq[]): DocReq[] => docs.map(d => promotedKeys.has(d.key) ? { ...d, required: true } : d);
+
+  const kycRequired     = promote(kycBase);
+  const financialReq    = promote(financialReqBase);
+  const occupantDocList = promote(occupantDocBase);
+
+  // Genuinely-new requested docs → their own required upload slots, keyed
   // deterministically (additional_<slug>) so each upload links back to the
-  // request on the RP side. These DO gate submission (unlike optional docs).
-  const additionalDocReqs: DocReq[] = (resolved.requestedAdditionalDocs ?? []).map(name => ({
+  // request on the RP side.
+  const additionalDocReqs: DocReq[] = extraNames.map(name => ({
     key: additionalDocKey(name), label: name, category: 'other', required: true,
     hint: 'Requested by your rental provider',
   }));
   const additionalAllDone = additionalDocReqs.length > 0 && additionalDocReqs.every(d => uploadedKeys.has(d.key));
 
-  // Gate counts the KYC identity rows PLUS any RP-requested additional docs.
-  // (Occupant / financial rows stay non-blocking.)
-  const allRequired      = [...kycRequired, ...additionalDocReqs];
+  // Submit gate = every REQUIRED doc across the rendered sections (after
+  // promotion) plus any genuinely-additional requests. Optional docs (e.g. an
+  // un-promoted UAE Visa, required:false) never block.
+  const promotedSupporting = [...financialReq, ...occupantDocList].filter(d => promotedKeys.has(d.key));
+  const allRequired      = [...kycRequired, ...additionalDocReqs, ...promotedSupporting].filter(d => d.required);
   // Emirates ID counts as done via a combined file OR both sides (isDocKeySatisfied).
   const allRequiredDone  = allRequired.every(d => isDocKeySatisfied(d.key, uploadedKeys));
 
@@ -1996,8 +2078,8 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   // Per-section completion flags drive the KycSection "Done ✓" collapse
   // so finished work stays visible (collapsed, with a green pill) instead
-  // of vanishing.
-  const kycAllDone      = kycRequired.every(d => isDocKeySatisfied(d.key, uploadedKeys));
+  // of vanishing. Only the REQUIRED KYC rows gate the section's done state.
+  const kycAllDone      = kycRequired.filter(d => d.required).every(d => isDocKeySatisfied(d.key, uploadedKeys));
   const supportingDocs  = financialReq;
   const supportingAllDone = supportingDocs.every(d => uploadedKeys.has(d.key));
   const occupantsAllDone  = occupantDocList.length > 0 && occupantDocList.every(d => uploadedKeys.has(d.key));
@@ -2036,46 +2118,57 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           in the codebase but gated off via OCR_ENABLED=false. Flip the
           env back on post-launch to resume auto-extract. */}
       {(() => {
-        const personal = {
-          firstName: user?.firstName ?? null,
-          lastName: user?.lastName ?? null,
-          gender: user?.gender ?? null,
-          nationality: user?.nationality ?? null,
-          emiratesIdNumber: user?.emiratesIdNumber ?? null,
-        };
-        const populated = !!(personal.firstName || personal.lastName || personal.emiratesIdNumber);
+        const populated = !!(user?.firstName || user?.lastName || user?.emiratesIdNumber);
+        // "Error / issue" = the customer uploaded their Emirates ID but we still
+        // couldn't capture their details (auto-read failed / returned nothing).
+        // Only THEN do we open a manually-editable form. Until an Emirates ID is
+        // uploaded, the section stays BLANK and locked — it auto-fills from the ID.
+        const needsManual = eidUploaded && !populated && !eidReading;
+        const pill = populated
+          ? { text: 'Provided',     color: 'var(--jade-deep)', bg: 'var(--jade-soft)' }
+          : eidReading
+            ? { text: 'Reading…',   color: 'var(--mute)',   bg: 'var(--mist)' }
+            : needsManual
+              ? { text: 'Action needed', color: 'var(--brick)', bg: 'var(--brick-soft)' }
+              : { text: 'From your ID',   color: 'var(--mute)',  bg: 'var(--mist)' };
         return (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px' }}>
+          <div data-testid="personal-details" data-state={populated ? 'populated' : eidReading ? 'reading' : needsManual ? 'manual' : 'blank'} style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>Personal details</p>
-              {populated
-                ? <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Provided</span>
-                : eidReading
-                  ? <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--mute)', background: 'var(--mist)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Reading…</span>
-                  : <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--brick)', background: 'var(--brick-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Required</span>}
+              <span style={{ fontSize: 10, fontWeight: 700, color: pill.color, background: pill.bg, padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{pill.text}</span>
             </div>
             {populated ? (
+              /* Auto-filled → read-only confirmation. Editable only via the
+                 "Something not right? Edit details" toggle (issue path). */
               <>
                 <p style={{ fontSize: 11, color: 'var(--mute)', margin: '0 0 10px', lineHeight: 1.4 }}>
-                  Filled from your Emirates ID. Tap any field to fix a mistake — make sure they match your Emirates ID exactly.
+                  Filled automatically from your Emirates ID — please check they match it exactly.
                 </p>
-                <PersonalDetailsEditor user={user} onSaved={refreshUser} />
+                <PersonalDetailsConfirm user={user} onSaved={refreshUser} />
               </>
             ) : eidReading ? (
               <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
                 Reading your Emirates ID… your details will fill in automatically. If they don&apos;t, you can type them in below.
               </p>
-            ) : (
-              /* Fallback — Emirates ID couldn't be read: let the customer enter
-                 their details manually (as per their Emirates ID) so they aren't
-                 blocked waiting on OCR/admin. */
+            ) : needsManual ? (
+              /* Error path — the Emirates ID couldn't be read: unlock the fields
+                 so the customer can enter their details manually and not be
+                 blocked waiting on the auto-read. */
               <>
                 <p style={{ fontSize: 11.5, color: 'var(--brick)', fontWeight: 600, margin: '0 0 10px', lineHeight: 1.45 }}>
-                  {eidUploaded
-                    ? "We couldn't read your Emirates ID automatically. Please enter your details exactly as they appear on it before continuing."
-                    : "Enter your name and details exactly as they appear on your Emirates ID before continuing. We'll fill these in automatically if your uploaded Emirates ID is readable."}
+                  We couldn&apos;t read your Emirates ID automatically. Please enter your details exactly as they appear on it before continuing.
                 </p>
                 <PersonalDetailsEditor user={user} onSaved={refreshUser} />
+              </>
+            ) : (
+              /* Default — nothing uploaded yet: keep the section blank and locked.
+                 It fills in from the Emirates ID upload below. */
+              <>
+                <p style={{ fontSize: 11.5, color: 'var(--ink-2)', margin: '0 0 10px', lineHeight: 1.45, display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                  <Sparkles size={14} style={{ color: 'var(--jade-deep)', flexShrink: 0, marginTop: 1 }} />
+                  <span>These fill in automatically from your Emirates ID. Upload it in the documents below and we&apos;ll do the rest.</span>
+                </p>
+                <PersonalDetailsPlaceholder />
               </>
             )}
           </div>
@@ -2559,19 +2652,22 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
  * (lump-sum fee breakdown + cheque schedule) so the customer can see
  * what they're committing to while admin processes their paperwork.
  */
-function DocsUnderReviewAction({ resolved }: { resolved: Resolved }) {
-  const plan = resolved.paymentPlan;
+function DocsUnderReviewAction() {
+  // No payment plan / summary at this stage: the stage copy promises the payment
+  // summary + contract preview unlock only AFTER the team approves the documents
+  // (that's the payment_review step, PaymentPlanAction). Showing it while docs are
+  // still under review pre-empts that and contradicts the messaging.
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <WaitingBadge />
-      {plan && <PaymentPlanSummary plan={plan} />}
     </div>
   );
 }
 
-/** Reusable summary card showing the lump-sum fee breakdown + the full
- *  cheque schedule from a PaymentPlan. Used by DocsUnderReviewAction
- *  and (later) the contract-preview block on Step 3 (payment_review). */
+/** Reusable summary card showing the lump-sum fee breakdown + the full cheque
+ *  schedule from a PaymentPlan. NOT rendered at docs_under_review anymore (the
+ *  plan stays hidden until the team approves and the payment_review step opens);
+ *  kept as a reusable card for that later step. */
 function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
   const items = plan.items ?? [];
   const installments = plan.installmentCount ?? Math.max(1, plan.chequeCount - 1);

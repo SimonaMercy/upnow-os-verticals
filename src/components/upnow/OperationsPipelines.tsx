@@ -20,7 +20,7 @@
  */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
@@ -315,6 +315,28 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     terminated: TERM_STAGES,
   };
 
+  // Deep-link focus (?focus=c-<id> / l-<id>) — e.g. "Open lease" from a converted
+  // lead. Once the data loads, jump to the tab that holds the card, then scroll to
+  // it and flash a highlight ring. Done once so the RP can still switch tabs after.
+  const focusKey = sp.get('focus');
+  const didFocusTab = useRef(false);
+  const focusElRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!focusKey || loading || didFocusTab.current) return;
+    for (const t of TABS) {
+      if (cardsByTab[t.key].some(c => c.key === focusKey)) {
+        didFocusTab.current = true;
+        setTab(t.key);
+        break;
+      }
+    }
+  }, [focusKey, loading, cardsByTab]);
+  useEffect(() => {
+    if (!focusKey || loading) return;
+    const el = focusElRef.current;
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusKey, loading, tab, view]);
+
   const activeCards = cardsByTab[tab];
   const stages = stagesForTab[tab];
   const byStage = useMemo(() => {
@@ -346,7 +368,8 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   // Shared vertical card (kanban lanes + grid). showStage adds a stage badge
   // (kanban implies stage by lane, so it hides it).
   const vcard = (c: CardVM, showStage: boolean) => (
-    <article key={c.key} className="card" title={cardTitle(c)}>
+    <article key={c.key} className={'card' + (c.key === focusKey ? ' focused' : '')}
+      ref={c.key === focusKey ? (focusElRef as React.RefObject<HTMLElement>) : undefined} title={cardTitle(c)}>
       <div className="c-top">
         <span className="av">{initials(c.name)}</span>
         <div className="c-id">
@@ -371,7 +394,8 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
 
   // Horizontal row (list view). Collapses to a wrapped card on narrow screens.
   const rrow = (c: CardVM) => (
-    <div key={c.key} className="rrow" title={cardTitle(c)}>
+    <div key={c.key} className={'rrow' + (c.key === focusKey ? ' focused' : '')}
+      ref={c.key === focusKey ? (focusElRef as React.RefObject<HTMLDivElement>) : undefined} title={cardTitle(c)}>
       <span className="av">{initials(c.name)}</span>
       <div className="r-id">
         <div className="c-name">{c.name}</div>
@@ -494,12 +518,14 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
           <div className="list">{sortedCards.map(c => rrow(c))}</div>
         )}
       </main>
-      <Style />
+      <OpsPipelineStyle />
     </div>
   );
 }
 
-function Style() {
+// Exported so SpOperationsPipelines (the service-provider twin of this page)
+// can reuse the exact same .opsp-page design system without duplicating it.
+export function OpsPipelineStyle() {
   return (
     <style jsx global>{`
       .opsp-page {
@@ -579,6 +605,9 @@ function Style() {
       .opsp-page .lane-empty{ text-align:center; font-size:10px; color:var(--mute); padding:10px 0; }
 
       .opsp-page .card{ position:relative; background:#fff; border:1px solid #e9ece8; border-radius:9px; padding:8px; box-shadow:0 1px 2px rgba(20,40,30,.04); }
+      /* Deep-link highlight (e.g. "Open lease" from a converted lead) */
+      .opsp-page .card.focused, .opsp-page .rrow.focused{ border-color:var(--green); box-shadow:0 0 0 3px rgba(46,159,130,.28); animation:opsp-flash 1.6s ease-out 1; }
+      @keyframes opsp-flash{ 0%{ box-shadow:0 0 0 3px rgba(46,159,130,.55); } 60%{ box-shadow:0 0 0 6px rgba(46,159,130,.12); } 100%{ box-shadow:0 0 0 3px rgba(46,159,130,.28); } }
       .opsp-page .c-top{ display:flex; align-items:center; gap:7px; }
       .opsp-page .card .c-top{ padding-right:30px; }  /* reserve the corner for the pinned age badge */
       .opsp-page .c-top .av{ width:23px; height:23px; flex:0 0 23px; border-radius:6px; background:var(--green-t); color:var(--green-d); display:grid; place-items:center; font-size:9px; font-weight:700; border:1px solid #cfe7dc; }

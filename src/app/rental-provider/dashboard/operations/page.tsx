@@ -11,7 +11,7 @@ import { Suspense } from 'react';
 import OperationsPipelines from '@/components/upnow/OperationsPipelines';
 
 const contractHref = (id: number) => `/rental-provider/dashboard/operations/${id}`;
-const leadHref = (id: number) => `/rental-provider/dashboard/leads#lead-${id}`;
+const leadHref = (id: number) => `/rental-provider/dashboard/leads/${id}`;
 
 export default function RpOperationsPage() {
   return (
