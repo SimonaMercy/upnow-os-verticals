@@ -281,7 +281,10 @@ export default function AddListingPage() {
   }, [actingRpId]);
 
   useEffect(() => {
-    apiGet<WizardProperty[]>('/properties').then(setExistingProps).catch(() => {});
+    // A manager (?rp) must pick from the LANDLORD's properties, not their own —
+    // the RP /properties route returns the manager's own portfolio (usually empty).
+    apiGet<WizardProperty[]>(actingRpId ? `/manager/properties?rp=${actingRpId}` : '/properties')
+      .then(setExistingProps).catch(() => {});
     // Load countries then default to UAE
     apiGet<Country[]>('/locations/countries').then(cs => {
       setCountries(cs);
@@ -613,10 +616,18 @@ export default function AddListingPage() {
       if (hasAddendumTerms(addendumTerms) && unitIds.length) {
         setSaveProgress({ phase: 'Saving addendum…', done: 0, total: 1 });
         try {
-          const fp = await apiGet<{ plans: Array<{ planLabel: string | null }> }>(`/properties/floor-plans?propertyId=${propId}`);
+          // Manager (?rp) routes through the manager-scoped proxies so the
+          // acting-landlord's addendum actually persists (RP paths 404 for a manager).
+          const fpUrl = actingRpId
+            ? `/manager/units?propertyId=${propId}&rp=${actingRpId}`
+            : `/properties/floor-plans?propertyId=${propId}`;
+          const addendumUrl = actingRpId
+            ? `/manager/units/addendum-terms?rp=${actingRpId}`
+            : '/properties/floor-plans/addendum-terms';
+          const fp = await apiGet<{ plans: Array<{ planLabel: string | null }> }>(fpUrl);
           const labels = Array.from(new Set((fp.plans ?? []).map(p => p.planLabel).filter((l): l is string => !!l)));
           for (const planLabel of labels) {
-            await apiPatch('/properties/floor-plans/addendum-terms', { propertyId: propId, planLabel, terms: addendumTerms });
+            await apiPatch(addendumUrl, { propertyId: propId, planLabel, terms: addendumTerms });
           }
         } catch { errs.push('Addendum: could not be saved to the new layout(s) — add it from the Units page.'); }
       }

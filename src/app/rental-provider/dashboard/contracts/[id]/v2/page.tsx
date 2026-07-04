@@ -170,8 +170,9 @@ interface ContractDetail {
     response: 'pending' | 'accepted' | 'rejected' | null;
     respondedAt: string | null;
     /** 'direct' = RP-side direct termination (no customer approval); the lease
-     *  stays active until the settlement is marked paid. NULL/'mutual' = legacy. */
-    method?: 'mutual' | 'direct' | null;
+     *  stays active until the settlement is marked paid. 'cancelled' = a
+     *  pre-active void (restorable). NULL/'mutual' = legacy. */
+    method?: 'mutual' | 'direct' | 'cancelled' | null;
   } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
@@ -4307,6 +4308,22 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch { alert('Unexpected error. Please try again.'); }
   };
+
+  // Undo a pre-active CANCELLATION — rolls the lease back to its previous state
+  // (issued + active, cheques reinstated). Same endpoint as a termination undo;
+  // the backend detects method='cancelled' and restores instead of reactivating.
+  const onRestoreCancelled = async () => {
+    if (!window.confirm('Restore this cancelled lease? It returns to its issued state and its cheques are reinstated.')) return;
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/termination/cancel`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        alert(b?.message ?? 'Could not restore the lease.');
+        return;
+      }
+      void reload();
+    } catch { alert('Unexpected error. Please try again.'); }
+  };
   // Upload a file to GCS/local via presigned URL, then record the document row.
   async function uploadContractDoc(file: File, displayName: string, keyPrefix: string) {
     if (!contract) return;
@@ -4655,7 +4672,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     signDocuments: mgrCan('canSignDocuments'),
     // Deposit edit / settlement: either deposits OR collections permission.
     deposits:      mgrCan('canManageDeposits') || mgrCan('canManageCollections'),
-    collections:   mgrCan('canManageCollections'),
+    // Record/edit payment + clear-cheque: the backend accepts the granular
+    // carve-out flags OR the umbrella, so surface the buttons for any of them.
+    collections:   mgrCan('canManageCollections') || mgrCan('canRecordPayments') || mgrCan('canClearCheques'),
   };
 
   // Step content + jump-to-step handler
@@ -4947,6 +4966,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 </>
               );
             })()}
+            {/* A cancelled (pre-active void) lease can be rolled back to its
+                previous issued state — cheques reinstated. */}
+            {!showPipeline && contract.status === 'terminated'
+              && contract.termination?.method === 'cancelled' && perms.agreements && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => void onRestoreCancelled()}
+                title="Undo the cancellation and return this lease to its issued state"
+              >
+                <RotateCcw size={14} /> Restore lease
+              </button>
+            )}
             {/* Always-available renewal entry — surfaces the existing renewal
                 feature on any live lease (incl. active renewal children, for
                 chained renewals) without hunting inside the Active step. Hidden

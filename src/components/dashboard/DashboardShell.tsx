@@ -103,7 +103,7 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
   manager: [
     { label: 'Overview',         href: '/dashboard/manager',            icon: LayoutDashboard },
-    { label: 'Leads',            href: '/dashboard/manager/viewings',   icon: TrendingUp, requirePerm: 'canManageViewings' },
+    { label: 'Leads',            href: '/dashboard/manager/leads',   icon: TrendingUp, requirePerm: 'canManageViewings', match: ['/dashboard/manager/viewings'] },
     { label: 'Properties',       href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
     { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties' },
     { label: 'Customers',        href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
@@ -113,7 +113,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Ended Leases',     href: '/dashboard/manager/ended-leases', icon: Archive, requirePerm: 'canManageAgreements' },
     { divider: true },
     { section: 'More' },
-    { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageAgreements' },
+    { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance' },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },

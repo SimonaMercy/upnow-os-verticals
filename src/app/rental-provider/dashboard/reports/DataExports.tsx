@@ -77,27 +77,35 @@ const EXPORTS: ExportDef[] = [
   },
 ];
 
-export default function DataExports() {
+export default function DataExports({ manager }: { manager?: { rp: number } } = {}) {
   const { user } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const role = user?.role;
   const canExport =
-    role === 'admin' || role === 'super_admin' || role === 'rental_provider';
+    !!manager || role === 'admin' || role === 'super_admin' || role === 'rental_provider';
   if (!canExport) return null;
 
   const isAdmin = role === 'admin' || role === 'super_admin';
   const scopeLabel = isAdmin
     ? 'Whole platform — all rental providers'
-    : 'Your portfolio';
+    : manager ? "This landlord's portfolio" : 'Your portfolio';
+
+  // Manager acts for a landlord: route through the /manager/platform-export proxy
+  // scoped by ?rp= (canViewReports); RP/admin use the direct endpoint.
+  function exportUrl(url: string) {
+    if (!manager) return url;
+    const mapped = url.replace('/api/platform-export', '/api/manager/platform-export');
+    return mapped + (mapped.includes('?') ? '&' : '?') + `rp=${manager.rp}`;
+  }
 
   async function run(def: ExportDef) {
     if (busy) return;
     setError(null);
     setBusy(def.key);
     try {
-      const res = await fetch(def.url, { credentials: 'include', cache: 'no-store' });
+      const res = await fetch(exportUrl(def.url), { credentials: 'include', cache: 'no-store' });
       if (!res.ok) {
         throw new Error(
           res.status === 403

@@ -28,12 +28,20 @@ export interface RpPermissions {
     // Contracts & signing
     canManageAgreements:  boolean;
     canCreateContracts:   boolean;
+    canManageContractLifecycle: boolean;
     canManageRenewals:    boolean;
+    canManageTermination: boolean;
+    canManageInspections: boolean;
+    canManageTemplates:   boolean;
+    canManageEjari:       boolean;
     canSignDocuments:     boolean;
     canSignAddenda:       boolean;
     canActAsPoa:          boolean;
     // Finance
     canManageDeposits:    boolean;
+    canSettleDeposits:    boolean;
+    canRecordPayments:    boolean;
+    canClearCheques:      boolean;
     canManageCollections: boolean;
     canViewFinancials:    boolean;
     canViewReports:       boolean;

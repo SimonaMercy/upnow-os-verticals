@@ -9,8 +9,8 @@
  *     (same contractsService.listEndedLeaseCustomers() the RP route uses, so the
  *     row shape + rendering are reused verbatim).
  *   - Is permission-gated per landlord on `canManageAgreements`.
- *   - Is READ-ONLY: the lifecycle popup gets links={null} (managers can't reach
- *     /rental-provider/* routes).
+ *   - The lifecycle popup jumps out to the MANAGER routes (contract v2 / customer),
+ *     scoped with ?rp=, so the modal's "open" links work for managers too.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -279,7 +279,11 @@ export default function ManagerEndedLeasesPage() {
           row={active}
           loadDetail={loadDetail}
           onClose={() => setDetailId(null)}
-          links={null}
+          links={{
+            contract: (id) => `/dashboard/manager/contracts/${id}/v2?rp=${effectiveRp}`,
+            settlement: (id) => `/dashboard/manager/contracts/${id}/v2?rp=${effectiveRp}`,
+            customer: (id) => `/dashboard/manager/tenants/${id}?rp=${effectiveRp}`,
+          }}
         />
       )}
     </div>

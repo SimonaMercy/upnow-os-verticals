@@ -125,12 +125,14 @@ function relativeTime(iso: string) {
 }
 
 const AVAIL_TONE: Record<string, BadgeTone> = { occupied: 'indigo', available: 'green', maintenance: 'amber', reserved: 'gray' };
-function unitDrillRow(u: UnitRow): DrillRow {
+function unitDrillRow(u: UnitRow, manager?: { rp: number }): DrillRow {
   return {
     key: u.id,
     title: u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`),
     subtitle: u.building ?? undefined,
-    href: `/rental-provider/dashboard/units/${u.id}`,
+    // The manager portal has no standalone unit-detail page, so the drill row is
+    // non-navigating for managers rather than dead-linking into an RP-only route.
+    href: manager ? undefined : `/rental-provider/dashboard/units/${u.id}`,
     badges: [
       { label: u.availability, tone: AVAIL_TONE[u.availability] ?? 'gray' },
       u.listingStatus === 'published'
@@ -140,7 +142,7 @@ function unitDrillRow(u: UnitRow): DrillRow {
   };
 }
 /** Group units by building (sorted), units sorted by number — "properly arranged". */
-function unitGroups(rows: UnitRow[]): { label?: string; rows: DrillRow[] }[] {
+function unitGroups(rows: UnitRow[], manager?: { rp: number }): { label?: string; rows: DrillRow[] }[] {
   const byBuilding = new Map<string, UnitRow[]>();
   for (const u of rows) {
     const b = u.building ?? '—';
@@ -153,7 +155,7 @@ function unitGroups(rows: UnitRow[]): { label?: string; rows: DrillRow[] }[] {
       label: `${building} · ${us.length}`,
       rows: us
         .sort((a, b) => (a.number ?? '').localeCompare(b.number ?? '', undefined, { numeric: true }))
-        .map(unitDrillRow),
+        .map(u => unitDrillRow(u, manager)),
     }));
 }
 
@@ -209,6 +211,14 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   const rpQ = manager ? `rp=${manager.rp}&` : '';
   const contractBase = manager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
   const receivablesHref = manager ? '/dashboard/manager/receivables' : '/rental-provider/dashboard/receivables';
+  // The activity feed hrefs are built server-side with RP-portal paths; in
+  // manager mode rewrite them into the manager namespace (+?rp=) so they don't
+  // eject the manager into RP-only, role-gated routes.
+  const mapHref = (href?: string): string | undefined => {
+    if (!href || !manager) return href;
+    const mapped = href.replace('/rental-provider/dashboard/', '/dashboard/manager/');
+    return mapped + (mapped.includes('?') ? '&' : '?') + `rp=${manager.rp}`;
+  };
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [fin, setFin] = useState<FinancialSummary | null>(null);
   const [extras, setExtras] = useState<DashboardExtras | null>(null);
@@ -342,11 +352,11 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     setDrill({
       title: `Available units · ${rows.length}`,
       note: `${published} published in public listings · ${rows.length - published} not listed (draft / pending) — only published units appear publicly.`,
-      groups: unitGroups(rows),
+      groups: unitGroups(rows, manager),
     });
   };
-  const drillOccupied = () => setDrill({ title: `Occupied units · ${occupied}`, groups: unitGroups(units.filter(u => u.availability === 'occupied')) });
-  const drillAllUnits = () => setDrill({ title: `All units · ${units.length}`, groups: unitGroups(units) });
+  const drillOccupied = () => setDrill({ title: `Occupied units · ${occupied}`, groups: unitGroups(units.filter(u => u.availability === 'occupied'), manager) });
+  const drillAllUnits = () => setDrill({ title: `All units · ${units.length}`, groups: unitGroups(units, manager) });
   const drillRenewals = () => {
     const list = (extras?.upcomingRenewals ?? []).slice().sort((a, b) => a.daysUntilEnd - b.daysUntilEnd);
     // "Days left" as a highlighted badge on the right, by urgency.
@@ -437,7 +447,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
             <span className="hidden sm:inline">{refreshing ? 'Refreshing' : 'Refresh'}</span>
           </button>
           <Link
-            href="/rental-provider/dashboard/portfolio?add=1"
+            href={manager ? `/dashboard/manager/properties/add?rp=${manager.rp}` : '/rental-provider/dashboard/portfolio?add=1'}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-dark)] transition-colors"
           >
             <Building2 size={16} /> List Property
@@ -707,7 +717,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
                     </div>
                     <div className="min-w-0">
                       {a.href ? (
-                        <Link href={a.href} className="block text-[13.5px] font-semibold text-[var(--neutral-900)] leading-tight truncate hover:underline">
+                        <Link href={mapHref(a.href)!} className="block text-[13.5px] font-semibold text-[var(--neutral-900)] leading-tight truncate hover:underline">
                           {a.title}
                         </Link>
                       ) : (

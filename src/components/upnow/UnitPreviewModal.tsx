@@ -289,6 +289,10 @@ export function UnitPreviewModal({
   const isTight = vw < 600;
 
   const q = fetchQuery ? `?${fetchQuery}` : '';
+  // Manager portal has no standalone unit-detail page; this modal IS the full
+  // unit view for managers, so we suppress the "Open full page" jump-out (which
+  // would dead-link into the RP-only /rental-provider route) in manager mode.
+  const isManagerView = fetchBase.startsWith('/manager');
 
   useEffect(() => {
     let cancelled = false;
@@ -773,10 +777,12 @@ export function UnitPreviewModal({
               </Link>
             )}
             <div style={{ flex: 1 }} />
-            <Link href={`/rental-provider/dashboard/units/${unit.id}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: '#fff', background: C.green, padding: '12px 22px', borderRadius: 11, textDecoration: 'none', boxShadow: '0 6px 16px rgba(26,154,100,.26)' }}>
-              Open full page <ExternalLink size={13} />
-            </Link>
+            {!isManagerView && (
+              <Link href={`/rental-provider/dashboard/units/${unit.id}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: '#fff', background: C.green, padding: '12px 22px', borderRadius: 11, textDecoration: 'none', boxShadow: '0 6px 16px rgba(26,154,100,.26)' }}>
+                Open full page <ExternalLink size={13} />
+              </Link>
+            )}
           </footer>
         </div>
       </div>

@@ -52,7 +52,20 @@ function defaultLabel(spaceCategory: string | null, unitType: string | null): st
   return unitType ? `${cat} › ${UNIT_TYPE_LABELS[unitType] ?? unitType}` : `${cat} (all)`;
 }
 
+/** RP hits /addendum-templates; a manager acting for a landlord hits the
+ *  /manager/templates proxy scoped by ?rp= (canManageTemplates). */
+function tplUrl(manager: { rp: number } | undefined, suffix = ''): string {
+  return manager
+    ? `/manager/templates${suffix}?rp=${manager.rp}`
+    : `/addendum-templates${suffix}`;
+}
+
+/** Manager route wraps this with manager={{ rp }}; the RP route uses the default. */
 export default function AddendumTemplatesPage() {
+  return <TemplatesWorkspace />;
+}
+
+export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
   const [templates, setTemplates] = useState<AddendumTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -63,7 +76,7 @@ export default function AddendumTemplatesPage() {
   async function fetchAll() {
     setLoading(true); setErr(null);
     try {
-      const list = await apiGet<AddendumTemplate[]>('/addendum-templates');
+      const list = await apiGet<AddendumTemplate[]>(tplUrl(manager));
       setTemplates(list);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load templates');
@@ -77,7 +90,7 @@ export default function AddendumTemplatesPage() {
   async function handleDelete(id: number) {
     if (!confirm('Remove this template? Past contracts that use it will keep their copy.')) return;
     try {
-      await apiDelete(`/addendum-templates/${id}`);
+      await apiDelete(tplUrl(manager, `/${id}`));
       await fetchAll();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Delete failed');
@@ -202,6 +215,7 @@ export default function AddendumTemplatesPage() {
 
       {showForm && (
         <NewTemplateModal
+          manager={manager}
           onClose={() => setShowForm(false)}
           onCreated={() => { setShowForm(false); void fetchAll(); }}
         />
@@ -213,6 +227,7 @@ export default function AddendumTemplatesPage() {
 
       {editTpl && (
         <EditTemplateModal
+          manager={manager}
           template={editTpl}
           onClose={() => setEditTpl(null)}
           onSaved={(versioned) => {
@@ -234,7 +249,7 @@ function mimeLabel(mime: string): string {
 
 /* ─── New template modal ─────────────────────────────────────────── */
 
-function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function NewTemplateModal({ manager, onClose, onCreated }: { manager?: { rp: number }; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [terms, setTerms] = useState<AddendumTerms>(emptyAddendumTerms());
@@ -251,7 +266,7 @@ function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreat
     if (!hasAddendumTerms(terms)) { setErr('Write at least one addendum term'); return; }
     setBusy(true); setErr(null);
     try {
-      await apiPost('/addendum-templates', {
+      await apiPost(tplUrl(manager), {
         name: name.trim(),
         description: description.trim() || undefined,
         terms,
@@ -323,7 +338,8 @@ function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreat
  * (`inUse`), in which case saving creates a NEW version and leaves the in-use
  * one untouched on its contracts. */
 
-function EditTemplateModal({ template, onClose, onSaved }: {
+function EditTemplateModal({ manager, template, onClose, onSaved }: {
+  manager?: { rp: number };
   template: AddendumTemplate;
   onClose: () => void;
   onSaved: (versioned: boolean) => void;
@@ -344,7 +360,7 @@ function EditTemplateModal({ template, onClose, onSaved }: {
     if (!hasAddendumTerms(terms)) { setErr('Write at least one addendum term'); return; }
     setBusy(true); setErr(null);
     try {
-      const res = await apiPatch<{ versioned?: boolean }>(`/addendum-templates/${template.id}`, {
+      const res = await apiPatch<{ versioned?: boolean }>(tplUrl(manager, `/${template.id}`), {
         name: name.trim(),
         description: description.trim() || null,
         terms,

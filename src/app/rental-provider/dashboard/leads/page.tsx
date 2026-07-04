@@ -504,7 +504,9 @@ function LeadRow({
   // manager acts on the same route with ?rp=<landlord> so leadUrl() rewrites the
   // API calls to /api/manager/leads.
   const openDetail = () =>
-    rowRouter.push(`/rental-provider/dashboard/leads/${lead.id}${manager ? `?rp=${manager.rp}` : ''}`);
+    rowRouter.push(manager
+      ? `/dashboard/manager/leads/${lead.id}?rp=${manager.rp}`
+      : `/rental-provider/dashboard/leads/${lead.id}`);
   const [panel, setPanel]             = useState<'none' | 'visited' | 'reject' | 'docs' | 'details' | 'guard' | 'plan' | 'plan_summary' | 'cheques'>('none');
   const [visitRemarks, setVisitRemarks] = useState('');
   const [markingVisit, setMarkingVisit] = useState(false);
@@ -660,6 +662,10 @@ function LeadRow({
   const phone        = lead.leadPhone ?? lead.convertedTenant?.user?.phone ?? null;
   const unitLabel    = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : null);
   const building     = lead.unit?.property?.buildingName ?? null;
+  // Annual rent — the firm plan's rent once issued, else the unit's listed price.
+  const annualRentAed = lead.paymentPlan ? Math.round(lead.paymentPlan.rentFils / 100)
+    : (lead.unit?.rentalPrice != null ? Number(lead.unit.rentalPrice) : null);
+  const fmtRent = (n: number) => `AED ${n.toLocaleString('en-AE')}`;
   const viewing      = getPendingViewing(lead);
   // Latest viewing by updatedAt — used for Details panel and Tenant Requested banner
   const anyViewing = lead.viewings?.slice().sort((a, b) => {
@@ -1062,1905 +1068,162 @@ ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35">${plan.not
 
   // Action cluster — Details · docs badge · primary CTA · ··· menu. Shared
   // verbatim by the row layout and the grid card so behaviour is identical.
-  const actionCluster = (
-    <>
-      {/* Open the full Lead Detail page (journey + action card). */}
-      <button
-        onClick={openDetail}
-        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium border border-[#e8e6e0] bg-white text-[#6b6860] hover:border-[#2e9f82] hover:text-[#1a7a5a] transition-colors cursor-pointer whitespace-nowrap"
-      >
-        <ExternalLink size={11} />
-        Open
-      </button>
-
-      {/* Viewing details button — visible whenever there is any viewing */}
-      {anyViewing && (
-        <button
-          onClick={() => openPanel('details')}
-          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors cursor-pointer whitespace-nowrap ${
-            panel === 'details'
-              ? 'bg-[#eef2ff] border-[#c7d2fe] text-[#4338ca]'
-              : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#c7d2fe] hover:text-[#4338ca]'
-          }`}
-        >
-          <StickyNote size={11} />
-          Details
-        </button>
-      )}
-
-      {/* Doc upload badge */}
-      {lead.docStats && lead.docStats.total > 0 && (
-        <button
-          onClick={() => openPanel('docs')}
-          className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium border transition-colors cursor-pointer whitespace-nowrap ${
-            lead.docStats.pending > 0
-              ? 'bg-amber-50 border-amber-200 text-amber-700'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-          }`}
-        >
-          <FileText size={11} />
-          {lead.docStats.pending > 0
-            ? `${lead.docStats.pending} pending`
-            : `${lead.docStats.total} docs`}
-        </button>
-      )}
-
-      {primary && (
-        <button
-          disabled={moving || approvingDocs}
-          onClick={handlePrimary}
-          title={approveDocsError ?? undefined}
-          className={`flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap ${primary.cls}`}
-        >
-          {primary.kind === 'convert' ? <ArrowRight size={12} /> : <CheckCircle2 size={12} />}
-          {primary.kind === 'approve_docs' && approvingDocs ? 'Approving…' : primary.label}
-        </button>
-      )}
-
-      {/* ··· menu */}
-      <div className="relative" ref={menuRef}>
-        <button
-          onClick={() => setMenuOpen(o => !o)}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-[#c8c6c0] hover:bg-[#f4f3f0] hover:text-[#3d3b35] transition-colors cursor-pointer"
-        >
-          <MoreVertical size={15} />
-        </button>
-
-        {menuOpen && (
-          <div className="absolute right-0 top-full mt-1 z-50 w-48 bg-white rounded-xl shadow-2xl border border-[#e8e6e0] py-1 text-sm">
-            {email && (
-              <a
-                href={`mailto:${email}`}
-                className="flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0]"
-                onClick={() => setMenuOpen(false)}
-              >
-                <Mail size={13} className="text-[#9b9890]" /> Send Email
-              </a>
-            )}
-            {phone && (
-              <a
-                href={`tel:${phone}`}
-                className="flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0]"
-                onClick={() => setMenuOpen(false)}
-              >
-                <Phone size={13} className="text-[#9b9890]" /> Call
-              </a>
-            )}
-
-            {/* Notify guard — only for scheduled viewings */}
-            {viewing && (viewing.status === 'scheduled' || viewing.status === 'confirmed') && (
-              <>
-                <div className="my-1 border-t border-[#f0ede8]" />
-                <button
-                  onClick={() => openPanel('guard')}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                >
-                  <ShieldAlert size={13} className="text-[#9b9890]" />
-                  {panel === 'guard' ? 'Hide Guard Alert' : 'Notify Guard'}
-                </button>
-              </>
-            )}
-
-            {canDocs && (
-              <>
-                <div className="my-1 border-t border-[#f0ede8]" />
-                <button
-                  onClick={() => openPanel('docs')}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                >
-                  <FileText size={13} className="text-[#9b9890]" />
-                  {panel === 'docs' ? 'Hide Documents' : 'Documents'}
-                </button>
-              </>
-            )}
-            {canCheques && (
-              <>
-                <div className="my-1 border-t border-[#f0ede8]" />
-                <button
-                  onClick={() => openPanel('plan_summary')}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                >
-                  <ClipboardList size={13} className="text-[#9b9890]" />
-                  {panel === 'plan_summary' ? 'Hide Plan' : 'View Payment Plan'}
-                </button>
-              </>
-            )}
-            {canEditPlan && (
-              <>
-                <div className="my-1 border-t border-[#f0ede8]" />
-                <button
-                  onClick={() => openPanel('plan')}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                >
-                  <ClipboardList size={13} className="text-[#9b9890]" />
-                  {panel === 'plan' ? 'Hide Plan Editor' : 'Edit Payment Plan'}
-                </button>
-              </>
-            )}
-            {canCheques && (
-              <>
-                <div className="my-1 border-t border-[#f0ede8]" />
-                <button
-                  onClick={() => openPanel('cheques')}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#3d3b35] hover:bg-[#f4f3f0] cursor-pointer"
-                >
-                  <CreditCard size={13} className="text-[#9b9890]" />
-                  {panel === 'cheques' ? 'Hide Payments' : 'Record Payments'}
-                </button>
-              </>
-            )}
-            {canReject && (
-              <>
-                <div className="my-1 border-t border-[#f0ede8]" />
-                <button
-                  onClick={() => openPanel('reject')}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-red-600 hover:bg-red-50 cursor-pointer"
-                >
-                  <X size={13} /> Reject Lead
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </>
-  );
 
   return (
-    <div className="bg-white rounded-xl border border-[#ede9e3]">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={openDetail}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(); } }}
+      className="bg-white rounded-xl border border-[#ede9e3] cursor-pointer transition-colors hover:border-[#2e9f82]/50 hover:bg-[#fafdfb] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
+    >
 
       {layout === 'grid' ? (
-        /* ── Compact grid card header ── */
-        <div className="p-4">
+        /* ── Grid card ── */
+        <div className="p-4 flex flex-col h-full">
+          {/* Identity + stage */}
           <div className="flex items-start gap-3">
-            <div
-              className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
-              style={{ backgroundColor: '#2e9f82' }}
-            >
+            <div className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: '#2e9f82' }}>
               {initials(displayName)}
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-[#1a1916] truncate">{displayName}</p>
-              <p className="text-xs text-[#9b9890] truncate mt-0.5">
-                {email ?? 'No email'}{phone ? ` · ${phone}` : ''}
-              </p>
+              <p className="text-xs text-[#9b9890] truncate mt-0.5">{email ?? 'No email'}{phone ? ` · ${phone}` : ''}</p>
             </div>
             <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 shrink-0 ${STAGE_PILL[lead.stage]}`}>
               {STAGE_LABELS[lead.stage]}
             </span>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-            {unitLabel ? (
-              <span className="text-[#1a1916] font-medium flex items-center gap-1 min-w-0">
-                <Building2 size={11} className="text-[#c8c6c0] shrink-0" />
-                <span className="truncate">{unitLabel}{building ? ` · ${building}` : ''}</span>
-              </span>
-            ) : (
-              <span className="text-[#c8c6c0]">No unit</span>
-            )}
-            {viewing ? (
-              <span className={`flex items-center gap-1 font-medium ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600' : 'text-[#6b6860]'}`}>
-                <Clock size={11} className="shrink-0" /> {fmtDateTime(viewing.scheduledAt)}
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-[#9b9890]">
-                <Calendar size={11} className="shrink-0" /> {fmtDate(lead.createdAt)}
-              </span>
+          {/* Key facts */}
+          <div className="mt-3.5 pt-3.5 border-t border-[#f4f3ef] space-y-2 text-xs">
+            <div className="flex items-center gap-2 text-[#3d3b35] min-w-0">
+              <Building2 size={13} className="text-[#c8c6c0] shrink-0" />
+              <span className="truncate">{unitLabel ? `${unitLabel}${building ? ` · ${building}` : ''}` : 'No unit assigned'}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {viewing ? (
+                <>
+                  <Clock size={13} className={`shrink-0 ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-500' : 'text-[#c8c6c0]'}`} />
+                  <span className={new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600 font-medium' : 'text-[#6b6860]'}>{fmtDateTime(viewing.scheduledAt)}</span>
+                </>
+              ) : (
+                <>
+                  <Calendar size={13} className="text-[#c8c6c0] shrink-0" />
+                  <span className="text-[#9b9890]">Added {fmtDate(lead.createdAt)}</span>
+                </>
+              )}
+            </div>
+            {annualRentAed != null && (
+              <div className="flex items-center gap-2">
+                <CreditCard size={13} className="text-[#c8c6c0] shrink-0" />
+                <span className="font-semibold text-[#1a1916] tabular-nums">{fmtRent(annualRentAed)}</span>
+                <span className="text-[#9b9890]">/ yr</span>
+              </div>
             )}
           </div>
 
+          {/* Urgency / decline */}
           {(() => {
             const u = getUrgency(lead);
             return u ? (
-              <p
-                className={`inline-flex items-center gap-1 rounded-full text-[10px] font-semibold px-1.5 py-0.5 mt-2 max-w-full ${URGENCY_PILL[u.level]}`}
-                title={u.label}
-              >
-                <Clock size={9} className="shrink-0" />
-                <span className="truncate">{u.label}</span>
+              <p className={`inline-flex items-center gap-1 rounded-full text-[10px] font-semibold px-1.5 py-0.5 mt-2.5 max-w-full ${URGENCY_PILL[u.level]}`} title={u.label}>
+                <Clock size={9} className="shrink-0" /><span className="truncate">{u.label}</span>
               </p>
             ) : null;
           })()}
           {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
-            <p
-              className="text-[10px] text-[#b91c1c] truncate mt-1"
-              title={anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
-            >
+            <p className="text-[10px] text-[#b91c1c] truncate mt-1.5" title={anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}>
               {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
             </p>
           )}
 
-          <div className="mt-3 pt-3 border-t border-[#f0ede8] flex items-center gap-2 flex-wrap">
-            {actionCluster}
+          {/* Footer pinned to the bottom so cards in a row align */}
+          <div className="mt-auto pt-3 flex items-center justify-end">
+            <span className="text-xs font-semibold text-[#2e9f82] inline-flex items-center gap-1">Open <ArrowRight size={12} /></span>
           </div>
         </div>
       ) : (
-      /* ── Single row ── */
-      <div className="flex items-center">
+      /* ── Single row (responsive columns; no horizontal scroll) ── */
+      <div className="flex items-center gap-4 px-5 py-3.5">
 
-        {/* Scrollable section — avatar through date */}
-        <div className="flex-1 min-w-0 overflow-x-auto">
-          <div className="flex items-center gap-5 px-5 py-4" style={{ minWidth: 580 }}>
-
-            {/* Avatar */}
-            <div
-              className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white"
-              style={{ backgroundColor: '#2e9f82' }}
-            >
-              {initials(displayName)}
-            </div>
-
-            {/* Name + contact */}
-            <div className="min-w-0" style={{ width: 190 }}>
-              <p className="text-sm font-semibold text-[#1a1916] truncate">{displayName}</p>
-              <p className="text-xs text-[#9b9890] truncate mt-0.5">
-                {email ?? 'No email'}{phone ? ` · ${phone}` : ''}
-              </p>
-            </div>
-
-            {/* Property */}
-            <div className="min-w-0" style={{ width: 155 }}>
-              {unitLabel ? (
-                <>
-                  <p className="text-sm text-[#1a1916] font-medium truncate flex items-center gap-1">
-                    <Building2 size={11} className="text-[#c8c6c0] shrink-0" />
-                    {unitLabel}
-                  </p>
-                  {building && <p className="text-xs text-[#9b9890] truncate pl-4">{building}</p>}
-                </>
-              ) : (
-                <span className="text-xs text-[#c8c6c0]">No unit</span>
-              )}
-            </div>
-
-            {/* Stage */}
-            <div style={{ width: 108 }} className="shrink-0">
-              <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 ${STAGE_PILL[lead.stage]}`}>
-                {STAGE_LABELS[lead.stage]}
-              </span>
-              {(() => {
-                const u = getUrgency(lead);
-                return u ? (
-                  <p
-                    className={`flex items-center gap-1 rounded-full text-[10px] font-semibold px-1.5 py-0.5 mt-1 max-w-full ${URGENCY_PILL[u.level]}`}
-                    title={u.label}
-                  >
-                    <Clock size={9} className="shrink-0" />
-                    <span className="truncate">{u.label}</span>
-                  </p>
-                ) : null;
-              })()}
-              {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
-                <p
-                  className="text-[10px] text-[#b91c1c] truncate mt-1"
-                  title={anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
-                >
-                  {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
-                </p>
-              )}
-            </div>
-
-            {/* Date */}
-            <div style={{ width: 138 }} className="shrink-0">
-              {viewing ? (
-                <div className={`flex items-center gap-1.5 text-xs font-medium ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600' : 'text-[#6b6860]'}`}>
-                  <Clock size={11} className="shrink-0" />
-                  {fmtDateTime(viewing.scheduledAt)}
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-xs text-[#9b9890]">
-                  <Calendar size={11} className="shrink-0" />
-                  {fmtDate(lead.createdAt)}
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Avatar */}
+        <div className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: '#2e9f82' }}>
+          {initials(displayName)}
         </div>
 
-        {/* Fixed right section — CTA + menu (never inside overflow container) */}
-        <div className="flex items-center gap-2 pr-4 pl-2 shrink-0">
-          {actionCluster}
+        {/* Customer */}
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-[#1a1916] truncate">{displayName}</p>
+          <p className="text-xs text-[#9b9890] truncate mt-0.5">{email ?? 'No email'}{phone ? ` · ${phone}` : ''}</p>
+        </div>
+
+        {/* Property */}
+        <div className="min-w-0 flex-1 hidden md:block">
+          {unitLabel ? (
+            <>
+              <p className="text-sm text-[#1a1916] font-medium truncate flex items-center gap-1.5">
+                <Building2 size={12} className="text-[#c8c6c0] shrink-0" />{unitLabel}
+              </p>
+              {building && <p className="text-xs text-[#9b9890] truncate pl-[19px]">{building}</p>}
+            </>
+          ) : (
+            <span className="text-xs text-[#c8c6c0]">No unit</span>
+          )}
+        </div>
+
+        {/* Stage + urgency */}
+        <div className="shrink-0 w-[128px]">
+          <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 ${STAGE_PILL[lead.stage]}`}>
+            {STAGE_LABELS[lead.stage]}
+          </span>
+          {(() => {
+            const u = getUrgency(lead);
+            return u ? (
+              <p className={`flex items-center gap-1 rounded-full text-[10px] font-semibold px-1.5 py-0.5 mt-1 max-w-full ${URGENCY_PILL[u.level]}`} title={u.label}>
+                <Clock size={9} className="shrink-0" /><span className="truncate">{u.label}</span>
+              </p>
+            ) : null;
+          })()}
+          {lead.stage === 'rejected' && anyViewing?.status === 'cancelled' && anyViewing?.outcome === 'not_interested' && (
+            <p className="text-[10px] text-[#b91c1c] truncate mt-1" title={anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}>
+              {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'Customer declined'}
+            </p>
+          )}
+        </div>
+
+        {/* Date */}
+        <div className="shrink-0 w-[136px] hidden lg:block">
+          {viewing ? (
+            <div className={`flex items-center gap-1.5 text-xs font-medium ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600' : 'text-[#6b6860]'}`}>
+              <Clock size={12} className="shrink-0" />{fmtDateTime(viewing.scheduledAt)}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-[#9b9890]">
+              <Calendar size={12} className="shrink-0" />{fmtDate(lead.createdAt)}
+            </div>
+          )}
+        </div>
+
+        {/* Rent */}
+        <div className="shrink-0 w-[104px] text-right hidden lg:block">
+          {annualRentAed != null ? (
+            <>
+              <p className="text-sm font-semibold text-[#1a1916] tabular-nums leading-tight">{fmtRent(annualRentAed)}</p>
+              <p className="text-[10px] text-[#9b9890]">per year</p>
+            </>
+          ) : (
+            <span className="text-xs text-[#c8c6c0]">—</span>
+          )}
+        </div>
+
+        {/* Open */}
+        <div className="shrink-0 pl-1">
+          <span className="text-xs font-semibold text-[#2e9f82] inline-flex items-center gap-1 whitespace-nowrap">Open <ArrowRight size={13} /></span>
         </div>
       </div>
       )}
 
-      {/* ── Mark Visited panel ── */}
-      {panel === 'visited' && viewing && (
-        <div className="border-t border-[#e8f7f1] bg-[#f5fdf9] px-5 py-4">
-          <p className="text-sm font-semibold text-[#1a1916] flex items-center gap-2 mb-3">
-            <CheckCircle2 size={14} className="text-[#2e9f82]" />
-            Mark viewing as completed
-            <span className="ml-auto text-xs font-normal text-[#9b9890]">{fmtDateTime(viewing.scheduledAt)}</span>
-          </p>
-          <label className="block text-xs font-medium text-[#3d3b35] mb-1.5">
-            <MessageSquare size={11} className="inline mr-1" />
-            Remarks <span className="font-normal text-[#9b9890]">(optional)</span>
-          </label>
-          <textarea
-            value={visitRemarks}
-            onChange={e => setVisitRemarks(e.target.value)}
-            rows={2}
-            placeholder="e.g. Very interested, wants to negotiate rent…"
-            className="w-full text-sm border border-[#c5ede2] rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30 bg-white mb-3"
-          />
-          {visitError && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{visitError}</p>
-          )}
-          <div className="flex gap-2">
-            <button
-              disabled={markingVisit}
-              onClick={handleMarkVisited}
-              className="text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
-            >
-              {markingVisit ? 'Saving…' : 'Confirm Visit'}
-            </button>
-            <button
-              onClick={() => { setPanel('none'); setVisitRemarks(''); setVisitError(null); }}
-              className="text-xs px-4 py-2 rounded-lg bg-white border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3f0] transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Reject panel ── */}
-      {panel === 'reject' && (
-        <div className="border-t border-red-100 bg-red-50 px-5 py-4">
-          <p className="text-sm font-semibold text-red-700 mb-1">Reject this lead?</p>
-          <p className="text-xs text-red-500 mb-3">
-            You&apos;re no longer pursuing <strong>{displayName}</strong> for this unit. You can reopen it later.
-          </p>
-          <div className="flex gap-2">
-            <button
-              disabled={moving}
-              onClick={() => { onMoveStage(lead.id, 'rejected'); setPanel('none'); }}
-              className="text-xs px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50 cursor-pointer"
-            >
-              Yes, reject
-            </button>
-            <button
-              onClick={() => setPanel('none')}
-              className="text-xs px-4 py-2 rounded-lg bg-white border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Documents panel ── */}
-      {panel === 'docs' && (
-        <div className="border-t border-[#e8e6e0] bg-[#fafaf8] px-5 py-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold text-[#3d3b35] flex items-center gap-1.5">
-              <FileText size={12} className="text-[#2e9f82]" /> Customer Documents
-            </p>
-            <div className="flex items-center gap-2">
-              {tenantDocs && tenantDocs.filter(d => d.documentKey !== 'profile_picture').length > 0 && (
-                <button
-                  onClick={() => {
-                    const list = tenantDocs.filter(d => d.documentKey !== 'profile_picture');
-                    openDocViewer(
-                      list.map(d => ({ fileUrl: d.fileUrl, caption: docLabel(d, list), mimeType: d.mimeType })),
-                      lead.convertedTenant?.user?.name?.trim() || lead.customerName || 'Documents',
-                    );
-                  }}
-                  className="flex items-center gap-1 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-2.5 py-1 hover:bg-[#f0faf6] transition-colors cursor-pointer"
-                >
-                  <Eye size={11} /> View All
-                </button>
-              )}
-              <button
-                onClick={() => setPanel('none')}
-                className="text-xs font-medium text-[#9b9890] hover:text-[#3d3b35] transition-colors cursor-pointer"
-              >
-                Hide
-              </button>
-            </div>
-          </div>
-          {/* What was requested from the customer — full checklist (required + supporting), mirrors the customer's view */}
-          {!docsLoading && (() => {
-            const all = getRequiredDocs(lead.unit?.unitType);
-            if (all.length === 0) return null;
-            const okKeys = new Set(
-              (tenantDocs ?? [])
-                .filter(d => !['missing', 'rejected'].includes(d.status))
-                .map(d => d.documentKey),
-            );
-            const req = all.filter(d => d.required);
-            const opt = all.filter(d => !d.required);
-            const received = req.filter(d => okKeys.has(d.key)).length;
-            const canUpload = !!lead.convertedTenant?.id;
-            // One actionable row per requirement: status + label + an Upload /
-            // Replace / Re-upload control so the RP can complete the document
-            // series on the customer's behalf (written under the customer owner).
-            const ReqRow = (d: DocReq, optional: boolean) => {
-              const doc = (tenantDocs ?? []).find(x => x.documentKey === d.key);
-              const onFile = okKeys.has(d.key);
-              const isRejected = doc?.status === 'rejected';
-              const busy = rpUploadingKey === d.key;
-              return (
-                <label
-                  key={d.key}
-                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${busy ? 'cursor-progress' : canUpload ? 'cursor-pointer' : 'cursor-default'} ${
-                    isRejected ? 'border-[#fecaca] bg-[#fff5f5]'
-                    : onFile ? 'border-[#bbf7d0] bg-[#f0faf6]'
-                    : optional ? 'border-[#e8e6e0] bg-[#fafaf8]'
-                    : 'border-[#fde68a] bg-[#fffbeb]'}`}
-                >
-                  {onFile ? <Check size={12} className="text-[#16a34a] shrink-0" />
-                    : isRejected ? <X size={12} className="text-[#b91c1c] shrink-0" />
-                    : <Clock size={12} className={`shrink-0 ${optional ? 'text-[#9b9890]' : 'text-[#92400e]'}`} />}
-                  <span className="flex-1 min-w-0 text-[11px] font-medium text-[#1a1916] truncate">
-                    {d.label}{!optional && <span className="text-[#b91c1c]"> *</span>}
-                  </span>
-                  {canUpload && (
-                    <span className={`text-[10px] font-semibold shrink-0 inline-flex items-center gap-1 ${isRejected ? 'text-[#b91c1c]' : onFile ? 'text-[#2e9f82]' : 'text-[#92400e]'}`}>
-                      {busy ? <Loader2 size={11} className="animate-spin" /> : <UploadCloud size={11} />}
-                      {busy ? 'Uploading…' : isRejected ? 'Re-upload' : onFile ? 'Replace' : 'Upload'}
-                    </span>
-                  )}
-                  {canUpload && (
-                    <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={busy}
-                      onChange={e => { const f = e.target.files?.[0]; if (f) handleRpUpload({ key: d.key, label: d.label, category: d.category }, f); e.target.value = ''; }} />
-                  )}
-                </label>
-              );
-            };
-            return (
-              <div className="mb-3 rounded-lg border border-[#e8e6e0] bg-white px-3 py-2.5">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[#6b6860] mb-1.5">
-                  Requested Documents · {received}/{req.length} required received
-                </p>
-                <div className="grid gap-1.5">
-                  {req.map(d => ReqRow(d, false))}
-                </div>
-                {opt.length > 0 && (
-                  <>
-                    <p className="text-[9px] font-semibold uppercase tracking-wide text-[#9b9890] mt-2 mb-1">
-                      Supporting (optional)
-                    </p>
-                    <div className="grid gap-1.5">
-                      {opt.map(d => ReqRow(d, true))}
-                    </div>
-                  </>
-                )}
-                {rpUploadError && <p className="text-[10px] text-[#b91c1c] mt-2">{rpUploadError}</p>}
-                {!canUpload && <p className="text-[10px] text-[#9b9890] mt-2">Convert this lead to a customer to upload documents on their behalf.</p>}
-              </div>
-            );
-          })()}
-          {docActionError && <p className="text-[10px] text-[#b91c1c] mb-2">{docActionError}</p>}
-          {docsLoading ? (
-            <p className="flex items-center gap-2 text-xs text-[#9b9890]">
-              <Loader2 size={12} className="animate-spin" /> Loading…
-            </p>
-          ) : (() => {
-            const RENTAL = new Set(['employment_letter', 'bank_statement', 'marriage_certificate', 'rental_history', 'credit_report', 'utility_clearance', 'trade_license', 'tax_registration', 'moa', 'business_license', 'utility_proof_of_payment']);
-            const docs = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
-
-            // Primary occupant (Occupant 1) identity keys. Emirates ID is stored
-            // as separate front/back rows (emirates_id_front / _back) plus a
-            // legacy combined `emirates_id` row from the Airtable import — all of
-            // these are Occupant-1 identity, not "Other". Occupants 2+ use the
-            // `occupant_N_*` key prefix.
-            const isEid     = (k: string) => /^emirates_id(_front|_back|_2|_\d{6,})?$/.test(k);
-            const isOcc1Id  = (k: string) => isEid(k) || k === 'passport' || k === 'uae_visa' || k === 'visa';
-
-            const occ1All     = docs.filter(d => isOcc1Id(d.documentKey));
-            // De-dup: if an explicit front exists, drop the legacy combined row so
-            // one physical ID doesn't render as three cards.
-            const hasFront    = occ1All.some(d => d.documentKey === 'emirates_id_front');
-            const occ1Docs    = hasFront ? occ1All.filter(d => d.documentKey !== 'emirates_id') : occ1All;
-            const rentalDocs  = docs.filter(d => RENTAL.has(d.documentKey));
-            const extraOccMap = new Map<number, TenantDoc[]>();
-            const otherDocs: TenantDoc[]  = [];
-            for (const d of docs) {
-              const m = d.documentKey.match(/^occupant_(\d+)_/);
-              if (m) {
-                const n = parseInt(m[1]);
-                if (!extraOccMap.has(n)) extraOccMap.set(n, []);
-                extraOccMap.get(n)!.push(d);
-              } else if (!isOcc1Id(d.documentKey) && !RENTAL.has(d.documentKey)) {
-                otherDocs.push(d);
-              }
-            }
-            const extraNs = [...extraOccMap.keys()].sort((a, b) => a - b);
-            const hasAny  = occ1Docs.length > 0 || extraNs.length > 0 || rentalDocs.length > 0 || otherDocs.length > 0;
-
-            function DocRow({ doc }: { doc: TenantDoc }) {
-              const label = docLabel(doc, docs);
-              const isPending    = ['pending', 'attached'].includes(doc.status);
-              const isApproved   = doc.status === 'processed';
-              const isRejected   = doc.status === 'rejected';
-              const isActioning  = docActioning === doc.id;
-              return (
-                <div className="flex items-center gap-2.5 bg-white rounded-lg border border-[#e8e6e0] px-3 py-2">
-                  <FileText size={12} className="text-[#2e9f82] shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-semibold text-[#1a1916] truncate">{label}</p>
-                    <p className={`text-[10px] capitalize ${isApproved ? 'text-[#16a34a]' : isRejected ? 'text-[#b91c1c]' : 'text-[#9b9890]'}`}>
-                      {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Uploaded'}
-                      {isRejected && doc.notes && <span className="normal-case text-[#9b9890]"> · {doc.notes}</span>}
-                    </p>
-                  </div>
-                  <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label, mimeType: doc.mimeType })}
-                    className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-[#2e9f82] hover:underline cursor-pointer">
-                    View <ExternalLink size={10} />
-                  </button>
-                  {isPending && (
-                    <>
-                      <button disabled={!!isActioning} onClick={() => handleApproveDoc(doc.id)}
-                        className="shrink-0 flex items-center gap-0.5 text-[10px] font-semibold text-[#065f46] bg-[#d1fae5] hover:bg-[#a7f3d0] disabled:opacity-50 rounded px-2 py-0.5 transition-colors cursor-pointer">
-                        {isActioning ? <Loader2 size={9} className="animate-spin" /> : <Check size={9} />} Approve
-                      </button>
-                      <button disabled={!!isActioning} onClick={() => { setRejectingDoc({ id: doc.id, label }); setRejectReason(''); }}
-                        className="shrink-0 flex items-center gap-0.5 text-[10px] font-semibold text-[#b91c1c] bg-[#fee2e2] hover:bg-[#fecaca] disabled:opacity-50 rounded px-2 py-0.5 transition-colors cursor-pointer">
-                        <X size={9} /> Reject
-                      </button>
-                    </>
-                  )}
-                  {isApproved && <span className="shrink-0 text-[9px] font-bold text-[#16a34a] bg-[#dcfce7] rounded px-1.5 py-0.5">✓</span>}
-                  {isRejected && <span className="shrink-0 text-[9px] font-bold text-[#b91c1c] bg-[#fee2e2] rounded px-1.5 py-0.5">✗</span>}
-                </div>
-              );
-            }
-
-            if (!hasAny) return <p className="text-xs text-[#9b9890]">No documents uploaded yet.</p>;
-
-            return (
-              <div className="space-y-3">
-                {/* ── Per-occupant identity docs ── */}
-                <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
-                  {/* Occupant 1 */}
-                  <div className={extraNs.length > 0 ? 'border-b border-[#e8e6e0]' : ''}>
-                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] px-3 pt-2 pb-1">Occupant 1</p>
-                    <div className="px-3 pb-2.5 space-y-1.5">
-                      {occ1Docs.length > 0
-                        ? occ1Docs.map(doc => <DocRow key={doc.id} doc={doc} />)
-                        : <p className="text-[10px] text-[#9b9890]">No identity documents uploaded yet.</p>}
-                    </div>
-                  </div>
-                  {/* Occupants 2+ */}
-                  {extraNs.map(n => (
-                    <div key={n} className="border-t border-[#e8e6e0]">
-                      <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] px-3 pt-2 pb-1 flex items-center justify-between">
-                        Occupant {n} <span className="text-[8px] font-normal normal-case text-[#c8c6c0]">optional</span>
-                      </p>
-                      <div className="px-3 pb-2.5 space-y-1.5">
-                        {extraOccMap.get(n)!.map(doc => <DocRow key={doc.id} doc={doc} />)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* ── Rental docs ── */}
-                {rentalDocs.length > 0 && (
-                  <div>
-                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">Rental Documents</p>
-                    <div className="space-y-1.5">
-                      {rentalDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Other docs ── */}
-                {otherDocs.length > 0 && (
-                  <div>
-                    <p className="text-[9px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">Other</p>
-                    <div className="space-y-1.5">
-                      {otherDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* ── Additional docs request ── */}
-          <div className="mt-4 pt-4 border-t border-[#e8e6e0]">
-            <p className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-              Request Additional Documents
-            </p>
-            <p className="text-[10px] text-[#9b9890] mb-3">
-              Each document appears as an individual upload slot in the customer's journey.
-            </p>
-
-            {/* Existing items — each shows the customer's upload status with
-                approve / reject / upload-on-behalf, matched by additionalDocKey. */}
-            {docsNoteItems.length > 0 && (
-              <div className="space-y-1.5 mb-3">
-                {docsNoteItems.map((item, idx) => {
-                  // A request that maps to a standard slot (e.g. UAE Visa) is fulfilled
-                  // by that existing upload — track the same key the customer uploads to.
-                  const key = resolveRequestedDocKey(item) ?? additionalDocKey(item);
-                  const doc = (tenantDocs ?? []).find(d => d.documentKey === key);
-                  const approved = doc?.status === 'processed' || doc?.status === 'complete';
-                  const rejected = doc?.status === 'rejected';
-                  const uploaded = !!doc && !approved && !rejected;   // attached, awaiting review
-                  const busyDoc  = doc ? docActioning === doc.id : false;
-                  const busyUp   = rpUploadingKey === key;
-                  const canUpload = !!lead.convertedTenant?.id;
-                  return (
-                    <div key={idx} className="bg-white border border-[#e8e6e0] rounded-lg px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        {approved ? <Check size={12} className="text-[#16a34a] shrink-0" />
-                          : rejected ? <X size={12} className="text-[#b91c1c] shrink-0" />
-                          : uploaded ? <Clock size={12} className="text-[#92400e] shrink-0" />
-                          : <FileText size={12} className="text-[#9b9890] shrink-0" />}
-                        <span className="flex-1 min-w-0 text-xs text-[#1a1916] truncate">{item}</span>
-                        <span className={`text-[9px] font-bold uppercase tracking-wide shrink-0 ${approved ? 'text-[#16a34a]' : rejected ? 'text-[#b91c1c]' : uploaded ? 'text-[#92400e]' : 'text-[#9b9890]'}`}>
-                          {approved ? 'Approved' : rejected ? 'Rejected' : uploaded ? 'Uploaded' : 'Awaiting'}
-                        </span>
-                        <button
-                          onClick={() => { setDocsNoteItems(prev => prev.filter((_, i) => i !== idx)); setDocsNoteSaved(false); }}
-                          className="text-[#9b9890] hover:text-[#b91c1c] transition-colors cursor-pointer shrink-0" title="Remove request"
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-                      {(doc || canUpload) && (
-                        <div className="flex items-center gap-3 mt-1.5 pl-5 flex-wrap">
-                          {doc?.fileUrl && (
-                            <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType ?? undefined })}
-                              className="text-[10px] font-semibold text-[#2e9f82] hover:underline cursor-pointer inline-flex items-center gap-1"><Eye size={11} /> View</button>
-                          )}
-                          {uploaded && (
-                            <>
-                              <button type="button" disabled={busyDoc} onClick={() => handleApproveDoc(doc!.id)}
-                                className="text-[10px] font-semibold text-[#16a34a] hover:underline cursor-pointer disabled:opacity-50">Approve</button>
-                              <button type="button" disabled={busyDoc} onClick={() => setRejectingDoc({ id: doc!.id, label: item })}
-                                className="text-[10px] font-semibold text-[#b91c1c] hover:underline cursor-pointer disabled:opacity-50">Reject</button>
-                            </>
-                          )}
-                          {canUpload && (
-                            <label className={`text-[10px] font-semibold text-[#6b6860] hover:text-[#2e9f82] cursor-pointer inline-flex items-center gap-1 ${busyUp ? 'opacity-50' : ''}`}>
-                              {busyUp ? <Loader2 size={11} className="animate-spin" /> : <UploadCloud size={11} />} {doc ? 'Replace' : 'Upload for customer'}
-                              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={busyUp}
-                                onChange={e => { const f = e.target.files?.[0]; if (f) handleRpUpload({ key, label: item, category: 'other' }, f); e.target.value = ''; }} />
-                            </label>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Add new item — searchable: pick a standard document or type a custom one */}
-            <div className="relative mb-3">
-              <input
-                type="text"
-                value={docSearch}
-                onChange={e => { setDocSearch(e.target.value); setDocMenuOpen(true); }}
-                onFocus={() => setDocMenuOpen(true)}
-                onBlur={() => setTimeout(() => setDocMenuOpen(false), 150)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    const q = docSearch.trim();
-                    const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q.toLowerCase()) && !docsNoteItems.includes(d));
-                    if (matches.length === 1) addDocByName(matches[0]);
-                    else if (q) addDocByName(q);
-                  } else if (e.key === 'Escape') setDocMenuOpen(false);
-                }}
-                placeholder="Search or type a document name…"
-                className="w-full text-xs border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82] text-[#1a1916]"
-              />
-              {docMenuOpen && (() => {
-                const q = docSearch.trim().toLowerCase();
-                const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q) && !docsNoteItems.includes(d));
-                const exact = REQUESTABLE_DOCS.some(d => d.toLowerCase() === q);
-                return (
-                  <div className="absolute z-20 mt-1 w-full bg-white border border-[#e8e6e0] rounded-lg shadow-lg max-h-56 overflow-auto">
-                    {matches.map(d => (
-                      <button
-                        key={d} type="button"
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => addDocByName(d)}
-                        className="w-full text-left text-xs px-3 py-2 hover:bg-[#f0faf6] text-[#1a1916] flex items-center gap-2 cursor-pointer"
-                      >
-                        <FileText size={11} className="text-[#9b9890] shrink-0" /> {d}
-                      </button>
-                    ))}
-                    {docSearch.trim() && !exact && (
-                      <button
-                        type="button"
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => addDocByName(docSearch.trim())}
-                        className="w-full text-left text-xs px-3 py-2 hover:bg-[#f0faf6] text-[#2e9f82] font-semibold border-t border-[#f0ede8] cursor-pointer"
-                      >
-                        + Add &ldquo;{docSearch.trim()}&rdquo; (custom)
-                      </button>
-                    )}
-                    {matches.length === 0 && !docSearch.trim() && (
-                      <p className="text-[10px] text-[#9b9890] px-3 py-2">Start typing to search documents…</p>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {docsNoteError && <p className="text-[10px] text-[#b91c1c] mb-2">{docsNoteError}</p>}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={saveDocsNote}
-                disabled={docsNoteSaving}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50 cursor-pointer"
-                style={{ backgroundColor: '#2e9f82' }}
-              >
-                {docsNoteSaving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                {docsNoteSaving ? 'Saving…' : 'Save Request'}
-              </button>
-              {docsNoteSaved && <span className="text-[10px] text-[#16a34a] font-medium">Saved ✓</span>}
-            </div>
-          </div>
-
-          {/* Approve all & advance — only after the RP has reviewed the docs above */}
-          {(lead.stage === 'interested' || lead.stage === 'documents_collection') && (
-            <div className="mt-4 pt-4 border-t border-[#e8e6e0]">
-              {approveDocsError && <p className="text-[10px] text-[#b91c1c] mb-2">{approveDocsError}</p>}
-              <button
-                onClick={handleApproveDocs}
-                disabled={approvingDocs}
-                className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2.5 rounded-lg text-white disabled:opacity-50 cursor-pointer"
-                style={{ backgroundColor: '#2e9f82' }}
-              >
-                {approvingDocs ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                {approvingDocs ? 'Approving…' : 'Approve Documents & Share Plan'}
-              </button>
-              <p className="text-[10px] text-[#9b9890] text-center mt-1.5">
-                Confirms the documents above and unlocks the customer&apos;s payment step.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Viewing Details panel ── */}
-      {panel === 'details' && anyViewing && (
-        <div className="border-t border-[#e8f0fe] bg-[#f8faff] px-5 py-4">
-          <p className="text-xs font-semibold text-[#3d3b35] mb-3 flex items-center gap-1.5">
-            <StickyNote size={12} className="text-[#2e9f82]" /> Viewing Details
-          </p>
-          <div className="space-y-3">
-            {/* Date/time + status */}
-            <div className="flex items-start gap-2">
-              <Clock size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
-              <div>
-                <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Scheduled</p>
-                <p className="text-xs font-semibold text-[#1a1916]">
-                  {fmtDateTime(anyViewing.scheduledAt)}
-                  <span className="ml-2 text-[10px] font-normal capitalize text-[#9b9890]">({anyViewing.status.replace(/_/g, ' ')})</span>
-                </p>
-              </div>
-            </div>
-
-            {/* Desired move-in */}
-            {anyViewing.desiredMoveIn && (
-              <div className="flex items-start gap-2">
-                <Calendar size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Desired Move-in</p>
-                  <p className="text-xs font-semibold text-[#1a1916]">{fmtDate(anyViewing.desiredMoveIn)}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Tenant payment preferences */}
-            {(anyViewing.preferredChequeCount || anyViewing.desiredMoveIn) && (
-              <div className="flex items-start gap-2 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg px-3 py-2.5">
-                <CreditCard size={12} className="text-[#16a34a] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#15803d] uppercase font-semibold tracking-wide mb-1">Customer Requested</p>
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                    {anyViewing.desiredMoveIn && (
-                      <p className="text-xs font-semibold text-[#1a1916]">
-                        Start: {fmtDate(anyViewing.desiredMoveIn)}
-                      </p>
-                    )}
-                    {anyViewing.preferredChequeCount && (
-                      <p className="text-xs font-semibold text-[#1a1916]">
-                        Payments: {(() => {
-                          const m: Record<number, string> = { 1: 'Annual', 2: 'Semi-Annual', 4: 'Quarterly', 6: 'Bi-Monthly', 12: 'Monthly' };
-                          return m[anyViewing.preferredChequeCount!] ?? `${anyViewing.preferredChequeCount} installments`;
-                        })()}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* What the customer is shown: the firm payment plan once one exists,
-                otherwise the LIVE cost summary derived from the unit's pricing —
-                the same figures on the customer's "I'm Interested" screen. */}
-            {lead.paymentPlan ? (() => {
-              const plan = lead.paymentPlan;
-              return (
-                <div className="flex items-start gap-2 bg-[#f0f9ff] border border-[#bae6fd] rounded-lg px-3 py-2.5">
-                  <ClipboardList size={12} className="text-[#0369a1] shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-[#0369a1] uppercase font-semibold tracking-wide mb-1">
-                      {lead.stage === 'payment_plan_shared' ? 'Proposed to Customer — awaiting response' : 'Proposed to Customer'}
-                    </p>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#6b6860]">
-                      <span>Annual Rent: <b className="text-[#1a1916]">AED {(plan.rentFils / 100).toLocaleString('en-AE')}</b></span>
-                      <span>Security Deposit: <b className="text-[#1a1916]">AED {(plan.securityDepositFils / 100).toLocaleString('en-AE')}</b></span>
-                      {plan.adminFeeFils > 0 && <span>Admin Fee: <b className="text-[#1a1916]">AED {(plan.adminFeeFils / 100).toLocaleString('en-AE')}</b></span>}
-                      {plan.ejariFils > 0 && <span>Ejari Fee: <b className="text-[#1a1916]">AED {(plan.ejariFils / 100).toLocaleString('en-AE')}</b></span>}
-                      {plan.commissionFils > 0 && <span>Commission: <b className="text-[#1a1916]">AED {(plan.commissionFils / 100).toLocaleString('en-AE')}</b></span>}
-                      {(plan.customFees ?? []).map((f, i) => (
-                        <span key={i}>{f.label}{f.vatFils > 0 ? ' (incl. VAT)' : ''}: <b className="text-[#1a1916]">AED {((f.netFils + f.vatFils) / 100).toLocaleString('en-AE')}</b></span>
-                      ))}
-                    </div>
-                    <p className="text-[10px] font-semibold text-[#0369a1] mt-1">
-                      Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}
-                    </p>
-                    <button
-                      onClick={() => openPanel('plan_summary')}
-                      className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#0369a1] hover:text-[#0284c7] cursor-pointer"
-                    >
-                      <Eye size={10} /> View full plan &amp; schedule
-                    </button>
-                  </div>
-                </div>
-              );
-            })() : lead.costPreview ? (() => {
-              const c = lead.costPreview;
-              const aed = (fils: number) => (fils / 100).toLocaleString('en-AE');
-              const vlbl = (vat: number) => (vat > 0 ? ' (incl. VAT)' : '');
-              return (
-                <div className="flex items-start gap-2 bg-[#f0f9ff] border border-[#bae6fd] rounded-lg px-3 py-2.5">
-                  <ClipboardList size={12} className="text-[#0369a1] shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-[#0369a1] uppercase font-semibold tracking-wide mb-1">Cost Summary — what the customer sees</p>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#6b6860]">
-                      <span>Annual Rent{vlbl(c.rentVatFils)}: <b className="text-[#1a1916]">AED {aed(c.rentFils + c.rentVatFils)}</b></span>
-                      <span>Security Deposit: <b className="text-[#1a1916]">AED {aed(c.securityDepositFils)}</b></span>
-                      {c.adminFeeFils > 0 && <span>Admin Fee{vlbl(c.adminFeeVatFils)}: <b className="text-[#1a1916]">AED {aed(c.adminFeeFils + c.adminFeeVatFils)}</b></span>}
-                      {c.ejariFils > 0 && <span>Ejari Fee{vlbl(c.ejariVatFils)}: <b className="text-[#1a1916]">AED {aed(c.ejariFils + c.ejariVatFils)}</b></span>}
-                      {c.commissionFils > 0 && <span>Commission{vlbl(c.commissionVatFils)}: <b className="text-[#1a1916]">AED {aed(c.commissionFils + c.commissionVatFils)}</b></span>}
-                      {(c.customFees ?? []).map((f, i) => (
-                        <span key={i}>{f.label}{vlbl(f.vatFils)}: <b className="text-[#1a1916]">AED {aed(f.netFils + f.vatFils)}</b></span>
-                      ))}
-                    </div>
-                    <p className="text-[10px] font-semibold text-[#0369a1] mt-1">Total payable: AED {aed(c.totalFils)}</p>
-                    <p className="text-[9px] text-[#9b9890] mt-0.5 italic">Live estimate from the unit&rsquo;s pricing — a firm plan is created once the customer taps &ldquo;I&rsquo;m Interested&rdquo;.</p>
-                  </div>
-                </div>
-              );
-            })() : null}
-
-            {/* Customer declined the viewing — surface the reason prominently */}
-            {anyViewing.status === 'cancelled' && anyViewing.outcome === 'not_interested' && (
-              <div className="flex items-start gap-2">
-                <X size={12} className="text-[#b91c1c] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#b91c1c] uppercase font-semibold tracking-wide mb-0.5">Declined by Customer</p>
-                  <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">
-                    {anyViewing.declineNote?.trim() ? anyViewing.declineNote : 'No reason provided.'}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Tenant notes from booking (viewing level). The decline reason now
-                lives in its own declineNote field, so booking notes are always
-                shown when present — they no longer collide with the decline text. */}
-            {anyViewing.notes && (
-              <div className="flex items-start gap-2">
-                <MessageSquare size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Customer Notes & Occupancy</p>
-                  <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">{anyViewing.notes}</p>
-                </div>
-              </div>
-            )}
-
-            {/* RP visit outcome/remarks — free text from a completed visit; skip the internal not_interested code */}
-            {anyViewing.outcome && anyViewing.outcome !== 'not_interested' && (
-              <div className="flex items-start gap-2">
-                <CheckCircle2 size={12} className="text-[#2e9f82] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Visit Remarks</p>
-                  <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">{anyViewing.outcome}</p>
-                </div>
-              </div>
-            )}
-
-            {/* RP notes on the lead */}
-            {lead.notes && (
-              <div className="flex items-start gap-2">
-                <StickyNote size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Notes</p>
-                  <p className="text-xs text-[#3d3b35] whitespace-pre-line leading-relaxed">{lead.notes}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Tenant contact */}
-            {(email || phone) && (
-              <div className="flex items-start gap-2">
-                <User size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Customer Contact</p>
-                  <div className="flex flex-wrap gap-3">
-                    {email && (
-                      <a href={`mailto:${email}`} className="flex items-center gap-1 text-xs text-[#2e9f82] hover:underline">
-                        <Mail size={10} /> {email}
-                      </a>
-                    )}
-                    {phone && (
-                      <a href={`tel:${phone}`} className="flex items-center gap-1 text-xs text-[#2e9f82] hover:underline">
-                        <Phone size={10} /> {phone}
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Listing link */}
-            {lead.unit?.id && (
-              <div className="flex items-start gap-2">
-                <ExternalLink size={12} className="text-[#9b9890] shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Listing</p>
-                  <a
-                    href={`/listings/units/${lead.unit.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-xs text-[#2e9f82] hover:underline font-medium"
-                  >
-                    {unitLabel ?? `Unit ${lead.unit.id}`}{building ? ` · ${building}` : ''} <ExternalLink size={10} />
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Payment Plan panel ── */}
-      {panel === 'plan' && (() => {
-        const _rentFils    = Math.round((parseFloat(planRentAed)       || 0) * 100);
-        const _adminFils   = Math.round((parseFloat(planAdminFeeAed)   || 0) * 100);
-        const _ejariFils   = Math.round((parseFloat(planEjariAed)      || 0) * 100);
-        const _commFils    = Math.round((parseFloat(planCommissionAed) || 0) * 100);
-        const _depositFils = Math.round((parseFloat(planDepositAed)    || 0) * 100);
-        // Apply discount preview — the discounted net rent is split across all installments
-        const _discountFils = planDiscountType !== 'none' && parseFloat(planDiscountValue) > 0
-          ? planDiscountType === 'percent'
-            ? Math.round(_rentFils * parseFloat(planDiscountValue) / 100)
-            : Math.round(parseFloat(planDiscountValue) * 100)
-          : 0;
-        const _effectiveRentFils = Math.max(0, _rentFils - _discountFils);
-        const _per    = _effectiveRentFils > 0 ? Math.floor(_effectiveRentFils / planInstallmentCount) : 0;
-        const _last   = _effectiveRentFils > 0 ? _effectiveRentFils - _per * (planInstallmentCount - 1) : 0;
-        const _totalFils = _effectiveRentFils + _adminFils + _ejariFils + _commFils + _depositFils;
-
-        // Each row owns its date. Sorted by dueDate ASC for display (deposit tiebreaks last when dates collide).
-        type ChequeRow = {
-          kind: 'bundle' | 'deposit' | 'installment';
-          installmentIndex?: number;  // 0..(installmentCount-2) for installments 2..N
-          label: string;
-          amountFils: number;
-          dueDate: string;
-        };
-        const KIND_WEIGHT: Record<ChequeRow['kind'], number> = { bundle: 0, installment: 1, deposit: 2 };
-        const unsortedRows: ChequeRow[] = _rentFils > 0 ? [
-          { kind: 'bundle', label: 'Admin Fee + Ejari + Commission + Installment 1', amountFils: _adminFils + _ejariFils + _commFils + _per, dueDate: planBundleDate },
-          ...Array.from({ length: planInstallmentCount - 1 }, (_, i) => ({
-            kind: 'installment' as const,
-            installmentIndex: i,
-            label: `Installment ${i + 2}`,
-            amountFils: i === planInstallmentCount - 2 ? _last : _per,
-            dueDate: planInstallmentDates[i] ?? '',
-          })),
-          { kind: 'deposit', label: 'Security Deposit', amountFils: _depositFils, dueDate: planDepositDate },
-        ] : [];
-        const chequeRows: ChequeRow[] = unsortedRows.slice().sort((a, b) => {
-          if (a.dueDate && b.dueDate && a.dueDate !== b.dueDate) return a.dueDate.localeCompare(b.dueDate);
-          return KIND_WEIGHT[a.kind] - KIND_WEIGHT[b.kind];
-        });
-
-        return (
-          <div className="border-t border-[#e0f2fe] bg-[#f0f9ff] px-5 py-4">
-            <p className="text-xs font-semibold text-[#0369a1] mb-4 flex items-center gap-1.5">
-              <ClipboardList size={12} /> {_existingPlan ? 'Edit Payment Plan' : 'Issue Payment Plan'}
-            </p>
-
-            {/* Tenant preferences banner */}
-            {(_latestViewing?.desiredMoveIn || _latestViewing?.preferredChequeCount) && (
-              <div className="flex items-center gap-2 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg px-3 py-2 mb-4">
-                <BadgeCheck size={13} className="text-[#16a34a] shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-semibold text-[#15803d] mb-0.5">Customer Requested</p>
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                    {_latestViewing.desiredMoveIn && (
-                      <span className="text-[10px] text-[#1a1916]">
-                        Start date: <strong>{fmtDate(_latestViewing.desiredMoveIn)}</strong>
-                      </span>
-                    )}
-                    {_latestViewing.preferredChequeCount && (
-                      <span className="text-[10px] text-[#1a1916]">
-                        Payments: <strong>{(() => {
-                          const m: Record<number, string> = { 1: 'Annual', 2: 'Semi-Annual', 4: 'Quarterly', 6: 'Bi-Monthly', 12: 'Monthly' };
-                          return m[_latestViewing.preferredChequeCount!] ?? `${_latestViewing.preferredChequeCount} installments`;
-                        })()}</strong>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Rent + Installments + Start Date */}
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                  Annual Rent (AED) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  value={planRentAed}
-                  onChange={e => setPlanRentAed(e.target.value)}
-                  placeholder="e.g. 85000"
-                  className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                  No. of Installments <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={planInstallmentCount}
-                  onChange={e => { const n = Number(e.target.value); setPlanInstallmentCount(n); resizeInstallmentDates(n); }}
-                  className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916] cursor-pointer"
-                >
-                  {allowedInstallmentPlans(allowedInstallments, [planInstallmentCount]).map(p => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                  Contract Start Date
-                </label>
-                <PreferredDayPicker
-                  value={planStartDate}
-                  preferredDays={preferredStartDays}
-                  onChange={d => { setPlanStartDate(d); if (d) applyStartDate(d, planInstallmentCount); }}
-                  placeholder="Pick start date"
-                />
-                {planStartDate && (
-                  <p className="text-[9px] text-[#0369a1] mt-0.5">Cheque dates auto-generated from start date</p>
-                )}
-              </div>
-            </div>
-
-            {/* Fees */}
-            <p className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-2">Fees & Deposit</p>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="block text-[10px] text-[#6b6860] mb-1">Admin Fee (AED)</label>
-                <input type="number" value={planAdminFeeAed} onChange={e => setPlanAdminFeeAed(e.target.value)}
-                  placeholder="0" className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]" />
-              </div>
-              <div>
-                <label className="block text-[10px] text-[#6b6860] mb-1">Ejari Fee (AED)</label>
-                <input type="number" value={planEjariAed} onChange={e => setPlanEjariAed(e.target.value)}
-                  placeholder="0" className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]" />
-              </div>
-              <div>
-                <label className="block text-[10px] text-[#6b6860] mb-1">Commission (AED)</label>
-                <input type="number" value={planCommissionAed} onChange={e => setPlanCommissionAed(e.target.value)}
-                  placeholder="0" className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]" />
-              </div>
-              <div>
-                <label className="block text-[10px] text-[#6b6860] mb-1">Security Deposit (AED)</label>
-                <input type="number" value={planDepositAed} onChange={e => setPlanDepositAed(e.target.value)}
-                  placeholder="0" className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]" />
-              </div>
-            </div>
-
-            {/* Rent discount — applies to the rent line, split across all installments */}
-            <div className="mb-3 bg-[#fffbeb] border border-[#fde68a] rounded-xl px-3 py-2.5">
-                <p className="text-[10px] font-semibold text-[#92400e] uppercase tracking-wide mb-2">Rent Discount (Optional)</p>
-                <div className="flex gap-1.5 mb-2">
-                  {(['none', 'percent', 'fixed'] as const).map(t => (
-                    <button key={t} type="button"
-                      onClick={() => { setPlanDiscountType(t); if (t === 'none') setPlanDiscountValue(''); }}
-                      className={`text-[10px] px-2.5 py-1 rounded-lg border font-medium cursor-pointer transition-colors ${planDiscountType === t ? 'bg-[#92400e] text-white border-[#92400e]' : 'bg-white border-[#d6d4ce] text-[#3d3b35] hover:border-[#92400e]'}`}
-                    >
-                      {t === 'none' ? 'No Discount' : t === 'percent' ? '% Off' : 'Fixed AED'}
-                    </button>
-                  ))}
-                </div>
-                {planDiscountType !== 'none' && (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={planDiscountValue}
-                      onChange={e => setPlanDiscountValue(e.target.value)}
-                      placeholder={planDiscountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'}
-                      className="flex-1 text-[11px] border border-[#fde68a] rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#f59e0b]/30 bg-white text-[#1a1916]"
-                    />
-                    <span className="text-[10px] text-[#92400e] font-semibold">{planDiscountType === 'percent' ? '%' : 'AED'}</span>
-                  </div>
-                )}
-                {planDiscountType !== 'none' && planDiscountValue && parseFloat(planDiscountValue) > 0 && (() => {
-                  const rent = parseFloat(planRentAed) || 0;
-                  const disc = planDiscountType === 'percent'
-                    ? Math.round(rent * parseFloat(planDiscountValue)) / 100
-                    : parseFloat(planDiscountValue) || 0;
-                  const effective = Math.max(0, rent - disc);
-                  return (
-                    <p className="text-[10px] text-[#92400e] mt-1.5">
-                      Original: <b>AED {rent.toLocaleString('en-AE')}</b> — Discount: <b>AED {disc.toLocaleString('en-AE', { maximumFractionDigits: 2 })}</b> → Final Rent: <b className="text-[#065f46]">AED {effective.toLocaleString('en-AE')}</b>
-                    </p>
-                  );
-                })()}
-              </div>
-
-            {/* Auto-generated cheque schedule */}
-            {chequeRows.length > 0 && (
-              <div className="mb-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">
-                    Cheque Schedule ({chequeRows.length} cheques)
-                  </p>
-                  {_totalFils > 0 && (
-                    <span className="text-[10px] font-bold text-[#0369a1]">
-                      Total: AED {(_totalFils / 100).toLocaleString('en-AE')}
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  {chequeRows.map((row, i) => {
-                    const key = row.kind === 'bundle' ? 'bundle'
-                      : row.kind === 'deposit' ? 'deposit'
-                      : `inst-${row.installmentIndex}`;
-                    const onChange = (v: string) => {
-                      if (row.kind === 'bundle') setPlanBundleDate(v);
-                      else if (row.kind === 'deposit') setPlanDepositDate(v);
-                      else setPlanInstallmentDates(prev => prev.map((d, j) => j === row.installmentIndex ? v : d));
-                    };
-                    return (
-                      <div key={key} className="flex items-center gap-2 bg-white border border-[#bae6fd] rounded-lg px-3 py-2">
-                        <span className="text-[10px] font-bold text-[#0369a1] w-5 shrink-0">#{i + 1}</span>
-                        <span className="text-[10px] text-[#1a1916] flex-1 min-w-0 truncate">{row.label}</span>
-                        <span className="text-[10px] font-semibold text-[#0369a1] shrink-0 w-24 text-right">
-                          {row.amountFils > 0 ? `AED ${(row.amountFils / 100).toLocaleString('en-AE')}` : '—'}
-                        </span>
-                        <input
-                          type="date"
-                          value={row.dueDate}
-                          onChange={e => onChange(e.target.value)}
-                          className="w-32 shrink-0 text-xs border border-[#e0f2fe] rounded px-2 py-1 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Extra installment rows */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide">Extra Installments</p>
-                <button
-                  type="button"
-                  onClick={() => setPlanExtraItems(prev => [...prev, { description: '', amountAed: '', dueDate: '' }])}
-                  className="flex items-center gap-1 text-[10px] font-semibold text-[#0369a1] hover:text-[#0284c7] cursor-pointer"
-                >
-                  <Plus size={10} /> Add Installment
-                </button>
-              </div>
-              {planExtraItems.length > 0 && (
-                <div className="space-y-1.5">
-                  {planExtraItems.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-white border border-[#bae6fd] rounded-lg px-3 py-2">
-                      <span className="text-[10px] font-bold text-[#0369a1] w-5 shrink-0">
-                        #{chequeRows.length + 1 + idx}
-                      </span>
-                      <input
-                        type="text"
-                        value={item.description}
-                        onChange={e => setPlanExtraItems(prev => prev.map((it, i) => i === idx ? { ...it, description: e.target.value } : it))}
-                        placeholder="Label (e.g. VAT, Municipality Fee)"
-                        className="flex-1 min-w-0 text-[10px] border border-[#e0f2fe] rounded px-2 py-1 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-                      />
-                      <input
-                        type="number"
-                        value={item.amountAed}
-                        onChange={e => setPlanExtraItems(prev => prev.map((it, i) => i === idx ? { ...it, amountAed: e.target.value } : it))}
-                        placeholder="AED"
-                        className="w-20 shrink-0 text-[10px] border border-[#e0f2fe] rounded px-2 py-1 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-                      />
-                      <input
-                        type="date"
-                        value={item.dueDate}
-                        onChange={e => setPlanExtraItems(prev => prev.map((it, i) => i === idx ? { ...it, dueDate: e.target.value } : it))}
-                        className="w-32 shrink-0 text-[10px] border border-[#e0f2fe] rounded px-2 py-1 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setPlanExtraItems(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-[#c8c6c0] hover:text-red-500 transition-colors cursor-pointer shrink-0"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="mb-3">
-              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                Cheques payable to <span className="font-normal normal-case text-[#9b9890]">(name customer writes on cheques)</span>
-              </label>
-              <input
-                type="text"
-                value={planChequesPayableTo}
-                onChange={e => setPlanChequesPayableTo(e.target.value)}
-                placeholder="e.g. ABC Real Estate LLC"
-                className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-              />
-              <p className="mt-1 text-[10px] text-[#9b9890]">Auto-filled from your profile. Edit if you need a different name on the cheques.</p>
-            </div>
-
-            <div className="mb-3">
-              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">Notes (optional)</label>
-              <input
-                type="text"
-                value={planNotes}
-                onChange={e => setPlanNotes(e.target.value)}
-                placeholder="e.g. 4 quarterly cheques"
-                className="w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916]"
-              />
-            </div>
-
-            {/* ── Rental Index Report attachment ── */}
-            <div className="mb-3">
-              <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">
-                Rental Index Report <span className="font-normal normal-case text-[#9b9890]">(optional — visible to customer)</span>
-              </label>
-              {rentalIndexUrl ? (
-                <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#2e9f82] rounded-lg px-3 py-2">
-                  <FileText size={13} className="text-[#2e9f82] shrink-0" />
-                  <span className="flex-1 text-[11px] font-medium text-[#1a1916] truncate">
-                    {rentalIndexFileName || 'Rental Index Report'}
-                  </span>
-                  <a href={rentalIndexUrl} target="_blank" rel="noopener noreferrer"
-                    className="text-[10px] text-[#2e9f82] hover:underline shrink-0 flex items-center gap-0.5">
-                    View <ExternalLink size={9} />
-                  </a>
-                  <button type="button" onClick={() => { setRentalIndexUrl(''); setRentalIndexFileName(''); setRentalIndexStatus(null); }}
-                    className="text-[#9b9890] hover:text-[#b91c1c] transition-colors cursor-pointer shrink-0">
-                    <X size={13} />
-                  </button>
-                </div>
-              ) : (
-                <label className={`flex items-center gap-2 border border-dashed border-[#bae6fd] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f0f9ff] transition-colors ${rentalIndexUploading ? 'opacity-60 pointer-events-none' : ''}`}>
-                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      setRentalIndexUploading(true);
-                      try {
-                        const urlRes = await fetch('/api/documents/upload-url', {
-                          method: 'POST', credentials: 'include',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            ownerType: 'rental_provider', ownerId: lead.unit?.id ?? lead.id,
-                            documentKey: 'rental_index_report', mimeType: file.type,
-                            originalName: file.name,
-                          }),
-                        });
-                        if (!urlRes.ok) {
-                          const errBody = await urlRes.json().catch(() => ({})) as { message?: string };
-                          const msg = `Upload failed — ${errBody.message ?? urlRes.status}`;
-                          setRentalIndexStatus({ ok: false, msg });
-                          toast.error(msg);
-                          return;
-                        }
-                        const { uploadUrl, fileUrl } = await urlRes.json() as { uploadUrl: string; fileUrl: string };
-                        // Normalise to a relative path so the PUT stays same-origin (fixes 127.0.0.1 vs localhost mismatch)
-                        const safeUploadUrl = (() => {
-                          try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; }
-                          catch { return uploadUrl; }
-                        })();
-                        let putRes: Response;
-                        try { putRes = await fetch(safeUploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } }); }
-                        catch { setRentalIndexStatus({ ok: false, msg: 'Upload failed — network error' }); toast.error('Upload failed — network error'); return; }
-                        if (!putRes.ok) { setRentalIndexStatus({ ok: false, msg: `Upload failed — server error ${putRes.status}` }); toast.error(`Upload failed — server error ${putRes.status}`); return; }
-                        setRentalIndexUrl(fileUrl);
-                        setRentalIndexFileName(file.name);
-                        setRentalIndexStatus({ ok: true, msg: `"${file.name}" uploaded successfully` });
-                        toast.success(`Rental Index Report uploaded — "${file.name}"`);
-                      } finally { setRentalIndexUploading(false); e.target.value = ''; }
-                    }}
-                  />
-                  {rentalIndexUploading
-                    ? <><Loader2 size={13} className="animate-spin text-[#0ea5e9]" /><span className="text-[11px] text-[#0ea5e9]">Uploading…</span></>
-                    : <><FileText size={13} className="text-[#9b9890]" /><span className="text-[11px] text-[#9b9890]">Attach PDF or image</span></>}
-                </label>
-              )}
-              {rentalIndexStatus && (
-                <p className={`mt-1.5 text-[10px] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 ${rentalIndexStatus.ok ? 'bg-[#f0faf6] text-[#16a34a] border border-[#bbf7d0]' : 'bg-red-50 text-red-600 border border-red-200'}`}>
-                  {rentalIndexStatus.ok ? <CheckCircle2 size={10} /> : <X size={10} />}
-                  {rentalIndexStatus.msg}
-                </p>
-              )}
-            </div>
-
-            {planError && (
-              <p className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{planError}</p>
-            )}
-            <div className="flex gap-2">
-              <button
-                disabled={planSaving}
-                onClick={handleIssuePlan}
-                className="text-xs px-4 py-2 rounded-lg bg-[#0ea5e9] text-white font-semibold hover:bg-[#0284c7] disabled:opacity-50 transition-colors cursor-pointer"
-              >
-                {planSaving ? 'Saving…' : _existingPlan ? 'Update Plan' : 'Issue Payment Plan'}
-              </button>
-              <button
-                onClick={() => { setPanel('none'); setPlanError(null); }}
-                className="text-xs px-4 py-2 rounded-lg bg-white border border-[#bae6fd] text-[#0369a1] hover:bg-[#e0f2fe] transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── Payment Plan summary ── */}
-      {panel === 'plan_summary' && lead.paymentPlan && (() => {
-        const plan = lead.paymentPlan;
-        const sorted = plan.items.slice().sort((a, b) => {
-          if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-          const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
-          return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
-        });
-        return (
-          <div className="border-t border-[#e0f2fe] bg-[#f8fbff] px-5 py-3 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-semibold text-[#0369a1] flex items-center gap-1.5">
-                <ClipboardList size={10} />
-                {lead.stage === 'payment_plan_shared' ? 'Payment Plan Shared — waiting for customer' : 'Payment Plan'}
-              </p>
-              <div className="flex items-center gap-3">
-                <button onClick={handlePreviewPlan} className="text-[10px] text-[#0369a1] hover:text-[#0284c7] font-semibold flex items-center gap-1 cursor-pointer">
-                  <Eye size={10} /> Preview as customer
-                </button>
-                <button onClick={handlePreviewPlan} className="text-[10px] text-[#0369a1] hover:text-[#0284c7] font-semibold flex items-center gap-1 cursor-pointer">
-                  <Printer size={10} /> Print / Download
-                </button>
-              </div>
-            </div>
-            {/* Fee summary row — matches tenant view */}
-            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#6b6860] border-b border-[#e0f2fe] pb-2">
-              {plan.originalRentFils != null ? (
-                <span className="col-span-2">
-                  Annual Rent: <span className="line-through text-[#9b9890]">AED {(plan.originalRentFils / 100).toLocaleString('en-AE')}</span>
-                  {' '}<span className="text-[#16a34a] font-semibold">→ AED {(plan.rentFils / 100).toLocaleString('en-AE')}</span>
-                  {' '}<span className="text-[#16a34a] text-[9px]">
-                    ({plan.discountType === 'percent' ? `${plan.discountPercent}% discount` : `AED ${((plan.discountFils ?? 0) / 100).toLocaleString('en-AE')} discount`})
-                  </span>
-                </span>
-              ) : (
-                <span>Annual Rent: <b className="text-[#1a1916]">AED {(plan.rentFils / 100).toLocaleString('en-AE')}</b></span>
-              )}
-              <span>Security Deposit: <b className="text-[#1a1916]">AED {(plan.securityDepositFils / 100).toLocaleString('en-AE')}</b></span>
-              {plan.adminFeeFils > 0 && <span>Admin Fee: <b className="text-[#1a1916]">AED {(plan.adminFeeFils / 100).toLocaleString('en-AE')}</b></span>}
-              {plan.ejariFils > 0 && <span>Ejari Fee: <b className="text-[#1a1916]">AED {(plan.ejariFils / 100).toLocaleString('en-AE')}</b></span>}
-              {plan.commissionFils > 0 && <span>Commission: <b className="text-[#1a1916]">AED {(plan.commissionFils / 100).toLocaleString('en-AE')}</b></span>}
-              <span className="col-span-2 font-semibold text-[#0369a1] mt-0.5">Total: AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')} · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}</span>
-            </div>
-            {/* Payment schedule — sorted by date, deposit lands last on ties; single-line per row */}
-            <div className="space-y-1">
-              {sorted.map((item, i) => (
-                <p key={item.index} className="text-[10px] py-0.5 border-b border-[#e0f2fe] last:border-0 leading-snug">
-                  <span className="text-[#0369a1]">#{i + 1} {item.description ?? `Payment ${i + 1}`}</span>
-                  <span className="text-[#6b6860]"> — </span>
-                  <span className="font-semibold text-[#1a1916]">AED {(item.amountFils / 100).toLocaleString('en-AE')}</span>
-                  <span className="text-[#6b6860]"> · {item.dueDate}</span>
-                </p>
-              ))}
-            </div>
-            {plan.chequesPayableTo && (
-              <p className="text-[10px] text-[#1a1916] bg-[#fef9c3] border border-[#fde68a] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                <BadgeCheck size={11} className="text-[#854d0e] shrink-0" />
-                <span><span className="font-semibold text-[#854d0e]">Cheques payable to:</span> {plan.chequesPayableTo}</span>
-              </p>
-            )}
-            {plan.notes && <p className="text-[10px] text-[#6b6860] italic mt-1">{plan.notes}</p>}
-            {plan.rentalIndexReportUrl && (
-              <a href={plan.rentalIndexReportUrl} target="_blank" rel="noopener noreferrer"
-                className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-3 py-1.5 hover:bg-[#f0faf6] transition-colors">
-                <FileText size={11} /> View Rental Index Report
-              </a>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Cheques Collection panel ── */}
-      {panel === 'cheques' && (() => {
-        const plan = lead.paymentPlan;
-        const sortedItems = plan
-          ? plan.items.slice().sort((a, b) => {
-              if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-              const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
-              return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
-            })
-          : [];
-        // Match each plan item to a recorded cheque by description (stored in cheque.notes)
-        const chequeByDesc = new Map<string, LeadChequeRecord>();
-        for (const c of cheques) if (c.notes) chequeByDesc.set(c.notes, c);
-
-        const customerUploads = cheques.filter(c => c.isCustomerUpload);
-        const hasCustomerUploads = customerUploads.length > 0;
-
-        return (
-          <div className="border-t border-[#fef3c7] bg-[#fffdf0] px-5 py-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-[#854d0e] flex items-center gap-1.5">
-                <CreditCard size={12} /> Record Payments — Series View
-                {plan && (
-                  <span className="ml-2 text-[10px] font-normal text-[#92400e]">
-                    {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'} · Total AED {(plan.totalAmountFils / 100).toLocaleString('en-AE')}
-                  </span>
-                )}
-              </p>
-              {lead.stage === 'payment_plan_shared' && (
-                <button onClick={() => openPanel('plan')} className="text-[10px] text-[#0369a1] hover:underline cursor-pointer">
-                  Edit plan instead →
-                </button>
-              )}
-            </div>
-
-            {/* Payment method per payment — all planned payments, RP sets each method (default Cheque),
-                independent of how many references the customer uploaded. */}
-            {plan && sortedItems.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide">Payment method (all payments)</p>
-                {sortedItems.map((item, i) => {
-                  const method = itemMethods[item.index] ?? item.paymentMethod ?? 'cheque';
-                  return (
-                    <div key={`m-${item.index}`} className="flex items-center gap-2 flex-wrap bg-white border border-[#fde68a] rounded-lg px-2.5 py-1.5">
-                      <span className="text-[11px] text-[#1a1916] flex-1 min-w-[150px]">
-                        <span className="text-[#0369a1] font-semibold">#{i + 1}</span> {item.description ?? `Payment ${i + 1}`}
-                        <span className="font-bold text-[#1a1916]"> · AED {(item.amountFils / 100).toLocaleString('en-AE')}</span>
-                        {item.dueDate && <span className="text-[#9b9890]"> · {item.dueDate}</span>}
-                      </span>
-                      <select
-                        value={method}
-                        onChange={async (e) => {
-                          const m = e.target.value as PaymentMethodKind;
-                          setChequeError(null);
-                          setItemMethods(prev => ({ ...prev, [item.index]: m }));
-                          const res = await fetch(leadUrl(`/api/leads/${lead.id}/plan-item-method`, manager), {
-                            method: 'PATCH', credentials: 'include',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ itemIndex: item.index, paymentMethod: m }),
-                          });
-                          if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed to set method'); }
-                        }}
-                        className="text-[10px] px-2 py-1 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] cursor-pointer focus:outline-none focus:border-[#2e9f82]"
-                      >
-                        {(['cheque','bank_transfer','card','cash'] as PaymentMethodKind[]).map(m => (
-                          <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        value={itemRefs[item.index] ?? item.reference ?? ''}
-                        onChange={(e) => setItemRefs(prev => ({ ...prev, [item.index]: e.target.value }))}
-                        placeholder="Reference (cheque #, transfer ID…)"
-                        onBlur={async (e) => {
-                          const val = e.currentTarget.value.trim();
-                          setChequeError(null);
-                          const patchRef = async (idx: number, reference: string) => {
-                            const res = await fetch(leadUrl(`/api/leads/${lead.id}/plan-item-method`, manager), {
-                              method: 'PATCH', credentials: 'include',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ itemIndex: idx, reference }),
-                            });
-                            if (!res.ok) { const b = await res.json().catch(() => ({})); setChequeError(b.message ?? 'Failed to set reference'); }
-                          };
-                          await patchRef(item.index, val);
-                          // Auto-generate the series for subsequent EMPTY rows (CHQ-1 → CHQ-2, CHQ-3…).
-                          if (val) {
-                            for (let j = i + 1; j < sortedItems.length; j++) {
-                              const t = sortedItems[j];
-                              const existing = (itemRefs[t.index] ?? t.reference ?? '').trim();
-                              if (existing) continue;
-                              const serial = nextSerial(val, j - i);
-                              setItemRefs(prev => ({ ...prev, [t.index]: serial }));
-                              await patchRef(t.index, serial);
-                            }
-                          }
-                        }}
-                        className="text-[10px] px-2 py-1 rounded-lg border border-[#ede9e3] bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] w-[170px]"
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {chequesLoading && (
-              <p className="flex items-center gap-2 text-xs text-[#9b9890]">
-                <Loader2 size={12} className="animate-spin" /> Loading…
-              </p>
-            )}
-
-            {/* Series of planned payments — one row per plan item. Only
-                shown when the customer hasn't attached references; once they
-                have, the verification flow happens below in the uploads
-                section (one row per uploaded reference, with the RP mapping
-                each to a plan installment + tagging the method). */}
-            {!chequesLoading && plan && !hasCustomerUploads && (
-              <div className="space-y-2">
-                {sortedItems.map((it, i) => {
-                  const desc = it.description ?? `Cheque ${i + 1}`;
-                  const recorded = chequeByDesc.get(desc);
-                  return (
-                    <ChequeRow
-                      key={`${it.index}-${desc}`}
-                      seq={i + 1}
-                      description={desc}
-                      amountFils={it.amountFils}
-                      dueDate={it.dueDate}
-                      recorded={recorded}
-                      suggestedSerial={!recorded ? chequeSuggestions[i] : undefined}
-                      onSerialChange={(value) => {
-                        // Propagate incremented serials to all subsequent unrecorded rows
-                        if (!value.trim()) return;
-                        setChequeSuggestions(prev => {
-                          const next: Record<number, string> = { ...prev };
-                          sortedItems.forEach((_, j) => {
-                            if (j <= i) return;
-                            const jDesc = sortedItems[j]?.description ?? `Cheque ${j + 1}`;
-                            if (chequeByDesc.get(jDesc)) return; // already recorded
-                            next[j] = nextSerial(value, j - i);
-                          });
-                          return next;
-                        });
-                      }}
-                      onRecord={async (serial) => {
-                        if (!serial.trim()) { setChequeError('Cheque number is required'); return; }
-                        setChequeError(null);
-                        const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques`, manager), {
-                          method: 'POST', credentials: 'include',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            chequeSerial: serial.trim(),
-                            bankName: 'N/A',
-                            amountFils: it.amountFils,
-                            dueDate: it.dueDate,
-                            notes: desc,
-                          }),
-                        });
-                        const body = await res.json().catch(() => ({}));
-                        if (!res.ok) { setChequeError(body.message ?? 'Failed to record'); return; }
-                        setCheques(prev => [...prev, body]);
-                        setChequeSuggestions(prev => { const n = { ...prev }; delete n[i]; return n; });
-                      }}
-                      onDelete={async () => {
-                        if (!recorded) return;
-                        const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques/${recorded.id}`, manager), { method: 'DELETE', credentials: 'include' });
-                        if (res.ok) setCheques(prev => prev.filter(c => c.id !== recorded.id));
-                      }}
-                      onStatusChange={async (status) => {
-                        if (!recorded) return;
-                        const res = await fetch(leadUrl(`/api/leads/${lead.id}/cheques/${recorded.id}/status`, manager), {
-                          method: 'PATCH', credentials: 'include',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ status }),
-                        });
-                        const body = await res.json().catch(() => ({}));
-                        if (res.ok && body?.id) setCheques(prev => prev.map(c => c.id === body.id ? body : c));
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            )}
-
-            {!chequesLoading && !plan && (
-              <p className="text-[10px] text-[#92400e] bg-[#fef3c7] rounded-lg px-2.5 py-1.5">
-                Issue the payment plan first — the cheque series will appear here once payments are scheduled.
-              </p>
-            )}
-
-            {/* Any extra physical cheques that don't match a plan-item description.
-                Customer-uploaded references intentionally don't appear here —
-                they're rendered as a dedicated mapping list below. */}
-            {!chequesLoading && plan && (() => {
-              const planDescs = new Set(sortedItems.map(it => it.description ?? ''));
-              const orphans = cheques.filter(c => !c.isCustomerUpload && (!c.notes || !planDescs.has(c.notes)));
-              if (orphans.length === 0) return null;
-              return (
-                <div className="border-t border-[#fde68a] pt-3 space-y-1.5">
-                  <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide">Extra / Unscheduled Cheques</p>
-                  {orphans.map(c => (
-                    <div key={c.id} className="flex items-center gap-2 bg-white border border-[#fde68a] rounded-lg px-3 py-2">
-                      <CreditCard size={11} className="text-[#f59e0b] shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-semibold text-[#1a1916]">{c.chequeSerial} · {c.bankName}</p>
-                        <p className="text-[10px] text-[#9b9890]">AED {(c.amountFils / 100).toLocaleString('en-AE')} · Due {c.dueDate} {c.notes ? `· ${c.notes}` : ''}</p>
-                      </div>
-                      <button onClick={() => handleDeleteCheque(c.id)} className="text-[#c8c6c0] hover:text-red-500 transition-colors cursor-pointer shrink-0">
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-
-            {/* Customer-uploaded references — shown when stage is cheques_submitted.
-                Each row is one upload; RP maps it to a plan installment + tags
-                the verified payment method. This replaces the old Series View
-                for the customer-upload path. */}
-            {lead.stage === 'cheques_submitted' && hasCustomerUploads && (
-              <div className={`pt-3 space-y-2 ${plan ? 'border-t border-[#fde68a]' : ''}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] font-semibold text-[#854d0e] uppercase tracking-wide flex items-center gap-1.5">
-                    Payment references uploaded by customer
-                    <span className="bg-[#fde68a] rounded px-1.5 py-0.5 text-[9px]">{customerUploads.length}</span>
-                  </p>
-                  {customerUploads.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => openDocsTogether(customerUploads.map(c => ({ fileUrl: c.imageUrl, displayName: c.notes ?? 'Cheque' })))}
-                      className="text-[10px] font-semibold text-[#0369a1] hover:underline cursor-pointer flex items-center gap-1 shrink-0"
-                    >
-                      <ExternalLink size={11} /> View all
-                    </button>
-                  )}
-                </div>
-                {customerUploads.map((c, i) => {
-                  const previewLabel = c.notes || `Payment ${i + 1}`;
-                  const openPreview = () => c.imageUrl && openDocViewer({ fileUrl: c.imageUrl, caption: previewLabel });
-                  return (
-                    <div key={c.id} className="bg-white border border-[#fde68a] rounded-xl overflow-hidden">
-                      {/* Top band: thumbnail + meta — full width, no narrow column squeeze */}
-                      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-[#fef3c7] bg-[#fffdf0]">
-                        <button
-                          type="button"
-                          onClick={openPreview}
-                          disabled={!c.imageUrl}
-                          className="relative w-14 h-14 rounded-lg border border-[#fde68a] overflow-hidden bg-[#fef9c3] flex items-center justify-center hover:opacity-80 disabled:cursor-default transition-opacity cursor-pointer flex-shrink-0"
-                          aria-label={`Preview ${previewLabel}`}
-                        >
-                          {c.imageUrl && !c.imageUrl.toLowerCase().split('?')[0].endsWith('.pdf')
-                            // eslint-disable-next-line @next/next/no-img-element
-                            ? <img src={c.imageUrl} alt={previewLabel} className="w-full h-full object-cover" />
-                            : <FileText size={16} className="text-[#9b9890]" />
-                          }
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[12px] font-semibold text-[#1a1916] truncate">{previewLabel}</p>
-                          <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-[#9b9890] mt-0.5">
-                            {c.amountFils > 0 && <span className="text-[#1a1916] font-semibold">AED {(c.amountFils / 100).toLocaleString('en-AE')}</span>}
-                            {c.dueDate && <span>Due {c.dueDate}</span>}
-                            {c.ocrStatus === 'done' && <span className="text-[#2e9f82]">✓ Auto-read</span>}
-                          </div>
-                        </div>
-                        {c.imageUrl && (
-                          <button
-                            type="button"
-                            onClick={openPreview}
-                            className="text-[10px] font-semibold text-[#0369a1] hover:underline cursor-pointer flex-shrink-0"
-                          >
-                            View
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {chequeError && (
-              <p className="text-[10px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{chequeError}</p>
-            )}
-
-            <div className="flex gap-2 pt-1 flex-wrap">
-              {/* Approve customer cheques — only shown in cheques_submitted stage */}
-              {lead.stage === 'cheques_submitted' && (
-                <button
-                  disabled={confirmingCollection}
-                  onClick={async () => {
-                    setConfirmingCollection(true); setChequeError(null);
-                    try {
-                      const res = await fetch(leadUrl(`/api/leads/${lead.id}/approve-cheques`, manager), { method: 'PATCH', credentials: 'include' });
-                      const body = await res.json().catch(() => ({}));
-                      if (!res.ok) { setChequeError(body.message ?? 'Failed'); return; }
-                      setPanel('none');
-                      // Success ⇒ contract auto-issued, lead is now CONVERTED (server truth).
-                      setLeads(prev => prev.map(l => l.id !== lead.id ? l : { ...l, stage: 'converted' as LeadStage }));
-                    } finally { setConfirmingCollection(false); }
-                  }}
-                  className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
-                >
-                  {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
-                  Payment Review & Approve
-                </button>
-              )}
-              {/* Only the customer-upload path uses "Payment Review & Approve" above;
-                  the RP-recorded path uses this one. Never show both at once. */}
-              {lead.stage !== 'cheques_submitted' && (
-                <button
-                  disabled={confirmingCollection || cheques.length === 0}
-                  onClick={handleConfirmCollected}
-                  className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg bg-[#2e9f82] text-white font-semibold hover:bg-[#1f6655] disabled:opacity-50 transition-colors cursor-pointer"
-                >
-                  {confirmingCollection ? <Loader2 size={11} className="animate-spin" /> : <BadgeCheck size={12} />}
-                  Confirm All Collected
-                </button>
-              )}
-              <button onClick={() => setPanel('none')} className="text-xs px-4 py-2 rounded-lg bg-white border border-[#fde68a] text-[#854d0e] hover:bg-[#fef9c3] transition-colors cursor-pointer">
-                Close
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Payment-reference previews now open in the secure in-portal viewer
-          (openDocViewer) — no raw iframe/img, no download. */}
-
-      {/* ── Notify Guard panel ── */}
-      {panel === 'guard' && viewing && (
-        <div className="border-t border-[#fef3c7] bg-[#fffbeb] px-5 py-4">
-          <p className="text-xs font-semibold text-[#92400e] mb-1 flex items-center gap-1.5">
-            <ShieldAlert size={12} className="text-[#f59e0b]" /> Notify Security Guard
-          </p>
-          <p className="text-[11px] text-[#b45309] mb-4">
-            Viewing at {unitLabel ?? 'unit'}{building ? ` · ${building}` : ''} — {fmtDateTime(viewing.scheduledAt)}
-          </p>
-
-          <div className="mb-3">
-            <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">Guard Phone or Email <span className="text-red-500">*</span></label>
-            <input
-              type="text"
-              value={guardContact}
-              onChange={e => setGuardContact(e.target.value)}
-              placeholder="+971 50 123 4567 or guard@building.ae"
-              className="w-full text-xs border border-[#fde68a] rounded-lg px-3 py-2 focus:outline-none focus:border-[#f59e0b] bg-white text-[#1a1916]"
-            />
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-[10px] font-semibold text-[#6b6860] uppercase tracking-wide mb-1">Message <span className="font-normal normal-case">(editable)</span></label>
-            <textarea
-              value={guardMsg}
-              onChange={e => setGuardMsg(e.target.value)}
-              rows={5}
-              className="w-full text-xs border border-[#fde68a] rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:border-[#f59e0b] bg-white text-[#3d3b35] leading-relaxed"
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {/* WhatsApp */}
-            {guardContact.replace(/\D/g, '').length >= 8 && (
-              <a
-                href={`https://wa.me/${guardContact.replace(/\D/g, '')}?text=${encodeURIComponent(guardMsg)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg text-white cursor-pointer"
-                style={{ backgroundColor: '#25d366' }}
-              >
-                <Phone size={12} /> WhatsApp
-              </a>
-            )}
-            {/* Email */}
-            {guardContact.includes('@') && (
-              <a
-                href={`mailto:${guardContact}?subject=${encodeURIComponent(`Viewing Alert — ${unitLabel ?? 'Unit'} on ${fmtDateTime(viewing.scheduledAt)}`)}&body=${encodeURIComponent(guardMsg)}`}
-                className="flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg text-white cursor-pointer"
-                style={{ backgroundColor: '#2e9f82' }}
-              >
-                <Mail size={12} /> Send Email
-              </a>
-            )}
-            {/* Copy */}
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(guardMsg).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                });
-              }}
-              className="flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg border border-[#fde68a] text-[#92400e] hover:bg-[#fef3c7] transition-colors cursor-pointer"
-            >
-              {copied ? <Check size={12} /> : <Copy size={12} />}
-              {copied ? 'Copied!' : 'Copy Message'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Reject document dialog ── */}
-      {rejectingDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setRejectingDoc(null); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="flex items-center justify-center w-9 h-9 rounded-full bg-[#fee2e2] shrink-0">
-                <X size={16} className="text-[#b91c1c]" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-[#1a1916]">Reject Document</p>
-                <p className="text-[11px] text-[#9b9890] mt-0.5">{rejectingDoc.label}</p>
-              </div>
-            </div>
-            <label className="block text-[11px] font-semibold text-[#3d3b35] mb-1.5">
-              Reason <span className="font-normal text-[#9b9890]">(optional — customer will see this)</span>
-            </label>
-            <textarea
-              value={rejectReason}
-              onChange={e => setRejectReason(e.target.value)}
-              placeholder="e.g. Document is blurry, please re-upload a clearer copy"
-              rows={3}
-              className="w-full text-xs border border-[#e8e6e0] rounded-xl px-3 py-2.5 resize-none focus:outline-none focus:border-[#b91c1c] text-[#1a1916] placeholder:text-[#c8c6c0]"
-            />
-            <div className="flex gap-2.5 mt-4">
-              <button
-                onClick={() => setRejectingDoc(null)}
-                className="flex-1 text-xs font-semibold px-4 py-2.5 rounded-xl border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors cursor-pointer">
-                Cancel
-              </button>
-              <button
-                disabled={docActioning === rejectingDoc.id}
-                onClick={async () => {
-                  const { id, label: _l } = rejectingDoc;
-                  setRejectingDoc(null);
-                  await handleRejectDoc(id, rejectReason);
-                }}
-                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl bg-[#b91c1c] hover:bg-[#991b1b] text-white disabled:opacity-50 transition-colors cursor-pointer">
-                {docActioning === rejectingDoc.id
-                  ? <><Loader2 size={12} className="animate-spin" /> Rejecting…</>
-                  : <><X size={12} /> Reject Document</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );
@@ -3101,7 +1364,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   });
 
   return (
-    <div className="p-5 sm:p-6 max-w-5xl mx-auto">
+    <div className="p-5 sm:p-6 max-w-6xl mx-auto">
 
       {/* Header */}
       <div className="flex items-center justify-between gap-3 mb-6">
@@ -3149,24 +1412,9 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
         </div>
       </div>
 
-      {/* Calendar view */}
-      {view === 'calendar' && !loading && (
-        <LeadsCalendarView
-          leads={leads}
-          onOpenLead={(id) => {
-            setView('row');
-            // Scroll the matching lead into view after the list re-renders
-            setTimeout(() => {
-              const el = document.getElementById(`lead-${id}`);
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 50);
-          }}
-        />
-      )}
-
-      {/* Row + Grid views — shared stage filter, search; only the leads container differs */}
-      {view !== 'calendar' && (
-      <>
+      {/* Stage filter + search are SHARED across all three views (Row · Grid ·
+          Calendar) so switching views keeps the same filter/search context; only
+          the body (further below) differs. */}
       {/* Pipeline strip — every stage (plus All) on a SINGLE line in one
           bordered card; columns flex to fit so there is no horizontal scroll.
           Always shown once loaded (even at zero leads). Doubles as the stage
@@ -3276,36 +1524,45 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
         </div>
       )}
 
-      {!loading && leads.length > 0 && filtered.length === 0 && (
+      {view !== 'calendar' && !loading && leads.length > 0 && filtered.length === 0 && (
         <div className="bg-white rounded-xl p-10 flex flex-col items-center text-center border border-[#ede9e3]">
           <p className="text-sm text-[#9b9890]">No leads match your search.</p>
           <button onClick={() => setSearch('')} className="mt-2 text-xs text-[#2e9f82] hover:underline cursor-pointer">Clear</button>
         </div>
       )}
 
-      {/* Leads — vertical rows or a 2-up card grid (items-start so an expanded
-          panel in one card doesn't stretch its neighbour). */}
-      {!loading && filtered.length > 0 && (
-        <div className={view === 'grid' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3 items-start' : 'space-y-2'}>
-          {filtered.map(lead => (
-            <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`}>
-              <LeadRow
-                lead={lead}
-                onMoveStage={moveStage}
-                moving={movingLead === lead.id}
-                onConvert={handleConvert}
-                setLeads={setLeads}
-                feeRules={feeRules}
-                preferredStartDays={preferredStartDays}
-                allowedInstallments={allowedInstallments}
-                manager={manager}
-                layout={view === 'grid' ? 'grid' : 'row'}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-      </>
+      {/* View body — Calendar, or the Row/Grid list. All three respect the stage
+          filter + search chrome above. */}
+      {view === 'calendar' ? (
+        !loading && leads.length > 0 && (
+          <LeadsCalendarView
+            leads={filtered}
+            onOpenLead={(id) => router.push(manager
+              ? `/dashboard/manager/leads/${id}?rp=${manager.rp}`
+              : `/rental-provider/dashboard/leads/${id}`)}
+          />
+        )
+      ) : (
+        !loading && filtered.length > 0 && (
+          <div className={view === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4' : 'space-y-2'}>
+            {filtered.map(lead => (
+              <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`}>
+                <LeadRow
+                  lead={lead}
+                  onMoveStage={moveStage}
+                  moving={movingLead === lead.id}
+                  onConvert={handleConvert}
+                  setLeads={setLeads}
+                  feeRules={feeRules}
+                  preferredStartDays={preferredStartDays}
+                  allowedInstallments={allowedInstallments}
+                  manager={manager}
+                  layout={view === 'grid' ? 'grid' : 'row'}
+                />
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );

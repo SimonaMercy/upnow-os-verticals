@@ -14,9 +14,11 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Search, X, BarChart2, Lock } from 'lucide-react';
+import { Search, X, BarChart2, Lock, CalendarRange } from 'lucide-react';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow/reportsYear';
 import ExecutiveOverview from '@/app/rental-provider/dashboard/reports/ExecutiveOverview';
+import DataExports from '@/app/rental-provider/dashboard/reports/DataExports';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
@@ -36,6 +38,7 @@ export default function ManagerReportsPage() {
     : (rps.find(r => r.permissions.canViewReports)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
   const allowed = effectiveRp != null && canForRp('canViewReports', effectiveRp);
 
+  const year = useReportsYear();
   const [search, setSearch] = useState('');
   const [openSlug, setOpenSlug] = useState<string | null>(slugParam);
 
@@ -117,12 +120,29 @@ export default function ManagerReportsPage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">Where this landlord&rsquo;s portfolio stands right now — then drill into any report below.</p>
         </div>
+        {/* Hub-wide year — scopes the overview and the default period each
+            time-based report opens with (snapshots ignore it). */}
+        <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+          <CalendarRange size={15} className="text-[#2e9f82]" />
+          <span className="text-xs font-medium text-[#6b6860]">Year</span>
+          <select
+            value={year === 'all' ? 'all' : String(year)}
+            onChange={e => setReportsYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1"
+            aria-label="Reports year">
+            {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            <option value="all">All years</option>
+          </select>
+        </label>
       </div>
 
       <ExecutiveOverview
         endpoint={`/api/manager/reports/executive-summary?rp=${effectiveRp}`}
         linkFor={(slug) => `/dashboard/manager/reports?rp=${effectiveRp}&slug=${slug}`}
+        year={year}
       />
+
+      <DataExports manager={{ rp: effectiveRp }} />
 
       <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">All reports</h2>
       <div className="relative max-w-sm mb-6">
