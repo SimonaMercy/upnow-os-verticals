@@ -39,6 +39,7 @@ export const REPORT_TILES: ReportTile[] = [
   // ── Leasing & Renewals ─────────────────────────────────────────────────
   { slug: 'renewal-forecast',   title: 'Renewal Forecast',         description: 'Leases coming up for renewal each month, with annual rent at stake.',  Icon: RefreshCw,    available: true,  group: 'leasing' },
   { slug: 'contract-renewal',   title: 'Contract Renewal Details',  description: 'Renewal calendar per property — leased units by renewal month (months sum to Total), plus Vacant and Total units.', Icon: CalendarClock, available: true, group: 'leasing' },
+  { slug: 'renewal-vacancy',    title: 'Renewal & Vacancy',         description: 'Occupied units by renewal month + Vacant + Total units, straight from each unit\'s Available/Occupied status. Click Vacant to list the units.', Icon: Building2, available: true, group: 'leasing' },
   { slug: 'leases-by-month',    title: 'Leases by Month',          description: 'How many leases started each month, by start date — expand to see them by customer.', Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'lease-expiry',       title: 'Lease Expiry Report',      description: 'Active contracts ending within 30 / 60 / 90 / 180 / 365 days.',       Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'leasing-activity',   title: 'Leasing Activity',         description: 'New leases per month, rent signed, and Ejari status.',                 Icon: CalendarClock, available: true, group: 'leasing' },

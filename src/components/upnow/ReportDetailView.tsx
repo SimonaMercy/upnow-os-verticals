@@ -19,7 +19,7 @@ import {
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'leases-by-month' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'contract-renewal' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'leases-by-month' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'contract-renewal' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -298,6 +298,21 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Contract Renewal Details',
     description: 'The renewal calendar for one year — every property down the side, the twelve months across the top, then Total · Vacant · Total units. Each occupied unit is counted once, in the month of its renewal event within the selected year: the month its renewal falls due (the day after the term ends — a lease ending 31 Jul renews in August), or, for a unit already renewed this year, the month its current term began. The months add up to the Total. A lease running straight through the year sits in no month — its renewal belongs to another year’s calendar. Occupied = any unit with a lease, including ones winding down (terminating) or still being set up in Operations — one per unit; Vacant = units with no lease at all (click a Vacant count to list those units); Total units = every unit. Pick the year above.',
     endpoint: '/api/reports/contract-renewal',
+    layout: 'countMatrix',
+    controlKey: 'year',
+    columns: [],
+    totals: [
+      { key: 'leased', label: 'Leased units', type: 'number', keep: true },
+      { key: 'vacant', label: 'Vacant', type: 'number', keep: true },
+      { key: 'totalUnits', label: 'Total units', type: 'number', keep: true },
+      { key: 'properties', label: 'Properties', type: 'number' },
+    ],
+  },
+
+  'renewal-vacancy': {
+    title: 'Renewal & Vacancy',
+    description: 'Renewal calendar and vacancy by unit status — every property down the side, the twelve months across the top, then Total · Vacant · Total units. Vacant = units marked Available, Occupied (Total) = units marked Occupied. Month cells count renewal events (each occupied unit\'s renewal-due month, plus its start month if it already renewed this year), matching the Renewal Forecast. Total units = every unit. Click a Vacant count to list those units.',
+    endpoint: '/api/reports/renewal-vacancy',
     layout: 'countMatrix',
     controlKey: 'year',
     columns: [],
