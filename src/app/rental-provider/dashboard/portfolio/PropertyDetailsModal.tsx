@@ -28,7 +28,9 @@ import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
-import { LayoutFinancialsModal, type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import type { FeeRuleLite } from '@/lib/feeRules';
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
@@ -140,7 +142,7 @@ function leasingLabel(t: Property['leasingType']): string {
 
 // ── Unit Mix helpers ──────────────────────────────────────
 // Shared column template for the mix table (Type · Layout · Sqft · Units · Rent/unit · Total · Edit).
-const MIX_COLS = 'minmax(100px,0.9fr) minmax(132px,1.4fr) 78px 52px minmax(110px,1fr) minmax(120px,1fr) 74px';
+const MIX_COLS = 'minmax(100px,0.9fr) minmax(132px,1.4fr) 78px 52px minmax(110px,1fr) minmax(120px,1fr) 82px';
 const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
 // Backend numeric(…) columns (size, rent) come back as strings — coerce defensively.
 const numOrNull = (v: unknown): number | null => {
@@ -287,7 +289,7 @@ export function PropertyDetailsModal({
   // Unit Mix per-layout pricing — floor-plans power the editor.
   const [plans, setPlans] = useState<Plan[]>([]);
   const [feeRules, setFeeRules] = useState<Record<string, FeeRuleLite[]> | null>(null);
-  const [editPlan, setEditPlan] = useState<Plan | null>(null);
+  const [editLayout, setEditLayout] = useState<{ planLabel: string | null; unitCount: number } | null>(null);
   const [showAllUnits, setShowAllUnits] = useState(false);
 
   // RP vs manager scope for the pricing endpoints (mirrors the units workspace).
@@ -417,10 +419,6 @@ export function PropertyDetailsModal({
     [plans],
   );
   const mix = useMemo(() => buildUnitMix(units, planLabelSet), [units, planLabelSet]);
-  const openEditor = useCallback((planLabel: string | null) => {
-    const pl = plans.find((x) => (x.planLabel ?? '') === (planLabel ?? ''));
-    if (pl) setEditPlan(pl);
-  }, [plans]);
 
   // ── document slots ──────────────────────────────────────
   // The proof-of-right slot depends on the leasing model.
@@ -791,10 +789,10 @@ export function PropertyDetailsModal({
                             {r.unpriced > 0 && r.sum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            {pricingEditable && r.hasPlan && (
-                              <button type="button" onClick={() => openEditor(r.planLabel)}
+                            {pricingEditable && r.planLabel && (
+                              <button type="button" onClick={() => setEditLayout({ planLabel: r.planLabel, unitCount: r.count })}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg, border: `1px solid ${C.greenBd}`, padding: '5px 10px', borderRadius: 8, cursor: 'pointer' }}>
-                                <Pencil size={12} /> Price
+                                <Pencil size={12} /> Edit
                               </button>
                             )}
                           </div>
@@ -1106,17 +1104,35 @@ export function PropertyDetailsModal({
         </div>
       )}
 
-      {/* ── PER-LAYOUT PRICING EDITOR ── */}
-      {editPlan && (
-        <LayoutFinancialsModal
-          plan={editPlan}
-          manager={managerScope}
-          rpQ={pricingRpQ}
-          feeRules={feeRules}
-          onClose={() => setEditPlan(null)}
-          onSaved={() => { setEditPlan(null); loadUnits(); loadFloorPlans(); }}
-        />
-      )}
+      {/* ── PER-LAYOUT EDITOR (one popup: all unit details for every unit on the layout) ── */}
+      {editLayout && (() => {
+        const rep = units.find((u) => (u.planLabel ?? '') === (editLayout.planLabel ?? ''));
+        if (!rep) return null;
+        const plan = plans.find((pl) => (pl.planLabel ?? '') === (editLayout.planLabel ?? ''));
+        return (
+          <UnitFormModal
+            open
+            layoutBulk
+            layoutUnitCount={editLayout.unitCount}
+            title="Edit layout"
+            propertyCategory={p.spaceCategory}
+            propertyStandalone
+            propertyId={property.id}
+            planLabel={editLayout.planLabel}
+            manager={managerScope}
+            rpQ={pricingRpQ}
+            feeRules={feeRules}
+            existingFloorPlanUrl={plan?.floorPlanUrl ?? null}
+            initial={unitToFormInitial(rep as unknown as UnitRecord)}
+            onSave={async (data, floorPlan) => {
+              await saveLayoutDetails({ propertyId: property.id, planLabel: editLayout.planLabel ?? '', data, floorPlan, manager: managerScope });
+              loadUnits();
+              loadFloorPlans();
+            }}
+            onClose={() => setEditLayout(null)}
+          />
+        );
+      })()}
     </>
   );
 }
