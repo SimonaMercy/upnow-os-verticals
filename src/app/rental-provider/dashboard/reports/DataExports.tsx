@@ -12,7 +12,8 @@
 
 import { useState } from 'react';
 import {
-  FileSpreadsheet, Building2, Users, Building, Boxes, Loader2, Download, AlertCircle,
+  FileSpreadsheet, Building2, Users, Building, Boxes, FileSignature, RefreshCw,
+  Loader2, Download, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { downloadXlsx } from '@/lib/xlsx';
@@ -59,6 +60,20 @@ const EXPORTS: ExportDef[] = [
     description: 'Every unit with pricing, layout, fees & availability.',
     url: '/api/platform-export/units',
     Icon: Boxes,
+  },
+  {
+    key: 'contracts-new-lease',
+    title: 'Contracts — New Lease',
+    description: 'New leases: market price, rent, cheque splits, fees, terms & documents.',
+    url: '/api/platform-export/contracts?type=new',
+    Icon: FileSignature,
+  },
+  {
+    key: 'contracts-renewal',
+    title: 'Contracts — Renewal',
+    description: 'Renewals: market price, rent, cheque splits, fees, terms & documents.',
+    url: '/api/platform-export/contracts?type=renewal',
+    Icon: RefreshCw,
   },
 ];
 
