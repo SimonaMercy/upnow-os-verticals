@@ -86,7 +86,7 @@ interface TotalSpec {
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Forecast',
-  description: 'The full renewal year plus the forward window. Each lease is bucketed by the month its renewal falls due — the day after the term ends, so a lease ending 31 Jul renews in August. Past months of the current year show renewals already completed (stage Renewed, counted in the month the new term began); a unit renewed this year can appear again at its next due date. Lapsed leases on occupied units show as Overdue. An unsigned draft renewal does not replace the current lease — it marks that lease\'s renewal as in progress (Proposed).',
+  description: 'The full renewal year plus the forward window. Each lease is bucketed by the month its renewal falls due — the day after the term ends, so a lease ending 31 Jul renews in August. Past months of the current year show renewals already completed (stage Renewed, counted in the month the new term began); a unit renewed this year can appear again at its next due date. A lease that lapsed this year stays in the month its renewal fell due (and counts in the Overdue tile); older lapses collapse into the Overdue section. An unsigned draft renewal does not replace the current lease — it marks that lease\'s renewal as in progress (Proposed).',
   endpoint: '/api/reports/renewal-forecast',
   layout: 'grouped',
   controlKey: 'forecastMonths',
