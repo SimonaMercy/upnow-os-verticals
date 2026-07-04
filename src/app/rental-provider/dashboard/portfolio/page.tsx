@@ -697,6 +697,7 @@ export default function PortfolioPage() {
           <PropertyDetailsModal
             property={detailsProperty}
             editable
+            canEditPricing
             stats={{
               units: detailsProperty.unitCount ?? 0,
               occupied: detailsProperty.occupiedCount ?? 0,

@@ -22,16 +22,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
-  Pencil, ChevronLeft, ChevronRight, Loader2,
+  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers,
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
+import { LayoutFinancialsModal, type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import type { FeeRuleLite } from '@/lib/feeRules';
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
 
-/** Minimal unit shape for the in-popup units list. */
+/** Unit shape for the in-popup units list + Unit Mix aggregation. */
 interface UnitLite {
   id: number;
   unitNumber: string;
@@ -39,6 +41,12 @@ interface UnitLite {
   unitType: string;
   availability: string;
   listingStatus: string;
+  bedrooms: number | null;
+  unitSizeSqm: number | null;
+  unitSizeSqft: number | null;
+  planLabel: string | null;
+  rentalPrice: number | null;
+  numBalconies: number | null;
 }
 
 interface Property {
@@ -131,6 +139,108 @@ function leasingLabel(t: Property['leasingType']): string {
   return 'Direct lease';
 }
 
+// ── Unit Mix helpers ──────────────────────────────────────
+// Shared column template for the mix table (Type · Layout · Sqft · Balcony · Units · Rent/unit · Total · Edit).
+const MIX_COLS = 'minmax(96px,0.85fr) minmax(128px,1.35fr) 72px 64px 48px minmax(102px,1fr) minmax(114px,1fr) 72px';
+const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
+// Backend numeric(…) columns (size, rent) come back as strings — coerce defensively.
+const numOrNull = (v: unknown): number | null => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const unitTypeLabel = (t: string) => (t ? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Other');
+const bedroomsLabel = (b: number | null) => (b == null ? '—' : b === 0 ? 'Studio' : `${b} Bedroom`);
+// A min–max span, collapsing to a single value when equal (used for size + price).
+const spanLabel = (lo: number | null, hi: number | null) => {
+  if (lo == null && hi == null) return '—';
+  const a = lo ?? (hi as number), b = hi ?? (lo as number);
+  return a === b ? aed(a) : `${aed(a)} – ${aed(b)}`;
+};
+
+/** One layout (units sharing a plan_label) within a type × bedrooms group. */
+interface MixLayout {
+  planLabel: string | null;
+  label: string;
+  count: number;
+  sqmLo: number | null; sqmHi: number | null;
+  sqftLo: number | null; sqftHi: number | null;
+  priceLo: number | null; priceHi: number | null;
+  sum: number;          // Σ annual rent over priced units
+  unpriced: number;
+  balcony: boolean;     // any unit on the layout has a balcony
+  hasPlan: boolean;     // a matching floor-plan exists (→ editable)
+}
+/** A type × bedrooms mix row, aggregating its layouts. */
+interface MixGroup {
+  key: string;
+  unitType: string;
+  bedrooms: number | null;
+  count: number;
+  sqmLo: number | null; sqmHi: number | null;
+  sqftLo: number | null; sqftHi: number | null;
+  priceLo: number | null; priceHi: number | null;
+  sum: number;
+  unpriced: number;
+  balcony: boolean;
+  layouts: MixLayout[];
+}
+
+/** A flattened mix row — one layout, carrying its parent unit type + bedrooms. */
+interface MixRow extends MixLayout { unitType: string; bedrooms: number | null; }
+
+const minOf = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.min(a, b));
+const maxOf = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.max(a, b));
+
+/**
+ * Fold the units list into a type × bedrooms → layouts tree with counts, size
+ * spans, price spans and rent-roll sums. `planLabels` (from the floor-plans
+ * endpoint) marks which layouts have an editable plan.
+ */
+function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRow[]; totalUnits: number; grandSum: number; unpriced: number } {
+  const groups = new Map<string, MixGroup>();
+  for (const u of units) {
+    const gkey = `${u.unitType}::${u.bedrooms ?? ''}`;
+    let g = groups.get(gkey);
+    if (!g) {
+      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, balcony: false, layouts: [] };
+      groups.set(gkey, g);
+    }
+    const lp = u.planLabel ?? null;
+    let l = g.layouts.find((x) => x.planLabel === lp);
+    if (!l) {
+      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, balcony: false, hasPlan: lp != null && planLabels.has(lp) };
+      g.layouts.push(l);
+    }
+    const price = u.rentalPrice;
+    const nb = u.numBalconies;
+    for (const bucket of [g, l]) {
+      bucket.count += 1;
+      if (nb != null && nb > 0) bucket.balcony = true;
+      bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
+      bucket.sqmHi = maxOf(bucket.sqmHi, u.unitSizeSqm);
+      bucket.sqftLo = minOf(bucket.sqftLo, u.unitSizeSqft);
+      bucket.sqftHi = maxOf(bucket.sqftHi, u.unitSizeSqft);
+      if (price != null && price > 0) {
+        bucket.sum += price;
+        bucket.priceLo = minOf(bucket.priceLo, price);
+        bucket.priceHi = maxOf(bucket.priceHi, price);
+      } else {
+        bucket.unpriced += 1;
+      }
+    }
+  }
+  const out = [...groups.values()];
+  out.forEach((g) => g.layouts.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })));
+  out.sort((a, b) => a.unitType.localeCompare(b.unitType) || (a.bedrooms ?? -1) - (b.bedrooms ?? -1));
+  // Flatten to one row per layout (no grouping), keeping type/bedroom order.
+  const rows: MixRow[] = out.flatMap((g) => g.layouts.map((l) => ({ ...l, unitType: g.unitType, bedrooms: g.bedrooms })));
+  const totalUnits = units.length;
+  const grandSum = out.reduce((s, g) => s + g.sum, 0);
+  const unpriced = out.reduce((s, g) => s + g.unpriced, 0);
+  return { rows, totalUnits, grandSum, unpriced };
+}
+
 // Open a transient file picker and resolve with the chosen files.
 function pickFiles(multiple: boolean): Promise<File[]> {
   return new Promise((resolve) => {
@@ -149,6 +259,8 @@ export function PropertyDetailsModal({
   fetchBase = '/properties',
   fetchQuery = '',
   editable = false,
+  canEditPricing = false,
+  pricingRp,
   onEdit,
   onClose,
 }: {
@@ -159,6 +271,10 @@ export function PropertyDetailsModal({
   fetchQuery?: string;
   /** When true, the documents section allows direct upload / replace / delete. */
   editable?: boolean;
+  /** When true, the Unit Mix table exposes per-layout pricing edit (RP always; manager needs canEditProperties). */
+  canEditPricing?: boolean;
+  /** Manager only — the landlord's rental-provider id, scoping the pricing endpoints (/manager/units*). */
+  pricingRp?: number;
   /** Opens the edit form (header "Edit" button). Hidden when omitted. */
   onEdit?: () => void;
   onClose: () => void;
@@ -170,6 +286,19 @@ export function PropertyDetailsModal({
   const [unitsLoading, setUnitsLoading] = useState(true);
   const [detail, setDetail] = useState<Partial<Property> | null>(null);
   const [photos, setPhotos] = useState<{ id: number; url: string }[]>([]);
+  // Unit Mix per-layout pricing — floor-plans power the editor.
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [feeRules, setFeeRules] = useState<Record<string, FeeRuleLite[]> | null>(null);
+  const [editPlan, setEditPlan] = useState<Plan | null>(null);
+  const [showAllUnits, setShowAllUnits] = useState(false);
+
+  // RP vs manager scope for the pricing endpoints (mirrors the units workspace).
+  // rp is a dedicated prop — it drives ONLY the pricing calls, never the units fetch.
+  const isManager = fetchBase.includes('/manager');
+  const managerScope = isManager && pricingRp != null ? { rp: pricingRp } : undefined;
+  const pricingRpQ = pricingRp != null ? `rp=${pricingRp}` : '';
+  // Pricing edit is available when allowed AND (RP, or a manager with a resolved rp).
+  const pricingEditable = canEditPricing && (!isManager || pricingRp != null);
 
   // Overlays
   const [lb, setLb] = useState<number | null>(null);          // lightbox photo index
@@ -239,26 +368,62 @@ export function PropertyDetailsModal({
     return () => { cancelled = true; };
   }, [property.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api${fetchBase}/${property.id}/units${fetchQuery ? `?${fetchQuery}` : ''}`, { credentials: 'include' });
-        const data = res.ok ? await res.json() : [];
-        const rows: UnitLite[] = Array.isArray(data) ? data : [];
-        rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
-        if (!cancelled) setUnits(rows);
-      } catch {
-        if (!cancelled) setUnits([]);
-      } finally {
-        if (!cancelled) setUnitsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadUnits = useCallback(async () => {
+    try {
+      const res = await fetch(`/api${fetchBase}/${property.id}/units${fetchQuery ? `?${fetchQuery}` : ''}`, { credentials: 'include' });
+      const data = res.ok ? await res.json() : [];
+      // numeric(…) columns (size, rent) serialise as strings — normalise for the mix maths.
+      const rows: UnitLite[] = (Array.isArray(data) ? data : []).map((r: Record<string, unknown>) => ({
+        ...(r as unknown as UnitLite),
+        bedrooms: numOrNull(r.bedrooms),
+        unitSizeSqm: numOrNull(r.unitSizeSqm),
+        unitSizeSqft: numOrNull(r.unitSizeSqft),
+        rentalPrice: numOrNull(r.rentalPrice),
+        numBalconies: numOrNull(r.numBalconies),
+      }));
+      rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
+      setUnits(rows);
+    } catch {
+      setUnits([]);
+    } finally {
+      setUnitsLoading(false);
+    }
   }, [property.id, fetchBase, fetchQuery]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadUnits(); }, [loadUnits]);
+
+  // Floor-plans (layout aggregates) — only needed to power the per-layout
+  // pricing editor, so fetched only when pricing edits are available.
+  const loadFloorPlans = useCallback(async () => {
+    if (!pricingEditable) return;
+    try {
+      const url = isManager
+        ? `/api/manager/units?rp=${pricingRp}&propertyId=${property.id}`
+        : `/api/properties/floor-plans?propertyId=${property.id}`;
+      const res = await fetch(url, { credentials: 'include' });
+      const data = res.ok ? await res.json() : null;
+      setPlans(Array.isArray(data?.plans) ? data.plans : []);
+      setFeeRules(data?.feeRules ?? null);
+    } catch {
+      setPlans([]); setFeeRules(null);
+    }
+  }, [pricingEditable, isManager, pricingRp, property.id]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadFloorPlans(); }, [loadFloorPlans]);
 
   // Merge: prefer freshly-fetched detail (full location names + leasing model).
   const p: Property = { ...property, ...(detail ?? {}) };
+
+  // ── Unit Mix (grouped by type × bedrooms, expandable to layouts) ─────────
+  const planLabelSet = useMemo(
+    () => new Set(plans.map((pl) => pl.planLabel).filter((x): x is string => x != null)),
+    [plans],
+  );
+  const mix = useMemo(() => buildUnitMix(units, planLabelSet), [units, planLabelSet]);
+  const openEditor = useCallback((planLabel: string | null) => {
+    const pl = plans.find((x) => (x.planLabel ?? '') === (planLabel ?? ''));
+    if (pl) setEditPlan(pl);
+  }, [plans]);
 
   // ── document slots ──────────────────────────────────────
   // The proof-of-right slot depends on the leasing model.
@@ -586,38 +751,115 @@ export function PropertyDetailsModal({
                 </div>
               </div>
 
-              {/* UNITS */}
+              {/* UNITS — Unit Mix (one flat row per layout) + rent roll */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                {sectionIcon(Building2)}
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Units <span style={{ color: C.mute3, fontWeight: 600 }}>{unitsLoading ? '' : (units.length || totalUnits)}</span></div>
+                {sectionIcon(Layers)}
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Unit Mix <span style={{ color: C.mute3, fontWeight: 600 }}>{unitsLoading ? '' : (units.length || totalUnits)}</span></div>
                 <div style={{ flex: 1 }} />
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg3, padding: '5px 11px', borderRadius: 7 }}>{occupied} occupied · {vacant} vacant</span>
               </div>
-              <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
-                <div style={{ maxHeight: 286, overflowY: 'auto' }}>
-                  {unitsLoading ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', fontSize: 13, color: C.mute3, background: '#fff' }}>
-                      <Loader2 size={15} className="animate-spin" /> Loading units…
-                    </div>
-                  ) : units.length === 0 ? (
-                    <div style={{ padding: '14px 16px', fontSize: 13, color: C.mute3, background: '#fff' }}>No units yet.</div>
-                  ) : units.map((u, i) => {
-                    const occ = u.availability === 'occupied';
-                    const maint = u.availability === 'maintenance';
-                    const pub = u.listingStatus === 'published';
-                    const color = occ || pub ? C.greenT : maint ? '#854d0e' : C.mute;
-                    const bg = occ || pub ? C.greenBg3 : maint ? '#fef3c7' : C.line3;
-                    const label = occ ? 'Occupied' : maint ? 'Maintenance' : pub ? 'Published' : 'Available';
-                    return (
-                      <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line4}`, background: '#fff' }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
-                        <span style={{ flex: 1, fontSize: 13, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || u.unitType.replace(/_/g, ' ')}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '4px 10px', borderRadius: 7 }}>{label}</span>
+
+              <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 14 }}>
+                {unitsLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16, fontSize: 13, color: C.mute3, background: '#fff' }}>
+                    <Loader2 size={15} className="animate-spin" /> Loading units…
+                  </div>
+                ) : units.length === 0 ? (
+                  <div style={{ padding: 16, fontSize: 13, color: C.mute3, background: '#fff' }}>No units yet.</div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <div style={{ minWidth: 720 }}>
+                      {/* header */}
+                      <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
+                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Balcony', 'Units', 'Rent / unit', 'Total / yr', ''].map((h, i) => (
+                          <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: (i === 3 || i === 4) ? 'center' : (i === 2 || i === 5 || i === 6) ? 'right' : 'left' }}>{h}</div>
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {/* one flat row per layout — no grouping */}
+                      {mix.rows.map((r, i) => (
+                        <div key={`${r.unitType}::${r.bedrooms ?? ''}::${r.label}`}
+                          style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '11px 14px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{unitTypeLabel(r.unitType)}</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
+                          <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
+                          <div style={{ textAlign: 'center' }}>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: r.balcony ? C.greenT : C.mute3, background: r.balcony ? C.greenBg3 : C.line3, padding: '3px 9px', borderRadius: 6 }}>{r.balcony ? 'Yes' : 'No'}</span>
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
+                          {/* Rent / unit — the per-unit annual price */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: r.priceLo == null ? C.amber : C.ink2, fontVariantNumeric: 'tabular-nums' }}>{r.priceLo == null ? 'No price' : `AED ${spanLabel(r.priceLo, r.priceHi)}`}</span>
+                          </div>
+                          {/* Total / yr — Rent × Units for the layout */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: r.sum > 0 ? C.greenD : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.sum > 0 ? `AED ${aed(r.sum)}` : '—'}</span>
+                            {r.unpriced > 0 && r.sum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            {pricingEditable && r.hasPlan && (
+                              <button type="button" onClick={() => openEditor(r.planLabel)}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg, border: `1px solid ${C.greenBd}`, padding: '5px 10px', borderRadius: 8, cursor: 'pointer' }}>
+                                <Pencil size={12} /> Price
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* total — the "sum of pricing as per mix" (rent roll = Σ rent × units) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '12px 14px', borderTop: `2px solid ${C.line}`, background: C.greenBg2 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, letterSpacing: '.02em' }}>TOTAL</div>
+                        <div />
+                        <div />
+                        <div />
+                        <div style={{ fontSize: 13, fontWeight: 800, color: C.ink, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{mix.totalUnits}</div>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: C.mute2, textAlign: 'right', textTransform: 'uppercase', letterSpacing: '.05em' }}>Rent roll</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.greenD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandSum)}</div>
+                        <div />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {/* caption + individual-units disclosure */}
+              {!unitsLoading && units.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
+                    Annual rent roll at asking prices{mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Price button to set a layout’s rent (applies to every unit on that layout).' : '.'}
+                  </div>
+                  <div style={{ marginBottom: 28 }}>
+                    <button type="button" onClick={() => setShowAllUnits((v) => !v)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, color: C.body, background: '#fff', border: `1px solid ${C.line}`, padding: '8px 13px', borderRadius: 10, cursor: 'pointer' }}>
+                      <Building2 size={14} /> {showAllUnits ? 'Hide' : 'Show'} individual units ({units.length})
+                      <ChevronDown size={14} style={{ transform: showAllUnits ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }} />
+                    </button>
+                    {showAllUnits && (
+                      <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginTop: 10 }}>
+                        <div style={{ maxHeight: 286, overflowY: 'auto' }}>
+                          {units.map((u, i) => {
+                            const occ = u.availability === 'occupied';
+                            const maint = u.availability === 'maintenance';
+                            const pub = u.listingStatus === 'published';
+                            const color = occ || pub ? C.greenT : maint ? '#854d0e' : C.mute;
+                            const bg = occ || pub ? C.greenBg3 : maint ? '#fef3c7' : C.line3;
+                            const label = occ ? 'Occupied' : maint ? 'Maintenance' : pub ? 'Published' : 'Available';
+                            return (
+                              <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line4}`, background: '#fff' }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
+                                <span style={{ flex: 1, fontSize: 13, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || u.unitType.replace(/_/g, ' ')}</span>
+                                {u.rentalPrice != null && u.rentalPrice > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(u.rentalPrice)}</span>}
+                                <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '4px 10px', borderRadius: 7 }}>{label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
               {/* LOCATION */}
               {hasLocation && (
@@ -869,6 +1111,18 @@ export function PropertyDetailsModal({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── PER-LAYOUT PRICING EDITOR ── */}
+      {editPlan && (
+        <LayoutFinancialsModal
+          plan={editPlan}
+          manager={managerScope}
+          rpQ={pricingRpQ}
+          feeRules={feeRules}
+          onClose={() => setEditPlan(null)}
+          onSaved={() => { setEditPlan(null); loadUnits(); loadFloorPlans(); }}
+        />
       )}
     </>
   );
