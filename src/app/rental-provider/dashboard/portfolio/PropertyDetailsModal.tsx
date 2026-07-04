@@ -151,11 +151,14 @@ const numOrNull = (v: unknown): number | null => {
 };
 const unitTypeLabel = (t: string) => (t ? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Other');
 const bedroomsLabel = (b: number | null) => (b == null ? '—' : b === 0 ? 'Studio' : `${b} Bedroom`);
-// A min–max span, collapsing to a single value when equal (used for size + price).
+// A min–max span, collapsing to a single value when the DISPLAYED (rounded)
+// numbers match — so 1313.95 & 1314.27 sqft both show as "1,314", not a range
+// of two identical-looking values (used for size + price).
 const spanLabel = (lo: number | null, hi: number | null) => {
   if (lo == null && hi == null) return '—';
   const a = lo ?? (hi as number), b = hi ?? (lo as number);
-  return a === b ? aed(a) : `${aed(a)} – ${aed(b)}`;
+  const fa = aed(a), fb = aed(b);
+  return fa === fb ? fa : `${fa} – ${fb}`;
 };
 
 /** One layout (units sharing a plan_label) within a type × bedrooms group. */
