@@ -28,7 +28,9 @@ import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
-import { LayoutFinancialsModal, type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import type { FeeRuleLite } from '@/lib/feeRules';
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
@@ -46,7 +48,6 @@ interface UnitLite {
   unitSizeSqft: number | null;
   planLabel: string | null;
   rentalPrice: number | null;
-  numBalconies: number | null;
 }
 
 interface Property {
@@ -140,8 +141,8 @@ function leasingLabel(t: Property['leasingType']): string {
 }
 
 // ── Unit Mix helpers ──────────────────────────────────────
-// Shared column template for the mix table (Type · Layout · Sqft · Balcony · Units · Rent/unit · Total · Edit).
-const MIX_COLS = 'minmax(96px,0.85fr) minmax(128px,1.35fr) 72px 64px 48px minmax(102px,1fr) minmax(114px,1fr) 72px';
+// Shared column template for the mix table (Type · Layout · Sqft · Units · Rent/unit · Total · Edit).
+const MIX_COLS = 'minmax(100px,0.9fr) minmax(132px,1.4fr) 78px 52px minmax(110px,1fr) minmax(120px,1fr) 82px';
 const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
 // Backend numeric(…) columns (size, rent) come back as strings — coerce defensively.
 const numOrNull = (v: unknown): number | null => {
@@ -151,11 +152,14 @@ const numOrNull = (v: unknown): number | null => {
 };
 const unitTypeLabel = (t: string) => (t ? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Other');
 const bedroomsLabel = (b: number | null) => (b == null ? '—' : b === 0 ? 'Studio' : `${b} Bedroom`);
-// A min–max span, collapsing to a single value when equal (used for size + price).
+// A min–max span, collapsing to a single value when the DISPLAYED (rounded)
+// numbers match — so 1313.95 & 1314.27 sqft both show as "1,314", not a range
+// of two identical-looking values (used for size + price).
 const spanLabel = (lo: number | null, hi: number | null) => {
   if (lo == null && hi == null) return '—';
   const a = lo ?? (hi as number), b = hi ?? (lo as number);
-  return a === b ? aed(a) : `${aed(a)} – ${aed(b)}`;
+  const fa = aed(a), fb = aed(b);
+  return fa === fb ? fa : `${fa} – ${fb}`;
 };
 
 /** One layout (units sharing a plan_label) within a type × bedrooms group. */
@@ -168,7 +172,6 @@ interface MixLayout {
   priceLo: number | null; priceHi: number | null;
   sum: number;          // Σ annual rent over priced units
   unpriced: number;
-  balcony: boolean;     // any unit on the layout has a balcony
   hasPlan: boolean;     // a matching floor-plan exists (→ editable)
 }
 /** A type × bedrooms mix row, aggregating its layouts. */
@@ -182,7 +185,6 @@ interface MixGroup {
   priceLo: number | null; priceHi: number | null;
   sum: number;
   unpriced: number;
-  balcony: boolean;
   layouts: MixLayout[];
 }
 
@@ -203,20 +205,18 @@ function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRo
     const gkey = `${u.unitType}::${u.bedrooms ?? ''}`;
     let g = groups.get(gkey);
     if (!g) {
-      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, balcony: false, layouts: [] };
+      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, layouts: [] };
       groups.set(gkey, g);
     }
     const lp = u.planLabel ?? null;
     let l = g.layouts.find((x) => x.planLabel === lp);
     if (!l) {
-      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, balcony: false, hasPlan: lp != null && planLabels.has(lp) };
+      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, hasPlan: lp != null && planLabels.has(lp) };
       g.layouts.push(l);
     }
     const price = u.rentalPrice;
-    const nb = u.numBalconies;
     for (const bucket of [g, l]) {
       bucket.count += 1;
-      if (nb != null && nb > 0) bucket.balcony = true;
       bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
       bucket.sqmHi = maxOf(bucket.sqmHi, u.unitSizeSqm);
       bucket.sqftLo = minOf(bucket.sqftLo, u.unitSizeSqft);
@@ -289,7 +289,7 @@ export function PropertyDetailsModal({
   // Unit Mix per-layout pricing — floor-plans power the editor.
   const [plans, setPlans] = useState<Plan[]>([]);
   const [feeRules, setFeeRules] = useState<Record<string, FeeRuleLite[]> | null>(null);
-  const [editPlan, setEditPlan] = useState<Plan | null>(null);
+  const [editLayout, setEditLayout] = useState<{ planLabel: string | null; unitCount: number } | null>(null);
   const [showAllUnits, setShowAllUnits] = useState(false);
 
   // RP vs manager scope for the pricing endpoints (mirrors the units workspace).
@@ -379,7 +379,6 @@ export function PropertyDetailsModal({
         unitSizeSqm: numOrNull(r.unitSizeSqm),
         unitSizeSqft: numOrNull(r.unitSizeSqft),
         rentalPrice: numOrNull(r.rentalPrice),
-        numBalconies: numOrNull(r.numBalconies),
       }));
       rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
       setUnits(rows);
@@ -420,10 +419,6 @@ export function PropertyDetailsModal({
     [plans],
   );
   const mix = useMemo(() => buildUnitMix(units, planLabelSet), [units, planLabelSet]);
-  const openEditor = useCallback((planLabel: string | null) => {
-    const pl = plans.find((x) => (x.planLabel ?? '') === (planLabel ?? ''));
-    if (pl) setEditPlan(pl);
-  }, [plans]);
 
   // ── document slots ──────────────────────────────────────
   // The proof-of-right slot depends on the leasing model.
@@ -771,8 +766,8 @@ export function PropertyDetailsModal({
                     <div style={{ minWidth: 720 }}>
                       {/* header */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
-                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Balcony', 'Units', 'Rent / unit', 'Total / yr', ''].map((h, i) => (
-                          <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: (i === 3 || i === 4) ? 'center' : (i === 2 || i === 5 || i === 6) ? 'right' : 'left' }}>{h}</div>
+                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Rent / unit', 'Total / yr', ''].map((h, i) => (
+                          <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
                         ))}
                       </div>
 
@@ -783,9 +778,6 @@ export function PropertyDetailsModal({
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{unitTypeLabel(r.unitType)}</div>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
                           <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
-                          <div style={{ textAlign: 'center' }}>
-                            <span style={{ fontSize: 10.5, fontWeight: 700, color: r.balcony ? C.greenT : C.mute3, background: r.balcony ? C.greenBg3 : C.line3, padding: '3px 9px', borderRadius: 6 }}>{r.balcony ? 'Yes' : 'No'}</span>
-                          </div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
                           {/* Rent / unit — the per-unit annual price */}
                           <div style={{ textAlign: 'right' }}>
@@ -797,10 +789,10 @@ export function PropertyDetailsModal({
                             {r.unpriced > 0 && r.sum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            {pricingEditable && r.hasPlan && (
-                              <button type="button" onClick={() => openEditor(r.planLabel)}
+                            {pricingEditable && r.planLabel && (
+                              <button type="button" onClick={() => setEditLayout({ planLabel: r.planLabel, unitCount: r.count })}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg, border: `1px solid ${C.greenBd}`, padding: '5px 10px', borderRadius: 8, cursor: 'pointer' }}>
-                                <Pencil size={12} /> Price
+                                <Pencil size={12} /> Edit
                               </button>
                             )}
                           </div>
@@ -810,7 +802,6 @@ export function PropertyDetailsModal({
                       {/* total — the "sum of pricing as per mix" (rent roll = Σ rent × units) */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '12px 14px', borderTop: `2px solid ${C.line}`, background: C.greenBg2 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, letterSpacing: '.02em' }}>TOTAL</div>
-                        <div />
                         <div />
                         <div />
                         <div style={{ fontSize: 13, fontWeight: 800, color: C.ink, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{mix.totalUnits}</div>
@@ -1113,17 +1104,35 @@ export function PropertyDetailsModal({
         </div>
       )}
 
-      {/* ── PER-LAYOUT PRICING EDITOR ── */}
-      {editPlan && (
-        <LayoutFinancialsModal
-          plan={editPlan}
-          manager={managerScope}
-          rpQ={pricingRpQ}
-          feeRules={feeRules}
-          onClose={() => setEditPlan(null)}
-          onSaved={() => { setEditPlan(null); loadUnits(); loadFloorPlans(); }}
-        />
-      )}
+      {/* ── PER-LAYOUT EDITOR (one popup: all unit details for every unit on the layout) ── */}
+      {editLayout && (() => {
+        const rep = units.find((u) => (u.planLabel ?? '') === (editLayout.planLabel ?? ''));
+        if (!rep) return null;
+        const plan = plans.find((pl) => (pl.planLabel ?? '') === (editLayout.planLabel ?? ''));
+        return (
+          <UnitFormModal
+            open
+            layoutBulk
+            layoutUnitCount={editLayout.unitCount}
+            title="Edit layout"
+            propertyCategory={p.spaceCategory}
+            propertyStandalone
+            propertyId={property.id}
+            planLabel={editLayout.planLabel}
+            manager={managerScope}
+            rpQ={pricingRpQ}
+            feeRules={feeRules}
+            existingFloorPlanUrl={plan?.floorPlanUrl ?? null}
+            initial={unitToFormInitial(rep as unknown as UnitRecord)}
+            onSave={async (data, floorPlan) => {
+              await saveLayoutDetails({ propertyId: property.id, planLabel: editLayout.planLabel ?? '', data, floorPlan, manager: managerScope });
+              loadUnits();
+              loadFloorPlans();
+            }}
+            onClose={() => setEditLayout(null)}
+          />
+        );
+      })()}
     </>
   );
 }
