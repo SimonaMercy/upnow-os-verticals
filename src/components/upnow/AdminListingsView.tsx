@@ -118,20 +118,19 @@ interface ServiceListing {
 
 const PAGE_SIZE = 25;
 
+// v2 service taxonomy — mirrors service_categories codes owned by the
+// Service Catalog console (dashboard/admin/catalog).
 const SERVICE_CATEGORIES: { id: string; label: string }[] = [
-  { id: 'cleaning',          label: 'Cleaning' },
-  { id: 'maintenance',       label: 'Maintenance' },
-  { id: 'security',          label: 'Security' },
-  { id: 'elevator',          label: 'Elevator' },
-  { id: 'fire_safety',       label: 'Fire Safety' },
-  { id: 'pest_control',      label: 'Pest Control' },
-  { id: 'landscaping',       label: 'Landscaping' },
-  { id: 'waste',             label: 'Waste' },
-  { id: 'electricity_water', label: 'Electricity & Water' },
-  { id: 'insurance',         label: 'Insurance' },
-  { id: 'renovation',        label: 'Renovation' },
-  { id: 'government',        label: 'Government' },
-  { id: 'other',             label: 'Other' },
+  { id: 'home_cleaning',       label: 'Home Cleaning' },
+  { id: 'ac_services',         label: 'AC Services' },
+  { id: 'plumbing',            label: 'Plumbing' },
+  { id: 'electrical',          label: 'Electrical' },
+  { id: 'handyman',            label: 'Handyman' },
+  { id: 'painting',            label: 'Painting' },
+  { id: 'pest_control',        label: 'Pest Control' },
+  { id: 'car_vehicle',         label: 'Car & Vehicle' },
+  { id: 'landscaping_outdoor', label: 'Landscaping & Outdoor' },
+  { id: 'commercial_services', label: 'Commercial Services' },
 ];
 
 function serviceCategoryLabel(id: string): string {
