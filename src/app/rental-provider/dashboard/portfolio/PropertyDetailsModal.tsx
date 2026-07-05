@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
-  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers,
+  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers, Info,
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
@@ -30,6 +30,8 @@ import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyF
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
 import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
 import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
+import { LocationMap } from '@/components/upnow/LocationMap';
 import { saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import type { FeeRuleLite } from '@/lib/feeRules';
 
@@ -290,7 +292,11 @@ export function PropertyDetailsModal({
   const [plans, setPlans] = useState<Plan[]>([]);
   const [feeRules, setFeeRules] = useState<Record<string, FeeRuleLite[]> | null>(null);
   const [editLayout, setEditLayout] = useState<{ planLabel: string | null; unitCount: number } | null>(null);
+  // Read-only per-layout (grouped) detail popup, opened from a Unit Mix row.
+  const [previewLayout, setPreviewLayout] = useState<MixRow | null>(null);
   const [showAllUnits, setShowAllUnits] = useState(false);
+  // ANNUAL RENT info popover — anchored to the icon (fixed, escapes the stat strip's overflow clip).
+  const [rentSplitAt, setRentSplitAt] = useState<{ left: number; top: number } | null>(null);
 
   // RP vs manager scope for the pricing endpoints (mirrors the units workspace).
   // rp is a dedicated prop — it drives ONLY the pricing calls, never the units fetch.
@@ -391,10 +397,12 @@ export function PropertyDetailsModal({
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadUnits(); }, [loadUnits]);
 
-  // Floor-plans (layout aggregates) — only needed to power the per-layout
-  // pricing editor, so fetched only when pricing edits are available.
+  // Floor-plans (layout aggregates) power BOTH the per-layout pricing editor and
+  // the read-only per-layout detail popup (fees, floor plan, market, terms), so
+  // they load whenever the endpoint is reachable — RP always; manager once a
+  // rental-provider scope is resolved — not only when pricing edits are allowed.
   const loadFloorPlans = useCallback(async () => {
-    if (!pricingEditable) return;
+    if (isManager && pricingRp == null) return;
     try {
       const url = isManager
         ? `/api/manager/units?rp=${pricingRp}&propertyId=${property.id}`
@@ -406,7 +414,7 @@ export function PropertyDetailsModal({
     } catch {
       setPlans([]); setFeeRules(null);
     }
-  }, [pricingEditable, isManager, pricingRp, property.id]);
+  }, [isManager, pricingRp, property.id]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadFloorPlans(); }, [loadFloorPlans]);
 
@@ -420,6 +428,18 @@ export function PropertyDetailsModal({
   );
   const mix = useMemo(() => buildUnitMix(units, planLabelSet), [units, planLabelSet]);
 
+  // Annual-rent split for the ANNUAL RENT info popover — each unit's asking rent
+  // bucketed by occupancy (occupied vs everything else). Sums to the rent roll.
+  const rentSplit = useMemo(() => {
+    let occ = 0, vac = 0, occN = 0, vacN = 0;
+    for (const u of units) {
+      const r = numOrNull(u.rentalPrice) ?? 0;
+      if ((u.availability || '').toLowerCase() === 'occupied') { occ += r; occN += 1; }
+      else { vac += r; vacN += 1; }
+    }
+    return { occ, vac, occN, vacN, total: occ + vac };
+  }, [units]);
+
   // ── document slots ──────────────────────────────────────
   // The proof-of-right slot depends on the leasing model.
   const proofSlot: PropertyDocSlot = useMemo(() => {
@@ -430,7 +450,6 @@ export function PropertyDetailsModal({
 
   const slotDefs: PropertyDocSlot[] = useMemo(() => [
     proofSlot,
-    { key: 'affection_plan',         label: 'Affection Plan',          category: 'property',   multiple: false },
     { key: 'completion_certificate', label: 'Completion Certificate',  category: 'compliance', multiple: false },
     { key: 'site_plan',              label: 'Site Plan',               category: 'property',   multiple: false },
     { key: 'building_drawing',       label: 'Building Floor Plans',    category: 'property',   multiple: true  },
@@ -544,13 +563,14 @@ export function PropertyDetailsModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (lb !== null) setLb(null);
+      if (rentSplitAt) setRentSplitAt(null);
+      else if (lb !== null) setLb(null);
       else if (reader !== null) setReader(null);
       else requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lb, reader, requestClose]);
+  }, [lb, reader, rentSplitAt, requestClose]);
 
   // ── summary numbers ─────────────────────────────────────
   const occFromUnits = units.filter((u) => u.availability === 'occupied').length;
@@ -562,13 +582,12 @@ export function PropertyDetailsModal({
     ? p.sharedAmenities
     : [p.hasParking && 'Parking', p.hasGym && 'Gym', p.hasPool && 'Pool'].filter(Boolean) as string[];
 
+  // Key facts carries only what isn't shown elsewhere: category + titling are
+  // header chips, total units is the stat strip, and plot / makani live in the
+  // Location card — so none of those are repeated here.
   const facts: { label: string; value: string }[] = [];
-  facts.push({ label: 'Category', value: categoryDisplayLabel(p.spaceCategory) });
   facts.push({ label: 'Leasing model', value: leasingLabel(p.leasingType) });
   if (p.numberOfFloors) facts.push({ label: 'Number of floors', value: p.numberOfFloors });
-  if (totalUnits) facts.push({ label: 'Total units', value: String(totalUnits) });
-  if (p.plotNumber) facts.push({ label: 'Plot number', value: p.plotNumber });
-  if (p.makaniNumber) facts.push({ label: 'Makani', value: p.makaniNumber });
 
   const statCells = stats ? [
     { label: 'UNITS', value: String(stats.units), color: C.ink },
@@ -594,7 +613,6 @@ export function PropertyDetailsModal({
   if (p.countryName) locCells.push({ label: 'Country', value: p.countryName });
   if (p.makaniNumber) locCells.push({ label: 'Makani', value: p.makaniNumber, mono: true });
   if (p.plotNumber) locCells.push({ label: 'Plot', value: p.plotNumber, mono: true });
-  if (p.numberOfFloors) locCells.push({ label: 'Floors', value: p.numberOfFloors });
   const hasLocation = !!fullAddressLine || locCells.length > 0 || hasMapLink;
   const photoSmalls = photos.slice(1, 5);
   const extraPhotos = Math.max(0, photos.length - 5);
@@ -679,24 +697,34 @@ export function PropertyDetailsModal({
                 </div>
               )}
 
-              {/* ADDRESS */}
-              {fullAddressLine && (
-                <div style={{ margin: '18px 0 8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: C.mute }}>
-                    <span style={{ display: 'inline-flex', color: C.greenT }}><MapPin size={15} /></span>{fullAddressLine}
-                  </div>
-                </div>
-              )}
+              {/* Address is shown once, in the Location card below — not repeated here. */}
 
               {/* STATS */}
               {statCells.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: isTight ? 'repeat(2,1fr)' : 'repeat(4,1fr)', border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', background: '#fff', marginBottom: 24 }}>
-                  {statCells.map((s, i) => (
+                  {statCells.map((s, i) => {
+                    const showRentInfo = s.label === 'ANNUAL RENT' && !unitsLoading && units.length > 0;
+                    return (
                     <div key={s.label} style={{ padding: '14px 18px', borderLeft: `1px solid ${i === 0 ? 'transparent' : C.line2}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>{s.label}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>
+                        {s.label}
+                        {showRentInfo && (
+                          <button type="button" aria-label="Show occupied vs vacant rent split"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (rentSplitAt) { setRentSplitAt(null); return; }
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setRentSplitAt({ left: Math.max(12, Math.min(r.left - 8, window.innerWidth - 268)), top: r.bottom + 8 });
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', background: 'transparent', color: rentSplitAt ? C.greenT : C.mute3, cursor: 'pointer', lineHeight: 0 }}>
+                            <Info size={12} />
+                          </button>
+                        )}
+                      </div>
                       <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-.02em', color: s.color, marginTop: 5, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -749,9 +777,7 @@ export function PropertyDetailsModal({
               {/* UNITS — Unit Mix (one flat row per layout) + rent roll */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                 {sectionIcon(Layers)}
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Unit Mix <span style={{ color: C.mute3, fontWeight: 600 }}>{unitsLoading ? '' : (units.length || totalUnits)}</span></div>
-                <div style={{ flex: 1 }} />
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg3, padding: '5px 11px', borderRadius: 7 }}>{occupied} occupied · {vacant} vacant</span>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Unit Mix</div>
               </div>
 
               <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 14 }}>
@@ -771,10 +797,14 @@ export function PropertyDetailsModal({
                         ))}
                       </div>
 
-                      {/* one flat row per layout — no grouping */}
+                      {/* one flat row per layout — no grouping; click opens the grouped detail popup */}
                       {mix.rows.map((r, i) => (
                         <div key={`${r.unitType}::${r.bedrooms ?? ''}::${r.label}`}
-                          style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '11px 14px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
+                          onClick={() => setPreviewLayout(r)}
+                          title="View layout details"
+                          style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '11px 14px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff', cursor: 'pointer' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = C.soft2; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{unitTypeLabel(r.unitType)}</div>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
                           <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
@@ -790,7 +820,7 @@ export function PropertyDetailsModal({
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             {pricingEditable && r.planLabel && (
-                              <button type="button" onClick={() => setEditLayout({ planLabel: r.planLabel, unitCount: r.count })}
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setEditLayout({ planLabel: r.planLabel, unitCount: r.count }); }}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg, border: `1px solid ${C.greenBd}`, padding: '5px 10px', borderRadius: 8, cursor: 'pointer' }}>
                                 <Pencil size={12} /> Edit
                               </button>
@@ -818,7 +848,7 @@ export function PropertyDetailsModal({
               {!unitsLoading && units.length > 0 && (
                 <>
                   <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
-                    Annual rent roll at asking prices{mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Price button to set a layout’s rent (applies to every unit on that layout).' : '.'}
+                    Tap a layout to see its grouped detail · annual rent roll at asking prices{mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
                   </div>
                   <div style={{ marginBottom: 28 }}>
                     <button type="button" onClick={() => setShowAllUnits((v) => !v)}
@@ -852,24 +882,22 @@ export function PropertyDetailsModal({
                 </>
               )}
 
-              {/* LOCATION */}
+              {/* LOCATION — details on the left, live Google map on the right */}
               {hasLocation && (
                 <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                     {sectionIcon(MapPin)}
                     <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Location</div>
                   </div>
-                  <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
-                    <div style={{ height: 150, background: 'linear-gradient(135deg,#dfe8e1,#cdddd2)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ width: 34, height: 34, borderRadius: '50%', background: C.green, boxShadow: '0 0 0 6px rgba(26,154,100,.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}><MapPin size={15} /></span>
-                    </div>
-                    <div style={{ padding: '16px 18px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: (isNarrow || !hasMapLink) ? '1fr' : '1fr 1fr', gap: 16, marginBottom: 28, alignItems: 'stretch' }}>
+                    {/* LEFT — address details */}
+                    <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, padding: '16px 18px', background: C.soft }}>
                       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>FULL ADDRESS</div>
                       <div style={{ fontSize: 14.5, fontWeight: 600, color: C.ink2, marginTop: 5 }}>{fullAddressLine || 'Pinned on map'}</div>
 
                       {/* Individually-labelled fields (street, community, emirate, country, …) */}
                       {locCells.length > 0 && (
-                        <div style={{ display: 'grid', gridTemplateColumns: isTight ? 'repeat(2,1fr)' : 'repeat(3,1fr)', gap: '14px 18px', marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.line3}` }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '14px 18px', marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.line3}` }}>
                           {locCells.map((c) => (
                             <div key={c.label} style={{ minWidth: 0 }}>
                               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4, textTransform: 'uppercase' }}>{c.label}</div>
@@ -886,6 +914,12 @@ export function PropertyDetailsModal({
                         </a>
                       )}
                     </div>
+
+                    {/* RIGHT — live Google map (only when the property is pinned).
+                        Fixed height so the map always renders; the left card stretches to match. */}
+                    {hasMapLink && p.latitude != null && p.longitude != null && (
+                      <LocationMap latitude={p.latitude} longitude={p.longitude} label={p.buildingName} height={isTight ? 240 : 300} />
+                    )}
                   </div>
                 </>
               )}
@@ -949,6 +983,32 @@ export function PropertyDetailsModal({
           </main>
         </div>
       </div>
+
+      {/* ── ANNUAL RENT split popover (occupied vs vacant) ── */}
+      {rentSplitAt && (
+        <>
+          <div onClick={() => setRentSplitAt(null)} style={{ position: 'fixed', inset: 0, zIndex: 64 }} />
+          <div style={{ position: 'fixed', left: rentSplitAt.left, top: rentSplitAt.top, zIndex: 65, width: 256, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: '0 12px 34px rgba(15,30,22,.20)', padding: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4, marginBottom: 8 }}>ANNUAL RENT · BY OCCUPANCY</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 0' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.body }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.green }} />Occupied <span style={{ color: C.mute3 }}>· {rentSplit.occN}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.occ)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderTop: `1px solid ${C.line3}` }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.body }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.mute3 }} />Vacant <span style={{ color: C.mute3 }}>· {rentSplit.vacN}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.vac)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 0 0', marginTop: 4, borderTop: `2px solid ${C.line}` }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, letterSpacing: '.03em' }}>TOTAL</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.total)}</span>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── LIGHTBOX ── */}
       {lb !== null && photos.length > 0 && (
@@ -1103,6 +1163,27 @@ export function PropertyDetailsModal({
           </div>
         </div>
       )}
+
+      {/* ── PER-LAYOUT DETAIL (read-only grouped view, opened from a Unit Mix row) ── */}
+      {previewLayout && (() => {
+        const lp = previewLayout.planLabel ?? '';
+        const plan = plans.find((pl) => (pl.planLabel ?? '') === lp) ?? null;
+        const unitsOnLayout = units.filter((u) => (u.planLabel ?? '') === lp);
+        return (
+          <LayoutPreviewModal
+            title={previewLayout.label}
+            planName={plan?.displayName ?? null}
+            unitType={previewLayout.unitType}
+            bedrooms={previewLayout.bedrooms}
+            plan={plan}
+            units={unitsOnLayout}
+            propertyName={p.buildingName}
+            canEdit={pricingEditable && !!previewLayout.planLabel}
+            onEdit={() => { setEditLayout({ planLabel: previewLayout.planLabel, unitCount: previewLayout.count }); setPreviewLayout(null); }}
+            onClose={() => setPreviewLayout(null)}
+          />
+        );
+      })()}
 
       {/* ── PER-LAYOUT EDITOR (one popup: all unit details for every unit on the layout) ── */}
       {editLayout && (() => {

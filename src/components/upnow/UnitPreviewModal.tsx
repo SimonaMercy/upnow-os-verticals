@@ -6,9 +6,11 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
  *
  * Redesigned to the "Unit View" handoff (sibling of the Property View modal): a
  * single near-full-screen card with
+ * Each value appears once — physical facts in the stat strip, money in Pricing
+ * & fees, type/status in the header, other identifiers in Key facts:
  *   • header (name · status · type · Edit · close)
  *   • photo gallery (hero + thumbnails → full-screen lightbox)
- *   • stat strip (annual rent · size · beds/baths · view)
+ *   • stat strip — PHYSICAL only (size · beds/baths · view)
  *   • About + Key facts (description, amenities, leasing terms)
  *   • Pricing & fees (annual rent + the one-off fee grid)
  *   • Documents grid + a view-only reader (floor plan, title deed, …)
@@ -337,45 +339,35 @@ export function UnitPreviewModal({
   const residential = isResidentialUnitType(unit.unitType);
   const rent = unit.rentalPrice;
 
-  const subline = [
-    propertyName,
-    unit.premiseNumber ? `Premise ${unit.premiseNumber}` : (unit.floor ? `Floor ${unit.floor}` : null),
-  ].filter(Boolean).join(' · ');
+  // Property name only — premise / floor live in Key facts, so they aren't repeated here.
+  const subline = propertyName ? String(propertyName) : '';
 
   const { amenities, leaseTerms, additionalPayments } = parseFacilities(unit.facilities);
 
-  // ── stat strip (adapts: beds only when residential) ──
+  // ── stat strip — PHYSICAL facts only. Rent lives in Pricing & fees; the unit
+  //    type is a header chip; other identifiers are in Key facts — nothing repeats. ──
   const sizeSub = [
     unit.unitSizeSqft != null ? 'sq.ft' : null,
     unit.unitSizeSqm != null ? `${Number(unit.unitSizeSqm).toLocaleString('en-AE')} sq.m` : null,
   ].filter(Boolean).join(' · ');
   const statCandidates: Array<{ label: string; value: string | null; sub?: string; accent?: boolean }> = [
-    { label: 'ANNUAL RENT', value: rent != null ? `AED ${Number(rent).toLocaleString('en-AE')}` : null, sub: 'Yearly', accent: true },
     {
       label: 'SIZE',
       value: unit.unitSizeSqft != null ? Number(unit.unitSizeSqft).toLocaleString('en-AE')
         : unit.unitSizeSqm != null ? Number(unit.unitSizeSqm).toLocaleString('en-AE') : null,
       sub: unit.unitSizeSqft != null ? sizeSub : (unit.unitSizeSqm != null ? 'sq.m' : undefined),
     },
-    residential && unit.bedrooms != null
-      ? { label: 'BEDROOMS', value: String(unit.bedrooms), sub: unit.unitType ? titleCase(unit.unitType) : undefined }
-      : unit.bathrooms != null
-        ? { label: 'BATHROOMS', value: String(unit.bathrooms), sub: unit.unitType ? titleCase(unit.unitType) : undefined }
-        : { label: 'TYPE', value: unit.unitType ? titleCase(unit.unitType) : null },
-    unit.view
-      ? { label: 'VIEW', value: unit.view, sub: 'View facing' }
-      : unit.furnishing
-        ? { label: 'FURNISHING', value: titleCase(unit.furnishing) }
-        : { label: 'FLOOR', value: unit.floor },
+    ...(residential && unit.bedrooms != null ? [{ label: 'BEDROOMS', value: String(unit.bedrooms) }] : []),
+    ...(unit.bathrooms != null ? [{ label: 'BATHROOMS', value: String(unit.bathrooms) }] : []),
+    ...(unit.view ? [{ label: 'VIEW', value: unit.view, sub: 'View facing' }] : []),
   ];
   const stats = statCandidates.filter((s) => s.value != null && String(s.value).trim() !== '');
 
-  // ── key facts ──
+  // ── key facts (identifiers not shown in the stat strip / header / pricing) ──
   const facts: Array<{ label: string; value: string }> = [];
   const pushFact = (label: string, value: string | null | undefined) => {
     if (value != null && String(value).trim() !== '') facts.push({ label, value });
   };
-  pushFact('Type', unit.unitType ? titleCase(unit.unitType) : null);
   pushFact('Unit Number', unit.unitNumber);
   pushFact('Premise No.', unit.premiseNumber);
   pushFact('Floor', unit.floor);

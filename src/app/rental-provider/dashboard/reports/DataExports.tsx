@@ -82,6 +82,13 @@ export default function DataExports({ manager }: { manager?: { rp: number } } = 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Data Exports is a dev-only surface for now — hidden from the production
+  // build. Local `next dev` runs with NODE_ENV==='development'; the deployed
+  // Amplify build runs `next build` (NODE_ENV==='production'), so this cleanly
+  // separates local dev from production. Covers both render sites (RP + manager)
+  // since both mount this component.
+  if (process.env.NODE_ENV === 'production') return null;
+
   const role = user?.role;
   const canExport =
     !!manager || role === 'admin' || role === 'super_admin' || role === 'rental_provider';
