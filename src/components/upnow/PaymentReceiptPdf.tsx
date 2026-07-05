@@ -291,8 +291,13 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
     legacyBundle = round2(adminNet + ejariNet);
   }
 
-  // Legacy fees were folded into the rent cheques (no separate row) → no reference.
-  const feeMeta = (row?: ReceiptPayment) => row ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null } : {};
+  // Each fee line carries its own date · method · reference. Legacy fees were
+  // folded into the rent cheques (no separate row) → fall back to the contract's
+  // mode of payment so the "date - method" line is always present.
+  const contractMethod = titleCase(contract.modeOfPayment) || 'Bank Transfer';
+  const feeMeta = (row?: ReceiptPayment) => row
+    ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null, date: row.transactionDate ?? null }
+    : { method: contractMethod, reference: null };
   const lines: LineItem[] = [];
   if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat), ...feeMeta(adminRow) });
   if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat), ...feeMeta(ejariRow) });
@@ -544,13 +549,13 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
           </View>
           {receipt.lines.map((l, i) => (
             <View key={i} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: LINE }}>
-              <View style={{ flex: 1, paddingVertical: 8 }}>
+              <View style={{ flex: 1, paddingVertical: 8, paddingRight: 8 }}>
                 <Text style={{ fontSize: 9, color: INK }}>{l.desc}</Text>
                 {(l.date || l.method) ? (
-                  <Text style={{ fontSize: 7, color: MUTE, marginTop: 1 }}>
-                    {[l.date ? `Due ${fmtDate(l.date)}` : null,
+                  <Text style={{ fontSize: 7, color: MUTE, marginTop: 2 }}>
+                    {[l.date ? fmtDate(l.date) : null,
                       l.method ? (l.reference ? `${l.method} ${l.reference}` : l.method) : null,
-                    ].filter(Boolean).join('  ·  ')}
+                    ].filter(Boolean).join(' - ')}
                   </Text>
                 ) : null}
               </View>

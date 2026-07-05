@@ -40,6 +40,8 @@ export interface PaymentPlanMeta {
   periodEnd?: string | null;
   tenantName?: string | null;
   landlordName?: string | null;
+  /** 'renewal' → "Renewal" badge; anything else → "New Lease". */
+  contractType?: string | null;
 }
 
 /** A contract shape sufficient to derive the plan + its heading metadata. */
@@ -102,6 +104,10 @@ export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refL
     (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
     || (a.type === 'security_deposit' ? -1 : b.type === 'security_deposit' ? 1 : 0));
   const schedTotal = items.reduce((sum, it) => sum + (it.amountFils ?? 0), 0);
+  const typeBadge = meta?.contractType == null ? null
+    : meta.contractType === 'renewal'
+      ? { label: 'Renewal', bg: '#eaf2fb', fg: '#1e5fae' }
+      : { label: 'New Lease', bg: '#e6f5ee', fg: '#1f6f54' };
   return (
     <Document title={refLabel ? `Payment plan — ${refLabel}` : 'Payment plan'}>
       <Page size="A4" style={s.page}>
@@ -110,6 +116,9 @@ export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refL
             <Text style={s.h1}>Payment Plan</Text>
             <Text style={s.sub}>{refLabel ? `Contract ${refLabel} · ` : ''}Current rent, fees &amp; deposit</Text>
           </View>
+          {typeBadge ? (
+            <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: typeBadge.fg, backgroundColor: typeBadge.bg, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10 }}>{typeBadge.label}</Text>
+          ) : null}
         </View>
 
         {/* Row 1 — Tenant (left) · Landlord (right) */}
@@ -173,6 +182,7 @@ export function planFromContract(contract: PlanViewerContract): { plan: OfferPla
     plan,
     refLabel: contract.ref ?? (contract.id != null ? `CID-${contract.id}` : null),
     meta: {
+      contractType: contract.contractType ?? null,
       buildingName: contract.property?.buildingName ?? null,
       unitNumber: contract.unit?.number ?? null,
       community: contract.property?.community ?? contract.property?.emirate ?? null,

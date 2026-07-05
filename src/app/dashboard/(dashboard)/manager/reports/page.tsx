@@ -146,6 +146,8 @@ export default function ManagerReportsPage() {
 
       <DataExports manager={{ rp: effectiveRp }} />
 
+      <DataExports manager={{ rp: effectiveRp }} />
+
       <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">All reports</h2>
       <div className="relative max-w-sm mb-6">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />

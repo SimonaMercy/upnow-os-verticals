@@ -1343,7 +1343,7 @@ type ContractNote = {
   id: number;
   body: string;
   authorName: string | null;
-  authorRole: 'rental_provider' | 'manager' | null;
+  authorRole: 'rental_provider' | 'manager' | 'tenant' | null;
   createdAt: string;
 };
 
@@ -3167,8 +3167,9 @@ function DetailsDrawer({
                     {notes.map(n => (
                       <div key={n.id} style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12, color: 'var(--ink-3)' }}>
-                          <strong style={{ color: 'var(--ink-2)' }}>{n.authorName ?? 'Staff'}</strong>
+                          <strong style={{ color: 'var(--ink-2)' }}>{n.authorName ?? (n.authorRole === 'tenant' ? 'Customer' : 'Staff')}</strong>
                           {n.authorRole === 'manager' && <span className="pill" style={{ fontSize: 10 }}>Manager</span>}
+                          {n.authorRole === 'tenant' && <span className="pill" style={{ fontSize: 10 }}>Customer</span>}
                           <span style={{ marginLeft: 'auto' }}>
                             {new Date(n.createdAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
                           </span>
@@ -4031,6 +4032,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
   const [notes, setNotes] = useState<ContractNote[]>([]);
+  // Optional comment the RP types when accepting / rejecting a customer's
+  // termination request — logged to the Notes journal alongside the decision.
+  const [respComment, setRespComment] = useState('');
   const [moveInInsp, setMoveInInsp] = useState<MoveInInsp | null>(null);
   const [moveOutInsp, setMoveOutInsp] = useState<MoveInInsp | null>(null);
   const [settlementStatus, setSettlementStatus] = useState<DerivedState['settlementStatus']>(null);
@@ -4639,10 +4643,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       const res = await fetch(`/api/contracts/${contract.id}/termination/respond`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response }),
+        body: JSON.stringify({ response, comment: respComment.trim() || undefined }),
       });
       if (!res.ok) throw new Error(`Respond failed: ${res.status}`);
+      setRespComment('');
       void reload();
+      loadNotes();
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Respond failed'); }
   };
 
@@ -4815,6 +4821,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                   <p className="bp">Requested {fmtDate(t.requestedAt)}</p>
                   {t.reason && <div className="quote">&ldquo;{t.reason}&rdquo;</div>}
                 </div>
+              </div>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label>Add a note (optional)</label>
+                <textarea className="input" value={respComment} placeholder="A note recorded with your decision — visible in the tenancy Notes log" onChange={e => setRespComment(e.target.value)} />
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn btn-brick" onClick={() => respondToTermination('accepted')}><Check size={14} /> Accept termination</button>
@@ -5337,9 +5347,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       </div>
 
       {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
-      {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
-      {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); }} />}
-      {modal === 'cancel-lease' && perms.agreements && <CancelLeaseModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+      {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
+      {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); loadNotes(); }} />}
+      {modal === 'cancel-lease' && perms.agreements && <CancelLeaseModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
       {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
       {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
