@@ -149,7 +149,7 @@ function PlanMeta({ label, value, align = 'left' }: { label: string; value?: str
   );
 }
 
-function OfferBlock({ plan, refLabel, unitNumber, buildingName, periodStart, periodEnd }: { plan: OfferPlan; refLabel?: string | null; unitNumber?: string | null; buildingName?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
+function OfferBlock({ plan, refLabel, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: { plan: OfferPlan; refLabel?: string | null; tenantName?: string | null; landlordName?: string | null; unitNumber?: string | null; buildingName?: string | null; community?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
   const lines: { label: string; fils: number }[] = [
     { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
   ];
@@ -158,16 +158,34 @@ function OfferBlock({ plan, refLabel, unitNumber, buildingName, periodStart, per
   if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils + (plan.commissionVatFils ?? 0) });
   (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils + f.vatFils }));
   if (plan.securityDepositFils > 0) lines.push({ label: 'Security deposit', fils: plan.securityDepositFils });
-  const items = [...(plan.items ?? [])].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
+  // By due date; on a same-date tie the security deposit sorts before the rent
+  // installments (deposit is collected first, then the plan).
+  const items = [...(plan.items ?? [])].sort((a, b) =>
+    (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
+    || (a.type === 'security_deposit' ? -1 : b.type === 'security_deposit' ? 1 : 0));
   return (
     <div style={cardCss}>
-      <div style={capCss}>Payment plan · current rent, fees &amp; deposit</div>
-      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} meta={{ buildingName, unitNumber, periodStart, periodEnd }} />
-      {(buildingName || unitNumber || periodStart) && (
-        <div style={{ padding: '11px 14px 2px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px' }}>
-          <PlanMeta label="Building" value={buildingName} />
-          <PlanMeta label="Unit" value={unitNumber} />
-          <PlanMeta label="Contract period" align="right" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
+      <div style={capCss}>
+        <div>Payment plan</div>
+        <div style={{ fontSize: 11, fontWeight: 500, color: '#6b6860', marginTop: 2 }}>current rent, fees &amp; deposit</div>
+      </div>
+      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} meta={{ tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
+      {(tenantName || landlordName || unitNumber || buildingName || community || periodStart) && (
+        <div style={{ padding: '11px 14px 2px', display: 'grid', gap: 10 }}>
+          {(tenantName || landlordName) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'flex-start' }}>
+              <PlanMeta label="Tenant" value={tenantName} />
+              <PlanMeta label="Landlord" align="right" value={landlordName} />
+            </div>
+          )}
+          {(unitNumber || buildingName || community || periodStart) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'flex-start' }}>
+              <PlanMeta label="Unit" value={unitNumber} />
+              <PlanMeta label="Building" value={buildingName} />
+              <PlanMeta label="Community" value={community} />
+              <PlanMeta label="Contract period" align="right" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
+            </div>
+          )}
         </div>
       )}
       <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
@@ -434,7 +452,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} refLabel={refLabel} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} refLabel={refLabel} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;

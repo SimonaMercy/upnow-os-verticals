@@ -61,7 +61,7 @@ export interface EjariContractData {
   // Lessor is the landlord, OR — when the RP holds a Power of Attorney — the POA
   // representative. The official contract lists the POA holder's phone as the
   // lessor's contact (see `lessorPhone` below).
-  landlord: EjariParty & { hasPoa?: boolean | null; poaPersonName?: string | null; poaPersonPhone?: string | null };
+  landlord: EjariParty & { bankAccountName?: string | null; hasPoa?: boolean | null; poaPersonName?: string | null; poaPersonPhone?: string | null };
   tenant: EjariParty;
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
   unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
