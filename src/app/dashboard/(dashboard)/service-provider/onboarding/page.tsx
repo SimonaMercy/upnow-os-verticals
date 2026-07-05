@@ -29,6 +29,9 @@ import {
   MapPin,
   UserCheck,
   ShieldCheck,
+  Clock,
+  Info,
+  PhoneCall,
 } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -148,20 +151,21 @@ interface SpProfile {
 
 // ─── Service category options ─────────────────────────────────────────────────
 
+// The 10-category Catalog v2 marketplace taxonomy (migr 0107; mirrors the PG
+// service_category enum + the seeded service_categories rows). Every category
+// is an on-site/manual trade — which UAE freelance permits do NOT cover, so
+// the whole list is company-only (see the eligibility gate in the step).
 const SERVICE_CATEGORIES: { value: string; label: string }[] = [
-  { value: "cleaning",           label: "Cleaning" },
-  { value: "maintenance",        label: "Maintenance & Repairs" },
-  { value: "renovation",         label: "Renovation" },
-  { value: "electricity_water",  label: "Electricity & Water" },
-  { value: "fire_safety",        label: "Fire Safety" },
-  { value: "security",           label: "Security" },
-  { value: "landscaping",        label: "Landscaping & Gardening" },
-  { value: "pest_control",       label: "Pest Control" },
-  { value: "elevator",           label: "Elevator & Lifting" },
-  { value: "waste",              label: "Waste Management" },
-  { value: "insurance",          label: "Insurance" },
-  { value: "government",         label: "Government Services" },
-  { value: "other",              label: "Other" },
+  { value: "home_cleaning",       label: "Home Cleaning" },
+  { value: "ac_services",         label: "AC Services" },
+  { value: "plumbing",            label: "Plumbing" },
+  { value: "electrical",          label: "Electrical" },
+  { value: "handyman",            label: "Handyman" },
+  { value: "painting",            label: "Painting" },
+  { value: "pest_control",        label: "Pest Control" },
+  { value: "car_vehicle",         label: "Car & Vehicle" },
+  { value: "landscaping_outdoor", label: "Landscaping & Outdoor" },
+  { value: "commercial_services", label: "Commercial Services" },
 ];
 
 // ─── UAE Emirates ─────────────────────────────────────────────────────────────
@@ -303,6 +307,40 @@ function Stepper({
           </button>
         );
       })}
+
+      {/* Terminal stage — not a form step. Rendering the compliance review as a
+          visible pipeline stage (Careem pattern) so approval is never a surprise
+          black hole after submit. */}
+      <div
+        className="flex items-center gap-4 px-4 py-3 rounded-2xl mt-1"
+        style={{
+          borderTop: "1px dashed var(--color-base-200)",
+          opacity: 0.9,
+        }}
+      >
+        <div
+          className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
+          style={{
+            background: "color-mix(in srgb, var(--color-primary) 10%, white)",
+          }}
+        >
+          <Clock className="w-5 h-5" style={{ color: "var(--color-primary)" }} />
+        </div>
+        <div className="min-w-0">
+          <p
+            className="text-sm font-semibold leading-tight"
+            style={{ color: "var(--color-neutral-700)" }}
+          >
+            Review by UpNow
+          </p>
+          <p
+            className="text-xs leading-tight mt-0.5"
+            style={{ color: "var(--color-neutral-400)" }}
+          >
+            Verified within 48 hours
+          </p>
+        </div>
+      </div>
     </nav>
   );
 }
@@ -562,14 +600,14 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
           {(
             [
               {
-                value: "individual",
-                title: "Sole trader / Freelancer",
-                desc: "Operating as an individual with your personal Emirates ID",
-              },
-              {
                 value: "company",
                 title: "Company",
-                desc: "Registered UAE entity with a trade licence",
+                desc: "Registered UAE entity with a trade licence — full access to every service category. Includes sole-establishment professional licences.",
+              },
+              {
+                value: "individual",
+                title: "Solo trader / Freelancer",
+                desc: "Freelance permit or eTrader licence holder, operating in your own name.",
               },
             ] as const
           ).map((opt) => (
@@ -633,6 +671,49 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
             {errors.entityType.message}
           </p>
         )}
+
+        {/* Consequence panel — the fork is a legal split, not a label. UAE law
+            reserves manual home services for licensed companies (FDL 9/2022;
+            freelance permits cover professional/digital work only), so the
+            individual path signposts instead of failing at review time. */}
+        {entityTypeValue === "individual" ? (
+          <div
+            className="flex gap-3 rounded-2xl px-4 py-3.5 mt-1"
+            style={{
+              background: "#fffbeb",
+              border: "1px solid #fde68a",
+            }}
+          >
+            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
+            <div className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
+              <p className="font-semibold mb-1">What a freelance permit covers</p>
+              <p>
+                UAE freelance permits and eTrader licences cover professional and
+                digital services only. <b>Hands-on home services</b> (cleaning, AC,
+                plumbing, electrical, handyman, pest control) <b>legally require a
+                licensed company</b>. If you hold a sole-establishment professional
+                licence (e.g. Technical Services), select <b>Company</b> — that licence
+                qualifies. Otherwise you can join a licensed company as a technician,
+                or our team can guide you on getting licensed.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div
+            className="flex gap-3 rounded-2xl px-4 py-3.5 mt-1"
+            style={{
+              background: "color-mix(in srgb, var(--color-primary) 5%, white)",
+              border: "1px solid color-mix(in srgb, var(--color-primary) 15%, white)",
+            }}
+          >
+            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "var(--color-primary)" }} />
+            <p className="text-xs leading-relaxed" style={{ color: "var(--color-neutral-600)" }}>
+              You&apos;ll upload your trade licence in the Documents step. Your licence
+              activities must cover the service categories you select — we check this
+              during review.
+            </p>
+          </div>
+        )}
       </div>
 
       <Input
@@ -675,6 +756,7 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
 function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const [entityType, setEntityType] = useState<string>("company");
 
   const {
     handleSubmit,
@@ -690,10 +772,17 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
     apiGet<{ profile: SpProfile }>("/profiles/service-provider/me")
       .then(({ profile }) => {
         reset({ serviceCategories: profile.serviceCategories ?? [] });
+        setEntityType(profile.entityType ?? "company");
       })
       .catch(() => {})
       .finally(() => setInitialLoaded(true));
   }, [reset]);
+
+  // Eligibility matrix (SP_ONBOARDING_V2_DESIGN §3): every catalog category is
+  // an on-site/manual trade, which UAE freelance permits and eTrader licences
+  // do not cover — so solo traders cannot select any of them. Signpost, don't
+  // silently fail at review time.
+  const isIndividual = entityType === "individual";
 
   const onSubmit = async (vals: CategoriesValues) => {
     setServerError(null);
@@ -723,6 +812,27 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {isIndividual && (
+        <div
+          className="flex gap-3 rounded-2xl px-4 py-3.5"
+          style={{ background: "#fffbeb", border: "1px solid #fde68a" }}
+        >
+          <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
+          <div className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
+            <p className="font-semibold mb-1">
+              These categories require a licensed company
+            </p>
+            <p>
+              All current UpNow service categories are hands-on, on-site trades —
+              UAE freelance permits and eTrader licences don&apos;t cover them. If you
+              hold a trade licence or a sole-establishment professional licence, go
+              back to the previous step and select <b>Company</b>. Otherwise you can
+              join a licensed company as a technician, or contact us for guidance
+              on getting licensed.
+            </p>
+          </div>
+        </div>
+      )}
       <Controller
         control={control}
         name="serviceCategories"
@@ -734,7 +844,9 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                 <button
                   key={cat.value}
                   type="button"
+                  disabled={isIndividual}
                   onClick={() => {
+                    if (isIndividual) return;
                     const next = selected
                       ? field.value.filter((v) => v !== cat.value)
                       : [...field.value, cat.value];
@@ -748,6 +860,8 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                     background: selected
                       ? "color-mix(in srgb, var(--color-primary) 6%, white)"
                       : "white",
+                    opacity: isIndividual ? 0.45 : 1,
+                    cursor: isIndividual ? "not-allowed" : "pointer",
                   }}
                 >
                   <div
@@ -1305,7 +1419,8 @@ export default function ServiceProviderOnboardingPage() {
               style={{ color: "var(--color-neutral-500)" }}
             >
               {completed.size} of {STEPS.length} steps complete &mdash; finish
-              setup to start receiving bookings.
+              setup, then our team verifies your profile within 48 hours and you
+              can start receiving bookings.
             </p>
           </div>
 
@@ -1347,6 +1462,28 @@ export default function ServiceProviderOnboardingPage() {
                   />
                 </div>
               </div>
+
+              {/* Concierge fallback — assisted onboarding for the pilot cohort */}
+              <a
+                href="mailto:support@upnow.ae?subject=Help%20me%20finish%20my%20provider%20onboarding"
+                className="mt-5 flex items-start gap-3 rounded-2xl px-4 py-3.5 transition-colors"
+                style={{
+                  background: "color-mix(in srgb, var(--color-primary) 5%, white)",
+                  border: "1px solid color-mix(in srgb, var(--color-primary) 15%, white)",
+                }}
+              >
+                <PhoneCall
+                  className="w-4 h-4 flex-shrink-0 mt-0.5"
+                  style={{ color: "var(--color-primary)" }}
+                />
+                <span className="text-xs leading-relaxed" style={{ color: "var(--color-neutral-600)" }}>
+                  <span className="font-semibold block" style={{ color: "var(--color-neutral-800)" }}>
+                    Prefer to do this together?
+                  </span>
+                  Reach out and we&apos;ll call you back within 48 hours to finish
+                  setup with you.
+                </span>
+              </a>
             </aside>
 
             {/* Content card */}
