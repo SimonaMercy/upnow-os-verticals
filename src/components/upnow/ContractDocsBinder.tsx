@@ -70,11 +70,13 @@ const idRank = (d: BinderDoc) => (isEid(d) ? 0 : isPassport(d) ? 1 : isVisa(d) ?
 // store, and a passport can arrive as both `passport` and `passport_2` (same doc,
 // two captures) — so without collapsing them a tenant looks like they have 2-3× of
 // each. We key each doc by its logical SLOT (type + side) and keep ONE per slot.
-//   • Side matters only for the EID, and only an explicit BACK is its own slot — a
-//     bare `emirates_id` and an `emirates_id_front` are the same (front) side.
+//   • Side matters only for the EID: an explicit BACK is its own slot, and so is
+//     an `emirates_id_2` — the EID is a two-sided card, so a second capture IS the
+//     back (unlike `passport_2`, a re-capture of the same photo page). A bare
+//     `emirates_id` and an `emirates_id_front` are the same (front) side.
 //   • Occupant docs keep their occupant number so occupants never merge together.
 const idBaseKey = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
-const isEidBack = (d: BinderDoc) => /(^|_)back(_|$)/.test(idBaseKey(d));
+const isEidBack = (d: BinderDoc) => /(^|_)back(_|$)/.test(idBaseKey(d)) || /_2$/.test(idBaseKey(d));
 const idType = (d: BinderDoc) => (isEid(d) ? 'eid' : isPassport(d) ? 'passport' : isVisa(d) ? 'visa' : idBaseKey(d));
 const idSlot = (d: BinderDoc) => `${isOccupant(d) ? `occ${occNum(d)}:` : ''}${idType(d)}${isEid(d) && isEidBack(d) ? ':back' : ''}`;
 // Within a slot prefer the canonical customer-KYC copy, then the clean-key one
@@ -298,9 +300,12 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const seqIds = new Set(seq.flatMap(s => (s.kind === 'doc' ? matchDocs(s.key).map(d => d.id) : [])));
   // Renewals drop the salary-certificate slot (income re-verification lives on the
   // original lease) — also drop any uploaded salary cert so it doesn't resurface
-  // under "Other documents".
+  // under "Other documents". Same for move-in docs: the move-in happened on the
+  // ORIGINAL lease (customer-scoped `move_in_form` rows travel with every contract
+  // of the tenant), so a renewal never shows one.
   const isSalaryDoc = (d: BinderDoc) => /salary/.test(norm(d.documentKey)) || /salary/i.test(d.displayName || '');
-  const leftover = all.filter(d => !isIdentity(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && isSalaryDoc(d)));
+  const isMoveInDoc = (d: BinderDoc) => /move_?in/.test(norm(d.documentKey)) || /move[ -]?in/i.test(d.displayName || '');
+  const leftover = all.filter(d => !isIdentity(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && (isSalaryDoc(d) || isMoveInDoc(d))));
 
   const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'agreement' ? 'Agreement' : s.label;
   const slotId = (s: Slot) => s.kind === 'doc' ? `r-${s.key}` : `r-${s.kind}`;
