@@ -32,7 +32,7 @@ interface AmcContract {
 }
 interface Vendor { id: number; name: string; email: string | null; serviceCategory: string | null; isGovernment: boolean; contractCount: number; documentCount: number }
 interface Task { id: number; title: string; dueDate: string | null; status: string; completedAt: string | null; notes: string | null }
-interface PropertyOpt { id: number; buildingName?: string | null; name?: string | null }
+interface PropertyOpt { id: number; buildingName?: string | null; name?: string | null; rentalProviderId?: number }
 interface VendorOpt { id: number; name: string; serviceCategory: string | null }
 interface PlanRow { title: string; dueDate: string; notes: string }
 
@@ -310,7 +310,11 @@ function AddAmcModal({ base, rp, propertiesUrl, existingContracts, onClose, onSa
 
   useEffect(() => {
     apiGet<VendorOpt[]>(amcUrl(base, rp, '/vendors/all')).then(setAllVendors).catch(() => setAllVendors([]));
-    apiGet<PropertyOpt[]>(propertiesUrl).then(setProps).catch(() => setProps([]));
+    apiGet<PropertyOpt[]>(propertiesUrl)
+      // Manager mode: /manager/properties returns every managed landlord's
+      // properties — scope the picker to the landlord this AMC contract is for.
+      .then(list => setProps(rp ? list.filter(p => p.rentalProviderId == null || p.rentalProviderId === rp) : list))
+      .catch(() => setProps([]));
   }, [base, rp, propertiesUrl]);
 
   function onPickVendor(id: string) {

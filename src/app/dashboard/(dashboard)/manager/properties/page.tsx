@@ -67,6 +67,7 @@ function formToCreateDto(data: PropertyFormData) {
   return {
     buildingName: data.buildingName,
     spaceCategory: data.spaceCategory,
+    leasingType: data.leasingType ?? undefined,
     street: data.street || undefined,
     // Without a street segment, leave full_address untouched (PATCH omits it)
     // so a legacy row's embedded street isn't recomposed away.
@@ -430,6 +431,7 @@ export default function ManagerPropertiesPage() {
         initial={propertyModal.editing ? {
           buildingName:        propertyModal.editing.buildingName,
           spaceCategory:       propertyModal.editing.spaceCategory,
+          leasingType:         propertyModal.editing.leasingType ?? 'direct',
           emirateId:           propertyModal.editing.emirateId ?? null,
           cityId:              propertyModal.editing.cityId ?? null,
           communityId:         propertyModal.editing.communityId ?? null,
@@ -458,6 +460,8 @@ export default function ManagerPropertiesPage() {
         <PropertyDetailsModal
           fetchBase="/manager/properties"
           editable={can('canManageDocuments')}
+          canEditPricing={can('canEditProperties')}
+          pricingRp={detailsProperty.rentalProviderId}
           property={{
             id: detailsProperty.id,
             buildingName: detailsProperty.buildingName,

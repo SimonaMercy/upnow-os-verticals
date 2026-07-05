@@ -352,6 +352,14 @@ interface Props {
   onClose: () => void;
   onSave: (data: UnitFormData, floorPlan?: File | null, titleDeed?: File | null, addendums?: File[]) => Promise<void>;
   title?: string;
+  /** Layout bulk mode — edit ALL units on a plan at once. Hides the per-unit
+   *  identifiers (unit number, premises no., floor) and the pricing / leasing /
+   *  addendum sections (those live on the plan "Price" editor), keeping the
+   *  physical details + amenities + a single layout floor-plan. The parent's
+   *  onSave applies the physical fields to every unit on the layout. */
+  layoutBulk?: boolean;
+  /** Units on the layout — for the "applies to N units" copy. */
+  layoutUnitCount?: number;
 }
 
 interface UnitMediaRow { id: number; url: string; caption?: string | null }
@@ -545,7 +553,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title, layoutBulk = false, layoutUnitCount }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   // Fee fields the user has typed in this session — they stop auto-recomputing
   // off the rent / unit type (mirrors the plan-pricing editor's `overridden`).
@@ -660,10 +668,10 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
 
   const validate = (): typeof errors => {
     const errs: typeof errors = {};
-    if (!form.unitNumber.trim()) errs.unitNumber  = 'Required';
+    if (!layoutBulk && !form.unitNumber.trim()) errs.unitNumber  = 'Required';
     if (!form.unitType)          errs.unitType    = 'Required';
     if (!form.unitSizeSqft && !form.unitSizeSqm) errs.unitSizeSqft = 'Required';
-    if (!form.rentalPrice)       errs.rentalPrice  = 'Required';
+    if (!layoutBulk && !form.rentalPrice)       errs.rentalPrice  = 'Required';
     setErrors(errs);
     return errs;
   };
@@ -707,9 +715,10 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     { id: 'pricing',   label: 'Pricing & fees' },
     { id: 'leasing',   label: 'Leasing terms' },
     { id: 'amenities', label: 'Amenities' },
-    { id: 'media',     label: 'Photos & documents' },
+    { id: 'media',     label: layoutBulk ? 'Floor plan' : 'Photos & documents' },
     { id: 'addendum',  label: 'Addendum' },
   ];
+  const secNum = (id: string) => SECTIONS.findIndex((s) => s.id === id) + 1;
   const SECTION_ORDER = SECTIONS.map(x => x.id);
   const setRef = (id: string) => (el: HTMLElement | null) => { secRefs.current[id] = el; };
   const goToSection = (id: string) => {
@@ -741,8 +750,10 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
       <div className={ds.app}>
         <header className={ds.header}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className={ds.headTitle}>{title ?? 'Add Unit'}</div>
-            <div className={ds.headSub}>{editingUnitId ? 'Update identity, pricing, terms and documents.' : 'Add a unit to this layout.'}</div>
+            <div className={ds.headTitle}>{title ?? (layoutBulk ? 'Edit layout' : 'Add Unit')}</div>
+            <div className={ds.headSub}>{layoutBulk
+              ? `Applies to all ${layoutUnitCount ?? ''} unit${layoutUnitCount === 1 ? '' : 's'} on this layout — unit number, premises no. and floor stay per-unit.`
+              : (editingUnitId ? 'Update identity, pricing, terms and documents.' : 'Add a unit to this layout.')}</div>
           </div>
           {/* Close on the RIGHT — aligned with the property modals. */}
           <button type="button" className={ds.backBtn} onClick={requestClose} aria-label="Close"><X size={17} /></button>
@@ -780,16 +791,20 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               </select>
               {errors.unitType && <p className={ds.errText}>{errors.unitType}</p>}
             </div>
-            <div>
-              <label className={ds.lbl}>Unit Number <span className={ds.req}>*</span></label>
-              <input className={cn(ds.input, errors.unitNumber && ds.inputErr)} placeholder="e.g. 101, G-02"
-                value={form.unitNumber} onChange={e => upd('unitNumber', e.target.value)} />
-              {errors.unitNumber && <p className={ds.errText}>{errors.unitNumber}</p>}
-            </div>
-            <div>
-              <label className={ds.lbl}>Utility Premises No.</label>
-              <input className={ds.input} placeholder="e.g. 1234567" value={form.premiseNumber} onChange={e => upd('premiseNumber', e.target.value)} />
-            </div>
+            {!layoutBulk && (
+              <div>
+                <label className={ds.lbl}>Unit Number <span className={ds.req}>*</span></label>
+                <input className={cn(ds.input, errors.unitNumber && ds.inputErr)} placeholder="e.g. 101, G-02"
+                  value={form.unitNumber} onChange={e => upd('unitNumber', e.target.value)} />
+                {errors.unitNumber && <p className={ds.errText}>{errors.unitNumber}</p>}
+              </div>
+            )}
+            {!layoutBulk && (
+              <div>
+                <label className={ds.lbl}>Utility Premises No.</label>
+                <input className={ds.input} placeholder="e.g. 1234567" value={form.premiseNumber} onChange={e => upd('premiseNumber', e.target.value)} />
+              </div>
+            )}
           </div>
 
           {showBedBath && (
@@ -822,7 +837,9 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
           )}
 
           <div className={cn(ds.grid3, ds.field)}>
-            <div><label className={ds.lbl}>Floor</label><input className={ds.input} placeholder="e.g. G, 1, 2…" value={form.floor} onChange={e => upd('floor', e.target.value)} /></div>
+            {!layoutBulk && (
+              <div><label className={ds.lbl}>Floor</label><input className={ds.input} placeholder="e.g. G, 1, 2…" value={form.floor} onChange={e => upd('floor', e.target.value)} /></div>
+            )}
             <div><label className={ds.lbl}>View</label><ViewInput value={form.view} onChange={v => upd('view', v)} /></div>
             <div><label className={ds.lbl}>Parking</label><input type="number" min="0" step="1" className={ds.input} placeholder="e.g. 1" value={form.parkingSpaces} onChange={e => upd('parkingSpaces', e.target.value)} /></div>
           </div>
@@ -903,12 +920,20 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
                 <input type="number" min="0" step="any" className={ds.input} placeholder="60" value={form.noticePeriodDays} onChange={e => upd('noticePeriodDays', e.target.value)} />
               </div>
             </div>
+            <div className={ds.grid3} style={{ marginTop: 13 }}>
+              <div><label className={ds.lbl}>Min. Lease (months)</label><input type="number" min="0" step="1" className={ds.input} placeholder="12" value={form.minLeaseMonths} onChange={e => upd('minLeaseMonths', e.target.value)} /></div>
+              <div><label className={ds.lbl}>Rent Escalation (%/yr)</label><input type="number" min="0" max="100" step="0.5" className={ds.input} placeholder="e.g. 5" value={form.rentEscalationPct} onChange={e => upd('rentEscalationPct', e.target.value)} /></div>
+              <div><label className={ds.lbl}>Number of Payments</label><input type="number" min="0" step="1" className={ds.input} placeholder="e.g. 4" value={form.numberOfPayments} onChange={e => upd('numberOfPayments', e.target.value)} /></div>
+              <div><label className={ds.lbl}>Advance Payment (AED)</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 5000" value={form.advancePayment} onChange={e => upd('advancePayment', e.target.value)} /></div>
+              <div><label className={ds.lbl}>Grace Period (days)</label><input type="number" min="0" step="1" className={ds.input} placeholder="e.g. 7" value={form.gracePeriodDays} onChange={e => upd('gracePeriodDays', e.target.value)} /></div>
+              <div><label className={ds.lbl}>Late Payment Fee (AED)</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 500" value={form.latePaymentFee} onChange={e => upd('latePaymentFee', e.target.value)} /></div>
+            </div>
           </div>
 
           <div className={ds.divider} />
 
           {/* 4 · AMENITIES & DESCRIPTION */}
-          <div ref={setRef('amenities')} className={ds.secHead}><span className={ds.secNum}>4</span><div><div className={ds.secTitle}>Amenities &amp; description</div><div className={ds.secSub}>What this unit offers, in its own words.</div></div></div>
+          <div ref={setRef('amenities')} className={ds.secHead}><span className={ds.secNum}>{secNum('amenities')}</span><div><div className={ds.secTitle}>Amenities &amp; description</div><div className={ds.secSub}>What this unit offers, in its own words.</div></div></div>
 
           <label className={ds.lbl}>Amenities{form.amenities.length > 0 && <span style={{ color: '#1a7a5a', fontWeight: 700 }}> · {form.amenities.length} selected</span>}</label>
           <div className={ds.amenWrap} style={{ marginBottom: 16 }}>
@@ -944,8 +969,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
 
           <div className={ds.divider} />
 
-          {/* 5 · PHOTOS & DOCUMENTS */}
-          <div ref={setRef('media')} className={ds.secHead}><span className={ds.secNum}>5</span><div><div className={ds.secTitle}>Photos &amp; documents</div><div className={ds.secSub}>Imagery and the paperwork for this unit.</div></div></div>
+          {/* PHOTOS & DOCUMENTS (bulk: layout floor plan only) */}
+          <div ref={setRef('media')} className={ds.secHead}><span className={ds.secNum}>{secNum('media')}</span><div><div className={ds.secTitle}>{layoutBulk ? 'Floor plan' : 'Photos & documents'}</div><div className={ds.secSub}>{layoutBulk ? 'One floor plan applied to every unit on this layout.' : 'Imagery and the paperwork for this unit.'}</div></div></div>
 
           {/* Photos — live manager (existing units only) */}
           {propertyId != null && editingUnitId != null && (
@@ -959,7 +984,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
           <input ref={titleDeedInputRef} type="file" accept="application/pdf,image/png,image/jpeg,image/webp" className="sr-only"
             onChange={e => { const f = e.target.files?.[0] ?? null; if (f) setTitleDeed(f); e.target.value = ''; }} />
 
-          <div className={ds.docGrid} style={propertyStandalone === false ? undefined : { gridTemplateColumns: '1fr' }}>
+          <div className={ds.docGrid} style={(propertyStandalone === false && !layoutBulk) ? undefined : { gridTemplateColumns: '1fr' }}>
             {/* Floor plan */}
             <div>
               <label className={ds.lbl}>Floor plan <span style={{ color: '#9b9890', fontWeight: 600 }}>(optional)</span></label>
@@ -985,8 +1010,8 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               )}
             </div>
 
-            {/* Title deed — per-unit (multi-unit / non-standalone properties) */}
-            {propertyStandalone === false && (
+            {/* Title deed — per-unit (multi-unit / non-standalone properties); never in layout bulk */}
+            {propertyStandalone === false && !layoutBulk && (
               <div>
                 <label className={ds.lbl}>Title Deed <span style={{ color: '#9b9890', fontWeight: 600 }}>(this unit)</span></label>
                 {titleDeed ? (
@@ -1044,7 +1069,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
           <div className={ds.footSpacer} />
           <button type="button" className={ds.saveBtn} disabled={saving} onClick={() => handleSubmit()}>
             {saving && <Loader2 size={14} className="animate-spin" />}
-            {saving ? 'Saving…' : (title?.startsWith('Edit') ? 'Save Changes' : 'Add Unit')}
+            {saving ? 'Saving…' : (layoutBulk ? `Save to all ${layoutUnitCount ?? ''} units` : (title?.startsWith('Edit') ? 'Save Changes' : 'Add Unit'))}
           </button>
         </footer>
       </div>

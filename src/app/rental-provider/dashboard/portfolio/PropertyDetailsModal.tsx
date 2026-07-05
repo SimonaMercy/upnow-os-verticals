@@ -22,16 +22,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
-  Pencil, ChevronLeft, ChevronRight, Loader2,
+  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers, Info,
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
+import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { UnitFormModal } from '@/components/upnow/UnitFormModal';
+import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
+import { LocationMap } from '@/components/upnow/LocationMap';
+import { saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
+import type { FeeRuleLite } from '@/lib/feeRules';
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
 
-/** Minimal unit shape for the in-popup units list. */
+/** Unit shape for the in-popup units list + Unit Mix aggregation. */
 interface UnitLite {
   id: number;
   unitNumber: string;
@@ -39,6 +45,11 @@ interface UnitLite {
   unitType: string;
   availability: string;
   listingStatus: string;
+  bedrooms: number | null;
+  unitSizeSqm: number | null;
+  unitSizeSqft: number | null;
+  planLabel: string | null;
+  rentalPrice: number | null;
 }
 
 interface Property {
@@ -131,6 +142,107 @@ function leasingLabel(t: Property['leasingType']): string {
   return 'Direct lease';
 }
 
+// ── Unit Mix helpers ──────────────────────────────────────
+// Shared column template for the mix table (Type · Layout · Sqft · Units · Rent/unit · Total · Edit).
+const MIX_COLS = 'minmax(100px,0.9fr) minmax(132px,1.4fr) 78px 52px minmax(110px,1fr) minmax(120px,1fr) 82px';
+const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
+// Backend numeric(…) columns (size, rent) come back as strings — coerce defensively.
+const numOrNull = (v: unknown): number | null => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const unitTypeLabel = (t: string) => (t ? t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Other');
+const bedroomsLabel = (b: number | null) => (b == null ? '—' : b === 0 ? 'Studio' : `${b} Bedroom`);
+// A min–max span, collapsing to a single value when the DISPLAYED (rounded)
+// numbers match — so 1313.95 & 1314.27 sqft both show as "1,314", not a range
+// of two identical-looking values (used for size + price).
+const spanLabel = (lo: number | null, hi: number | null) => {
+  if (lo == null && hi == null) return '—';
+  const a = lo ?? (hi as number), b = hi ?? (lo as number);
+  const fa = aed(a), fb = aed(b);
+  return fa === fb ? fa : `${fa} – ${fb}`;
+};
+
+/** One layout (units sharing a plan_label) within a type × bedrooms group. */
+interface MixLayout {
+  planLabel: string | null;
+  label: string;
+  count: number;
+  sqmLo: number | null; sqmHi: number | null;
+  sqftLo: number | null; sqftHi: number | null;
+  priceLo: number | null; priceHi: number | null;
+  sum: number;          // Σ annual rent over priced units
+  unpriced: number;
+  hasPlan: boolean;     // a matching floor-plan exists (→ editable)
+}
+/** A type × bedrooms mix row, aggregating its layouts. */
+interface MixGroup {
+  key: string;
+  unitType: string;
+  bedrooms: number | null;
+  count: number;
+  sqmLo: number | null; sqmHi: number | null;
+  sqftLo: number | null; sqftHi: number | null;
+  priceLo: number | null; priceHi: number | null;
+  sum: number;
+  unpriced: number;
+  layouts: MixLayout[];
+}
+
+/** A flattened mix row — one layout, carrying its parent unit type + bedrooms. */
+interface MixRow extends MixLayout { unitType: string; bedrooms: number | null; }
+
+const minOf = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.min(a, b));
+const maxOf = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.max(a, b));
+
+/**
+ * Fold the units list into a type × bedrooms → layouts tree with counts, size
+ * spans, price spans and rent-roll sums. `planLabels` (from the floor-plans
+ * endpoint) marks which layouts have an editable plan.
+ */
+function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRow[]; totalUnits: number; grandSum: number; unpriced: number } {
+  const groups = new Map<string, MixGroup>();
+  for (const u of units) {
+    const gkey = `${u.unitType}::${u.bedrooms ?? ''}`;
+    let g = groups.get(gkey);
+    if (!g) {
+      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, layouts: [] };
+      groups.set(gkey, g);
+    }
+    const lp = u.planLabel ?? null;
+    let l = g.layouts.find((x) => x.planLabel === lp);
+    if (!l) {
+      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, hasPlan: lp != null && planLabels.has(lp) };
+      g.layouts.push(l);
+    }
+    const price = u.rentalPrice;
+    for (const bucket of [g, l]) {
+      bucket.count += 1;
+      bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
+      bucket.sqmHi = maxOf(bucket.sqmHi, u.unitSizeSqm);
+      bucket.sqftLo = minOf(bucket.sqftLo, u.unitSizeSqft);
+      bucket.sqftHi = maxOf(bucket.sqftHi, u.unitSizeSqft);
+      if (price != null && price > 0) {
+        bucket.sum += price;
+        bucket.priceLo = minOf(bucket.priceLo, price);
+        bucket.priceHi = maxOf(bucket.priceHi, price);
+      } else {
+        bucket.unpriced += 1;
+      }
+    }
+  }
+  const out = [...groups.values()];
+  out.forEach((g) => g.layouts.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })));
+  out.sort((a, b) => a.unitType.localeCompare(b.unitType) || (a.bedrooms ?? -1) - (b.bedrooms ?? -1));
+  // Flatten to one row per layout (no grouping), keeping type/bedroom order.
+  const rows: MixRow[] = out.flatMap((g) => g.layouts.map((l) => ({ ...l, unitType: g.unitType, bedrooms: g.bedrooms })));
+  const totalUnits = units.length;
+  const grandSum = out.reduce((s, g) => s + g.sum, 0);
+  const unpriced = out.reduce((s, g) => s + g.unpriced, 0);
+  return { rows, totalUnits, grandSum, unpriced };
+}
+
 // Open a transient file picker and resolve with the chosen files.
 function pickFiles(multiple: boolean): Promise<File[]> {
   return new Promise((resolve) => {
@@ -149,6 +261,8 @@ export function PropertyDetailsModal({
   fetchBase = '/properties',
   fetchQuery = '',
   editable = false,
+  canEditPricing = false,
+  pricingRp,
   onEdit,
   onClose,
 }: {
@@ -159,6 +273,10 @@ export function PropertyDetailsModal({
   fetchQuery?: string;
   /** When true, the documents section allows direct upload / replace / delete. */
   editable?: boolean;
+  /** When true, the Unit Mix table exposes per-layout pricing edit (RP always; manager needs canEditProperties). */
+  canEditPricing?: boolean;
+  /** Manager only — the landlord's rental-provider id, scoping the pricing endpoints (/manager/units*). */
+  pricingRp?: number;
   /** Opens the edit form (header "Edit" button). Hidden when omitted. */
   onEdit?: () => void;
   onClose: () => void;
@@ -170,6 +288,23 @@ export function PropertyDetailsModal({
   const [unitsLoading, setUnitsLoading] = useState(true);
   const [detail, setDetail] = useState<Partial<Property> | null>(null);
   const [photos, setPhotos] = useState<{ id: number; url: string }[]>([]);
+  // Unit Mix per-layout pricing — floor-plans power the editor.
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [feeRules, setFeeRules] = useState<Record<string, FeeRuleLite[]> | null>(null);
+  const [editLayout, setEditLayout] = useState<{ planLabel: string | null; unitCount: number } | null>(null);
+  // Read-only per-layout (grouped) detail popup, opened from a Unit Mix row.
+  const [previewLayout, setPreviewLayout] = useState<MixRow | null>(null);
+  const [showAllUnits, setShowAllUnits] = useState(false);
+  // ANNUAL RENT info popover — anchored to the icon (fixed, escapes the stat strip's overflow clip).
+  const [rentSplitAt, setRentSplitAt] = useState<{ left: number; top: number } | null>(null);
+
+  // RP vs manager scope for the pricing endpoints (mirrors the units workspace).
+  // rp is a dedicated prop — it drives ONLY the pricing calls, never the units fetch.
+  const isManager = fetchBase.includes('/manager');
+  const managerScope = isManager && pricingRp != null ? { rp: pricingRp } : undefined;
+  const pricingRpQ = pricingRp != null ? `rp=${pricingRp}` : '';
+  // Pricing edit is available when allowed AND (RP, or a manager with a resolved rp).
+  const pricingEditable = canEditPricing && (!isManager || pricingRp != null);
 
   // Overlays
   const [lb, setLb] = useState<number | null>(null);          // lightbox photo index
@@ -239,26 +374,71 @@ export function PropertyDetailsModal({
     return () => { cancelled = true; };
   }, [property.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api${fetchBase}/${property.id}/units${fetchQuery ? `?${fetchQuery}` : ''}`, { credentials: 'include' });
-        const data = res.ok ? await res.json() : [];
-        const rows: UnitLite[] = Array.isArray(data) ? data : [];
-        rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
-        if (!cancelled) setUnits(rows);
-      } catch {
-        if (!cancelled) setUnits([]);
-      } finally {
-        if (!cancelled) setUnitsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadUnits = useCallback(async () => {
+    try {
+      const res = await fetch(`/api${fetchBase}/${property.id}/units${fetchQuery ? `?${fetchQuery}` : ''}`, { credentials: 'include' });
+      const data = res.ok ? await res.json() : [];
+      // numeric(…) columns (size, rent) serialise as strings — normalise for the mix maths.
+      const rows: UnitLite[] = (Array.isArray(data) ? data : []).map((r: Record<string, unknown>) => ({
+        ...(r as unknown as UnitLite),
+        bedrooms: numOrNull(r.bedrooms),
+        unitSizeSqm: numOrNull(r.unitSizeSqm),
+        unitSizeSqft: numOrNull(r.unitSizeSqft),
+        rentalPrice: numOrNull(r.rentalPrice),
+      }));
+      rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
+      setUnits(rows);
+    } catch {
+      setUnits([]);
+    } finally {
+      setUnitsLoading(false);
+    }
   }, [property.id, fetchBase, fetchQuery]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadUnits(); }, [loadUnits]);
+
+  // Floor-plans (layout aggregates) power BOTH the per-layout pricing editor and
+  // the read-only per-layout detail popup (fees, floor plan, market, terms), so
+  // they load whenever the endpoint is reachable — RP always; manager once a
+  // rental-provider scope is resolved — not only when pricing edits are allowed.
+  const loadFloorPlans = useCallback(async () => {
+    if (isManager && pricingRp == null) return;
+    try {
+      const url = isManager
+        ? `/api/manager/units?rp=${pricingRp}&propertyId=${property.id}`
+        : `/api/properties/floor-plans?propertyId=${property.id}`;
+      const res = await fetch(url, { credentials: 'include' });
+      const data = res.ok ? await res.json() : null;
+      setPlans(Array.isArray(data?.plans) ? data.plans : []);
+      setFeeRules(data?.feeRules ?? null);
+    } catch {
+      setPlans([]); setFeeRules(null);
+    }
+  }, [isManager, pricingRp, property.id]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadFloorPlans(); }, [loadFloorPlans]);
 
   // Merge: prefer freshly-fetched detail (full location names + leasing model).
   const p: Property = { ...property, ...(detail ?? {}) };
+
+  // ── Unit Mix (grouped by type × bedrooms, expandable to layouts) ─────────
+  const planLabelSet = useMemo(
+    () => new Set(plans.map((pl) => pl.planLabel).filter((x): x is string => x != null)),
+    [plans],
+  );
+  const mix = useMemo(() => buildUnitMix(units, planLabelSet), [units, planLabelSet]);
+
+  // Annual-rent split for the ANNUAL RENT info popover — each unit's asking rent
+  // bucketed by occupancy (occupied vs everything else). Sums to the rent roll.
+  const rentSplit = useMemo(() => {
+    let occ = 0, vac = 0, occN = 0, vacN = 0;
+    for (const u of units) {
+      const r = numOrNull(u.rentalPrice) ?? 0;
+      if ((u.availability || '').toLowerCase() === 'occupied') { occ += r; occN += 1; }
+      else { vac += r; vacN += 1; }
+    }
+    return { occ, vac, occN, vacN, total: occ + vac };
+  }, [units]);
 
   // ── document slots ──────────────────────────────────────
   // The proof-of-right slot depends on the leasing model.
@@ -270,7 +450,6 @@ export function PropertyDetailsModal({
 
   const slotDefs: PropertyDocSlot[] = useMemo(() => [
     proofSlot,
-    { key: 'affection_plan',         label: 'Affection Plan',          category: 'property',   multiple: false },
     { key: 'completion_certificate', label: 'Completion Certificate',  category: 'compliance', multiple: false },
     { key: 'site_plan',              label: 'Site Plan',               category: 'property',   multiple: false },
     { key: 'building_drawing',       label: 'Building Floor Plans',    category: 'property',   multiple: true  },
@@ -384,13 +563,14 @@ export function PropertyDetailsModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (lb !== null) setLb(null);
+      if (rentSplitAt) setRentSplitAt(null);
+      else if (lb !== null) setLb(null);
       else if (reader !== null) setReader(null);
       else requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lb, reader, requestClose]);
+  }, [lb, reader, rentSplitAt, requestClose]);
 
   // ── summary numbers ─────────────────────────────────────
   const occFromUnits = units.filter((u) => u.availability === 'occupied').length;
@@ -402,13 +582,12 @@ export function PropertyDetailsModal({
     ? p.sharedAmenities
     : [p.hasParking && 'Parking', p.hasGym && 'Gym', p.hasPool && 'Pool'].filter(Boolean) as string[];
 
+  // Key facts carries only what isn't shown elsewhere: category + titling are
+  // header chips, total units is the stat strip, and plot / makani live in the
+  // Location card — so none of those are repeated here.
   const facts: { label: string; value: string }[] = [];
-  facts.push({ label: 'Category', value: categoryDisplayLabel(p.spaceCategory) });
   facts.push({ label: 'Leasing model', value: leasingLabel(p.leasingType) });
   if (p.numberOfFloors) facts.push({ label: 'Number of floors', value: p.numberOfFloors });
-  if (totalUnits) facts.push({ label: 'Total units', value: String(totalUnits) });
-  if (p.plotNumber) facts.push({ label: 'Plot number', value: p.plotNumber });
-  if (p.makaniNumber) facts.push({ label: 'Makani', value: p.makaniNumber });
 
   const statCells = stats ? [
     { label: 'UNITS', value: String(stats.units), color: C.ink },
@@ -434,7 +613,6 @@ export function PropertyDetailsModal({
   if (p.countryName) locCells.push({ label: 'Country', value: p.countryName });
   if (p.makaniNumber) locCells.push({ label: 'Makani', value: p.makaniNumber, mono: true });
   if (p.plotNumber) locCells.push({ label: 'Plot', value: p.plotNumber, mono: true });
-  if (p.numberOfFloors) locCells.push({ label: 'Floors', value: p.numberOfFloors });
   const hasLocation = !!fullAddressLine || locCells.length > 0 || hasMapLink;
   const photoSmalls = photos.slice(1, 5);
   const extraPhotos = Math.max(0, photos.length - 5);
@@ -519,24 +697,34 @@ export function PropertyDetailsModal({
                 </div>
               )}
 
-              {/* ADDRESS */}
-              {fullAddressLine && (
-                <div style={{ margin: '18px 0 8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: C.mute }}>
-                    <span style={{ display: 'inline-flex', color: C.greenT }}><MapPin size={15} /></span>{fullAddressLine}
-                  </div>
-                </div>
-              )}
+              {/* Address is shown once, in the Location card below — not repeated here. */}
 
               {/* STATS */}
               {statCells.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: isTight ? 'repeat(2,1fr)' : 'repeat(4,1fr)', border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', background: '#fff', marginBottom: 24 }}>
-                  {statCells.map((s, i) => (
+                  {statCells.map((s, i) => {
+                    const showRentInfo = s.label === 'ANNUAL RENT' && !unitsLoading && units.length > 0;
+                    return (
                     <div key={s.label} style={{ padding: '14px 18px', borderLeft: `1px solid ${i === 0 ? 'transparent' : C.line2}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>{s.label}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>
+                        {s.label}
+                        {showRentInfo && (
+                          <button type="button" aria-label="Show occupied vs vacant rent split"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (rentSplitAt) { setRentSplitAt(null); return; }
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setRentSplitAt({ left: Math.max(12, Math.min(r.left - 8, window.innerWidth - 268)), top: r.bottom + 8 });
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', background: 'transparent', color: rentSplitAt ? C.greenT : C.mute3, cursor: 'pointer', lineHeight: 0 }}>
+                            <Info size={12} />
+                          </button>
+                        )}
+                      </div>
                       <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-.02em', color: s.color, marginTop: 5, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -586,57 +774,130 @@ export function PropertyDetailsModal({
                 </div>
               </div>
 
-              {/* UNITS */}
+              {/* UNITS — Unit Mix (one flat row per layout) + rent roll */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                {sectionIcon(Building2)}
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Units <span style={{ color: C.mute3, fontWeight: 600 }}>{unitsLoading ? '' : (units.length || totalUnits)}</span></div>
-                <div style={{ flex: 1 }} />
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg3, padding: '5px 11px', borderRadius: 7 }}>{occupied} occupied · {vacant} vacant</span>
-              </div>
-              <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
-                <div style={{ maxHeight: 286, overflowY: 'auto' }}>
-                  {unitsLoading ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', fontSize: 13, color: C.mute3, background: '#fff' }}>
-                      <Loader2 size={15} className="animate-spin" /> Loading units…
-                    </div>
-                  ) : units.length === 0 ? (
-                    <div style={{ padding: '14px 16px', fontSize: 13, color: C.mute3, background: '#fff' }}>No units yet.</div>
-                  ) : units.map((u, i) => {
-                    const occ = u.availability === 'occupied';
-                    const maint = u.availability === 'maintenance';
-                    const pub = u.listingStatus === 'published';
-                    const color = occ || pub ? C.greenT : maint ? '#854d0e' : C.mute;
-                    const bg = occ || pub ? C.greenBg3 : maint ? '#fef3c7' : C.line3;
-                    const label = occ ? 'Occupied' : maint ? 'Maintenance' : pub ? 'Published' : 'Available';
-                    return (
-                      <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line4}`, background: '#fff' }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
-                        <span style={{ flex: 1, fontSize: 13, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || u.unitType.replace(/_/g, ' ')}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '4px 10px', borderRadius: 7 }}>{label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+                {sectionIcon(Layers)}
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Unit Mix</div>
               </div>
 
-              {/* LOCATION */}
+              <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 14 }}>
+                {unitsLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16, fontSize: 13, color: C.mute3, background: '#fff' }}>
+                    <Loader2 size={15} className="animate-spin" /> Loading units…
+                  </div>
+                ) : units.length === 0 ? (
+                  <div style={{ padding: 16, fontSize: 13, color: C.mute3, background: '#fff' }}>No units yet.</div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <div style={{ minWidth: 720 }}>
+                      {/* header */}
+                      <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
+                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Rent / unit', 'Total / yr', ''].map((h, i) => (
+                          <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
+                        ))}
+                      </div>
+
+                      {/* one flat row per layout — no grouping; click opens the grouped detail popup */}
+                      {mix.rows.map((r, i) => (
+                        <div key={`${r.unitType}::${r.bedrooms ?? ''}::${r.label}`}
+                          onClick={() => setPreviewLayout(r)}
+                          title="View layout details"
+                          style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '11px 14px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff', cursor: 'pointer' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = C.soft2; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{unitTypeLabel(r.unitType)}</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
+                          <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
+                          {/* Rent / unit — the per-unit annual price */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: r.priceLo == null ? C.amber : C.ink2, fontVariantNumeric: 'tabular-nums' }}>{r.priceLo == null ? 'No price' : `AED ${spanLabel(r.priceLo, r.priceHi)}`}</span>
+                          </div>
+                          {/* Total / yr — Rent × Units for the layout */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: r.sum > 0 ? C.greenD : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.sum > 0 ? `AED ${aed(r.sum)}` : '—'}</span>
+                            {r.unpriced > 0 && r.sum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            {pricingEditable && r.planLabel && (
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setEditLayout({ planLabel: r.planLabel, unitCount: r.count }); }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, color: C.greenT, background: C.greenBg, border: `1px solid ${C.greenBd}`, padding: '5px 10px', borderRadius: 8, cursor: 'pointer' }}>
+                                <Pencil size={12} /> Edit
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* total — the "sum of pricing as per mix" (rent roll = Σ rent × units) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '12px 14px', borderTop: `2px solid ${C.line}`, background: C.greenBg2 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, letterSpacing: '.02em' }}>TOTAL</div>
+                        <div />
+                        <div />
+                        <div style={{ fontSize: 13, fontWeight: 800, color: C.ink, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{mix.totalUnits}</div>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: C.mute2, textAlign: 'right', textTransform: 'uppercase', letterSpacing: '.05em' }}>Rent roll</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.greenD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandSum)}</div>
+                        <div />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* caption + individual-units disclosure */}
+              {!unitsLoading && units.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
+                    Tap a layout to see its grouped detail · annual rent roll at asking prices{mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
+                  </div>
+                  <div style={{ marginBottom: 28 }}>
+                    <button type="button" onClick={() => setShowAllUnits((v) => !v)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, color: C.body, background: '#fff', border: `1px solid ${C.line}`, padding: '8px 13px', borderRadius: 10, cursor: 'pointer' }}>
+                      <Building2 size={14} /> {showAllUnits ? 'Hide' : 'Show'} individual units ({units.length})
+                      <ChevronDown size={14} style={{ transform: showAllUnits ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }} />
+                    </button>
+                    {showAllUnits && (
+                      <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginTop: 10 }}>
+                        <div style={{ maxHeight: 286, overflowY: 'auto' }}>
+                          {units.map((u, i) => {
+                            const occ = u.availability === 'occupied';
+                            const maint = u.availability === 'maintenance';
+                            const pub = u.listingStatus === 'published';
+                            const color = occ || pub ? C.greenT : maint ? '#854d0e' : C.mute;
+                            const bg = occ || pub ? C.greenBg3 : maint ? '#fef3c7' : C.line3;
+                            const label = occ ? 'Occupied' : maint ? 'Maintenance' : pub ? 'Published' : 'Available';
+                            return (
+                              <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line4}`, background: '#fff' }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
+                                <span style={{ flex: 1, fontSize: 13, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || u.unitType.replace(/_/g, ' ')}</span>
+                                {u.rentalPrice != null && u.rentalPrice > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(u.rentalPrice)}</span>}
+                                <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '4px 10px', borderRadius: 7 }}>{label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* LOCATION — details on the left, live Google map on the right */}
               {hasLocation && (
                 <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                     {sectionIcon(MapPin)}
                     <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Location</div>
                   </div>
-                  <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
-                    <div style={{ height: 150, background: 'linear-gradient(135deg,#dfe8e1,#cdddd2)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ width: 34, height: 34, borderRadius: '50%', background: C.green, boxShadow: '0 0 0 6px rgba(26,154,100,.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}><MapPin size={15} /></span>
-                    </div>
-                    <div style={{ padding: '16px 18px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: (isNarrow || !hasMapLink) ? '1fr' : '1fr 1fr', gap: 16, marginBottom: 28, alignItems: 'stretch' }}>
+                    {/* LEFT — address details */}
+                    <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, padding: '16px 18px', background: C.soft }}>
                       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>FULL ADDRESS</div>
                       <div style={{ fontSize: 14.5, fontWeight: 600, color: C.ink2, marginTop: 5 }}>{fullAddressLine || 'Pinned on map'}</div>
 
                       {/* Individually-labelled fields (street, community, emirate, country, …) */}
                       {locCells.length > 0 && (
-                        <div style={{ display: 'grid', gridTemplateColumns: isTight ? 'repeat(2,1fr)' : 'repeat(3,1fr)', gap: '14px 18px', marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.line3}` }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '14px 18px', marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.line3}` }}>
                           {locCells.map((c) => (
                             <div key={c.label} style={{ minWidth: 0 }}>
                               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4, textTransform: 'uppercase' }}>{c.label}</div>
@@ -653,6 +914,12 @@ export function PropertyDetailsModal({
                         </a>
                       )}
                     </div>
+
+                    {/* RIGHT — live Google map (only when the property is pinned).
+                        Fixed height so the map always renders; the left card stretches to match. */}
+                    {hasMapLink && p.latitude != null && p.longitude != null && (
+                      <LocationMap latitude={p.latitude} longitude={p.longitude} label={p.buildingName} height={isTight ? 240 : 300} />
+                    )}
                   </div>
                 </>
               )}
@@ -716,6 +983,32 @@ export function PropertyDetailsModal({
           </main>
         </div>
       </div>
+
+      {/* ── ANNUAL RENT split popover (occupied vs vacant) ── */}
+      {rentSplitAt && (
+        <>
+          <div onClick={() => setRentSplitAt(null)} style={{ position: 'fixed', inset: 0, zIndex: 64 }} />
+          <div style={{ position: 'fixed', left: rentSplitAt.left, top: rentSplitAt.top, zIndex: 65, width: 256, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: '0 12px 34px rgba(15,30,22,.20)', padding: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4, marginBottom: 8 }}>ANNUAL RENT · BY OCCUPANCY</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 0' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.body }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.green }} />Occupied <span style={{ color: C.mute3 }}>· {rentSplit.occN}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.occ)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderTop: `1px solid ${C.line3}` }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.body }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.mute3 }} />Vacant <span style={{ color: C.mute3 }}>· {rentSplit.vacN}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.vac)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 0 0', marginTop: 4, borderTop: `2px solid ${C.line}` }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, letterSpacing: '.03em' }}>TOTAL</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.total)}</span>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── LIGHTBOX ── */}
       {lb !== null && photos.length > 0 && (
@@ -870,6 +1163,57 @@ export function PropertyDetailsModal({
           </div>
         </div>
       )}
+
+      {/* ── PER-LAYOUT DETAIL (read-only grouped view, opened from a Unit Mix row) ── */}
+      {previewLayout && (() => {
+        const lp = previewLayout.planLabel ?? '';
+        const plan = plans.find((pl) => (pl.planLabel ?? '') === lp) ?? null;
+        const unitsOnLayout = units.filter((u) => (u.planLabel ?? '') === lp);
+        return (
+          <LayoutPreviewModal
+            title={previewLayout.label}
+            planName={plan?.displayName ?? null}
+            unitType={previewLayout.unitType}
+            bedrooms={previewLayout.bedrooms}
+            plan={plan}
+            units={unitsOnLayout}
+            propertyName={p.buildingName}
+            canEdit={pricingEditable && !!previewLayout.planLabel}
+            onEdit={() => { setEditLayout({ planLabel: previewLayout.planLabel, unitCount: previewLayout.count }); setPreviewLayout(null); }}
+            onClose={() => setPreviewLayout(null)}
+          />
+        );
+      })()}
+
+      {/* ── PER-LAYOUT EDITOR (one popup: all unit details for every unit on the layout) ── */}
+      {editLayout && (() => {
+        const rep = units.find((u) => (u.planLabel ?? '') === (editLayout.planLabel ?? ''));
+        if (!rep) return null;
+        const plan = plans.find((pl) => (pl.planLabel ?? '') === (editLayout.planLabel ?? ''));
+        return (
+          <UnitFormModal
+            open
+            layoutBulk
+            layoutUnitCount={editLayout.unitCount}
+            title="Edit layout"
+            propertyCategory={p.spaceCategory}
+            propertyStandalone
+            propertyId={property.id}
+            planLabel={editLayout.planLabel}
+            manager={managerScope}
+            rpQ={pricingRpQ}
+            feeRules={feeRules}
+            existingFloorPlanUrl={plan?.floorPlanUrl ?? null}
+            initial={unitToFormInitial(rep as unknown as UnitRecord)}
+            onSave={async (data, floorPlan) => {
+              await saveLayoutDetails({ propertyId: property.id, planLabel: editLayout.planLabel ?? '', data, floorPlan, manager: managerScope });
+              loadUnits();
+              loadFloorPlans();
+            }}
+            onClose={() => setEditLayout(null)}
+          />
+        );
+      })()}
     </>
   );
 }

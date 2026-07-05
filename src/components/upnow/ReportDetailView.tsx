@@ -19,7 +19,7 @@ import {
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'leases-by-month' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -48,7 +48,7 @@ interface ReportDef {
    * section (using its summary columns as the header) with its drilldown
    * children listed inline beneath — everything on one page, no modal.
    */
-  layout?: 'table' | 'grouped' | 'matrix';
+  layout?: 'table' | 'grouped' | 'matrix' | 'countMatrix';
   /** Optional caution banner shown above the report (e.g. data-quality notes). */
   dataNote?: string;
   /** When set, render the building + leasing-model (direct/sub) multi-select
@@ -56,6 +56,9 @@ interface ReportDef {
    *  honours `buildings=` / `leaseTypes=` query params. */
   buildingLeaseFilter?: boolean;
 }
+
+/** A vacant unit, listed when a Vacant cell in the renewal-details matrix is clicked. */
+interface VacantUnit { unitId: number; label: string; unitType: string | null; rentFils: number; }
 
 /** A building option for the fee-taxation building multi-select (from the API). */
 interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'sub' | 'management'; contracts: number; }
@@ -82,11 +85,11 @@ interface TotalSpec {
 }
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
-  title: 'Renewal Forecast',
-  description: 'Leases coming up for renewal each month — count, annual rent at stake, and how many are already in progress. Lapsed leases on occupied units show as Overdue. An unsigned draft renewal does not replace the current lease — it marks that lease\'s renewal as in progress (Proposed).',
+  title: 'Renewal Details Per Year',
+  description: 'The detailed companion to Renewal Summary Per Year — the same renewals for the selected year, but month by month with the individual leases. Each lease is bucketed by the month its renewal falls due (the day after the term ends, so a lease ending 31 Jul renews in August); a unit that already renewed earlier in the year also shows in the month its new term began (stage Renewed). Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Summary.',
   endpoint: '/api/reports/renewal-forecast',
   layout: 'grouped',
-  controlKey: 'forecastMonths',
+  controlKey: 'year',
   columns: [
     { key: 'monthLabel', label: 'Month' },
     { key: 'leases', label: 'Leases up for renewal', align: 'right', type: 'number' },
@@ -95,12 +98,11 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
     { key: 'notStarted', label: 'Not started', align: 'right', type: 'number' },
   ],
   totals: [
-    { key: 'overdue', label: 'Overdue', type: 'number' },
-    { key: 'next90', label: 'Next 90 days', type: 'number' },
-    { key: 'next12mo', label: 'Next 12 months', type: 'number' },
-    { key: 'totalLeases', label: 'Total leases', type: 'number' },
+    { key: 'totalLeases', label: 'Renewals', type: 'number', keep: true },
     { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
+    { key: 'inProgress', label: 'In progress', type: 'number' },
     { key: 'notStarted', label: 'Not started', type: 'number' },
+    { key: 'renewed', label: 'Renewed', type: 'number', keep: true },
   ],
   drilldown: {
     childKey: 'items',
@@ -210,39 +212,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   // renewal-pipeline kept so older links/bookmarks still work).
   'renewal-forecast': RENEWAL_FORECAST_DEF,
   'renewal-pipeline': RENEWAL_FORECAST_DEF,
-  'leases-by-month': {
-    title: 'Leases by Month',
-    description: 'How many leases started each month — every lease bucketed by its start date, so you can see how many contracts commenced in January, February, and so on. Defaults to this year; use the period control to pick a different year or range. Expand a month to see every lease by customer.',
-    endpoint: '/api/reports/leases-by-month',
-    layout: 'grouped',
-    controlKey: 'dateRange',
-    columns: [
-      { key: 'monthLabel', label: 'Month' },
-      { key: 'contracts', label: 'Leases started', align: 'right', type: 'number' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-    ],
-    totals: [
-      { key: 'contracts', label: 'Leases started', type: 'number' },
-      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
-      { key: 'months', label: 'Months', type: 'number' },
-    ],
-    drilldown: {
-      childKey: 'items',
-      titleKey: 'monthLabel',
-      countLabel: 'leases',
-      contractIdKey: 'contractId',
-      columns: [
-        { key: 'contractRef', label: 'Contract' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'buildingName', label: 'Property' },
-        { key: 'startDate', label: 'Lease starts', type: 'date' },
-        { key: 'endDate', label: 'Lease ends', type: 'date' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'status', label: 'Status', type: 'stage' },
-      ],
-    },
-  },
   'security-deposits': {
     title: 'Security Deposits Report',
     description: 'Full deposit register and settlement ledger. A deposit is collected at lease start and refundable at lease end. Status shows where each one stands: Holding (live lease), Pending settlement (lease ended — needs to be refunded or deducted), or settled as Returned, Partial return or Forfeited. Refunded / Kept are the amounts that moved at settlement. The tiles up top answer how much you currently hold, how much is pending settlement, and what has been refunded to tenants vs kept. Pick a year to scope the register to deposits taken that year, or All years for the full register.',
@@ -287,6 +256,21 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
+  'renewal-vacancy': {
+    title: 'Renewal Summary Per Year',
+    description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year. Click a Vacant count to list those units.',
+    endpoint: '/api/reports/renewal-vacancy',
+    layout: 'countMatrix',
+    controlKey: 'year',
+    columns: [],
+    totals: [
+      { key: 'leased', label: 'Renewals', type: 'number', keep: true },
+      { key: 'vacant', label: 'Total Vacant', type: 'number', keep: true },
+      { key: 'totalUnits', label: 'Total Units', type: 'number', keep: true },
+      { key: 'properties', label: 'Properties', type: 'number' },
     ],
   },
 
@@ -560,7 +544,7 @@ const FEE_DETAIL_COLUMNS: Column[] = [
 const TENANT_SCOPED = new Set<ReportSlug>([
   'receivables', 'security-deposits', 'cheque-register', 'collection-rate',
   'tenant-ledger', 'rent-collection', 'leasing-activity', 'fee-taxation',
-  'cashflow-forecast', 'leases-by-month',
+  'cashflow-forecast',
 ]);
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
@@ -619,6 +603,7 @@ const STAGE_STYLE: Record<string, string> = {
   signed:      'bg-[#dbeafe] text-[#1e40af]',
   active:      'bg-[#d8f2e8] text-[#1a7a5a]',
   rejected:    'bg-[#fee2e2] text-[#b91c1c]',
+  renewed:     'bg-[#dcfce7] text-[#166534]',  // renewal completed — new term already running
   // security-deposit lifecycle
   holding:            'bg-[#dbeafe] text-[#1e40af]',  // held against a live lease
   pending_settlement: 'bg-[#fef3c7] text-[#854d0e]',  // lease ended → refund/deduct it
@@ -731,6 +716,7 @@ export function ReportDetailView({
   // Tenant scope — show active customers only (default) or include ended tenants.
   const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
+  const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Fee-taxation building + leasing-model filters. [] buildings = all; lease
   // types default to both selected (= all). Inline reclassify bumps refreshTick
@@ -877,6 +863,9 @@ export function ReportDetailView({
         ['customer', 'unitLabel', 'buildingName', 'contractRef'].some(
           k => String(row[k] ?? '').toLowerCase().includes(needle)));
     }
+    if (def.layout === 'countMatrix') {
+      return activeRows.filter(row => String(row.label ?? '').toLowerCase().includes(needle));
+    }
     return activeRows.filter(row =>
       activeColumns.some(c => String(row[c.key] ?? '').toLowerCase().includes(needle)),
     );
@@ -938,20 +927,6 @@ export function ReportDetailView({
       .filter(g => g.items.length > 0);
   }, [def, data, search]);
 
-  // KPI tiles for leases-by-month must follow the search filter too (count of
-  // matched leases, sum of their rent, count of months with matches). Other
-  // grouped reports (cashflow-forecast) keep their bucketed forecast KPIs.
-  const groupedTileTotals = useMemo(() => {
-    if (def.layout !== 'grouped' || slug !== 'leases-by-month' || !data || !search.trim()) return null;
-    const out: Record<string, number> = {};
-    for (const t of def.totals) {
-      if (t.key === 'months') out[t.key] = groups.length;
-      else if (t.type === 'number') out[t.key] = groups.reduce((n, g) => n + (g.items?.length ?? 0), 0);
-      else out[t.key] = groups.reduce((s, g) => s + Number((g.row as Record<string, unknown>)[t.key] ?? 0), 0);
-    }
-    return out;
-  }, [def, slug, data, search, groups]);
-
   // Rent-roll matrix: when a search needle narrows the visible customers, the
   // footer (per-month + grand total), the KPI chips and the CSV "Total" row must
   // reflect the rows shown. Per-row totalFils/collectedFils/outstandingFils are
@@ -981,6 +956,33 @@ export function ReportDetailView({
         outstandingFils: outstanding,
         bouncedFils: bounced,
         collectionRate: scheduled > 0 ? Math.round((collected / scheduled) * 1000) / 10 : 0,
+      } as Record<string, number>,
+    };
+  }, [def.layout, data, search, sorted]);
+
+  // Count-matrix (renewal-vacancy): when a search narrows the visible
+  // properties, recompute the per-month footer, grand total and KPI tiles from
+  // the rows shown. No search → trust the server's full totals.
+  const countMatrixView = useMemo(() => {
+    if (def.layout !== 'countMatrix' || !data) return null;
+    const monthCount = (data.months ?? []).length;
+    if (!search.trim()) return { columnTotals: data.columnTotals ?? [], totals: data.totals };
+    const colTotals = new Array(monthCount).fill(0);
+    let leased = 0, vacant = 0, totalUnits = 0;
+    sorted.forEach(row => {
+      const cells = (row.cells as number[] | undefined) ?? [];
+      cells.forEach((n, ci) => { if (ci < monthCount) colTotals[ci] += Number(n) || 0; });
+      leased += Number(row.total ?? 0);
+      vacant += Number(row.vacant ?? 0);
+      totalUnits += Number(row.totalUnits ?? 0);
+    });
+    return {
+      columnTotals: colTotals,
+      totals: {
+        leased,
+        vacant,
+        totalUnits,
+        properties: sorted.length,
       } as Record<string, number>,
     };
   }, [def.layout, data, search, sorted]);
@@ -1054,6 +1056,32 @@ export function ReportDetailView({
         'Total', '', '',
         ...(matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
         (Number(matrixView?.totals?.scheduledFils ?? data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
+      ]);
+      downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
+      return;
+    }
+
+    // Count-matrix layout: property, a column per month, then Renewals · Vacant · Total units.
+    if (def.layout === 'countMatrix') {
+      const months = data.months ?? [];
+      const headers = ['Property', ...months, 'Renewals', 'Vacant', 'Total units'];
+      const rows = sorted.map(row => {
+        const cells = (row.cells as number[]) ?? [];
+        return [
+          String(row.label ?? ''),
+          ...cells.map(n => String(Number(n) || 0)),
+          String(Number(row.total) || 0),
+          String(Number(row.vacant) || 0),
+          String(Number(row.totalUnits) || 0),
+        ];
+      });
+      const cmt = countMatrixView?.totals ?? data.totals;
+      rows.push([
+        'Total',
+        ...(countMatrixView?.columnTotals ?? data.columnTotals ?? []).map(t => String(Number(t) || 0)),
+        String(Number(cmt?.leased ?? 0)),
+        String(Number(cmt?.vacant ?? 0)),
+        String(Number(cmt?.totalUnits ?? 0)),
       ]);
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
@@ -1365,7 +1393,8 @@ export function ReportDetailView({
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 mb-6">
           {visibleTotals.map(t => {
             const raw = (def.layout === 'matrix' && matrixView ? matrixView.totals
-              : groupedTileTotals ?? data.totals)[t.key];
+              : def.layout === 'countMatrix' && countMatrixView ? countMatrixView.totals
+              : data.totals)[t.key];
             return (
               <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
                 <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
@@ -1525,6 +1554,81 @@ export function ReportDetailView({
             <span className="flex items-center gap-1.5"><span className="text-[#d4d2cc]">·</span> No cheque due</span>
           </div>
         </div>
+      ) : def.layout === 'countMatrix' ? (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+          <div className="overflow-x-auto">
+            <table className="text-sm border-collapse min-w-full">
+              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <tr>
+                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">Property</th>
+                  {(data?.months ?? []).map(m => (
+                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap">{m}</th>
+                  ))}
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Renewals</th>
+                  <th className="px-3 py-3 text-right font-semibold whitespace-nowrap">Vacant</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">Total units</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((row, i) => {
+                  const cells = (row.cells as number[]) ?? [];
+                  return (
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+                      <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left font-medium text-[#1a1916] whitespace-nowrap">{String(row.label ?? '—')}</td>
+                      {cells.map((n, ci) => (
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${Number(n) ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
+                          {Number(n) ? fmtNumber(Number(n)) : '·'}
+                        </td>
+                      ))}
+                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.total))}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
+                        {Number(row.vacant) ? (
+                          <button
+                            type="button"
+                            onClick={() => setVacantList({ title: String(row.label ?? ''), units: (row.vacantUnits as VacantUnit[]) ?? [] })}
+                            className="font-medium text-[#b45309] hover:underline cursor-pointer print:no-underline print:text-[#b45309]"
+                            title="View vacant units">
+                            {fmtNumber(Number(row.vacant))}
+                          </button>
+                        ) : <span className="text-[#d4d2cc]">·</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-[#6b6860] whitespace-nowrap">{fmtNumber(Number(row.totalUnits))}</td>
+                    </tr>
+                  );
+                })}
+                {sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={(data?.months?.length ?? 12) + 4} className="px-4 py-8 text-center text-[#9b9890]">No leases in this year.</td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+                <tr>
+                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
+                  {(countMatrixView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
+                    <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{Number(t) ? fmtNumber(Number(t)) : '·'}</td>
+                  ))}
+                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtNumber(Number(countMatrixView?.totals?.leased ?? data?.totals?.leased ?? 0))}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {(() => {
+                      const all = sorted.flatMap(r => (r.vacantUnits as VacantUnit[]) ?? []);
+                      return all.length ? (
+                        <button type="button" onClick={() => setVacantList({ title: 'All properties', units: all })}
+                          className="font-bold text-[#b45309] hover:underline cursor-pointer" title="View all vacant units">
+                          {fmtNumber(all.length)}
+                        </button>
+                      ) : fmtNumber(0);
+                    })()}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">{fmtNumber(Number(countMatrixView?.totals?.totalUnits ?? data?.totals?.totalUnits ?? 0))}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="px-4 py-2.5 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
+            Months add up to Renewals — the units coming up for renewal in the selected year (each counted once, in its renewal month). Vacant and Total units are current inventory (each unit&rsquo;s live status), independent of the year. Click a Vacant count to list those units.
+          </div>
+        </div>
       ) : (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
@@ -1645,6 +1749,47 @@ export function ReportDetailView({
           </div>
         );
       })()}
+
+      {/* Vacant units list — opened from a Vacant cell in the renewal-details matrix */}
+      {vacantList && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={() => setVacantList(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
+              <div>
+                <h3 className="text-base font-bold text-[#1a1916]">Vacant units — {vacantList.title}</h3>
+                <p className="text-xs text-[#6b6860] mt-0.5">{vacantList.units.length} vacant unit{vacantList.units.length === 1 ? '' : 's'}</p>
+              </div>
+              <button onClick={() => setVacantList(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="overflow-auto">
+              {vacantList.units.length === 0 ? (
+                <div className="px-5 py-8 text-center text-sm text-[#9b9890]">No vacant units.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                    <tr>
+                      <th className="px-5 py-2.5 text-left font-semibold">Unit</th>
+                      <th className="px-4 py-2.5 text-left font-semibold">Type</th>
+                      <th className="px-5 py-2.5 text-right font-semibold">Asking rent</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vacantList.units.map(u => (
+                      <tr key={u.unitId} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        <td className="px-5 py-2.5 text-left font-medium text-[#1a1916]">{u.label}</td>
+                        <td className="px-4 py-2.5 text-left text-[#6b6860] capitalize">{(u.unitType ?? '—').replace(/_/g, ' ')}</td>
+                        <td className="px-5 py-2.5 text-right tabular-nums text-[#1a1916]">{u.rentFils ? fmtAed(u.rentFils) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -26,6 +26,7 @@ export function toEjari(c: any, signatures: any[]): EjariContractData {
     notes: c.notes ?? null,
     landlord: {
       name: c.landlord?.name ?? null,
+      bankAccountName: c.landlord?.bankAccountName ?? null,
       email: c.landlord?.email ?? null,
       phone: c.landlord?.phone ?? null,
       companyName: c.landlord?.companyName ?? null,

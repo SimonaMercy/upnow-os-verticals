@@ -199,7 +199,7 @@ function isRenewalContract(c: ReceiptContract): boolean {
   return (c.contractType ?? '').toLowerCase() === 'renewal';
 }
 
-interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; }
+interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; method?: string | null; reference?: string | null; }
 interface Receipt {
   kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management';
   title: string;
@@ -215,17 +215,21 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   const gross = sel.amount || 0;
   const vat = sel.vatAmount || 0;
   const net = Math.max(0, gross - vat);
+  // Payment method + cheque/ref travel ON the line item (shown inline under the
+  // description), so every receipt states how each amount was paid without a
+  // separate "Payment Details" block.
+  const meta = { method: methodLabel(sel, contract), reference: sel.chequeNumber ?? null };
 
   if (type === 'security_deposit') {
     return { kind: 'deposit', title: 'SECURITY DEPOSIT RECEIPT',
       receiptNo: `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
-      lines: [{ desc: 'Security Deposit', net: gross, vat: 0, total: gross }] };
+      lines: [{ desc: 'Security Deposit', net: gross, vat: 0, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
   if (isFee(sel)) {
     const code = type === 'ejari_fee' ? 'EJR' : type === 'commission' ? 'COM' : 'ADM';
     return { kind: 'fee', title: 'FEE RECEIPT',
       receiptNo: `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
-      lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross }] };
+      lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
 
   const rentalIdx = rentals.findIndex(p => p.id === sel.id);
@@ -241,9 +245,9 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     if (admin > 0) lines.push({ desc: 'Administration Fee', net: admin, vat: 0, total: admin });
     if (ejari > 0) lines.push({ desc: 'Ejari Registration Fee', net: ejari, vat: 0, total: ejari });
     const rentNet = Math.max(0, net - admin - ejari);
-    lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net: rentNet, vat, total: rentNet + vat, date: sel.transactionDate ?? null });
+    lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net: rentNet, vat, total: rentNet + vat, date: sel.transactionDate ?? null, ...meta });
   } else {
-    lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net, vat, total: gross, date: sel.transactionDate ?? null });
+    lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net, vat, total: gross, date: sel.transactionDate ?? null, ...meta });
   }
 
   return { kind: 'rent', title: 'RENT RECEIPT',
@@ -265,6 +269,7 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
   const netOf = (rows: ReceiptPayment[]) => round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
 
   let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commissionNet = 0, commissionVat = 0, legacyBundle = 0;
+  let adminRow: ReceiptPayment | undefined, ejariRow: ReceiptPayment | undefined, commRow: ReceiptPayment | undefined;
 
   if (feeRows.length > 0) {
     // Real fee rows — read each fee (gross + VAT) directly from its own row(s).
@@ -273,6 +278,8 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
     adminVat = vatSumOf(a); adminNet = round2(grossOf(a) - adminVat);
     ejariVat = vatSumOf(e); ejariNet = round2(grossOf(e) - ejariVat);
     commissionVat = vatSumOf(c); commissionNet = round2(grossOf(c) - commissionVat);
+    // Representative row per fee → its cheque/ref + method for the line.
+    adminRow = a[0]; ejariRow = e[0]; commRow = c[0];
   } else {
     // Legacy / renewal: no separate fee rows — fees were bundled into the rent
     // cheques. Reconstruct admin/ejari from the (RP-entered) columns; everything
@@ -284,10 +291,12 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
     legacyBundle = round2(adminNet + ejariNet);
   }
 
+  // Legacy fees were folded into the rent cheques (no separate row) → no reference.
+  const feeMeta = (row?: ReceiptPayment) => row ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null } : {};
   const lines: LineItem[] = [];
-  if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat) });
-  if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat) });
-  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Commission',             net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat) });
+  if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat), ...feeMeta(adminRow) });
+  if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat), ...feeMeta(ejariRow) });
+  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Commission',             net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat), ...feeMeta(commRow) });
   return { lines, legacyBundle, feeCount: feeRows.length };
 }
 
@@ -305,7 +314,8 @@ function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]
     const vat = p.vatAmount || 0;
     let net = Math.max(0, round2(gross - vat));
     if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
-    return { desc: `Rent — Installment ${i + 1} of ${n}`, net, vat, total: round2(net + vat), date: p.transactionDate ?? null };
+    return { desc: `Rent — Installment ${i + 1} of ${n}`, net, vat, total: round2(net + vat), date: p.transactionDate ?? null,
+      method: methodLabel(p, contract), reference: p.chequeNumber ?? null };
   });
   return { kind: 'rental', title: 'RENT INCOME RECEIPT',
     receiptNo: `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
@@ -440,15 +450,6 @@ function Pill({ text }: { text: string }) {
     </View>
   );
 }
-function Detail({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
-  return (
-    <View style={{ marginRight: 26, marginBottom: 8 }}>
-      <Text style={{ fontSize: 6.5, color: MUTE, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 2 }}>{label}</Text>
-      <Text style={{ fontSize: 9, color: INK, fontWeight: 500 }}>{value}</Text>
-    </View>
-  );
-}
 
 // ─── The PDF document ─────────────────────────────────────────────────────────
 
@@ -545,7 +546,13 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
             <View key={i} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: LINE }}>
               <View style={{ flex: 1, paddingVertical: 8 }}>
                 <Text style={{ fontSize: 9, color: INK }}>{l.desc}</Text>
-                {l.date ? <Text style={{ fontSize: 7, color: MUTE, marginTop: 1 }}>Due {fmtDate(l.date)}</Text> : null}
+                {(l.date || l.method) ? (
+                  <Text style={{ fontSize: 7, color: MUTE, marginTop: 1 }}>
+                    {[l.date ? `Due ${fmtDate(l.date)}` : null,
+                      l.method ? (l.reference ? `${l.method} ${l.reference}` : l.method) : null,
+                    ].filter(Boolean).join('  ·  ')}
+                  </Text>
+                ) : null}
               </View>
               {showVat ? <Text style={[st.td, { width: 78, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
               {showVat ? <Text style={[st.td, { width: 60, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
@@ -571,19 +578,8 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
           </View>
         </View>
 
-        {/* ── Payment details — single-payment receipts only. The aggregate
-             "Mode / No. of Cheques" line was removed (it just restated the
-             contract's mode + instalment count, adding nothing to the receipt). ── */}
-        {single ? (
-          <View style={{ paddingHorizontal: PAD, paddingTop: 18 }}>
-            <Text style={[st.metaLbl, { marginBottom: 7 }]}>Payment Details</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              <Detail label="Method" value={methodLabel(single, contract)} />
-              <Detail label="Cheque / Ref" value={single.chequeNumber} />
-              <Detail label="Value Date" value={fmtDate(single.transactionDate)} />
-            </View>
-          </View>
-        ) : null}
+        {/* Payment method + cheque/ref now travel inline on each line item above,
+           so there's no separate "Payment Details" block. */}
 
         {/* ── System-generated note ── */}
         <View style={{ paddingHorizontal: PAD, paddingTop: 14 }}>

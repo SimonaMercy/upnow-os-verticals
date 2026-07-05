@@ -259,3 +259,38 @@ export async function saveUnit(opts: {
   }
   return saved;
 }
+
+/**
+ * Apply physical unit details to EVERY unit on a layout — the "Edit layout" bulk
+ * editor. Sends ONLY the physical fields (type/tier, beds/baths, size, view,
+ * furnishing, parking, amenities, description) — never the per-unit identifiers
+ * (unit number, premises no., floor) or the money / lease fields (owned by the
+ * plan Price editor). An optional floor plan is applied to the whole layout via
+ * the existing layout-image endpoint.
+ */
+export async function saveLayoutDetails(opts: {
+  propertyId: number;
+  planLabel: string;
+  data: UnitFormData;
+  floorPlan?: File | null;
+  manager?: { rp: number };
+}): Promise<void> {
+  const { propertyId, planLabel, data, floorPlan, manager } = opts;
+  // Every unit field EXCEPT the per-unit identifiers (those stay per-unit).
+  const dto = unitFormToDto(data) as Record<string, unknown>;
+  delete dto.unitNumber;
+  delete dto.premiseNumber;
+  delete dto.floor;
+  const body = { propertyId, planLabel, ...dto };
+  const rpQ = manager ? `?rp=${manager.rp}` : '';
+  await apiPatch(manager ? `/manager/units/details${rpQ}` : '/properties/floor-plans/details', body);
+  // One floor plan for the whole layout (reuses the existing layout-image endpoint).
+  if (floorPlan) {
+    const fd = new FormData();
+    fd.append('file', floorPlan);
+    fd.append('propertyId', String(propertyId));
+    fd.append('planLabel', planLabel);
+    await fetch(manager ? `/api/manager/units/image${rpQ}` : '/api/properties/floor-plans/image',
+      { method: 'POST', credentials: 'include', body: fd });
+  }
+}

@@ -32,8 +32,7 @@ import {
   User,
   ExternalLink,
 } from 'lucide-react';
-
-type ViewingStatus = 'scheduled' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
+import { STAGE_LABELS, STAGE_PILL, type LeadStage } from '@/lib/leadJourney';
 
 interface ApiViewing {
   id: number;
@@ -45,6 +44,7 @@ interface ApiViewing {
 
 interface ApiLead {
   id: number;
+  stage: LeadStage;
   customerName: string;
   leadPhone: string | null;
   leadEmail: string | null;
@@ -60,7 +60,7 @@ interface ApiLead {
 interface FlatViewing {
   viewingId: number;
   scheduledAt: Date;
-  status: ViewingStatus;
+  stage: LeadStage;
   notes: string | null;
   lead: ApiLead;
 }
@@ -70,70 +70,46 @@ interface Props {
   onOpenLead?: (leadId: number) => void;
 }
 
-const STATUS_META: Record<ViewingStatus, { label: string; dot: string; chip: string; ring: string }> = {
-  scheduled: {
-    label: 'Scheduled',
-    dot: 'bg-[#3b82f6]',
-    chip: 'bg-[#dbeafe] text-[#1e40af] border-[#bfdbfe]',
-    ring: 'ring-[#3b82f6]',
-  },
-  confirmed: {
-    label: 'Confirmed',
-    dot: 'bg-[#10b981]',
-    chip: 'bg-[#d1fae5] text-[#065f46] border-[#a7f3d0]',
-    ring: 'ring-[#10b981]',
-  },
-  completed: {
-    label: 'Completed',
-    dot: 'bg-[#64748b]',
-    chip: 'bg-[#e2e8f0] text-[#334155] border-[#cbd5e1]',
-    ring: 'ring-[#64748b]',
-  },
-  no_show: {
-    label: 'No-show',
-    dot: 'bg-[#ef4444]',
-    chip: 'bg-[#fee2e2] text-[#991b1b] border-[#fecaca]',
-    ring: 'ring-[#ef4444]',
-  },
-  cancelled: {
-    label: 'Cancelled',
-    dot: 'bg-[#9ca3af]',
-    chip: 'bg-[#f3f4f6] text-[#4b5563] border-[#e5e7eb]',
-    ring: 'ring-[#9ca3af]',
-  },
+/** Saturated dot colour per lead stage — hue-matched to the STAGE_PILL used in
+ *  Row/Grid, but a solid fill so the tiny day-cell dots stay legible. */
+const STAGE_DOT: Record<LeadStage, string> = {
+  new:                  'bg-[#1e40af]',
+  contacted:            'bg-[#6d28d9]',
+  viewing_scheduled:    'bg-[#b45309]',
+  offer_made:           'bg-[#1a7a5a]',
+  applied:              'bg-[#9d174d]',
+  approved:             'bg-[#065f46]',
+  documents_collection: 'bg-[#c2410c]',
+  payment_plan_shared:  'bg-[#0369a1]',
+  interested:           'bg-[#1f5a3f]',
+  cheques_submitted:    'bg-[#854d0e]',
+  cheques_collected:    'bg-[#1a7a5a]',
+  contract_issued:      'bg-[#065f46]',
+  rejected:             'bg-[#b91c1c]',
+  converted:            'bg-[#0369a1]',
 };
-
-const ALL_STATUSES: ViewingStatus[] = ['scheduled', 'confirmed', 'completed', 'no_show', 'cancelled'];
-
-function normaliseStatus(raw: string): ViewingStatus {
-  const s = raw.toLowerCase();
-  if (s === 'scheduled' || s === 'confirmed' || s === 'completed' || s === 'no_show' || s === 'cancelled') return s;
-  return 'scheduled';
-}
 
 export function LeadsCalendarView({ leads, onOpenLead }: Props) {
   const [cursor, setCursor]                 = useState<Date>(() => startOfMonth(new Date()));
   const [selectedDay, setSelectedDay]       = useState<Date>(() => new Date());
-  const [statusFilter, setStatusFilter]     = useState<Set<ViewingStatus>>(() => new Set(ALL_STATUSES));
 
-  // Flatten viewings out of leads + apply status filter
+  // Flatten viewings out of the (already stage-filtered) leads. Each appointment
+  // is coloured/labelled by its LEAD's pipeline stage — same taxonomy as Row/Grid.
   const allViewings: FlatViewing[] = useMemo(() => {
     const flat: FlatViewing[] = [];
     for (const lead of leads) {
       for (const v of lead.viewings ?? []) {
-        const status = normaliseStatus(v.status);
-        if (!statusFilter.has(status)) continue;
         flat.push({
           viewingId: v.id,
           scheduledAt: new Date(v.scheduledAt),
-          status,
+          stage: lead.stage,
           notes: v.notes ?? null,
           lead,
         });
       }
     }
     return flat.sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
-  }, [leads, statusFilter]);
+  }, [leads]);
 
   // Group viewings by day (ISO date key)
   const byDay: Map<string, FlatViewing[]> = useMemo(() => {
@@ -159,15 +135,6 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
 
   const selectedDayKey   = format(selectedDay, 'yyyy-MM-dd');
   const selectedViewings = byDay.get(selectedDayKey) ?? [];
-  const confirmedCount   = selectedViewings.filter(v => v.status === 'confirmed').length;
-
-  function toggleStatus(s: ViewingStatus) {
-    setStatusFilter(prev => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s); else next.add(s);
-      return next;
-    });
-  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 mt-2">
@@ -202,26 +169,6 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
           >
             Today
           </button>
-        </div>
-
-        {/* Status filter chips */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {ALL_STATUSES.map(s => {
-            const meta = STATUS_META[s];
-            const on   = statusFilter.has(s);
-            return (
-              <button
-                key={s}
-                onClick={() => toggleStatus(s)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors cursor-pointer ${
-                  on ? meta.chip : 'bg-white text-[#9b9890] border-[#e8e6e0] hover:bg-[#f4f3ef]'
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${on ? meta.dot : 'bg-[#c8c6c0]'}`} />
-                {meta.label}
-              </button>
-            );
-          })}
         </div>
 
         {/* Weekday header */}
@@ -265,8 +212,8 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                       {dayViews.slice(0, 5).map(v => (
                         <span
                           key={v.viewingId}
-                          className={`w-1.5 h-1.5 rounded-full ${STATUS_META[v.status].dot}`}
-                          title={`${format(v.scheduledAt, 'HH:mm')} — ${v.lead.customerName}`}
+                          className={`w-1.5 h-1.5 rounded-full ${STAGE_DOT[v.stage]}`}
+                          title={`${format(v.scheduledAt, 'HH:mm')} — ${v.lead.customerName} · ${STAGE_LABELS[v.stage]}`}
                         />
                       ))}
                       {dayViews.length > 5 && (
@@ -296,7 +243,7 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
         <p className="text-xs text-[#9b9890] mb-4">
           {selectedViewings.length === 0
             ? 'No viewings'
-            : `${selectedViewings.length} viewing${selectedViewings.length === 1 ? '' : 's'}${confirmedCount ? ` · ${confirmedCount} confirmed` : ''}`}
+            : `${selectedViewings.length} viewing${selectedViewings.length === 1 ? '' : 's'}`}
         </p>
 
         {selectedViewings.length === 0 ? (
@@ -309,7 +256,6 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
         ) : (
           <div className="space-y-2">
             {selectedViewings.map(v => {
-              const meta = STATUS_META[v.status];
               return (
                 <div
                   key={v.viewingId}
@@ -320,8 +266,8 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                       <Clock size={13} className="text-[#9b9890]" />
                       {format(v.scheduledAt, 'HH:mm')}
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${meta.chip}`}>
-                      {meta.label}
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STAGE_PILL[v.stage]}`}>
+                      {STAGE_LABELS[v.stage]}
                     </span>
                   </div>
 

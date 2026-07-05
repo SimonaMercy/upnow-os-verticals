@@ -4,17 +4,17 @@
  *
  * The four `available: true` reports route to /reports/<slug> which fetches
  * `/api/reports/<slug>` and renders an interactive table + CSV + PDF.
+ *
+ * The at-a-glance KPIs / exceptions / charts (ExecutiveOverview) live on the
+ * separate Analytics page — this hub is the drillable + exportable report list.
  */
 'use client';
 
 import { useState } from 'react';
 import Link from 'next/link';
 import {
-  Search, X, FileText, BarChart2, Building2, AlertCircle, CalendarClock,
-  RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart, ScrollText,
-  Banknote, TrendingUp, CalendarRange,
+  Search, X, BarChart2, CalendarRange, LineChart,
 } from 'lucide-react';
-import ExecutiveOverview from './ExecutiveOverview';
 import DataExports from './DataExports';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow/reportsYear';
@@ -37,9 +37,14 @@ export default function ReportsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Where the portfolio stands right now — then drill into any report below.</p>
+          <p className="text-sm text-[#6b6860] mt-0.5">
+            Open any report to view, filter and export it.{' '}
+            <Link href="/rental-provider/dashboard/analytics" className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
+              <LineChart size={12} /> View analytics
+            </Link>
+          </p>
         </div>
-        {/* Hub-wide year — scopes the overview and the default period each
+        {/* Hub-wide year (shared with Analytics) — the default period each
             time-based report opens with (snapshots ignore it). */}
         <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
           <CalendarRange size={15} className="text-[#2e9f82]" />
@@ -54,9 +59,6 @@ export default function ReportsPage() {
           </select>
         </label>
       </div>
-
-      {/* Executive overview — KPI tiles, exceptions, charts */}
-      <ExecutiveOverview year={year} />
 
       {/* Full-dataset CSV downloads (customers / properties / units) */}
       <DataExports />

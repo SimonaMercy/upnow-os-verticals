@@ -1,42 +1,18 @@
 'use client';
 
 /**
- * Manager — Leads. Reuses the full RP `LeadsWorkspace` pipeline (record/collect
- * cheques, issue plan, approve docs, confirm collected, etc.), scoped to the
- * landlord chosen in the LandlordSwitcher (?rp=) and gated by canManageViewings.
- * Every action calls the landlord-scoped /api/manager/leads/* endpoints.
+ * Legacy alias — the manager "Leads" workspace now lives at /dashboard/manager/leads
+ * (mirroring the RP /leads route). Redirect here, preserving the ?rp= scope.
  */
-import { useSearchParams } from 'next/navigation';
-import { Lock } from 'lucide-react';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { LeadsWorkspace } from '@/app/rental-provider/dashboard/leads/page';
+import { useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function ManagerLeadsPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
-  const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageViewings)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canManageViewings', effectiveRp);
-
-  if (!permsLoading && !allowed) {
-    return (
-      <div className="p-6">
-        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
-          <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]">
-            <Lock size={20} />
-          </div>
-          <p className="text-base font-bold text-[#1a1916]">Permission required</p>
-          <p className="text-sm text-[#6b6860] mt-1.5 leading-relaxed">
-            This landlord hasn&rsquo;t granted you the <strong>Manage Viewings</strong> permission, so their leads aren&rsquo;t available.
-          </p>
-        </div>
-      </div>
-    );
-  }
-  if (permsLoading || effectiveRp == null) {
-    return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
-  }
-  return <LeadsWorkspace manager={{ rp: effectiveRp }} />;
+export default function ManagerViewingsRedirect() {
+  const router = useRouter();
+  const params = useSearchParams();
+  useEffect(() => {
+    const rp = params.get('rp');
+    router.replace(`/dashboard/manager/leads${rp ? `?rp=${rp}` : ''}`);
+  }, [router, params]);
+  return <div className="p-6 text-sm text-[#9b9890]">Redirecting to Leads…</div>;
 }

@@ -31,7 +31,6 @@ export const LEASE_PROOF_KEYS = [HEAD_LEASE_KEY, MGMT_AGREEMENT_KEY];
 export const PROPERTY_DOC_SLOTS: PropertyDocSlot[] = [
   { key: HEAD_LEASE_KEY,           label: 'Head-lease / Master-lease Agreement',  category: 'legal',      multiple: false },
   { key: MGMT_AGREEMENT_KEY,       label: 'Signed Property Management Agreement',  category: 'legal',      multiple: false },
-  { key: 'affection_plan',         label: 'Affection Plan',         category: 'property',   multiple: false },
   { key: 'completion_certificate', label: 'Completion Certificate', category: 'compliance', multiple: false },
   { key: 'site_plan',              label: 'Site Plan',              category: 'property',   multiple: false },
   { key: 'utility_account',        label: 'Utility Account Details', category: 'property',  multiple: false },

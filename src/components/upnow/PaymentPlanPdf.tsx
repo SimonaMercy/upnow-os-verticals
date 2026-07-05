@@ -24,7 +24,7 @@ import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 
-const NAVY = '#1a3c6e';
+const GREEN = '#1a5a4a'; // --color-primary-dark — brand green accent (was navy)
 const aed = (fils: number) => `AED ${Math.round((fils ?? 0) / 100).toLocaleString('en-AE')}`;
 const fmtD = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
@@ -35,9 +35,11 @@ const statusLabel = (s?: string | null) => STATUS_LABEL[(s ?? '').toLowerCase()]
 export interface PaymentPlanMeta {
   buildingName?: string | null;
   unitNumber?: string | null;
+  community?: string | null;
   periodStart?: string | null;
   periodEnd?: string | null;
   tenantName?: string | null;
+  landlordName?: string | null;
 }
 
 /** A contract shape sufficient to derive the plan + its heading metadata. */
@@ -46,27 +48,28 @@ export interface PlanViewerContract extends PlanContract {
   ref?: string | null;
   startDate?: string | null;
   endDate?: string | null;
-  property?: { buildingName?: string | null } | null;
+  property?: { buildingName?: string | null; community?: string | null; emirate?: string | null } | null;
   unit?: { number?: string | null } | null;
   tenant?: { name?: string | null; companyName?: string | null } | null;
+  landlord?: { name?: string | null; companyName?: string | null; bankAccountName?: string | null } | null;
   payments?: PlanPayment[] | null;
 }
 
 const s = StyleSheet.create({
   page: { paddingTop: 36, paddingBottom: 44, paddingHorizontal: 40, fontSize: 10, color: '#1a1916', fontFamily: 'Helvetica' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: `2px solid ${NAVY}`, paddingBottom: 8 },
-  h1: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: NAVY },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: `2px solid ${GREEN}`, paddingBottom: 8 },
+  h1: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: GREEN },
   sub: { fontSize: 9, color: '#6b6860', marginTop: 2 },
   metaRow: { flexDirection: 'row', marginTop: 14, gap: 22, flexWrap: 'wrap' },
   metaCol: { flexGrow: 1 },
   metaLabel: { fontSize: 8, color: '#9b9890', textTransform: 'uppercase', letterSpacing: 0.5 },
   metaVal: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginTop: 1 },
-  sectionTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: NAVY, marginTop: 20, marginBottom: 6, borderBottom: '1px solid #e3e0d9', paddingBottom: 3 },
+  sectionTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: GREEN, marginTop: 20, marginBottom: 6, borderBottom: '1px solid #e3e0d9', paddingBottom: 3 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, borderBottom: '0.5px solid #f0ede7' },
   rowLabel: { flexGrow: 1 },
   amt: { fontFamily: 'Helvetica-Bold' },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, marginTop: 4, borderTop: '1px solid #c5cdd9' },
-  totalLabel: { fontFamily: 'Helvetica-Bold', color: NAVY },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, marginTop: 4, borderTop: '1px solid #c5e8df' },
+  totalLabel: { fontFamily: 'Helvetica-Bold', color: GREEN },
   totalAmt: { fontFamily: 'Helvetica-Bold', color: '#15803d', fontSize: 12 },
   thead: { flexDirection: 'row', backgroundColor: '#f4f3ef', paddingVertical: 4, paddingHorizontal: 4, marginTop: 4 },
   th: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6b6860', textTransform: 'uppercase' },
@@ -93,7 +96,11 @@ function planLines(plan: OfferPlan): { label: string; fils: number }[] {
 
 export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refLabel?: string | null; meta?: PaymentPlanMeta }) {
   const lines = planLines(plan);
-  const items = [...(plan.items ?? [])].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
+  // By due date; on a same-date tie the security deposit sorts before the rent
+  // installments (deposit is collected first, then the plan).
+  const items = [...(plan.items ?? [])].sort((a, b) =>
+    (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
+    || (a.type === 'security_deposit' ? -1 : b.type === 'security_deposit' ? 1 : 0));
   const schedTotal = items.reduce((sum, it) => sum + (it.amountFils ?? 0), 0);
   return (
     <Document title={refLabel ? `Payment plan — ${refLabel}` : 'Payment plan'}>
@@ -105,12 +112,22 @@ export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refL
           </View>
         </View>
 
-        {(meta?.buildingName || meta?.unitNumber || meta?.periodStart || meta?.tenantName) && (
-          <View style={s.metaRow}>
-            {meta?.tenantName ? <View style={s.metaCol}><Text style={s.metaLabel}>Tenant</Text><Text style={s.metaVal}>{meta.tenantName}</Text></View> : null}
-            {meta?.buildingName ? <View style={s.metaCol}><Text style={s.metaLabel}>Building</Text><Text style={s.metaVal}>{meta.buildingName}</Text></View> : null}
-            {meta?.unitNumber ? <View style={s.metaCol}><Text style={s.metaLabel}>Unit</Text><Text style={s.metaVal}>{meta.unitNumber}</Text></View> : null}
-            {meta?.periodStart ? <View style={s.metaCol}><Text style={s.metaLabel}>Contract period</Text><Text style={s.metaVal}>{fmtD(meta.periodStart)} – {fmtD(meta.periodEnd)}</Text></View> : null}
+        {/* Row 1 — Tenant (left) · Landlord (right) */}
+        {(meta?.tenantName || meta?.landlordName) && (
+          <View style={[s.metaRow, { justifyContent: 'space-between' }]}>
+            {meta?.tenantName ? <View><Text style={s.metaLabel}>Tenant</Text><Text style={s.metaVal}>{meta.tenantName}</Text></View> : <View />}
+            {meta?.landlordName ? <View style={{ alignItems: 'flex-end' }}><Text style={s.metaLabel}>Landlord</Text><Text style={s.metaVal}>{meta.landlordName}</Text></View> : <View />}
+          </View>
+        )}
+        {/* Row 2 — Unit · Building · Community (left) · Contract period (right) */}
+        {(meta?.unitNumber || meta?.buildingName || meta?.community || meta?.periodStart) && (
+          <View style={[s.metaRow, { marginTop: 10, justifyContent: 'space-between' }]}>
+            <View style={{ flexDirection: 'row', gap: 22 }}>
+              {meta?.unitNumber ? <View><Text style={s.metaLabel}>Unit</Text><Text style={s.metaVal}>{meta.unitNumber}</Text></View> : null}
+              {meta?.buildingName ? <View><Text style={s.metaLabel}>Building</Text><Text style={s.metaVal}>{meta.buildingName}</Text></View> : null}
+              {meta?.community ? <View><Text style={s.metaLabel}>Community</Text><Text style={s.metaVal}>{meta.community}</Text></View> : null}
+            </View>
+            {meta?.periodStart ? <View style={{ alignItems: 'flex-end' }}><Text style={s.metaLabel}>Contract period</Text><Text style={s.metaVal}>{fmtD(meta.periodStart)} – {fmtD(meta.periodEnd)}</Text></View> : <View />}
           </View>
         )}
 
@@ -158,9 +175,11 @@ export function planFromContract(contract: PlanViewerContract): { plan: OfferPla
     meta: {
       buildingName: contract.property?.buildingName ?? null,
       unitNumber: contract.unit?.number ?? null,
+      community: contract.property?.community ?? contract.property?.emirate ?? null,
       periodStart: contract.startDate ?? null,
       periodEnd: contract.endDate ?? null,
       tenantName: contract.tenant?.companyName || contract.tenant?.name || null,
+      landlordName: contract.landlord?.bankAccountName || contract.landlord?.companyName || contract.landlord?.name || null,
     },
   };
 }
@@ -194,7 +213,7 @@ export function PaymentPlanDownloadLink({ plan, refLabel, meta }: { plan: OfferP
 const VIEWER_WRAP = { position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#52555a' } as const;
 const VIEWER_BAR = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: '#fff', borderBottom: '1px solid #ddd', gap: 12, flexWrap: 'wrap' } as const;
 const CLOSE_BTN = { padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, background: '#fff' } as const;
-const DL_BTN = { padding: '6px 16px', background: NAVY, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' } as const;
+const DL_BTN = { padding: '6px 16px', background: GREEN, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' } as const;
 
 export default function PaymentPlanViewer({ contract }: { contract: PlanViewerContract }) {
   const { plan, refLabel, meta } = planFromContract(contract);

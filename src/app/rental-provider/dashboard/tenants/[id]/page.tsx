@@ -219,7 +219,9 @@ export default function CustomerDetailPage() {
     try {
       // Notes are anchored on the renewal-chain root server-side, so any lease in
       // the chain is a valid target — the backend resolves the shared journal.
-      const res = await fetch(`/api/contracts/${noteLeaseId}/notes`, {
+      // Manager acts on the landlord-scoped endpoint (?rp=) via /api/manager/*.
+      const res = await fetch(
+        isManager ? `/api/manager/contracts/${noteLeaseId}/notes?rp=${rpParam ?? ''}` : `/api/contracts/${noteLeaseId}/notes`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: text }),
