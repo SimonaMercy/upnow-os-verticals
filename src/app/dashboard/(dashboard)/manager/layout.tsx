@@ -2,6 +2,7 @@
 
 import { ManagerPermissionsProvider } from '@/contexts/ManagerPermissionsContext';
 import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
+import { ManagerScopeSync } from '@/components/dashboard/ManagerScopeSync';
 import type { ReactNode } from 'react';
 
 /**
@@ -13,6 +14,7 @@ import type { ReactNode } from 'react';
 export default function ManagerLayout({ children }: { children: ReactNode }) {
   return (
     <ManagerPermissionsProvider>
+      <ManagerScopeSync />
       <div className="mgr-scopebar">
         <span className="mgr-scopebar__lbl">Acting for</span>
         <LandlordSwitcher />

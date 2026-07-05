@@ -7,14 +7,18 @@
  * the whole dashboard to a single landlord (so it behaves exactly like that
  * landlord's own RP view) or pick "All landlords" to see everything aggregated.
  *
- * The selection is held in the URL (?rp=<id> or absent = All) so it survives
- * navigation between manager pages and deep links.
+ * The selection is held in the URL (?rp=<id> or absent = All) AND persisted to
+ * localStorage, so it survives navigation between manager pages, sidebar clicks
+ * (whose links carry no query), reloads and deep links. `ManagerScopeSync`
+ * restores the persisted choice into the URL on any page that loads without it,
+ * so the chosen landlord stays in effect until the manager changes it here.
  */
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { Building2, ChevronDown, Check, Layers } from 'lucide-react';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { writeMgrScope } from '@/lib/managerScope';
 
 export function LandlordSwitcher() {
   const { rps, loading } = useManagerPermissions();
@@ -37,6 +41,9 @@ export function LandlordSwitcher() {
   const current = activeRp ? rps.find(r => r.rentalProviderId === activeRp)?.rpName ?? 'Landlord' : 'All landlords';
 
   const select = (rpId: number | null) => {
+    // Remember the choice so it stays in effect across every manager page
+    // (sidebar links carry no query; ManagerScopeSync restores it from here).
+    writeMgrScope(rpId);
     const next = new URLSearchParams(Array.from(params.entries()));
     if (rpId == null) next.delete('rp'); else next.set('rp', String(rpId));
     router.push(`${pathname}${next.toString() ? `?${next}` : ''}`);

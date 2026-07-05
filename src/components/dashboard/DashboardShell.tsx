@@ -234,6 +234,14 @@ function Sidebar({
   counts?: NavCounts;
 }) {
   const managerPerms = useManagerNavPerms(role);
+  const navSearchParams = useSearchParams();
+  // Carry the manager's chosen landlord (?rp=) onto every sidebar link so
+  // navigating between sections keeps the same landlord in view instead of
+  // resetting to "All landlords". ManagerScopeSync is the safety net for any
+  // other entry point; this just avoids a scope flash on sidebar clicks.
+  const scopeRp = role === 'manager' ? navSearchParams.get('rp') : null;
+  const withScope = (href: string) =>
+    scopeRp && href.startsWith('/dashboard/manager') ? `${href}?rp=${scopeRp}` : href;
   const rawNav = NAV[role] ?? [];
   // For managers: hide nav items whose requirePerm flag isn't granted, then drop
   // any section header left with no visible links under it (so a landlord that
@@ -265,7 +273,7 @@ function Sidebar({
     >
       {/* Brand */}
       <Link
-        href={dashboardPath(role)}
+        href={withScope(dashboardPath(role))}
         className={shell.brand}
         style={collapsed ? { justifyContent: 'center', padding: '6px 0', gap: 0 } : undefined}
         title={collapsed ? 'UpNow' : undefined}
@@ -335,7 +343,7 @@ function Sidebar({
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={withScope(item.href)}
               onClick={onClose}
               className={cn(shell.item, isActive && shell.active)}
               style={collapsed ? { justifyContent: 'center', padding: '8px', gap: 0 } : undefined}
