@@ -24,6 +24,7 @@ import type { EjariContractData, EjariAddendum } from '@/components/contract/Eja
 import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
+import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergePart } from '@/components/upnow/DownloadDocsPopup';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
 import ds from './ContractDocsBinder.module.css';
@@ -318,13 +319,85 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     ...(leftover.length ? [{ id: 'r-other', label: 'Other documents' }] : []),
   ];
 
+  // ── "Download documents" popup — everything AVAILABLE on this page, in page
+  // order, so the user can tick a selection and save it as ONE combined PDF.
+  // Generated documents (plan / receipts / agreement) build their bytes with the
+  // same generators the inline previews use; stored uploads stream through the
+  // same-origin /documents/:id/file proxy. Authenticated surfaces only — the
+  // magic-link portal has no JWT for the byte proxy.
+  const reactPdfBytes = async (blob: Blob): Promise<MergePart[]> =>
+    [{ bytes: new Uint8Array(await blob.arrayBuffer()), mime: 'application/pdf' }];
+  const storedItem = (label: string, group: string, docs: BinderDoc[]): MergeDocItem => ({
+    id: `s-${docs.map(d => d.id).join('-')}`,
+    label,
+    group,
+    count: docs.length,
+    make: () => Promise.all(docs.map(d => fetchStoredDocBytes(d.id))),
+  });
+  const downloadItems: MergeDocItem[] = [];
+  for (const s of seq) {
+    if (s.kind === 'plan') {
+      if (!hasPlan) continue;
+      downloadItems.push({
+        id: 'g-plan', label: 'Payment plan', group: 'Rental documents',
+        make: async () => {
+          const [{ pdf }, { PaymentPlanDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentPlanPdf')]);
+          return reactPdfBytes(await pdf(
+            <PaymentPlanDoc plan={currentPlan} refLabel={refLabel} meta={{
+              contractType, tenantName: tenant.companyName || tenant.name,
+              landlordName: ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name,
+              unitNumber: ejari.unit?.number, buildingName: ejari.property?.buildingName,
+              community: ejari.property?.community || ejari.property?.emirate,
+              periodStart: ejari.startDate, periodEnd: ejari.endDate,
+            }} />,
+          ).toBlob());
+        },
+      });
+    } else if (s.kind === 'receipts') {
+      if (!hasReceiptData || !receipt) continue;
+      downloadItems.push({
+        id: 'g-receipts', label: 'Receipts', group: 'Rental documents',
+        make: async () => {
+          const [{ pdf }, { PaymentReceiptDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentReceiptPdf')]);
+          return reactPdfBytes(await pdf(<PaymentReceiptDoc contract={receipt} kind="all" selectedId={null} selectedIdx={0} />).toBlob());
+        },
+      });
+    } else if (s.kind === 'agreement') {
+      downloadItems.push({
+        id: 'g-agreement', label: 'Agreement (tenancy contract)', group: 'Rental documents',
+        make: async () => {
+          const { isDubaiContract, fillEjariPdf } = await import('@/lib/ejariFill');
+          if (isDubaiContract(ejari)) return [{ bytes: await fillEjariPdf(ejari, addendums), mime: 'application/pdf' }];
+          const [{ pdf }, { EjariContractDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/contract/EjariContractPdf')]);
+          return reactPdfBytes(await pdf(<EjariContractDoc data={ejari} addendums={addendums} />).toBlob());
+        },
+      });
+    } else {
+      const docs = matchDocs(s.key);
+      if (docs.length) downloadItems.push(storedItem(s.label, 'Rental documents', docs));
+    }
+  }
+  // Loose uploaded extras are offered under their own group (mirroring the page's
+  // "Other documents" section) but arrive UNTICKED — the default selection is the
+  // canonical binder set; the extras are one click away when wanted. Their own
+  // group also keeps an uploaded scan named "Agreement" from sitting confusingly
+  // next to the GENERATED "Agreement (tenancy contract)".
+  for (const d of leftover) downloadItems.push({ ...storedItem(d.displayName ?? d.documentKey.replace(/_/g, ' '), 'Other documents (uploaded)', [d]), preselected: false });
+  for (const d of primaryId) downloadItems.push(storedItem(idLabel(d), 'Tenant & KYC', [d]));
+  for (const g of occGroups) for (const d of g.docs) downloadItems.push(storedItem(`Occupant ${g.n} — ${idLabel(d)}`, 'Tenant & KYC', [d]));
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#f4f3ef', display: 'flex', flexDirection: 'column' }}>
       <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6, gap: 10 }}>
         <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>All documents</span>
         <span style={{ fontSize: 12.5, color: '#9b9890' }}>{refLabel}</span>
         <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>
-        {headerRight && <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{headerRight}</div>}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!portalToken && downloadItems.length > 0 && (
+            <DownloadDocsButton items={downloadItems} fileName={`Documents-${(refLabel || 'contract').replace(/[^\w.-]+/g, '-')}.pdf`} style={linkBtnGhost} />
+          )}
+          {headerRight}
+        </div>
       </header>
 
       <div className={ds.body}>

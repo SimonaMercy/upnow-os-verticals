@@ -2,11 +2,12 @@
  * Admin: Platform Billing (dashboard/admin/billing)
  *
  * RP commercial model (agency, final recommendation) — what UpNow bills each
- * Rental Provider per calendar month: platform subscription (AED 499/mo) +
- * lease origination (AED 300, new lease activated) + lease renewal (AED 100)
- * + lease settlement (AED 100, settlement paid). VAT (5%) is always its own
- * line, never folded into net. Phase 1 = statement CALCULATOR with per-provider
- * drill-down; invoice generation is a later phase.
+ * Rental Provider per calendar month: platform subscription (AED 499/month,
+ * recurring, per the commercial-model PDF) + lease origination (AED 300, new
+ * lease activated) + lease renewal (AED 100) + lease settlement (AED 100,
+ * settlement paid, once per tenancy chain). VAT (5%) is always its own line,
+ * never folded into net. Phase 1 = statement CALCULATOR with per-provider
+ * drill-down; invoice generation is later.
  *
  * Fee amounts are versioned in fee_config; editing is SUPER_ADMIN-only.
  * Backend contract: /admin/billing/* . All money WHOLE AED (VAT can be 2dp).
@@ -41,7 +42,8 @@ interface StatementRow {
 interface Statements {
   month: string; vatRatePct: number; fees: BillingFees;
   totals: {
-    providers: number; newLeases: number; renewals: number; settlements: number;
+    providers: number; subscribedProviders: number;
+    newLeases: number; renewals: number; settlements: number;
     subscriptionAed: number; newLeaseAed: number; renewalAed: number; settlementAed: number;
     netAed: number; vatAed: number; grossAed: number;
   };
@@ -65,7 +67,9 @@ interface ProviderStatement {
   totals: StatementRow extends infer _ ? Omit<StatementRow, 'rentalProviderId' | 'name' | 'email' | 'joinedAt'> : never;
 }
 interface TrendPoint {
-  month: string; providers: number; newLeases: number; renewals: number; settlements: number;
+  // `subscribers` = providers paying the monthly subscription that month;
+  // statement rows can exceed this in history months (events pre-date signup).
+  month: string; subscribers: number; newLeases: number; renewals: number; settlements: number;
   subscriptionAed: number; newLeaseAed: number; renewalAed: number; settlementAed: number;
   netAed: number; vatAed: number;
 }
@@ -85,11 +89,16 @@ const STREAMS = [
 ] as const;
 
 /* ── Formatting helpers ── */
+// Fractional amounts always render fixed 2dp ('AED 49.90', never 'AED 49.9')
+// so a money column mixing VAT and whole-AED fees stays aligned.
 function fmtAED(n: number | null | undefined): string {
   if (n == null) return '—';
-  return `AED ${n.toLocaleString('en-AE', { maximumFractionDigits: 2 })}`;
+  const dp = Number.isInteger(n) ? 0 : 2;
+  return `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: dp, maximumFractionDigits: 2 })}`;
 }
-const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}K` : String(v));
+// One decimal for non-integer thousands ('1.5K') — Math.round would label the
+// 1,500 gridline '2K', colliding with the real 2,000 tick.
+const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(v % 1000 ? 1 : 0)}K` : String(v));
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function monthShort(m: string): string {
   const [y, mo] = m.split('-').map(Number);
@@ -370,7 +379,9 @@ export default function AdminBillingPage() {
 
   if (!allowed) return <p className="p-8 text-sm text-[#9b9890]">Admin access required.</p>;
 
-  const t = statements?.totals;
+  // Undefined while loading/errored so KPI sub-labels never show a stale
+  // previous month's figures under a '…' value.
+  const t = !loading && !stmtError ? statements?.totals : undefined;
   const chartData = (trend?.months ?? []).map((p) => ({ ...p, label: monthShort(p.month) }));
 
   return (
@@ -404,7 +415,7 @@ export default function AdminBillingPage() {
       {/* KPI row — '—' on fetch failure so an error is never mistaken for AED 0 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiTile icon={Landmark} label="Gross billed" value={loading ? '…' : stmtError ? '—' : fmtAED(t?.grossAed ?? 0)} sub={t ? `${fmtAED(t.netAed)} net + ${fmtAED(t.vatAed)} VAT` : undefined} />
-        <KpiTile icon={Users} label="Providers billed" value={loading ? '…' : stmtError ? '—' : String(t?.providers ?? 0)} sub={`subscription ${fmtAED(statements?.fees.subscriptionAed ?? config?.fees.subscriptionAed ?? 499)}/mo each`} />
+        <KpiTile icon={Users} label="Providers billed" value={loading ? '…' : stmtError ? '—' : String(t?.providers ?? 0)} sub={t ? `${t.subscribedProviders} × ${fmtAED(statements!.fees.subscriptionAed)}/mo subscription` : undefined} />
         <KpiTile icon={FilePlus2} label="Lease events" value={loading ? '…' : stmtError ? '—' : String((t?.newLeases ?? 0) + (t?.renewals ?? 0))} sub={t ? `${t.newLeases} new · ${t.renewals} renewals` : undefined} />
         <KpiTile icon={Scale} label="Settlements" value={loading ? '…' : stmtError ? '—' : String(t?.settlements ?? 0)} sub="settlement & closure completed" />
       </div>
@@ -433,7 +444,7 @@ export default function AdminBillingPage() {
                     formatter={(v, name) => [fmtAED(Number(v)), String(name)]}
                     labelFormatter={(l, payload) => {
                       const p = payload?.[0]?.payload as TrendPoint | undefined;
-                      return p ? `${monthLong(p.month)} — ${p.providers} providers` : String(l);
+                      return p ? `${monthLong(p.month)} — ${p.subscribers} subscribed` : String(l);
                     }}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={7} />
@@ -472,7 +483,7 @@ export default function AdminBillingPage() {
         <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0ede8]">
           <Building2 size={14} className="text-[#6b6860]" />
           <h3 className="text-sm font-bold text-[#1a1916] flex-1">Provider statements — {monthLong(month)}</h3>
-          <span className="text-[11px] text-[#9b9890]">{statements?.rows.length ?? 0} providers</span>
+          <span className="text-[11px] text-[#9b9890]">{loading ? '…' : `${statements?.rows.length ?? 0} providers`}</span>
         </div>
 
         {loading ? (
@@ -508,7 +519,16 @@ export default function AdminBillingPage() {
                   <Fragment key={r.rentalProviderId}>
                     <tr
                       onClick={() => setExpanded((e) => (e === r.rentalProviderId ? null : r.rentalProviderId))}
-                      className="cursor-pointer hover:bg-[#fafaf8]"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setExpanded((x) => (x === r.rentalProviderId ? null : r.rentalProviderId));
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-expanded={expanded === r.rentalProviderId}
+                      className="cursor-pointer hover:bg-[#fafaf8] focus:outline-none focus-visible:bg-[#f5f4f0]"
                     >
                       <td className="px-4 py-2.5">
                         <span className="flex items-center gap-1.5">
@@ -559,7 +579,7 @@ export default function AdminBillingPage() {
           </div>
         )}
         <p className="px-4 py-2.5 text-[10px] text-[#9b9890] border-t border-[#f0ede8]">
-          Billable events: new lease / renewal on activation (amendments excluded) · settlement on payment · subscription for every provider existing in the month.
+          Billable events: new lease / renewal on activation (amendments excluded) · settlement on payment (once per tenancy chain) · monthly subscription for every provider existing in the month.
           History included from each lease&apos;s real activation month. VAT {statements?.vatRatePct ?? 5}% shown separately. Statement view only — no invoices are issued from this page.
         </p>
       </div>
