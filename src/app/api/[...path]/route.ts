@@ -139,6 +139,20 @@ async function proxy(
     return new NextResponse(null, { status: 204 });
   }
 
+  // ── Binary passthrough (e.g. /documents/:id/file) ────────────────────────
+  // Anything that isn't JSON or text must stream through UNTOUCHED — decoding
+  // file bytes as text (below) irreversibly corrupts PDFs/images.
+  const upstreamType = upstream.headers.get('content-type') ?? '';
+  if (upstreamType && !upstreamType.includes('json') && !upstreamType.startsWith('text/')) {
+    const binHeaders = new Headers({ 'Content-Type': upstreamType });
+    const disposition = upstream.headers.get('content-disposition');
+    if (disposition) binHeaders.set('Content-Disposition', disposition);
+    return new NextResponse(await upstream.arrayBuffer(), {
+      status: upstream.status,
+      headers: binHeaders,
+    });
+  }
+
   const rawText = await upstream.text();
   let data: unknown;
   try {

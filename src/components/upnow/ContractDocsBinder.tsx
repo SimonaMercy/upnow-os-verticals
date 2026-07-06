@@ -24,6 +24,7 @@ import type { EjariContractData, EjariAddendum } from '@/components/contract/Eja
 import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
+import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergePart } from '@/components/upnow/DownloadDocsPopup';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
 import ds from './ContractDocsBinder.module.css';
@@ -125,105 +126,6 @@ function PendingLink({ label }: { label: string }) {
   return (
     <div style={{ border: '1px dashed #d8d4cc', borderRadius: 12, padding: '14px 16px', marginBottom: 16, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, background: '#fff', color: '#6b6860' }}>
       <FileText size={14} /> {label} — not completed yet
-    </div>
-  );
-}
-
-const PLAN_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
-  cleared:   { label: 'Cleared',   bg: '#e6f5ee', fg: '#1f6f54' },
-  bounced:   { label: 'Bounced',   bg: '#fdece7', fg: '#9a3520' },
-  cancelled: { label: 'Cancelled', bg: '#f0ede8', fg: '#6b6860' },
-};
-const planStatus = (s?: string | null) => PLAN_STATUS[(s ?? '').toLowerCase()] ?? { label: 'Pending', bg: '#fff7ed', fg: '#c2410c' };
-
-function PlanMeta({ label, value, align = 'left' }: { label: string; value?: string | null; align?: 'left' | 'right' }) {
-  if (!value) return null;
-  return (
-    <div style={align === 'right' ? { marginLeft: 'auto', textAlign: 'right' } : undefined}>
-      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1916' }}>{value}</div>
-    </div>
-  );
-}
-
-function OfferBlock({ plan, refLabel, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: { plan: OfferPlan; refLabel?: string | null; tenantName?: string | null; landlordName?: string | null; unitNumber?: string | null; buildingName?: string | null; community?: string | null; periodStart?: string | null; periodEnd?: string | null }) {
-  const lines: { label: string; fils: number }[] = [
-    { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
-  ];
-  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils + (plan.adminFeeVatFils ?? 0) });
-  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils + (plan.ejariVatFils ?? 0) });
-  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils + (plan.commissionVatFils ?? 0) });
-  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils + f.vatFils }));
-  if (plan.securityDepositFils > 0) lines.push({ label: 'Security deposit', fils: plan.securityDepositFils });
-  // By due date; on a same-date tie the security deposit sorts before the rent
-  // installments (deposit is collected first, then the plan).
-  const items = [...(plan.items ?? [])].sort((a, b) =>
-    (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
-    || (a.type === 'security_deposit' ? -1 : b.type === 'security_deposit' ? 1 : 0));
-  return (
-    <div style={cardCss}>
-      <div style={capCss}>
-        <div>Payment plan</div>
-        <div style={{ fontSize: 11, fontWeight: 500, color: '#6b6860', marginTop: 2 }}>current rent, fees &amp; deposit</div>
-      </div>
-      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} meta={{ tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
-      {(tenantName || landlordName || unitNumber || buildingName || community || periodStart) && (
-        <div style={{ padding: '11px 14px 2px', display: 'grid', gap: 10 }}>
-          {(tenantName || landlordName) && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'flex-start' }}>
-              <PlanMeta label="Tenant" value={tenantName} />
-              <PlanMeta label="Landlord" align="right" value={landlordName} />
-            </div>
-          )}
-          {(unitNumber || buildingName || community || periodStart) && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'flex-start' }}>
-              <PlanMeta label="Unit" value={unitNumber} />
-              <PlanMeta label="Building" value={buildingName} />
-              <PlanMeta label="Community" value={community} />
-              <PlanMeta label="Contract period" align="right" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
-            </div>
-          )}
-        </div>
-      )}
-      <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
-        {lines.map((l, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#334155' }}><span>{l.label}</span><span style={{ fontWeight: 600 }}>{aed(l.fils)}</span></div>
-        ))}
-        <div style={{ borderTop: '2px solid #c5e8df', margin: '4px 0' }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 800, color: '#15803d' }}><span>Total</span><span>{aed(plan.totalAmountFils)}</span></div>
-      </div>
-      {items.length > 0 && (
-        <div style={{ borderTop: '1px solid #efece6', padding: '10px 14px 12px' }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', margin: '2px 0 8px' }}>Schedule · {plan.installmentCount} installment{plan.installmentCount === 1 ? '' : 's'}</div>
-          {/* Grid (not a <table>): a row per installment on desktop, a two-line
-              card per installment on mobile — see ContractDocsBinder.module.css. */}
-          <div className={ds.sched}>
-            <div className={`${ds.schedRow} ${ds.schedHead}`}>
-              <span className={ds.cNum}>#</span>
-              <span className={ds.cDesc}>Description</span>
-              <span className={ds.cDue}>Due date</span>
-              <span className={ds.cStatus}>Status</span>
-              <span className={ds.cAmt}>Amount</span>
-            </div>
-            {items.map((it, i) => {
-              const st = planStatus(it.status);
-              return (
-                <div key={it.index ?? i} className={ds.schedRow} style={{ background: i % 2 ? '#faf9f6' : '#fff' }}>
-                  <span className={ds.cNum}><span className={ds.schedBadge}>{i + 1}</span></span>
-                  <span className={ds.cDesc} style={{ color: '#1a1916' }}>{it.description ?? `Payment ${i + 1}`}</span>
-                  <span className={ds.cDue} style={{ color: '#6b6860' }}>{fmtD(it.dueDate)}</span>
-                  <span className={ds.cStatus}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.fg, whiteSpace: 'nowrap' }}>{st.label}</span></span>
-                  <span className={ds.cAmt} style={{ fontWeight: 700, color: '#1a1916' }}>{aed(it.amountFils)}</span>
-                </div>
-              );
-            })}
-            <div className={ds.schedTotal}>
-              <span>Schedule total</span>
-              <span className={ds.schedTotalAmt}>{aed(items.reduce((s, it) => s + (it.amountFils ?? 0), 0))}</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -412,13 +314,85 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     ...(leftover.length ? [{ id: 'r-other', label: 'Other documents' }] : []),
   ];
 
+  // ── "Download documents" popup — everything AVAILABLE on this page, in page
+  // order, so the user can tick a selection and save it as ONE combined PDF.
+  // Generated documents (plan / receipts / agreement) build their bytes with the
+  // same generators the inline previews use; stored uploads stream through the
+  // same-origin /documents/:id/file proxy. Authenticated surfaces only — the
+  // magic-link portal has no JWT for the byte proxy.
+  const reactPdfBytes = async (blob: Blob): Promise<MergePart[]> =>
+    [{ bytes: new Uint8Array(await blob.arrayBuffer()), mime: 'application/pdf' }];
+  const storedItem = (label: string, group: string, docs: BinderDoc[]): MergeDocItem => ({
+    id: `s-${docs.map(d => d.id).join('-')}`,
+    label,
+    group,
+    count: docs.length,
+    make: () => Promise.all(docs.map(d => fetchStoredDocBytes(d.id))),
+  });
+  const downloadItems: MergeDocItem[] = [];
+  for (const s of seq) {
+    if (s.kind === 'plan') {
+      if (!hasPlan) continue;
+      downloadItems.push({
+        id: 'g-plan', label: 'Payment plan', group: 'Rental documents',
+        make: async () => {
+          const [{ pdf }, { PaymentPlanDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentPlanPdf')]);
+          return reactPdfBytes(await pdf(
+            <PaymentPlanDoc plan={currentPlan} refLabel={refLabel} meta={{
+              contractType, tenantName: tenant.companyName || tenant.name,
+              landlordName: ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name,
+              unitNumber: ejari.unit?.number, buildingName: ejari.property?.buildingName,
+              community: ejari.property?.community || ejari.property?.emirate,
+              periodStart: ejari.startDate, periodEnd: ejari.endDate,
+            }} />,
+          ).toBlob());
+        },
+      });
+    } else if (s.kind === 'receipts') {
+      if (!hasReceiptData || !receipt) continue;
+      downloadItems.push({
+        id: 'g-receipts', label: 'Receipts', group: 'Rental documents',
+        make: async () => {
+          const [{ pdf }, { PaymentReceiptDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentReceiptPdf')]);
+          return reactPdfBytes(await pdf(<PaymentReceiptDoc contract={receipt} kind="all" selectedId={null} selectedIdx={0} />).toBlob());
+        },
+      });
+    } else if (s.kind === 'agreement') {
+      downloadItems.push({
+        id: 'g-agreement', label: 'Agreement (tenancy contract)', group: 'Rental documents',
+        make: async () => {
+          const { isDubaiContract, fillEjariPdf } = await import('@/lib/ejariFill');
+          if (isDubaiContract(ejari)) return [{ bytes: await fillEjariPdf(ejari, addendums), mime: 'application/pdf' }];
+          const [{ pdf }, { EjariContractDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/contract/EjariContractPdf')]);
+          return reactPdfBytes(await pdf(<EjariContractDoc data={ejari} addendums={addendums} />).toBlob());
+        },
+      });
+    } else {
+      const docs = matchDocs(s.key);
+      if (docs.length) downloadItems.push(storedItem(s.label, 'Rental documents', docs));
+    }
+  }
+  // Loose uploaded extras are offered under their own group (mirroring the page's
+  // "Other documents" section) but arrive UNTICKED — the default selection is the
+  // canonical binder set; the extras are one click away when wanted. Their own
+  // group also keeps an uploaded scan named "Agreement" from sitting confusingly
+  // next to the GENERATED "Agreement (tenancy contract)".
+  for (const d of leftover) downloadItems.push({ ...storedItem(d.displayName ?? d.documentKey.replace(/_/g, ' '), 'Other documents (uploaded)', [d]), preselected: false });
+  for (const d of primaryId) downloadItems.push(storedItem(idLabel(d), 'Tenant & KYC', [d]));
+  for (const g of occGroups) for (const d of g.docs) downloadItems.push(storedItem(`Occupant ${g.n} — ${idLabel(d)}`, 'Tenant & KYC', [d]));
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#f4f3ef', display: 'flex', flexDirection: 'column' }}>
       <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6, gap: 10 }}>
         <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>All documents</span>
         <span style={{ fontSize: 12.5, color: '#9b9890' }}>{refLabel}</span>
         <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>
-        {headerRight && <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{headerRight}</div>}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!portalToken && downloadItems.length > 0 && (
+            <DownloadDocsButton items={downloadItems} fileName={`Documents-${(refLabel || 'contract').replace(/[^\w.-]+/g, '-')}.pdf`} style={linkBtnGhost} />
+          )}
+          {headerRight}
+        </div>
       </header>
 
       <div className={ds.body}>
@@ -449,7 +423,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <OfferBlock plan={currentPlan} refLabel={refLabel} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} refLabel={refLabel} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;

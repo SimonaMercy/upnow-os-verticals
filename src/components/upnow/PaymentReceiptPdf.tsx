@@ -618,7 +618,7 @@ function EmptyDoc({ kind }: { kind: Props['kind'] }) {
   );
 }
 
-function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
+export function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
   // Default / kind="all" → ONE document holding the three segmented receipts as
   // separate pages. A specific kind / pid → that single page only.
   if (isCombined(kind, selectedId)) {
