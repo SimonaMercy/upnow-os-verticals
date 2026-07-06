@@ -96,3 +96,15 @@ export async function apiDelete<T>(path: string): Promise<T> {
   });
   return handleResponse<T>(res);
 }
+
+/** Multipart upload through the proxy — field name "file"; auth via cookies. */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`/api${path}`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  return handleResponse<T>(res);
+}

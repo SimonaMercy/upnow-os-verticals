@@ -10,11 +10,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Pencil, Plus, X, Loader2, RefreshCw, AlertTriangle, Percent, Layers, ListChecks, Tags, BadgePercent, Landmark, Rocket, ChevronUp, ChevronDown, Trash2, GripVertical } from 'lucide-react';
+import { Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Pencil, Plus, X, Loader2, RefreshCw, AlertTriangle, Percent, Layers, ListChecks, Tags, BadgePercent, Landmark, Rocket, ChevronUp, ChevronDown, Trash2, GripVertical, Image as ImageIcon, ImagePlus } from 'lucide-react';
 import {
   ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete, apiUpload } from '@/lib/api';
 
 /* ── API types (exact contract) ── */
 type PriceUnit =
@@ -23,7 +23,7 @@ type PriceUnit =
 
 interface CatCategory {
   id: number; code: string; nameEn: string; nameAr: string | null;
-  iconKey: string | null; sortOrder: number; isActive: boolean;
+  iconKey: string | null; imageUrl?: string | null; sortOrder: number; isActive: boolean;
   serviceCount: number; activeServiceCount: number; minFromPrice: number | null;
   commissionBps: number; hasOverride: boolean;
 }
@@ -57,6 +57,7 @@ interface Template {
   minPrice: number | null; maxPrice: number | null; minCalloutCharge: number | null;
   isEmergency: boolean; estimatedDuration: number | null; estimatedDurationMax: number | null;
   sortOrder: number; isActive: boolean; adoptionCount: number;
+  imageUrl?: string | null;
   // Variant layer (backend rolling out in parallel — always read defensively).
   variantGroupLabel?: string | null;
   variantCount?: number;               // active variants
@@ -190,6 +191,85 @@ function Field({ label, children, hint }: { label: string; children: React.React
   );
 }
 const inputCls = 'w-full rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1.5 text-[13px] text-[#1a1916] outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:text-[#9b9890]';
+
+/** Attach/replace/remove a cover image on a saved row (multipart POST). */
+function ImageAttach({ label, current, uploadPath, clearPath, onChanged, newHint }: {
+  label: string;
+  current: string | null;
+  uploadPath: string | null; // null → row not saved yet (attach disabled)
+  clearPath: string;
+  onChanged: (url: string | null) => void;
+  newHint: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!uploadPath) {
+    return (
+      <div>
+        <span className="block text-[11px] font-semibold text-[#6b6860] mb-1">{label}</span>
+        <p className="rounded-lg border border-dashed border-[#e8e6e0] px-3 py-2.5 text-[11px] text-[#9b9890]">{newHint}</p>
+      </div>
+    );
+  }
+
+  const onFile = async (f: File | undefined) => {
+    if (!f) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { setErr('Use a JPEG, PNG or WebP image.'); return; }
+    if (f.size > 8 * 1024 * 1024) { setErr('Image is larger than 8 MB.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await apiUpload<{ imageUrl?: string | null }>(uploadPath, f);
+      onChanged(res.imageUrl ?? null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Upload failed.');
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await apiDelete(clearPath);
+      onChanged(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Remove failed.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <span className="block text-[11px] font-semibold text-[#6b6860] mb-1">{label}</span>
+      <div className="flex items-center gap-3">
+        {current ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={current} alt="" className="h-14 w-24 rounded-lg object-cover border border-[#e8e6e0]" />
+        ) : (
+          <div className="h-14 w-24 rounded-lg border border-dashed border-[#d4d2cc] flex items-center justify-center text-[#c9c6bf]">
+            <ImageIcon size={16} />
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] px-2.5 py-1.5 text-[11px] font-semibold text-[#1a1916] hover:bg-[#faf9f6] disabled:opacity-50">
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <ImagePlus size={11} />} {current ? 'Replace' : 'Attach image'}
+          </button>
+          {current && (
+            <button type="button" disabled={busy} onClick={remove}
+              className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-[#b91c1c] hover:bg-[#fef2f2] disabled:opacity-50">Remove</button>
+          )}
+        </div>
+        <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+          onChange={e => onFile(e.target.files?.[0] ?? undefined)} />
+      </div>
+      <span className="block text-[10px] text-[#9b9890] mt-1">Shown on the landing page and services cards. Without one, a stock photo is used.</span>
+      {err && <span className="block text-[11px] text-[#b91c1c] mt-1">{err}</span>}
+    </div>
+  );
+}
 
 function SectionCard({ step, title, sub, children }: {
   step: string; title: string; sub?: string; children: React.ReactNode;
@@ -460,7 +540,12 @@ export default function AdminCatalogPage() {
                   >
                     <GripVertical size={13} className="text-[#d5d2cb] flex-shrink-0" />
                     <button onClick={() => setSelectedCatId(cat.id)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
-                      <Icon size={15} style={{ color: selected ? GREEN : '#9b9890' }} />
+                      {cat.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={cat.imageUrl} alt="" className="h-5 w-5 rounded object-cover flex-shrink-0" />
+                      ) : (
+                        <Icon size={15} style={{ color: selected ? GREEN : '#9b9890' }} />
+                      )}
                       <span className={`truncate text-[13px] ${selected ? 'font-semibold text-[#1a7a5a]' : 'text-[#1a1916]'}`}>{cat.nameEn}</span>
                     </button>
                     {!cat.isActive && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[#f5f4f0] text-[#9b9890]">Off</span>}
@@ -517,6 +602,10 @@ export default function AdminCatalogPage() {
                     className={`flex items-center gap-2 px-3 py-2.5 cursor-grab active:cursor-grabbing ${t.isActive ? '' : 'opacity-55'} ${tplSelected ? 'bg-[#f0faf6]' : ''} ${dragSvcId === t.id ? 'opacity-40' : ''}`}
                   >
                     <GripVertical size={13} className="text-[#d5d2cb] flex-shrink-0" />
+                    {t.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.imageUrl} alt="" className="h-8 w-11 rounded-md object-cover border border-[#f0ede8] flex-shrink-0" />
+                    )}
                     <div
                       className="flex-1 min-w-0 cursor-pointer"
                       onClick={() => setSelectedTplId(tplSelected ? null : t.id)}
@@ -728,6 +817,7 @@ export default function AdminCatalogPage() {
           nextSortOrder={categories.length ? Math.max(...categories.map(c => c.sortOrder)) + 1 : 1}
           onClose={() => setCatModal(null)}
           onSaved={() => { setCatModal(null); loadAll({ silent: true }); }}
+          onRefetch={() => loadAll({ silent: true })}
         />
       )}
       {svcModal && (
@@ -1062,8 +1152,8 @@ function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
-  cat: CatCategory | null; nextSortOrder: number; onClose: () => void; onSaved: () => void;
+function CategoryModal({ cat, nextSortOrder, onClose, onSaved, onRefetch }: {
+  cat: CatCategory | null; nextSortOrder: number; onClose: () => void; onSaved: () => void; onRefetch: () => void;
 }) {
   const isNew = cat == null;
   const [nameEn, setNameEn] = useState(cat?.nameEn ?? '');
@@ -1073,6 +1163,7 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
   const [iconKey, setIconKey] = useState(cat?.iconKey ?? 'sparkles');
   const [sortOrder, setSortOrder] = useState(String(cat?.sortOrder ?? nextSortOrder));
   const [isActive, setIsActive] = useState(cat?.isActive ?? true);
+  const [imageUrl, setImageUrl] = useState<string | null>(cat?.imageUrl ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1102,6 +1193,14 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
   return (
     <Modal title={isNew ? 'New category' : `Edit — ${cat.nameEn}`} onClose={onClose}>
       <div className="space-y-3">
+        <ImageAttach
+          label="Cover image (optional)"
+          current={imageUrl}
+          uploadPath={isNew ? null : `/admin/catalog/categories/${cat.id}/image`}
+          clearPath={isNew ? '' : `/admin/catalog/categories/${cat.id}/image`}
+          onChanged={(url) => { setImageUrl(url); onRefetch(); }}
+          newHint="Create the category first — then reopen it to attach an image."
+        />
         <Field label="Category name *" hint="Shown to customers — e.g. Home Cleaning, Pest Control.">
           <input className={inputCls} value={nameEn} placeholder="e.g. Appliance Repair"
             onChange={e => { setNameEn(e.target.value); if (isNew && !codeTouched) setCode(slugify(e.target.value)); }} />
@@ -1162,6 +1261,7 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
   const [estMin, setEstMin] = useState(tpl?.estimatedDuration != null ? String(tpl.estimatedDuration) : '');
   const [estMax, setEstMax] = useState(tpl?.estimatedDurationMax != null ? String(tpl.estimatedDurationMax) : '');
   const [variantGroupLabel, setVariantGroupLabel] = useState(tpl?.variantGroupLabel ?? '');
+  const [imageUrl, setImageUrl] = useState<string | null>(tpl?.imageUrl ?? null);
   const [variants, setVariants] = useState<TemplateVariant[]>(() => (tpl?.variants ?? []).slice());
   const [addons, setAddons] = useState<TemplateAddon[]>(() => (tpl?.addons ?? []).slice());
   const [quantityLabel, setQuantityLabel] = useState(tpl?.quantityLabel ?? '');
@@ -1229,6 +1329,14 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
         {/* ① Basics */}
         {showFull && (
         <SectionCard step="1" title="The basics" sub="What customers see on the services page.">
+          <ImageAttach
+            label="Card image (optional)"
+            current={imageUrl}
+            uploadPath={isNew ? null : `/admin/catalog/templates/${tpl.id}/image`}
+            clearPath={isNew ? '' : `/admin/catalog/templates/${tpl.id}/image`}
+            onChanged={(url) => { setImageUrl(url); onRefetch(); }}
+            newHint="Create the service first — then reopen it to attach an image."
+          />
           <div className="grid grid-cols-2 gap-3">
             <Field label="Service name *">
               <input className={inputCls} value={name} placeholder="e.g. Sofa Cleaning" onChange={e => setName(e.target.value)} />

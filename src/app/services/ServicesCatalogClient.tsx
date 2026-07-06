@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { serviceImg } from '@/lib/serviceImages';
 import {
   Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees,
   Building2, Wrench, Loader2, Search, X, LayoutGrid, AlarmClockCheck, Clock,
@@ -32,9 +33,11 @@ interface PublicService {
   quantityLabel: string | null; quantityMin: number; quantityMax: number | null;
   addons: PublicAddon[];
   packages: PublicPackage[];
+  imageUrl?: string | null;
 }
 interface PublicCategory {
-  id: number; code: string; name: string; iconKey: string | null; services: PublicService[];
+  id: number; code: string; name: string; iconKey: string | null;
+  imageUrl?: string | null; services: PublicService[];
 }
 
 /* ── Category icons (admin icon_key → lucide) ──────────────────────────────── */
@@ -45,27 +48,8 @@ const CATEGORY_ICONS: Record<string, typeof Sparkles> = {
 
 const FOR_BUSINESS_CODE = 'commercial_services';
 
-/* ── Category imagery — RELEVANT per category, only photo ids already proven
-      in this codebase. Same pools as the landing rails (keep the two in sync).
-      Cards fall back to a plain tinted panel if a photo ever fails. ────────── */
-const UPH = 'https://images.unsplash.com/photo-';
-const UQ = '?auto=format&fit=crop&w=800&q=60';
-const CATEGORY_IMGS: Record<string, string[]> = {
-  home_cleaning:       ['1581578731548-c64695cc6952', '1563453392212-326f5e854473', '1628177142898-93e36e4e3a50', '1584622650111-993a426fbf0a'],
-  ac_services:         ['1590756254933-2873d72a83b6', '1621905251918-48416bd8575a'],
-  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7'],
-  electrical:          ['1621905252507-b35492cc74b4', '1544724569-5f546fd6f2b5', '1555963966-b7ae5404b6ed'],
-  handyman:            ['1504148455328-c376907d081c', '1530124566582-a618bc2615dc', '1426927308491-6380b6a9936f'],
-  painting:            ['1562259949-e8e7689d7828', '1717281234297-3def5ae3eee1'],
-  pest_control:        ['1687749927928-96276b1d0cb9'],
-  car_vehicle:         ['1520340356584-f9917d1eea6f', '1607860108855-64acf2078ed9', '1601362840469-51e4d8d58785'],
-  landscaping_outdoor: ['1416879595882-3373a0480b5b', '1558904541-efa843a96f01'],
-  commercial_services: ['1497366216548-37526070297c', '1497366811353-6870744d04b2', '1558882224-dda166733046'],
-};
-const catImg = (code: string, i: number) => {
-  const pool = CATEGORY_IMGS[code] ?? CATEGORY_IMGS.home_cleaning;
-  return `${UPH}${pool[i % pool.length]}${UQ}`;
-};
+/* Imagery: admin-attached imageUrl wins; otherwise verified stock photos from
+   the shared map (src/lib/serviceImages.ts). */
 
 const fmtAed = (n: number) => n.toLocaleString('en-AE');
 function durLabel(min: number | null, max: number | null): string | null {
@@ -87,7 +71,7 @@ function ServiceLCard({ s, catName, catCode, idx }: {
       <div className="ph">
         {!imgErr && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={catImg(catCode, idx)} alt={s.name} loading="lazy" onError={() => setImgErr(true)} />
+          <img src={serviceImg(s.code, catCode, idx, s.imageUrl)} alt={s.name} loading="lazy" onError={() => setImgErr(true)} />
         )}
         <span className="cbadge">{catName}</span>
         {s.isEmergency && (

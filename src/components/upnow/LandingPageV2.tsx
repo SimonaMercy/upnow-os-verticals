@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { serviceImg as sharedServiceImg } from '@/lib/serviceImages';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -182,30 +183,18 @@ function fallbackImg(category: string, id: number): string {
 
 // Landing category imagery — keyed by REAL catalog codes (migr 0107 taxonomy).
 // The rails themselves render from GET /api/catalog/public; nothing hardcoded.
-const SERVICE_CAT_IMGS: Record<string, string[]> = {
-  home_cleaning:       ['1581578731548-c64695cc6952', '1563453392212-326f5e854473', '1628177142898-93e36e4e3a50', '1584622650111-993a426fbf0a'],
-  ac_services:         ['1590756254933-2873d72a83b6', '1621905251918-48416bd8575a'],
-  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7'],
-  electrical:          ['1621905252507-b35492cc74b4', '1544724569-5f546fd6f2b5', '1555963966-b7ae5404b6ed'],
-  handyman:            ['1504148455328-c376907d081c', '1530124566582-a618bc2615dc', '1426927308491-6380b6a9936f'],
-  painting:            ['1562259949-e8e7689d7828', '1717281234297-3def5ae3eee1'],
-  pest_control:        ['1687749927928-96276b1d0cb9'],
-  car_vehicle:         ['1520340356584-f9917d1eea6f', '1607860108855-64acf2078ed9', '1601362840469-51e4d8d58785'],
-  landscaping_outdoor: ['1416879595882-3373a0480b5b', '1558904541-efa843a96f01'],
-  commercial_services: ['1497366216548-37526070297c', '1497366811353-6870744d04b2', '1558882224-dda166733046'],
-};
-const svcImg = (code: string, i: number) => {
-  const pool = SERVICE_CAT_IMGS[code] ?? SERVICE_CAT_IMGS.home_cleaning;
-  return `${UPH}${pool[i % pool.length]}${UQ}`;
-};
 
 interface PublicCatalogService {
   code: string; name: string; pricingMode: string; priceUnit: string;
   basePrice: number | null; isFromPrice: boolean; isEmergency: boolean;
   estimatedDuration: number | null; estimatedDurationMax: number | null;
   packages: { id: number }[]; packageGroupLabel: string | null;
+  imageUrl?: string | null;
 }
-interface PublicCatalogCategory { code: string; name: string; services: PublicCatalogService[] }
+interface PublicCatalogCategory {
+  code: string; name: string; imageUrl?: string | null;
+  services: PublicCatalogService[];
+}
 
 function svcPrice(sv: PublicCatalogService): { price: string; per: string } {
   if (sv.pricingMode === 'quote' || sv.basePrice == null) return { price: 'Free quote', per: '' };
@@ -239,7 +228,7 @@ function toServiceCats(categories: PublicCatalogCategory[]): ServiceCat[] {
           per,
           meta: svcMeta(c.name, sv),
           badge: sv.isEmergency ? '24/7' : sv.pricingMode === 'quote' ? 'Free quote' : undefined,
-          img: svcImg(c.code, i),
+          img: sharedServiceImg(sv.code, c.code, i, sv.imageUrl),
           href: `/services/book/${sv.code}`,
         };
       }),
