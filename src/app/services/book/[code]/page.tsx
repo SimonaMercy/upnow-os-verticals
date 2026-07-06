@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   BadgeCheck, CalendarDays, Check, CheckCircle2, Clock, Loader2,
-  MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles, Pencil,
+  MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles, Pencil, Info,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navbar } from '@/components/upnow/Navbar';
@@ -38,6 +38,8 @@ interface Svc {
   imageUrl?: string | null;
 }
 interface Cat { id: number; code: string; name: string; services: Svc[] }
+interface CancelTier { minHoursBefore: number; feePct: number }
+interface CancellationPolicy { reschedule: CancelTier[]; cancel: CancelTier[]; noShowFeePct: number; note?: string }
 
 const HOUR_OPTIONS = [2, 3, 4, 6, 8];
 const SLOT_HOURS = Array.from({ length: 13 }, (_, i) => 8 + i); // 08:00–20:00
@@ -61,6 +63,40 @@ function durText(min: number | null, max: number | null): string | null {
   return max && max !== min ? `${f(min)}–${f(max)}` : f(min);
 }
 
+/** Human rows for a fee-tier ladder; concrete datetimes once a slot is set. */
+function tierRows(tiers: CancelTier[], word: string, slot: Date | null): string[] {
+  const sorted = [...tiers].sort((a, b) => b.minHoursBefore - a.minHoursBefore);
+  const fmtD = (d: Date) =>
+    d.toLocaleString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  const minus = (d: Date, h: number) => new Date(d.getTime() - h * 3_600_000);
+  return sorted.map((t, i) => {
+    const upper = i > 0 ? sorted[i - 1].minHoursBefore : null;
+    if (t.feePct === 0) {
+      return slot
+        ? `Free ${word} until ${fmtD(minus(slot, t.minHoursBefore))}`
+        : `Free ${word} up to ${t.minHoursBefore}h before the visit`;
+    }
+    if (t.minHoursBefore === 0) return `${t.feePct}% fee within ${upper}h of the visit`;
+    return `${t.feePct}% fee ${t.minHoursBefore}–${upper}h before`;
+  });
+}
+
+/** Small terms panel — every step states its rules plainly. */
+function TermsNote({ title, rows }: { title: string; rows: string[] }) {
+  return (
+    <div className="rounded-[14px] px-4 py-3 mt-4" style={{ background: 'var(--green-tint-2)', border: '1px solid var(--line)' }}>
+      <p className="text-[11px] font-bold uppercase tracking-wide mb-1.5 inline-flex items-center gap-1.5" style={{ color: GREEN_DD }}>
+        <Info size={11} /> {title}
+      </p>
+      <ul className="space-y-0.5">
+        {rows.map((r, i) => (
+          <li key={i} className="text-[12px] leading-relaxed" style={{ color: 'var(--ink-2)' }}>{r}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type StepKey = 'customize' | 'schedule' | 'address';
 
 export default function BookServicePage() {
@@ -71,6 +107,7 @@ export default function BookServicePage() {
   const [svc, setSvc] = useState<Svc | null>(null);
   const [catName, setCatName] = useState<string>('');
   const [catCode, setCatCode] = useState<string>('');
+  const [cancelPolicy, setCancelPolicy] = useState<CancellationPolicy | null>(null);
   const [loading, setLoading] = useState(true);
 
   // selections
@@ -104,7 +141,8 @@ export default function BookServicePage() {
   useEffect(() => {
     fetch('/api/catalog/public')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { categories?: Cat[] }) => {
+      .then((d: { categories?: Cat[]; policies?: { cancellationPolicy?: CancellationPolicy | null } }) => {
+        setCancelPolicy(d.policies?.cancellationPolicy ?? null);
         for (const c of d.categories ?? []) {
           const found = c.services.find((s) => s.code === code);
           if (found) {
@@ -203,6 +241,11 @@ export default function BookServicePage() {
 
   const stepDone: Record<StepKey, boolean> = { customize: optionsDone, schedule: scheduleDone, address: addressDone };
   const stepContinueOk: Record<StepKey, boolean> = stepDone;
+
+  const slotDate = useMemo(
+    () => (day && hour != null ? new Date(`${day}T${String(hour).padStart(2, '0')}:00:00`) : null),
+    [day, hour],
+  );
 
   const dayLabel = useMemo(() => {
     const d = days.find((x) => x.value === day);
@@ -502,6 +545,16 @@ export default function BookServicePage() {
             </div>
           </div>
         )}
+        <TermsNote
+          title="Pricing terms"
+          rows={[
+            'All prices include 5% VAT — no surprises at checkout.',
+            ...(isHourly ? ['Hourly services are billed per hour, per professional.'] : []),
+            ...(hasLadder && !isHourly ? ['The price shown applies to the selected package size.'] : []),
+            ...(svc.addons.length > 0 && !isQuote ? ['Add-ons are charged together with the service.'] : []),
+            'The final amount is confirmed before you pay — no hidden charges.',
+          ]}
+        />
       </>
     ),
     schedule: (
@@ -549,6 +602,19 @@ export default function BookServicePage() {
             );
           })}
         </div>
+        {cancelPolicy && (
+          <TermsNote
+            title="Cancellation & reschedule terms"
+            rows={[
+              ...tierRows(cancelPolicy.cancel, 'cancellation', slotDate),
+              ...tierRows(cancelPolicy.reschedule, 'reschedule', slotDate).slice(0, 1),
+              ...(cancelPolicy.reschedule.some((t) => t.feePct > 0)
+                ? [`Later reschedules: ${[...cancelPolicy.reschedule].sort((a, b) => b.minHoursBefore - a.minHoursBefore).filter((t) => t.feePct > 0).map((t) => `${t.feePct}%${t.minHoursBefore > 0 ? ` (${t.minHoursBefore}h+)` : ' (same-slot window)'}`).join(' · ')}`]
+                : []),
+              `No-show: ${cancelPolicy.noShowFeePct}% of the booking value.`,
+            ]}
+          />
+        )}
       </>
     ),
     address: (
@@ -621,6 +687,14 @@ export default function BookServicePage() {
             style={{ borderColor: LINE }}
           />
         </div>
+        <TermsNote
+          title="Visit terms"
+          rows={[
+            'We serve Dubai during the pilot — your pin confirms the service area.',
+            'The professional calls when nearby; gate codes and parking notes prevent delays.',
+            'Someone 18+ should be present (or provide access instructions above).',
+          ]}
+        />
       </>
     ),
   };
@@ -829,7 +903,10 @@ export default function BookServicePage() {
                       </span>
                     </div>
                     <p className="text-[11px] mb-4" style={{ color: 'var(--mute)' }}>
-                      Free cancellation up to 6 hours before your slot
+                      {(() => {
+                        const free = cancelPolicy ? [...cancelPolicy.cancel].sort((a, b) => b.minHoursBefore - a.minHoursBefore).find((t) => t.feePct === 0) : null;
+                        return free ? `Free cancellation up to ${free.minHoursBefore} hours before your slot` : 'Flexible cancellation — see the terms in the date step';
+                      })()}
                     </p>
                   </>
                 )}
