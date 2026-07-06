@@ -21,6 +21,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { Navbar } from '@/components/upnow/Navbar';
 import { serviceImg } from '@/lib/serviceImages';
+import { AddressMapPicker, type PickedAddress } from '@/components/upnow/AddressMapPicker';
 
 interface Pkg { id: number; name: string; basePrice: number | null; estimatedDuration: number | null; estimatedDurationMax: number | null }
 interface SvcAddon { id: number; code: string; name: string; price: number; priceUnit: string }
@@ -79,7 +80,8 @@ export default function BookServicePage() {
   const [addonIds, setAddonIds] = useState<Set<number>>(new Set());
   const [day, setDay] = useState<string>('');
   const [hour, setHour] = useState<number | null>(null);
-  const [address, setAddress] = useState('');
+  const [pin, setPin] = useState<PickedAddress | null>(null);
+  const [addrDetails, setAddrDetails] = useState(''); // flat / villa / floor / access
   const [emirate, setEmirate] = useState('dubai');
   const [notes, setNotes] = useState('');
 
@@ -188,11 +190,12 @@ export default function BookServicePage() {
 
   const optionsDone = Boolean(svc) && (!hasLadder || isHourly || pkgId != null);
   const scheduleDone = Boolean(day) && hour != null;
-  const addressDone = address.trim().length >= 8;
+  const address = pin ? (addrDetails.trim() ? `${addrDetails.trim()} — ${pin.address}` : pin.address) : '';
+  const addressDone = pin != null && address.trim().length >= 8;
   const selectionsComplete = optionsDone && scheduleDone && addressDone;
   const missing = !optionsDone
     ? `Choose ${svc?.packageGroupLabel?.toLowerCase() ?? 'an option'} to continue`
-    : !scheduleDone ? 'Pick a date and time' : !addressDone ? 'Add your address' : null;
+    : !scheduleDone ? 'Pick a date and time' : !addressDone ? 'Pin your location' : null;
 
   const stepDone: Record<StepKey, boolean> = { customize: optionsDone, schedule: scheduleDone, address: addressDone };
   const stepContinueOk: Record<StepKey, boolean> = stepDone;
@@ -275,6 +278,8 @@ export default function BookServicePage() {
           addonIds: addonIds.size ? [...addonIds] : undefined,
           scheduledAt,
           addressText: address.trim(),
+          addressLat: pin?.lat,
+          addressLng: pin?.lng,
           emirate,
           notes: notes.trim() || undefined,
         }),
@@ -539,11 +544,12 @@ export default function BookServicePage() {
     ),
     address: (
       <>
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_170px] gap-3">
+        <AddressMapPicker value={pin} onChange={setPin} />
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_170px] gap-3 mt-3">
           <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Building, street, area — e.g. Marina Heights, Tower 2, Apt 1204"
+            value={addrDetails}
+            onChange={(e) => setAddrDetails(e.target.value)}
+            placeholder="Flat / villa no., floor, gate code… (helps the pro find you)"
             className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
             style={{ borderColor: LINE }}
           />
@@ -683,7 +689,7 @@ export default function BookServicePage() {
                         </button>
                         {!stepContinueOk[key] && (
                           <span className="ml-3 text-[12px]" style={{ color: 'var(--mute)' }}>
-                            {key === 'customize' ? `Choose ${svc.packageGroupLabel?.toLowerCase() ?? 'an option'} first` : key === 'schedule' ? 'Pick a date and a start time' : 'Enter your full address'}
+                            {key === 'customize' ? `Choose ${svc.packageGroupLabel?.toLowerCase() ?? 'an option'} first` : key === 'schedule' ? 'Pick a date and a start time' : 'Search or drop the pin on your location'}
                           </span>
                         )}
                       </div>
