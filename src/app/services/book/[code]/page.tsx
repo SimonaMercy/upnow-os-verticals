@@ -191,11 +191,12 @@ export default function BookServicePage() {
   const optionsDone = Boolean(svc) && (!hasLadder || isHourly || pkgId != null);
   const scheduleDone = Boolean(day) && hour != null;
   const address = pin ? (addrDetails.trim() ? `${addrDetails.trim()} — ${pin.address}` : pin.address) : '';
-  const addressDone = pin != null && address.trim().length >= 8;
+  const inServiceArea = pin == null || pin.emirate == null || EMIRATES.some((e) => e.value === pin.emirate);
+  const addressDone = pin != null && address.trim().length >= 8 && inServiceArea;
   const selectionsComplete = optionsDone && scheduleDone && addressDone;
   const missing = !optionsDone
     ? `Choose ${svc?.packageGroupLabel?.toLowerCase() ?? 'an option'} to continue`
-    : !scheduleDone ? 'Pick a date and time' : !addressDone ? 'Pin your location' : null;
+    : !scheduleDone ? 'Pick a date and time' : !addressDone ? (pin && !inServiceArea ? 'We currently serve Dubai only' : 'Pin your location') : null;
 
   const stepDone: Record<StepKey, boolean> = { customize: optionsDone, schedule: scheduleDone, address: addressDone };
   const stepContinueOk: Record<StepKey, boolean> = stepDone;
@@ -214,6 +215,11 @@ export default function BookServicePage() {
     ].filter(Boolean).join(' · '),
     schedule: scheduleDone ? `${dayLabel} · ${String(hour).padStart(2, '0')}:00` : '',
     address: address ? `${address}${emirate ? ` — ${EMIRATES.find((e) => e.value === emirate)?.label ?? emirate}` : ''}` : '',
+  };
+
+  const onPinChange = (picked: PickedAddress) => {
+    setPin(picked);
+    if (picked.emirate && EMIRATES.some((e) => e.value === picked.emirate)) setEmirate(picked.emirate);
   };
 
   const goContinue = (idx: number) => {
@@ -544,32 +550,57 @@ export default function BookServicePage() {
     ),
     address: (
       <>
-        <AddressMapPicker value={pin} onChange={setPin} />
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_170px] gap-3 mt-3">
+        <AddressMapPicker value={pin} onChange={onPinChange} />
+
+        {/* Confirmed location */}
+        {pin && (
+          <div
+            className="bk-recap flex items-start gap-2.5 rounded-[14px] px-4 py-3 mt-3 border"
+            style={inServiceArea
+              ? { background: TINT, borderColor: 'transparent' }
+              : { background: '#fffbeb', borderColor: '#fde68a' }}
+          >
+            <MapPin size={15} className="mt-0.5 flex-shrink-0" style={{ color: inServiceArea ? GREEN_DD : '#b45309' }} />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-semibold leading-snug" style={{ color: inServiceArea ? GREEN_DD : '#92400e' }}>
+                {pin.address}
+              </p>
+              <p className="text-[11px] mt-0.5" style={{ color: inServiceArea ? 'var(--mute)' : '#b45309' }}>
+                {inServiceArea
+                  ? `${EMIRATES.find((e) => e.value === (pin.emirate ?? emirate))?.label ?? 'Dubai'} — in our service area`
+                  : 'We currently serve Dubai only — move the pin to a Dubai address'}
+              </p>
+            </div>
+            {inServiceArea && <Check size={15} className="flex-shrink-0 mt-0.5" style={{ color: GREEN_DD }} />}
+          </div>
+        )}
+
+        {/* Door details + notes — the pin finds the building, this finds the door */}
+        <div className="mt-4">
+          <p className="text-[12px] font-semibold mb-1.5" style={{ color: 'var(--mute)' }}>
+            Apartment / villa &amp; floor <span className="font-normal">(optional — the pin finds your building, this finds your door)</span>
+          </p>
           <input
             value={addrDetails}
             onChange={(e) => setAddrDetails(e.target.value)}
-            placeholder="Flat / villa no., floor, gate code… (helps the pro find you)"
+            placeholder="e.g. Apt 1204, Tower 2, 12th floor"
             className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
             style={{ borderColor: LINE }}
           />
-          <select
-            value={emirate}
-            onChange={(e) => setEmirate(e.target.value)}
-            className="rounded-xl border-2 px-3 py-3 text-sm bg-white"
-            style={{ borderColor: LINE }}
-          >
-            {EMIRATES.map((e) => <option key={e.value} value={e.value}>{e.label}</option>)}
-          </select>
         </div>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Anything the professional should know? (optional)"
-          rows={2}
-          className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full mt-2.5 transition-colors focus:border-[#2e9f82]"
-          style={{ borderColor: LINE }}
-        />
+        <div className="mt-3">
+          <p className="text-[12px] font-semibold mb-1.5" style={{ color: 'var(--mute)' }}>
+            Notes for the professional <span className="font-normal">(optional)</span>
+          </p>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Parking, pets, access instructions…"
+            rows={2}
+            className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+            style={{ borderColor: LINE }}
+          />
+        </div>
       </>
     ),
   };

@@ -41,6 +41,26 @@ export interface PickedAddress {
   lat: number;
   lng: number;
   address: string;
+  /** Detected emirate code (dubai, abu_dhabi, …) — null when not resolvable. */
+  emirate: string | null;
+}
+
+/** administrative_area_level_1 → our emirate codes. */
+const EMIRATE_CODES: [RegExp, string][] = [
+  [/dubai/i, 'dubai'],
+  [/abu\s*dhabi/i, 'abu_dhabi'],
+  [/sharjah/i, 'sharjah'],
+  [/ajman/i, 'ajman'],
+  [/ras\s*al[\s-]*khaimah/i, 'rak'],
+  [/fujairah/i, 'fujairah'],
+  [/umm\s*al[\s-]*quwain/i, 'uaq'],
+];
+function emirateFromComponents(components: google.maps.GeocoderAddressComponent[] | undefined): string | null {
+  const admin = components?.find((c) => c.types.includes('administrative_area_level_1'))?.long_name
+    ?? components?.find((c) => c.types.includes('locality'))?.long_name;
+  if (!admin) return null;
+  for (const [re, code] of EMIRATE_CODES) if (re.test(admin)) return code;
+  return null;
 }
 
 export function AddressMapPicker({ value, onChange, placeholder }: {
@@ -104,16 +124,15 @@ export function AddressMapPicker({ value, onChange, placeholder }: {
       });
       const geocoder = new google.maps.Geocoder();
 
-      const emit = (lat: number, lng: number, address: string) =>
-        onChangeRef.current({ lat, lng, address });
+      const emit = (lat: number, lng: number, address: string, emirate: string | null) =>
+        onChangeRef.current({ lat, lng, address, emirate });
 
       const reverseGeocode = (pos: google.maps.LatLng) => {
         geocoder.geocode({ location: pos }, (results, status) => {
-          const address = status === 'OK' && results?.[0]?.formatted_address
-            ? results[0].formatted_address
-            : `${pos.lat().toFixed(5)}, ${pos.lng().toFixed(5)}`;
+          const first = status === 'OK' ? results?.[0] : undefined;
+          const address = first?.formatted_address ?? `${pos.lat().toFixed(5)}, ${pos.lng().toFixed(5)}`;
           if (searchRef.current) searchRef.current.value = address;
-          emit(pos.lat(), pos.lng(), address);
+          emit(pos.lat(), pos.lng(), address, emirateFromComponents(first?.address_components));
         });
       };
 
@@ -129,7 +148,7 @@ export function AddressMapPicker({ value, onChange, placeholder }: {
       // Search — Places Autocomplete, UAE only
       const auto = new google.maps.places.Autocomplete(searchRef.current, {
         componentRestrictions: { country: 'ae' },
-        fields: ['geometry', 'formatted_address', 'name'],
+        fields: ['geometry', 'formatted_address', 'name', 'address_components'],
       });
       auto.bindTo('bounds', map);
       auto.addListener('place_changed', () => {
@@ -141,7 +160,7 @@ export function AddressMapPicker({ value, onChange, placeholder }: {
         map.setZoom(16);
         const address = place.formatted_address ?? place.name ?? '';
         if (searchRef.current && address) searchRef.current.value = address;
-        emit(loc.lat(), loc.lng(), address);
+        emit(loc.lat(), loc.lng(), address, emirateFromComponents(place.address_components));
       });
 
       mapRef.current = map;
