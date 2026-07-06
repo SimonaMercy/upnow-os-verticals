@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Allow all LAN origins in dev so other devices on the network can connect
-  allowedDevOrigins: ["127.0.0.1", "192.168.2.126"],
+  // Allow all LAN origins in dev so other devices on the network can connect.
+  // Wildcards cover the whole private subnet so the box's IP can change (DHCP)
+  // without editing this list; explicit IPs are kept as a fallback.
+  allowedDevOrigins: ["127.0.0.1", "192.168.2.35", "192.168.2.126", "192.168.2.*", "192.168.*.*"],
 
   // Allow a second dev server (e.g. e2e test instance) to run from the same
   // working tree without fighting over the .next build cache
