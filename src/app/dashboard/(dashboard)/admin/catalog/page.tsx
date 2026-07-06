@@ -10,7 +10,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Pencil, Plus, X, Loader2, RefreshCw, AlertTriangle, Percent, Layers, ListChecks, Tags, BadgePercent, Landmark, Rocket, ChevronUp, ChevronDown, Trash2 } from 'lucide-react';
+import { Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Pencil, Plus, X, Loader2, RefreshCw, AlertTriangle, Percent, Layers, ListChecks, Tags, BadgePercent, Landmark, Rocket, ChevronUp, ChevronDown, Trash2, GripVertical } from 'lucide-react';
 import {
   ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
@@ -191,6 +191,23 @@ function Field({ label, children, hint }: { label: string; children: React.React
 }
 const inputCls = 'w-full rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1.5 text-[13px] text-[#1a1916] outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:text-[#9b9890]';
 
+function SectionCard({ step, title, sub, children }: {
+  step: string; title: string; sub?: string; children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-[#f0ede8] p-3.5 bg-white">
+      <div className="flex items-start gap-2.5 mb-3">
+        <span className="w-5 h-5 rounded-full bg-[#f0faf6] text-[#1a7a5a] text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{step}</span>
+        <div>
+          <p className="text-[13px] font-bold text-[#1a1916] leading-tight">{title}</p>
+          {sub && <p className="text-[11px] text-[#9b9890] mt-0.5 leading-snug">{sub}</p>}
+        </div>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
   return (
     <div
@@ -221,6 +238,9 @@ export default function AdminCatalogPage() {
   const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
   // Third browser column: the service whose package ladder is shown on-page.
   const [selectedTplId, setSelectedTplId] = useState<number | null>(null);
+  // Drag-to-reorder (native HTML5) — replaces numeric position fields.
+  const [dragCatId, setDragCatId] = useState<number | null>(null);
+  const [dragSvcId, setDragSvcId] = useState<number | null>(null);
   const deepLinkCode = useRef<string | null>(null);
 
   /* Modals + confirm */
@@ -275,6 +295,49 @@ export default function AdminCatalogPage() {
     [templates, selectedCatId],
   );
   const selectedCat = selectedCatId == null ? null : categories.find(c => c.id === selectedCatId) ?? null;
+
+  /** Persist a new order: renumber 1..n and PATCH only the rows that moved. */
+  const persistOrder = async (
+    rows: { id: number; sortOrder: number }[],
+    pathFor: (id: number) => string,
+  ) => {
+    const changed = rows.filter((r, i) => r.sortOrder !== i + 1);
+    await Promise.all(changed.map((r, ) => apiPatch(pathFor(r.id), { sortOrder: rows.indexOf(r) + 1 })));
+  };
+
+  const dropCategory = async (targetId: number) => {
+    if (dragCatId == null || dragCatId === targetId) { setDragCatId(null); return; }
+    const list = [...categories];
+    const from = list.findIndex(c => c.id === dragCatId);
+    const to = list.findIndex(c => c.id === targetId);
+    if (from < 0 || to < 0) { setDragCatId(null); return; }
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    setOverview(prev => prev ? { ...prev, categories: list.map((c, i) => ({ ...c, sortOrder: i + 1 })) } : prev);
+    setDragCatId(null);
+    try { await persistOrder(list, id => `/admin/catalog/categories/${id}`); } catch { /* order re-syncs on next load */ }
+  };
+
+  const dropService = async (targetId: number) => {
+    if (dragSvcId == null || dragSvcId === targetId) { setDragSvcId(null); return; }
+    const list = [...visibleTemplates];
+    const from = list.findIndex(t => t.id === dragSvcId);
+    const to = list.findIndex(t => t.id === targetId);
+    if (from < 0 || to < 0) { setDragSvcId(null); return; }
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    const renumbered = new Map(list.map((t, i) => [t.id, i + 1]));
+    setTemplates(prev => prev.map(t => renumbered.has(t.id) ? { ...t, sortOrder: renumbered.get(t.id)! } : t)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id));
+    setDragSvcId(null);
+    try { await persistOrder(list, id => `/admin/catalog/templates/${id}`); } catch { /* re-syncs on next load */ }
+  };
+
+  // No "All categories" view — default the rail to the first category.
+  useEffect(() => {
+    if (selectedCatId == null && categories.length) setSelectedCatId(categories[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories.length]);
 
   // Switching category clears a packages selection that is no longer visible.
   useEffect(() => {
@@ -374,24 +437,28 @@ export default function AdminCatalogPage() {
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-[280px_1fr_300px] gap-4 items-start">
         {/* LEFT: category rail */}
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-[#f0ede8] text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">Categories</div>
+          <div className="flex items-center px-4 py-2 border-b border-[#f0ede8]">
+            <span className="flex-1 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">Categories</span>
+            <button
+              onClick={() => setCatModal({ cat: null })}
+              className="flex items-center gap-1 rounded-lg bg-[#2e9f82] px-2 py-1 text-[11px] font-semibold text-white hover:opacity-90"
+            ><Plus size={12} /> New</button>
+          </div>
           <ul className="divide-y divide-[#f0ede8]">
-            <li>
-              <button
-                onClick={() => setSelectedCatId(null)}
-                className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] ${selectedCatId == null ? 'bg-[#f0faf6] font-semibold text-[#1a7a5a]' : 'text-[#1a1916] hover:bg-[#faf9f6]'}`}
-              >
-                <Layers size={15} className="text-[#9b9890]" />
-                <span className="flex-1">All categories</span>
-                <span className="text-[11px] text-[#9b9890]">{activeTemplates.length}</span>
-              </button>
-            </li>
             {categories.map(cat => {
               const Icon = iconFor(cat.iconKey);
               const selected = selectedCatId === cat.id;
               return (
                 <li key={cat.id} className={cat.isActive ? '' : 'opacity-55'}>
-                  <div className={`group flex items-center gap-2.5 px-4 py-2.5 ${selected ? 'bg-[#f0faf6]' : 'hover:bg-[#faf9f6]'}`}>
+                  <div
+                    draggable
+                    onDragStart={() => setDragCatId(cat.id)}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => dropCategory(cat.id)}
+                    onDragEnd={() => setDragCatId(null)}
+                    className={`group flex items-center gap-1.5 px-3 py-2.5 cursor-grab active:cursor-grabbing ${selected ? 'bg-[#f0faf6]' : 'hover:bg-[#faf9f6]'} ${dragCatId === cat.id ? 'opacity-40' : ''}`}
+                  >
+                    <GripVertical size={13} className="text-[#d5d2cb] flex-shrink-0" />
                     <button onClick={() => setSelectedCatId(cat.id)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
                       <Icon size={15} style={{ color: selected ? GREEN : '#9b9890' }} />
                       <span className={`truncate text-[13px] ${selected ? 'font-semibold text-[#1a7a5a]' : 'text-[#1a1916]'}`}>{cat.nameEn}</span>
@@ -415,10 +482,6 @@ export default function AdminCatalogPage() {
               <li className="px-4 py-6 text-center text-[12px] text-[#9b9890]">No categories yet.</li>
             )}
           </ul>
-          <button
-            onClick={() => setCatModal({ cat: null })}
-            className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 border-t border-[#f0ede8] text-[12px] font-semibold text-[#2e9f82] hover:bg-[#f0faf6]"
-          ><Plus size={13} /> Add category</button>
         </div>
 
         {/* RIGHT: services panel */}
@@ -446,8 +509,14 @@ export default function AdminCatalogPage() {
                 return (
                   <li
                     key={t.id}
-                    className={`flex items-center gap-3 px-4 py-2.5 ${t.isActive ? '' : 'opacity-55'} ${tplSelected ? 'bg-[#f0faf6]' : ''}`}
+                    draggable
+                    onDragStart={() => setDragSvcId(t.id)}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => dropService(t.id)}
+                    onDragEnd={() => setDragSvcId(null)}
+                    className={`flex items-center gap-2 px-3 py-2.5 cursor-grab active:cursor-grabbing ${t.isActive ? '' : 'opacity-55'} ${tplSelected ? 'bg-[#f0faf6]' : ''} ${dragSvcId === t.id ? 'opacity-40' : ''}`}
                   >
+                    <GripVertical size={13} className="text-[#d5d2cb] flex-shrink-0" />
                     <div
                       className="flex-1 min-w-0 cursor-pointer"
                       onClick={() => setSelectedTplId(tplSelected ? null : t.id)}
@@ -640,6 +709,7 @@ export default function AdminCatalogPage() {
           tpl={svcModal.tpl}
           categories={categories}
           defaultCategoryId={selectedCatId}
+          nextSortOrder={Math.max(0, ...templates.filter(t => t.categoryId === (svcModal.tpl?.categoryId ?? selectedCatId)).map(t => t.sortOrder)) + 1}
           onClose={() => setSvcModal(null)}
           onSaved={() => { setSvcModal(null); loadAll({ silent: true }); }}
           onRefetch={() => loadAll({ silent: true })}
@@ -992,7 +1062,7 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
       } else {
         await apiPatch(`/admin/catalog/categories/${cat.id}`, {
           nameEn: nameEn.trim(), nameAr: nameAr.trim() || null,
-          iconKey, sortOrder: Number(sortOrder) || cat.sortOrder, isActive,
+          iconKey, isActive,
         });
       }
       onSaved();
@@ -1003,32 +1073,27 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
   };
 
   return (
-    <Modal title={isNew ? 'Add category' : `Edit ${cat.nameEn}`} onClose={onClose}>
+    <Modal title={isNew ? 'New category' : `Edit — ${cat.nameEn}`} onClose={onClose}>
       <div className="space-y-3">
-        <Field label="Name (English)">
-          <input className={inputCls} value={nameEn}
+        <Field label="Category name *" hint="Shown to customers — e.g. Home Cleaning, Pest Control.">
+          <input className={inputCls} value={nameEn} placeholder="e.g. Appliance Repair"
             onChange={e => { setNameEn(e.target.value); if (isNew && !codeTouched) setCode(slugify(e.target.value)); }} />
         </Field>
-        <Field label="Name (Arabic)">
+        <Field label="Arabic name (optional)">
           <input className={inputCls} dir="rtl" value={nameAr} onChange={e => setNameAr(e.target.value)} />
         </Field>
         {isNew && (
-          <Field label="Code" hint="Stable identifier (snake_case) — cannot be changed later.">
+          <Field label="System ID" hint="Created automatically from the name — fine to leave as is.">
             <input className={inputCls} value={code} onChange={e => { setCode(e.target.value); setCodeTouched(true); }} />
           </Field>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Icon">
-            <select className={inputCls} value={iconKey} onChange={e => setIconKey(e.target.value)}>
-              {(ICON_KEYS.includes(iconKey) ? ICON_KEYS : [iconKey, ...ICON_KEYS]).map(k => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Sort order">
-            <input className={inputCls} type="number" value={sortOrder} onChange={e => setSortOrder(e.target.value)} />
-          </Field>
-        </div>
+        <Field label="Icon" hint="Shown on the public services page. Reorder categories by dragging them in the list.">
+          <select className={inputCls} value={iconKey} onChange={e => setIconKey(e.target.value)}>
+            {(ICON_KEYS.includes(iconKey) ? ICON_KEYS : [iconKey, ...ICON_KEYS]).map(k => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </Field>
         {!isNew && (
           <div className="flex items-center gap-2">
             <Toggle on={isActive} onChange={() => setIsActive(v => !v)} />
@@ -1051,8 +1116,8 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
 
 /* ═════════════════════════ Service modal ═════════════════════════ */
 
-function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, onRefetch }: {
-  tpl: Template | null; categories: CatCategory[]; defaultCategoryId: number | null;
+function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClose, onSaved, onRefetch }: {
+  tpl: Template | null; categories: CatCategory[]; defaultCategoryId: number | null; nextSortOrder: number;
   onClose: () => void; onSaved: () => void; onRefetch: () => void;
 }) {
   const isNew = tpl == null;
@@ -1069,7 +1134,6 @@ function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, on
   const [isEmergency, setIsEmergency] = useState(tpl?.isEmergency ?? false);
   const [estMin, setEstMin] = useState(tpl?.estimatedDuration != null ? String(tpl.estimatedDuration) : '');
   const [estMax, setEstMax] = useState(tpl?.estimatedDurationMax != null ? String(tpl.estimatedDurationMax) : '');
-  const [sortOrder, setSortOrder] = useState(tpl?.sortOrder != null ? String(tpl.sortOrder) : '');
   const [variantGroupLabel, setVariantGroupLabel] = useState(tpl?.variantGroupLabel ?? '');
   const [variants, setVariants] = useState<TemplateVariant[]>(() => (tpl?.variants ?? []).slice());
   const [addons, setAddons] = useState<TemplateAddon[]>(() => (tpl?.addons ?? []).slice());
@@ -1105,7 +1169,7 @@ function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, on
       estimatedDurationMax: num(estMax),
     };
     if (nameAr.trim()) payload.nameAr = nameAr.trim(); else if (!isNew) payload.nameAr = null;
-    if (sortOrder.trim() !== '') payload.sortOrder = Number(sortOrder);
+    if (isNew) payload.sortOrder = nextSortOrder; // append at the end; reorder by dragging in the list
     if (!isNew) payload.variantGroupLabel = variantGroupLabel.trim() || null;
     if (!isNew) {
       payload.quantityLabel = quantityLabel.trim() || null;
@@ -1129,103 +1193,167 @@ function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, on
   };
 
   return (
-    <Modal title={isNew ? 'Add service' : `Edit ${tpl.name}`} onClose={onClose} wide>
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Name (English)"><input className={inputCls} value={name} onChange={e => setName(e.target.value)} /></Field>
-          <Field label="Name (Arabic)"><input className={inputCls} dir="rtl" value={nameAr} onChange={e => setNameAr(e.target.value)} /></Field>
-        </div>
-        <Field label="Description">
-          <textarea className={`${inputCls} resize-y`} rows={2} value={description} onChange={e => setDescription(e.target.value)} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Category">
-            <select className={inputCls} value={categoryId} onChange={e => setCategoryId(Number(e.target.value))}>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
-            </select>
-          </Field>
-          <Field label="Price unit">
-            <select className={inputCls} value={priceUnit}
-              onChange={e => {
-                const v = e.target.value as PriceUnit;
-                setPriceUnit(v);
-                if (v === 'quote_after_callout') { setBasePrice(''); setIsFromPrice(false); }
-              }}>
-              {PRICE_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
-            </select>
-          </Field>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Base price (AED)" hint={lockedBase ? 'From-price auto-tracks the cheapest active variant' : undefined}>
-            <input className={inputCls} type="number" min={0} value={basePrice} disabled={isQuote || lockedBase}
-              onChange={e => setBasePrice(e.target.value)} placeholder={isQuote ? 'Quoted on site' : ''} />
-          </Field>
-          <Field label="Min price (AED)" hint="Provider price bounds — leave empty to lock at platform price.">
-            <input className={inputCls} type="number" min={0} value={minPrice} onChange={e => setMinPrice(e.target.value)} />
-          </Field>
-          <Field label="Max price (AED)">
-            <input className={inputCls} type="number" min={0} value={maxPrice} onChange={e => setMaxPrice(e.target.value)} />
-          </Field>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Callout charge (AED)">
-            <input className={inputCls} type="number" min={0} value={minCalloutCharge} onChange={e => setMinCalloutCharge(e.target.value)} />
-          </Field>
-          <Field label="Est. duration (min)">
-            <input className={inputCls} type="number" min={0} value={estMin} onChange={e => setEstMin(e.target.value)} />
-          </Field>
-          <Field label="Max duration (min)">
-            <input className={inputCls} type="number" min={0} value={estMax} onChange={e => setEstMax(e.target.value)} />
-          </Field>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
-          <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
-            <input type="checkbox" checked={lockedBase ? true : isFromPrice} disabled={isQuote || lockedBase} onChange={e => setIsFromPrice(e.target.checked)} className="accent-[#2e9f82]" />
-            Display as &lsquo;from&rsquo; price
-          </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
-            <input type="checkbox" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="accent-[#dc2626]" />
-            Emergency service
-          </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
-            Sort order
-            <input className={`${inputCls} !w-16 !py-0.5`} type="number" value={sortOrder} onChange={e => setSortOrder(e.target.value)} />
-          </label>
-        </div>
+    <Modal title={isNew ? 'New service' : `Edit — ${tpl.name}`} onClose={onClose} wide>
+      <div className="space-y-3.5">
 
-        {/* ── Variant pricing ── */}
-        <div className="border-t border-[#f0ede8] pt-3">
-          <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">Variant pricing</p>
-          {isQuote ? (
-            <p className="mt-1.5 rounded-lg bg-[#faf9f6] border border-[#f0ede8] px-2.5 py-2 text-[11px] text-[#9b9890]">
-              Quote services are priced in the callout quote.
+        {/* ① Basics */}
+        <SectionCard step="1" title="The basics" sub="What customers see on the services page.">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Service name *">
+              <input className={inputCls} value={name} placeholder="e.g. Sofa Cleaning" onChange={e => setName(e.target.value)} />
+            </Field>
+            <Field label="Category *">
+              <select className={inputCls} value={categoryId} onChange={e => setCategoryId(Number(e.target.value))}>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+              </select>
+            </Field>
+          </div>
+          <Field label="Short description (optional)" hint="One or two lines shown under the service name.">
+            <textarea className={`${inputCls} resize-y`} rows={2} value={description} onChange={e => setDescription(e.target.value)} />
+          </Field>
+          <Field label="Arabic name (optional)">
+            <input className={inputCls} dir="rtl" value={nameAr} onChange={e => setNameAr(e.target.value)} />
+          </Field>
+        </SectionCard>
+
+        {/* ② Pricing */}
+        <SectionCard step="2" title="How is it priced?" sub="Pick one — the booking page adapts automatically.">
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { v: 'fixed', t: 'Fixed price', d: 'One set price. Can be sold as packages (sizes / types).' },
+              { v: 'per_hour', t: 'Per hour', d: 'Customer picks hours — price = rate × hours.' },
+              { v: 'quote_after_callout', t: 'Free quote', d: 'Assess on site first; customer approves a quote.' },
+            ] as { v: PriceUnit; t: string; d: string }[]).map(o => {
+              const on = priceUnit === o.v;
+              return (
+                <button key={o.v} type="button"
+                  onClick={() => {
+                    setPriceUnit(o.v);
+                    if (o.v === 'quote_after_callout') { setBasePrice(''); setIsFromPrice(false); }
+                  }}
+                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition-colors ${on ? 'border-[#2e9f82] bg-[#f0faf6]' : 'border-[#e8e6e0] bg-white hover:border-[#c9c6bf]'}`}
+                >
+                  <span className={`block text-[12px] font-bold ${on ? 'text-[#1a7a5a]' : 'text-[#1a1916]'}`}>{o.t}</span>
+                  <span className="block text-[10px] text-[#9b9890] mt-0.5 leading-snug">{o.d}</span>
+                </button>
+              );
+            })}
+          </div>
+          {!['fixed', 'per_hour', 'quote_after_callout'].includes(priceUnit) && (
+            <p className="rounded-lg bg-[#fffbeb] border border-[#fde68a] px-2.5 py-2 text-[11px] text-[#92400e]">
+              This service uses an advanced price unit ({priceUnit}) — keep it, or pick one of the three above.
             </p>
-          ) : isNew ? (
-            <p className="mt-1.5 rounded-lg bg-[#faf9f6] border border-[#f0ede8] px-2.5 py-2 text-[11px] text-[#9b9890]">
-              Create the service first — size/type variants can be added when editing it.
-            </p>
+          )}
+
+          {!isQuote ? (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <Field
+                  label={priceUnit === 'per_hour' ? 'Rate per hour (AED) *' : 'Price (AED) *'}
+                  hint={lockedBase ? 'Set automatically by the cheapest package below.' : undefined}
+                >
+                  <input className={inputCls} type="number" min={0} value={basePrice} disabled={lockedBase}
+                    onChange={e => setBasePrice(e.target.value)} />
+                </Field>
+                <Field label="Typical duration (min)" hint="Optional — shown to customers.">
+                  <input className={inputCls} type="number" min={0} value={estMin} onChange={e => setEstMin(e.target.value)} />
+                </Field>
+                <Field label="… up to (min)">
+                  <input className={inputCls} type="number" min={0} value={estMax} onChange={e => setEstMax(e.target.value)} />
+                </Field>
+              </div>
+              <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
+                <input type="checkbox" checked={lockedBase ? true : isFromPrice} disabled={lockedBase} onChange={e => setIsFromPrice(e.target.checked)} className="accent-[#2e9f82]" />
+                Show as a starting price — &ldquo;From AED …&rdquo;
+              </label>
+            </>
           ) : (
-            <div className="mt-2 space-y-3">
-              <Field label="Variant group label" hint="What the options represent — shown to customers. Saved with the service.">
-                <input className={inputCls} value={variantGroupLabel} placeholder="e.g. Home size / Vehicle type"
-                  onChange={e => setVariantGroupLabel(e.target.value)} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Visit charge (AED, optional)" hint="Charged for the assessment visit — credited to the job if the customer goes ahead.">
+                <input className={inputCls} type="number" min={0} value={minCalloutCharge} onChange={e => setMinCalloutCharge(e.target.value)} />
               </Field>
-              <VariantsEditor templateId={tpl.id} variants={variants} setVariants={setVariants} onRefetch={onRefetch} />
-              <Field label="Booking options" hint="Quantity control shown at checkout ('Cleaners', 'AC units') — blank = none. Add-ons are priced extras; per-hour add-ons multiply by booked hours.">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <input className={`${inputCls} flex-1`} placeholder="Quantity label — e.g. Cleaners" value={quantityLabel}
-                    onChange={e => setQuantityLabel(e.target.value)} />
-                  <input className={`${inputCls} !w-16 text-right`} type="number" min={1} placeholder="min" value={quantityMin}
-                    onChange={e => setQuantityMin(e.target.value)} disabled={!quantityLabel.trim()} />
-                  <span className="text-[11px] text-[#9b9890]">–</span>
-                  <input className={`${inputCls} !w-16 text-right`} type="number" min={1} placeholder="max" value={quantityMax}
-                    onChange={e => setQuantityMax(e.target.value)} disabled={!quantityLabel.trim()} />
-                </div>
-                <AddonsEditor templateId={tpl.id} addons={addons} setAddons={setAddons} onRefetch={onRefetch} />
+              <Field label="Typical duration (min, optional)">
+                <input className={inputCls} type="number" min={0} value={estMin} onChange={e => setEstMin(e.target.value)} />
               </Field>
             </div>
           )}
-        </div>
+
+          <details className="rounded-lg border border-[#f0ede8] px-3 py-2">
+            <summary className="cursor-pointer text-[11px] font-semibold text-[#9b9890]">Advanced (rarely needed)</summary>
+            <div className="grid grid-cols-3 gap-3 pt-2.5">
+              {!isQuote && (
+                <>
+                  <Field label="Provider min price (AED)" hint="Only if providers may set their own price later.">
+                    <input className={inputCls} type="number" min={0} value={minPrice} onChange={e => setMinPrice(e.target.value)} />
+                  </Field>
+                  <Field label="Provider max price (AED)">
+                    <input className={inputCls} type="number" min={0} value={maxPrice} onChange={e => setMaxPrice(e.target.value)} />
+                  </Field>
+                  <Field label="Callout charge (AED)">
+                    <input className={inputCls} type="number" min={0} value={minCalloutCharge} onChange={e => setMinCalloutCharge(e.target.value)} />
+                  </Field>
+                </>
+              )}
+            </div>
+          </details>
+        </SectionCard>
+
+        {/* ③ Packages — fixed-price services only */}
+        {priceUnit === 'fixed' && (
+          <SectionCard step="3" title="Packages — sizes & types (optional)"
+            sub="Sell the same service in sizes or types, each with its own price — e.g. Studio → Villa 5BR+. The 'From' price follows the cheapest package automatically.">
+            {isNew ? (
+              <p className="rounded-lg bg-[#faf9f6] border border-[#f0ede8] px-2.5 py-2 text-[11px] text-[#9b9890]">
+                Save the service first — then add packages here.
+              </p>
+            ) : (
+              <>
+                <Field label="Packages are grouped by…" hint="Shown as the question title on the booking page.">
+                  <input className={inputCls} value={variantGroupLabel} placeholder="e.g. Home size · Vehicle type · AC type"
+                    onChange={e => setVariantGroupLabel(e.target.value)} />
+                </Field>
+                <VariantsEditor templateId={tpl.id} variants={variants} setVariants={setVariants} onRefetch={onRefetch} />
+              </>
+            )}
+          </SectionCard>
+        )}
+
+        {/* ④ Booking questions — not for quote services */}
+        {!isQuote && (
+          <SectionCard step={priceUnit === 'fixed' ? '4' : '3'} title="Booking questions (optional)"
+            sub="Extra questions the customer answers at checkout — leave empty for none.">
+            {isNew ? (
+              <p className="rounded-lg bg-[#faf9f6] border border-[#f0ede8] px-2.5 py-2 text-[11px] text-[#9b9890]">
+                Save the service first — then set these here.
+              </p>
+            ) : (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#6b6860] mb-1.5">Ask &ldquo;how many?&rdquo; — multiplies the price</p>
+                  <div className="flex items-center gap-1.5">
+                    <input className={`${inputCls} flex-1`} placeholder="What are we counting? e.g. Cleaners · AC units" value={quantityLabel}
+                      onChange={e => setQuantityLabel(e.target.value)} />
+                    <span className="text-[11px] text-[#9b9890]">from</span>
+                    <input className={`${inputCls} !w-14 text-right`} type="number" min={1} value={quantityMin}
+                      onChange={e => setQuantityMin(e.target.value)} disabled={!quantityLabel.trim()} />
+                    <span className="text-[11px] text-[#9b9890]">to</span>
+                    <input className={`${inputCls} !w-14 text-right`} type="number" min={1} placeholder="∞" value={quantityMax}
+                      onChange={e => setQuantityMax(e.target.value)} disabled={!quantityLabel.trim()} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#6b6860] mb-1.5">Optional extras the customer can tick — e.g. Cleaning materials +10/hr</p>
+                  <AddonsEditor templateId={tpl.id} addons={addons} setAddons={setAddons} onRefetch={onRefetch} />
+                </div>
+              </>
+            )}
+          </SectionCard>
+        )}
+
+        <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
+          <input type="checkbox" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="accent-[#dc2626]" />
+          24/7 emergency service — shows the red badge
+        </label>
 
         {error && <p className="text-[12px] text-[#b91c1c]">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
@@ -1263,53 +1391,43 @@ function VariantsEditor({ templateId, variants, setVariants, onRefetch }: {
       const row = await apiPatch<TemplateVariant>(`/admin/catalog/variants/${id}`, body);
       setVariants(prev => prev.map(v => (v.id === id ? { ...v, ...(row && typeof row.id === 'number' ? row : body) } : v)));
       onRefetch();
-    } catch (e) { fail(e, 'Variant update failed.'); }
+    } catch (e) { fail(e, 'Package update failed.'); }
   };
 
-  const move = async (idx: number, dir: -1 | 1) => {
-    const j = idx + dir;
-    if (j < 0 || j >= variants.length) return;
-    const a = variants[idx], b = variants[j];
-    // Swap sort orders; if they collide (both 0 from defaults), fall back to list positions.
-    const aOrder = a.sortOrder === b.sortOrder ? j : b.sortOrder;
-    const bOrder = a.sortOrder === b.sortOrder ? idx : a.sortOrder;
+  const [dragId, setDragId] = useState<number | null>(null);
+  const dropOn = async (targetId: number) => {
+    if (dragId == null || dragId === targetId) { setDragId(null); return; }
+    const list = [...variants];
+    const from = list.findIndex(v => v.id === dragId);
+    const to = list.findIndex(v => v.id === targetId);
+    if (from < 0 || to < 0) { setDragId(null); return; }
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    const renumbered = list.map((v, i) => ({ ...v, sortOrder: i + 1 }));
+    setVariants(renumbered);
+    setDragId(null);
     setError(null);
-    setVariants(prev => {
-      const next = [...prev];
-      next[idx] = { ...b, sortOrder: bOrder };
-      next[j] = { ...a, sortOrder: aOrder };
-      return next;
-    });
     try {
-      await Promise.all([
-        apiPatch(`/admin/catalog/variants/${a.id}`, { sortOrder: aOrder }),
-        apiPatch(`/admin/catalog/variants/${b.id}`, { sortOrder: bOrder }),
-      ]);
+      await Promise.all(renumbered.filter((v, i) => variants.find(x => x.id === v.id)?.sortOrder !== i + 1)
+        .map(v => apiPatch(`/admin/catalog/variants/${v.id}`, { sortOrder: v.sortOrder })));
       onRefetch();
-    } catch (e) {
-      setVariants(prev => {
-        const next = [...prev];
-        next[idx] = a; next[j] = b;
-        return next;
-      });
-      fail(e, 'Could not reorder variants.');
-    }
+    } catch (e) { fail(e, 'Could not reorder packages.'); }
   };
 
   const remove = async (v: TemplateVariant) => {
-    if (!window.confirm(`Delete variant “${v.name}”? This is permanent.`)) return;
+    if (!window.confirm(`Delete package “${v.name}”? This is permanent.`)) return;
     setError(null);
     try {
       await apiDelete(`/admin/catalog/variants/${v.id}`);
       setVariants(prev => prev.filter(x => x.id !== v.id));
       onRefetch();
-    } catch (e) { fail(e, 'Could not delete the variant.'); }
+    } catch (e) { fail(e, 'Could not delete the package.'); }
   };
 
   const add = async () => {
     const price = Number(addPrice);
-    if (!addName.trim()) { setError('Variant name is required.'); return; }
-    if (addPrice.trim() === '' || !isFinite(price) || !(price > 0)) { setError('Variant price must be greater than 0.'); return; }
+    if (!addName.trim()) { setError('Package name is required.'); return; }
+    if (addPrice.trim() === '' || !isFinite(price) || !(price > 0)) { setError('Package price must be greater than 0.'); return; }
     setAdding(true); setError(null);
     const body: Record<string, unknown> = { name: addName.trim(), basePrice: price };
     if (addDuration.trim() !== '') body.estimatedDuration = Number(addDuration);
@@ -1318,7 +1436,7 @@ function VariantsEditor({ templateId, variants, setVariants, onRefetch }: {
       if (row && typeof row.id === 'number') setVariants(prev => [...prev, row]);
       setAddName(''); setAddPrice(''); setAddDuration('');
       onRefetch();
-    } catch (e) { fail(e, 'Could not add the variant.'); }
+    } catch (e) { fail(e, 'Could not add the package.'); }
     finally { setAdding(false); }
   };
 
@@ -1326,18 +1444,19 @@ function VariantsEditor({ templateId, variants, setVariants, onRefetch }: {
     <div className="rounded-xl border border-[#f0ede8] overflow-hidden">
       {variants.length > 0 && (
         <>
-          <div className="grid grid-cols-[1fr_76px_64px_36px_44px_24px] items-center gap-1.5 px-2.5 pt-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-[#9b9890]">
-            <span>Variant</span><span className="text-right">AED</span><span className="text-right">Min (m)</span>
-            <span className="text-center">On</span><span /><span />
+          <div className="grid grid-cols-[16px_1fr_76px_64px_36px_24px] items-center gap-1.5 px-2.5 pt-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-[#9b9890]">
+            <span /><span>Package</span><span className="text-right">AED</span><span className="text-right">Min (m)</span>
+            <span className="text-center">On</span><span />
           </div>
           <ul className="divide-y divide-[#f0ede8]">
-            {variants.map((v, i) => (
+            {variants.map(v => (
               <VariantRow
                 key={v.id} v={v}
+                dragging={dragId === v.id}
+                onDragStart={() => setDragId(v.id)}
+                onDropOn={() => dropOn(v.id)}
                 onPatch={body => patchVariant(v.id, body)}
                 onToggle={() => patchVariant(v.id, { isActive: !v.isActive })}
-                onMoveUp={i > 0 ? () => move(i, -1) : undefined}
-                onMoveDown={i < variants.length - 1 ? () => move(i, 1) : undefined}
                 onDelete={() => remove(v)}
               />
             ))}
@@ -1345,10 +1464,10 @@ function VariantsEditor({ templateId, variants, setVariants, onRefetch }: {
         </>
       )}
       {variants.length === 0 && (
-        <p className="px-2.5 py-2.5 text-[11px] text-[#9b9890]">No variants yet — the service sells at its base price.</p>
+        <p className="px-2.5 py-2.5 text-[11px] text-[#9b9890]">No packages yet — the service sells at one price.</p>
       )}
       <div className="flex items-center gap-1.5 border-t border-[#f0ede8] bg-[#faf9f6] px-2.5 py-2">
-        <input className={`${inputCls} !py-1 flex-1`} placeholder="New variant name" value={addName}
+        <input className={`${inputCls} !py-1 flex-1`} placeholder="New package — e.g. Studio" value={addName}
           onChange={e => setAddName(e.target.value)} />
         <input className={`${inputCls} !py-1 !w-[76px] text-right`} type="number" min={0} placeholder="AED" value={addPrice}
           onChange={e => setAddPrice(e.target.value)} />
@@ -1455,12 +1574,13 @@ function AddonsEditor({ templateId, addons, setAddons, onRefetch }: {
   );
 }
 
-function VariantRow({ v, onPatch, onToggle, onMoveUp, onMoveDown, onDelete }: {
+function VariantRow({ v, dragging, onDragStart, onDropOn, onPatch, onToggle, onDelete }: {
   v: TemplateVariant;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDropOn: () => void;
   onPatch: (body: Record<string, unknown>) => void;
   onToggle: () => void;
-  onMoveUp?: () => void;
-  onMoveDown?: () => void;
   onDelete: () => void;
 }) {
   const [name, setName] = useState(v.name);
@@ -1489,20 +1609,21 @@ function VariantRow({ v, onPatch, onToggle, onMoveUp, onMoveDown, onDelete }: {
   };
 
   return (
-    <li className={`grid grid-cols-[1fr_76px_64px_36px_44px_24px] items-center gap-1.5 px-2.5 py-1.5 ${v.isActive ? '' : 'opacity-55'}`}>
+    <li
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={e => e.preventDefault()}
+      onDrop={onDropOn}
+      className={`grid grid-cols-[16px_1fr_76px_64px_36px_24px] items-center gap-1.5 px-2.5 py-1.5 ${v.isActive ? '' : 'opacity-55'} ${dragging ? 'opacity-40' : ''}`}
+    >
+      <span className="cursor-grab active:cursor-grabbing text-[#d5d2cb]"><GripVertical size={13} /></span>
       <input className={`${inputCls} !py-1`} value={name} onChange={e => setName(e.target.value)} onBlur={blurName} />
       <input className={`${inputCls} !py-1 text-right`} type="number" min={0} value={price}
         onChange={e => setPrice(e.target.value)} onBlur={blurPrice} />
       <input className={`${inputCls} !py-1 text-right`} type="number" min={0} value={duration} placeholder="—"
         onChange={e => setDuration(e.target.value)} onBlur={blurDuration} />
       <div className="flex justify-center"><Toggle on={v.isActive} onChange={onToggle} /></div>
-      <div className="flex items-center justify-center gap-0.5">
-        <button type="button" disabled={!onMoveUp} onClick={onMoveUp} title="Move up"
-          className="text-[#9b9890] hover:text-[#1a1916] disabled:opacity-25"><ChevronUp size={13} /></button>
-        <button type="button" disabled={!onMoveDown} onClick={onMoveDown} title="Move down"
-          className="text-[#9b9890] hover:text-[#1a1916] disabled:opacity-25"><ChevronDown size={13} /></button>
-      </div>
-      <button type="button" onClick={onDelete} title="Delete variant"
+      <button type="button" onClick={onDelete} title="Delete package"
         className="text-[#c9c6bf] hover:text-[#b91c1c] justify-self-center"><X size={13} /></button>
     </li>
   );
