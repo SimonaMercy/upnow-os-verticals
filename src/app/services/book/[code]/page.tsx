@@ -87,7 +87,7 @@ function TermsLink({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold hover:underline"
+      className="inline-flex items-center gap-1.5 text-[12px] font-semibold hover:underline"
       style={{ color: GREEN_DD }}
     >
       <Info size={13} /> {label}
@@ -289,10 +289,11 @@ export default function BookServicePage() {
   }, [days, day]);
 
   /** One-line recap shown when a step is collapsed-done. */
+  const qtyWord = (n: number, label: string) => `${n} ${n === 1 ? label.toLowerCase().replace(/s$/, '') : label.toLowerCase()}`;
   const stepRecap: Record<StepKey, string> = {
     customize: [
       chosenPkg?.name ?? (isHourly ? `${hours} hours` : svc?.name ?? ''),
-      svc?.quantityLabel ? `${qty} ${svc.quantityLabel.toLowerCase()}` : '',
+      svc?.quantityLabel ? qtyWord(qty, svc.quantityLabel) : '',
       addonIds.size ? `${addonIds.size} add-on${addonIds.size > 1 ? 's' : ''}` : '',
     ].filter(Boolean).join(' · '),
     schedule: scheduleDone ? `${dayLabel} · ${String(hour).padStart(2, '0')}:00` : '',
@@ -581,7 +582,6 @@ export default function BookServicePage() {
             </div>
           </div>
         )}
-        <TermsLink label="Pricing terms" onClick={() => setPolicyModal('pricing')} />
       </>
     ),
     schedule: (
@@ -629,9 +629,6 @@ export default function BookServicePage() {
             );
           })}
         </div>
-        {cancelPolicy && (
-          <TermsLink label="Cancellation & reschedule policy" onClick={() => setPolicyModal('cancel')} />
-        )}
       </>
     ),
     address: (
@@ -704,15 +701,14 @@ export default function BookServicePage() {
             style={{ borderColor: LINE }}
           />
         </div>
-        <TermsLink label="Visit terms" onClick={() => setPolicyModal('visit')} />
       </>
     ),
   };
 
-  const stepMeta: Record<StepKey, { title: string; icon: React.ElementType; continueLabel: string }> = {
-    customize: { title: 'Customize your service', icon: SlidersHorizontal, continueLabel: 'Continue to date & time' },
-    schedule: { title: 'Pick a date & time', icon: CalendarDays, continueLabel: 'Continue to address' },
-    address: { title: 'Where should we come?', icon: MapPin, continueLabel: isQuote ? 'Review request' : 'Review & pay' },
+  const stepMeta: Record<StepKey, { title: string; icon: React.ElementType; continueLabel: string; policy: 'pricing' | 'cancel' | 'visit'; policyLabel: string }> = {
+    customize: { title: 'Customize your service', icon: SlidersHorizontal, continueLabel: 'Continue to date & time', policy: 'pricing', policyLabel: 'Pricing terms' },
+    schedule: { title: 'Pick a date & time', icon: CalendarDays, continueLabel: 'Continue to address', policy: 'cancel', policyLabel: 'Cancellation policy' },
+    address: { title: 'Where should we come?', icon: MapPin, continueLabel: isQuote ? 'Review request' : 'Review & pay', policy: 'visit', policyLabel: 'Visit terms' },
   };
 
   return (
@@ -734,7 +730,6 @@ export default function BookServicePage() {
             <h1>{svc.name}</h1>
           </div>
           <div className="flex items-center gap-4 mt-2 text-[13px] flex-wrap" style={{ color: 'var(--mute)' }}>
-            <span className="font-semibold" style={{ color: GREEN_DD }}>{catName}</span>
             {svc.isEmergency && (
               <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full" style={{ background: '#fee2e2', color: '#b91c1c' }}>
                 <AlarmClockCheck size={11} /> 24/7
@@ -813,19 +808,24 @@ export default function BookServicePage() {
                     {state === 'active' && (
                       <div className="bk-body px-5 pb-5">
                         {stepBody[key]}
-                        <button
-                          type="button"
-                          disabled={!stepContinueOk[key]}
-                          onClick={() => goContinue(idx)}
-                          className="mt-5 rounded-xl px-5 py-3 text-sm font-bold text-white transition-opacity"
-                          style={{ background: GREEN, opacity: stepContinueOk[key] ? 1 : 0.45 }}
-                        >
-                          {meta.continueLabel}
-                        </button>
+                        <div className="mt-5 pt-4 flex items-center justify-between gap-3 flex-wrap" style={{ borderTop: '1px solid var(--line-2, #eff2ef)' }}>
+                          <button
+                            type="button"
+                            disabled={!stepContinueOk[key]}
+                            onClick={() => goContinue(idx)}
+                            className="rounded-xl px-6 py-3 text-sm font-bold text-white transition-opacity"
+                            style={{ background: GREEN, opacity: stepContinueOk[key] ? 1 : 0.45 }}
+                          >
+                            {meta.continueLabel}
+                          </button>
+                          {(meta.policy !== 'cancel' || cancelPolicy) && (
+                            <TermsLink label={meta.policyLabel} onClick={() => setPolicyModal(meta.policy)} />
+                          )}
+                        </div>
                         {!stepContinueOk[key] && (
-                          <span className="ml-3 text-[12px]" style={{ color: 'var(--mute)' }}>
+                          <p className="mt-2 text-[12px]" style={{ color: 'var(--mute)' }}>
                             {key === 'customize' ? `Choose ${svc.packageGroupLabel?.toLowerCase() ?? 'an option'} first` : key === 'schedule' ? 'Pick a date and a start time' : 'Search or drop the pin on your location'}
-                          </span>
+                          </p>
                         )}
                       </div>
                     )}
@@ -928,8 +928,8 @@ export default function BookServicePage() {
                 )}
 
                 {/* Sign-in — the LAST step, after details are captured */}
-                {!user && (
-                  <div className="rounded-2xl px-4 py-4 mb-4" style={{ background: 'var(--green-tint-2)' }}>
+                {!user && selectionsComplete && (
+                  <div className="bk-body rounded-2xl px-4 py-4 mb-4" style={{ background: 'var(--green-tint-2)' }}>
                     <p className="text-xs font-semibold mb-2.5 inline-flex items-center gap-1.5" style={{ color: 'var(--ink-2)' }}>
                       <Lock size={12} /> Almost done — verify your email to confirm
                     </p>
