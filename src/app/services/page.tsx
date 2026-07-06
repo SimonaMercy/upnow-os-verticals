@@ -38,13 +38,12 @@ export default function ServicesPage() {
             to a full AC service, see exactly what it costs before you book.
           </p>
 
-          {/* Booking status badge — flips off with SP Sprint 2 */}
           <div
             className="mt-8 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium"
-            style={{ backgroundColor: '#fef9c3', color: '#92400e' }}
+            style={{ backgroundColor: '#d8f2e8', color: '#1a7a5a' }}
           >
             <Zap size={14} />
-            Online booking opens soon — browse services and prices below
+            Online booking is live — Dubai pilot
           </div>
         </div>
       </section>

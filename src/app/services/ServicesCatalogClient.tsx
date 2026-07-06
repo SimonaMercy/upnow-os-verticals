@@ -10,6 +10,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees,
   Building2, Wrench, Clock, Loader2, ChevronDown, ChevronUp, BadgeCheck,
@@ -138,9 +139,13 @@ function ServiceCard({ s, tone }: { s: PublicService; tone: { bg: string; fg: st
         <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>
           <BadgeCheck size={13} style={{ color: 'var(--color-primary)' }} /> Vetted, licensed providers
         </span>
-        <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>
-          Booking opens soon
-        </span>
+        <Link
+          href={`/services/book/${s.code}`}
+          className="text-[11px] font-bold px-3 py-1.5 rounded-full text-white"
+          style={{ background: tone.fg }}
+        >
+          {s.pricingMode === 'quote' ? 'Get free quote' : 'Book now'}
+        </Link>
       </div>
     </div>
   );

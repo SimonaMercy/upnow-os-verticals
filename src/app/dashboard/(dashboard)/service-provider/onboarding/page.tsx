@@ -757,6 +757,10 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [entityType, setEntityType] = useState<string>("company");
+  // Live taxonomy from the admin-configured catalog (active categories only);
+  // the hardcoded list is only the fallback if the public endpoint is down.
+  const [categoryOptions, setCategoryOptions] =
+    useState<{ value: string; label: string }[]>(SERVICE_CATEGORIES);
 
   const {
     handleSubmit,
@@ -776,6 +780,15 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       })
       .catch(() => {})
       .finally(() => setInitialLoaded(true));
+
+    fetch("/api/catalog/public")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { categories?: { code: string; name: string }[] }) => {
+        if (d.categories?.length) {
+          setCategoryOptions(d.categories.map((c) => ({ value: c.code, label: c.name })));
+        }
+      })
+      .catch(() => {}); // keep the static fallback
   }, [reset]);
 
   // Eligibility matrix (SP_ONBOARDING_V2_DESIGN §3): every catalog category is
@@ -838,7 +851,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
         name="serviceCategories"
         render={({ field }) => (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {SERVICE_CATEGORIES.map((cat) => {
+            {categoryOptions.map((cat) => {
               const selected = field.value.includes(cat.value);
               return (
                 <button
