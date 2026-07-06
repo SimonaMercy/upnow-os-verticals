@@ -1,12 +1,13 @@
 /**
  * Public booking flow — /services/book/[code] (SP Sprint 2, SCRUM-402/405).
  *
- * Justlife / Urban Company checkout: numbered detail-capture steps in the
- * LEFT column (customize → date & time → address), a STICKY summary card on
- * the RIGHT with the service photo, itemized live pricing, inline sign-in
- * (email → OTP, registers new customers on the fly) at the END, then payment.
- * Server-side pricing is authoritative on submit; quote-mode services submit
- * without payment. Everything rendered comes from GET /api/catalog/public.
+ * Justlife / Urban Company checkout: a step-by-step TIMELINE on the left —
+ * only the current step is expanded, completed steps collapse to a recap
+ * with Edit, upcoming steps stay locked on a connected rail. Sticky summary
+ * on the right with the service photo, itemized pricing + VAT breakdown,
+ * inline sign-in (email → OTP, registers new customers) at the END, then
+ * payment. Server-side pricing is authoritative on submit; quote-mode
+ * services submit without payment. All data from GET /api/catalog/public.
  */
 'use client';
 
@@ -15,7 +16,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   BadgeCheck, CalendarDays, Check, CheckCircle2, Clock, Loader2,
-  MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles,
+  MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles, Pencil,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navbar } from '@/components/upnow/Navbar';
@@ -46,12 +47,20 @@ const LINE = 'var(--line)';
 const TINT = 'var(--green-tint)';   // selected surfaces (matches .l-catchip.active)
 const GREEN_DD = 'var(--green-dd)'; // selected text, per theme
 
+/** UAE statutory VAT. Catalog prices are VAT-INCLUSIVE (platform policy) —
+ *  this rate is used only to DISPLAY the tax split; the charged total is
+ *  unchanged. See docs/PAYMENTS_REFERENCE.md before touching money logic. */
+const VAT_RATE = 0.05;
+
 const fmtAed = (n: number) => n.toLocaleString('en-AE');
+const fmtAed2 = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 function durText(min: number | null, max: number | null): string | null {
   if (!min) return null;
   const f = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`);
   return max && max !== min ? `${f(min)}–${f(max)}` : f(min);
 }
+
+type StepKey = 'customize' | 'schedule' | 'address';
 
 export default function BookServicePage() {
   const { code } = useParams<{ code: string }>();
@@ -73,6 +82,10 @@ export default function BookServicePage() {
   const [address, setAddress] = useState('');
   const [emirate, setEmirate] = useState('dubai');
   const [notes, setNotes] = useState('');
+
+  // timeline
+  const [activeStep, setActiveStep] = useState(0);
+  const [maxReached, setMaxReached] = useState(0);
 
   // auth gate
   const [email, setEmail] = useState('');
@@ -122,6 +135,13 @@ export default function BookServicePage() {
   const isHourly = svc?.priceUnit === 'per_hour';
   const hasLadder = (svc?.packages.length ?? 0) > 0;
   const chosenPkg = svc?.packages.find((p) => p.id === pkgId) ?? null;
+  const hasOptionsStep = Boolean(svc && (hasLadder || isHourly || svc.quantityLabel || (!isQuote && svc.addons.length > 0)));
+
+  /** Ordered steps for this service — the timeline. */
+  const steps: StepKey[] = useMemo(
+    () => (hasOptionsStep ? ['customize', 'schedule', 'address'] : ['schedule', 'address']),
+    [hasOptionsStep],
+  );
 
   /* Itemized display estimate — the server recomputes authoritatively on submit. */
   const lineItems = useMemo(() => {
@@ -159,6 +179,13 @@ export default function BookServicePage() {
     return lineItems.reduce((sum, i) => sum + (i.amount ?? 0), 0);
   }, [svc, isQuote, lineItems]);
 
+  /* Display-only VAT split of the inclusive total. */
+  const vatSplit = useMemo(() => {
+    if (estimate == null) return null;
+    const net = estimate / (1 + VAT_RATE);
+    return { net, vat: estimate - net };
+  }, [estimate]);
+
   const optionsDone = Boolean(svc) && (!hasLadder || isHourly || pkgId != null);
   const scheduleDone = Boolean(day) && hour != null;
   const addressDone = address.trim().length >= 8;
@@ -166,6 +193,31 @@ export default function BookServicePage() {
   const missing = !optionsDone
     ? `Choose ${svc?.packageGroupLabel?.toLowerCase() ?? 'an option'} to continue`
     : !scheduleDone ? 'Pick a date and time' : !addressDone ? 'Add your address' : null;
+
+  const stepDone: Record<StepKey, boolean> = { customize: optionsDone, schedule: scheduleDone, address: addressDone };
+  const stepContinueOk: Record<StepKey, boolean> = stepDone;
+
+  const dayLabel = useMemo(() => {
+    const d = days.find((x) => x.value === day);
+    return d ? `${d.wd} ${d.num} ${d.mon}` : '';
+  }, [days, day]);
+
+  /** One-line recap shown when a step is collapsed-done. */
+  const stepRecap: Record<StepKey, string> = {
+    customize: [
+      chosenPkg?.name ?? (isHourly ? `${hours} hours` : svc?.name ?? ''),
+      svc?.quantityLabel ? `${qty} ${svc.quantityLabel.toLowerCase()}` : '',
+      addonIds.size ? `${addonIds.size} add-on${addonIds.size > 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(' · '),
+    schedule: scheduleDone ? `${dayLabel} · ${String(hour).padStart(2, '0')}:00` : '',
+    address: address ? `${address}${emirate ? ` — ${EMIRATES.find((e) => e.value === emirate)?.label ?? emirate}` : ''}` : '',
+  };
+
+  const goContinue = (idx: number) => {
+    const next = Math.min(idx + 1, steps.length);
+    setMaxReached((m) => Math.max(m, next));
+    setActiveStep(next); // steps.length ⇒ everything collapsed, focus on summary
+  };
 
   const isCustomer = user?.role === 'customer';
 
@@ -299,10 +351,223 @@ export default function BookServicePage() {
     );
   }
 
-  let stepNo = 0;
-  const nextStep = () => String(++stepNo);
   const svcDur = durText(svc.estimatedDuration, svc.estimatedDurationMax)
     ?? durText(chosenPkg?.estimatedDuration ?? null, chosenPkg?.estimatedDurationMax ?? null);
+
+  /* ── Step bodies (rendered only when a step is expanded) ── */
+  const stepBody: Record<StepKey, React.ReactNode> = {
+    customize: (
+      <>
+        {hasLadder && !isHourly && (
+          <div className="mb-5">
+            <p className="text-[12px] font-semibold mb-2.5" style={{ color: 'var(--mute)' }}>{svc.packageGroupLabel ?? 'Choose an option'}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {svc.packages.map((p) => {
+                const on = pkgId === p.id;
+                const d = durText(p.estimatedDuration, p.estimatedDurationMax);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPkgId(p.id)}
+                    className="relative rounded-[14px] border-2 px-4 py-3.5 text-left transition-all"
+                    style={{
+                      borderColor: on ? GREEN : LINE,
+                      background: on ? TINT : '#fff',
+                      boxShadow: on ? 'var(--shadow-card)' : 'none',
+                    }}
+                  >
+                    {on && (
+                      <span className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: GREEN }}>
+                        <Check size={12} style={{ color: '#fff' }} />
+                      </span>
+                    )}
+                    <span className="block text-sm font-semibold pr-6" style={{ color: 'var(--ink)' }}>{p.name}</span>
+                    <span className="flex items-baseline gap-2 mt-1.5">
+                      <span className="text-[15px] font-bold" style={{ color: on ? GREEN_DD : 'var(--ink)' }}>
+                        {p.basePrice != null ? `AED ${fmtAed(Number(p.basePrice))}` : '—'}
+                      </span>
+                      {d && <span className="text-[11px]" style={{ color: 'var(--mute)' }}>~{d}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {isHourly && (
+          <div className="mb-5">
+            <p className="text-[12px] font-semibold mb-2.5" style={{ color: 'var(--mute)' }}>How many hours?</p>
+            <div className="flex gap-2 flex-wrap">
+              {HOUR_OPTIONS.map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setHours(h)}
+                  className="w-[54px] h-12 rounded-[14px] border-2 text-sm font-bold transition-all"
+                  style={{
+                    borderColor: hours === h ? GREEN : LINE,
+                    background: hours === h ? TINT : '#fff',
+                    color: hours === h ? GREEN_DD : 'var(--ink-2)',
+                    boxShadow: hours === h ? 'var(--shadow-card)' : 'none',
+                  }}
+                >
+                  {h}h
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {svc.quantityLabel && (
+          <div className="mb-5">
+            <p className="text-[12px] font-semibold mb-2.5" style={{ color: 'var(--mute)' }}>How many {svc.quantityLabel.toLowerCase()}?</p>
+            <div className="inline-flex items-center rounded-[14px] border-2 overflow-hidden" style={{ borderColor: LINE }}>
+              <button
+                type="button"
+                onClick={() => setQty(Math.max(svc.quantityMin || 1, qty - 1))}
+                className="w-11 h-11 text-lg font-bold transition-colors hover:bg-[#f1faf5]"
+                style={{ color: 'var(--mute)' }}
+              >−</button>
+              <span className="text-base font-bold w-12 text-center tabular-nums" style={{ color: 'var(--ink)' }}>{qty}</span>
+              <button
+                type="button"
+                onClick={() => setQty(Math.min(svc.quantityMax ?? 99, qty + 1))}
+                className="w-11 h-11 text-lg font-bold transition-colors hover:bg-[#f1faf5]"
+                style={{ color: GREEN }}
+              >+</button>
+            </div>
+            <span className="ml-3 text-[11px]" style={{ color: 'var(--mute)' }}>
+              {svc.quantityMin || 1}–{svc.quantityMax ?? '∞'} {svc.quantityLabel.toLowerCase()}
+            </span>
+          </div>
+        )}
+
+        {!isQuote && svc.addons.length > 0 && (
+          <div>
+            <p className="text-[12px] font-semibold mb-2.5 inline-flex items-center gap-1.5" style={{ color: 'var(--mute)' }}>
+              <Sparkles size={12} style={{ color: GREEN }} /> Popular add-ons
+            </p>
+            <div className="space-y-2">
+              {svc.addons.map((a) => {
+                const on = addonIds.has(a.id);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setAddonIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(a.id)) next.delete(a.id); else next.add(a.id);
+                      return next;
+                    })}
+                    className="w-full flex items-center justify-between rounded-[14px] border-2 px-4 py-3 text-left transition-all"
+                    style={{
+                      borderColor: on ? GREEN : LINE,
+                      background: on ? TINT : '#fff',
+                    }}
+                  >
+                    <span className="flex items-center gap-3">
+                      <span
+                        className="w-5 h-5 rounded-md flex items-center justify-center border-2 transition-colors"
+                        style={{ borderColor: on ? GREEN : LINE, background: on ? GREEN : '#fff' }}
+                      >{on && <Check size={12} style={{ color: '#fff' }} />}</span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--ink-2)' }}>{a.name}</span>
+                    </span>
+                    <span className="text-sm font-bold whitespace-nowrap" style={{ color: on ? GREEN_DD : 'var(--ink)' }}>
+                      +AED {fmtAed(a.price)}{a.priceUnit === 'per_hour' ? '/hr' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </>
+    ),
+    schedule: (
+      <>
+        <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+          {days.map((d) => {
+            const on = day === d.value;
+            return (
+              <button
+                key={d.value}
+                type="button"
+                onClick={() => setDay(d.value)}
+                className="flex flex-col items-center justify-center w-[62px] h-[72px] rounded-[14px] border-2 flex-shrink-0 transition-all"
+                style={{
+                  borderColor: on ? GREEN : LINE,
+                  background: on ? TINT : '#fff',
+                  boxShadow: on ? 'var(--shadow-card)' : 'none',
+                }}
+              >
+                <span className="text-[10px] font-semibold uppercase" style={{ color: on ? GREEN_DD : 'var(--mute)' }}>{d.wd}</span>
+                <span className="text-lg font-bold leading-tight tabular-nums" style={{ color: on ? GREEN_DD : 'var(--ink)' }}>{d.num}</span>
+                <span className="text-[10px]" style={{ color: 'var(--mute)' }}>{d.mon}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[12px] font-semibold mt-3 mb-2" style={{ color: 'var(--mute)' }}>Start time</p>
+        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+          {SLOT_HOURS.map((h) => {
+            const on = hour === h;
+            return (
+              <button
+                key={h}
+                type="button"
+                onClick={() => setHour(h)}
+                className="py-2.5 rounded-xl border-2 text-[12.5px] font-semibold tabular-nums transition-all"
+                style={{
+                  borderColor: on ? GREEN : LINE,
+                  background: on ? TINT : '#fff',
+                  color: on ? GREEN_DD : 'var(--mute)',
+                }}
+              >
+                {String(h).padStart(2, '0')}:00
+              </button>
+            );
+          })}
+        </div>
+      </>
+    ),
+    address: (
+      <>
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_170px] gap-3">
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Building, street, area — e.g. Marina Heights, Tower 2, Apt 1204"
+            className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+            style={{ borderColor: LINE }}
+          />
+          <select
+            value={emirate}
+            onChange={(e) => setEmirate(e.target.value)}
+            className="rounded-xl border-2 px-3 py-3 text-sm bg-white"
+            style={{ borderColor: LINE }}
+          >
+            {EMIRATES.map((e) => <option key={e.value} value={e.value}>{e.label}</option>)}
+          </select>
+        </div>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Anything the professional should know? (optional)"
+          rows={2}
+          className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full mt-2.5 transition-colors focus:border-[#2e9f82]"
+          style={{ borderColor: LINE }}
+        />
+      </>
+    ),
+  };
+
+  const stepMeta: Record<StepKey, { title: string; icon: React.ElementType; continueLabel: string }> = {
+    customize: { title: 'Customize your service', icon: SlidersHorizontal, continueLabel: 'Continue to date & time' },
+    schedule: { title: 'Pick a date & time', icon: CalendarDays, continueLabel: 'Continue to address' },
+    address: { title: 'Where should we come?', icon: MapPin, continueLabel: isQuote ? 'Review request' : 'Review & pay' },
+  };
 
   return (
     <div className="min-h-screen" style={{ background: '#fff' }}>
@@ -323,7 +588,7 @@ export default function BookServicePage() {
             <h1>{svc.name}</h1>
           </div>
           <div className="flex items-center gap-4 mt-2 text-[13px] flex-wrap" style={{ color: 'var(--mute)' }}>
-            <span className="font-semibold" style={{ color: 'var(--green-dd)' }}>{catName}</span>
+            <span className="font-semibold" style={{ color: GREEN_DD }}>{catName}</span>
             {svc.isEmergency && (
               <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded-full" style={{ background: '#fee2e2', color: '#b91c1c' }}>
                 <AlarmClockCheck size={11} /> 24/7
@@ -337,221 +602,96 @@ export default function BookServicePage() {
       </section>
 
       <div className="l-wrap" style={{ paddingTop: 28, paddingBottom: 72 }}>
-        {/* ── Two columns: steps left, sticky summary right ── */}
+        {/* ── Two columns: timeline left, sticky summary right ── */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_384px] gap-7 items-start">
 
-          {/* LEFT — detail capture steps */}
-          <div className="min-w-0">
-            {/* Step: customize */}
-            {(hasLadder || isHourly || svc.quantityLabel || (!isQuote && svc.addons.length > 0)) && (
-              <StepCard no={nextStep()} title="Customize your service" icon={SlidersHorizontal} done={optionsDone && (hasLadder && !isHourly ? pkgId != null : true)}>
-                {/* Package ladder */}
-                {hasLadder && !isHourly && (
-                  <div className="mb-5">
-                    <p className="text-[12px] font-semibold mb-2.5" style={{ color: 'var(--mute)' }}>{svc.packageGroupLabel ?? 'Choose an option'}</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {svc.packages.map((p) => {
-                        const on = pkgId === p.id;
-                        const d = durText(p.estimatedDuration, p.estimatedDurationMax);
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => setPkgId(p.id)}
-                            className="relative rounded-[14px] border-2 px-4 py-3.5 text-left transition-all"
-                            style={{
-                              borderColor: on ? GREEN : LINE,
-                              background: on ? TINT : '#fff',
-                              boxShadow: on ? 'var(--shadow-card)' : 'none',
-                            }}
-                          >
-                            {on && (
-                              <span className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: GREEN }}>
-                                <Check size={12} style={{ color: '#fff' }} />
-                              </span>
-                            )}
-                            <span className="block text-sm font-semibold pr-6" style={{ color: 'var(--ink)' }}>{p.name}</span>
-                            <span className="flex items-baseline gap-2 mt-1.5">
-                              <span className="text-[15px] font-bold" style={{ color: on ? GREEN_DD : 'var(--ink)' }}>
-                                {p.basePrice != null ? `AED ${fmtAed(Number(p.basePrice))}` : '—'}
-                              </span>
-                              {d && <span className="text-[11px]" style={{ color: 'var(--mute)' }}>~{d}</span>}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+          {/* LEFT — step-by-step timeline (one step open at a time) */}
+          <div className="min-w-0 relative">
+            {/* connector rail */}
+            <div className="absolute left-[15px] top-5 bottom-8 w-px" style={{ background: LINE }} />
 
-                {/* Hours */}
-                {isHourly && (
-                  <div className="mb-5">
-                    <p className="text-[12px] font-semibold mb-2.5" style={{ color: 'var(--mute)' }}>How many hours?</p>
-                    <div className="flex gap-2 flex-wrap">
-                      {HOUR_OPTIONS.map((h) => (
+            {steps.map((key, idx) => {
+              const meta = stepMeta[key];
+              const state: 'active' | 'done' | 'locked' =
+                idx === activeStep ? 'active' : idx < maxReached || stepDone[key] && idx < activeStep ? 'done' : idx < activeStep ? 'done' : 'locked';
+              const clickable = state === 'done';
+              const Icon = meta.icon;
+              return (
+                <div key={key} className="relative pl-11 mb-4">
+                  {/* timeline node */}
+                  <span
+                    className="absolute left-0 top-4 w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold border-2 bg-white z-10 transition-colors"
+                    style={state === 'done'
+                      ? { background: GREEN, borderColor: GREEN, color: '#fff' }
+                      : state === 'active'
+                        ? { borderColor: GREEN, color: GREEN_DD }
+                        : { borderColor: LINE, color: 'var(--mute)' }}
+                  >
+                    {state === 'done' ? <Check size={14} /> : idx + 1}
+                  </span>
+
+                  {/* card */}
+                  <div
+                    className="rounded-[18px] border bg-white transition-all"
+                    style={{
+                      borderColor: state === 'active' ? GREEN : LINE,
+                      boxShadow: state === 'active' ? 'var(--shadow-card)' : 'none',
+                      opacity: state === 'locked' ? 0.55 : 1,
+                    }}
+                  >
+                    {/* header */}
+                    <button
+                      type="button"
+                      disabled={state === 'locked'}
+                      onClick={() => clickable && setActiveStep(idx)}
+                      className="w-full flex items-center gap-2.5 px-5 py-4 text-left"
+                      style={{ cursor: state === 'done' ? 'pointer' : 'default' }}
+                    >
+                      <span className="text-[15px] font-bold flex-1 flex items-center gap-2" style={{ color: 'var(--ink)' }}>
+                        {meta.title}
+                        <Icon size={15} style={{ color: 'var(--mute)' }} />
+                      </span>
+                      {state === 'done' && (
+                        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: GREEN_DD }}>
+                          <Pencil size={12} /> Edit
+                        </span>
+                      )}
+                      {state === 'locked' && (
+                        <Lock size={13} style={{ color: 'var(--mute)' }} />
+                      )}
+                    </button>
+
+                    {/* collapsed recap */}
+                    {state === 'done' && stepRecap[key] && (
+                      <p className="px-5 pb-4 -mt-1 text-[13px] truncate" style={{ color: 'var(--mute)' }}>
+                        {stepRecap[key]}
+                      </p>
+                    )}
+
+                    {/* expanded body */}
+                    {state === 'active' && (
+                      <div className="px-5 pb-5">
+                        {stepBody[key]}
                         <button
-                          key={h}
                           type="button"
-                          onClick={() => setHours(h)}
-                          className="w-[54px] h-12 rounded-2xl border-2 text-sm font-bold transition-all"
-                          style={{
-                            borderColor: hours === h ? GREEN : LINE,
-                            background: hours === h ? TINT : '#fff',
-                            color: hours === h ? GREEN_DD : 'var(--ink-2)',
-                            boxShadow: hours === h ? 'var(--shadow-card)' : 'none',
-                          }}
+                          disabled={!stepContinueOk[key]}
+                          onClick={() => goContinue(idx)}
+                          className="mt-5 rounded-xl px-5 py-3 text-sm font-bold text-white transition-opacity"
+                          style={{ background: GREEN, opacity: stepContinueOk[key] ? 1 : 0.45 }}
                         >
-                          {h}h
+                          {meta.continueLabel}
                         </button>
-                      ))}
-                    </div>
+                        {!stepContinueOk[key] && (
+                          <span className="ml-3 text-[12px]" style={{ color: 'var(--mute)' }}>
+                            {key === 'customize' ? `Choose ${svc.packageGroupLabel?.toLowerCase() ?? 'an option'} first` : key === 'schedule' ? 'Pick a date and a start time' : 'Enter your full address'}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
-
-                {/* Quantity (admin-configured: Cleaners, AC units, …) */}
-                {svc.quantityLabel && (
-                  <div className="mb-5">
-                    <p className="text-[12px] font-semibold mb-2.5" style={{ color: 'var(--mute)' }}>How many {svc.quantityLabel.toLowerCase()}?</p>
-                    <div className="inline-flex items-center rounded-2xl border-2 overflow-hidden" style={{ borderColor: LINE }}>
-                      <button
-                        type="button"
-                        onClick={() => setQty(Math.max(svc.quantityMin || 1, qty - 1))}
-                        className="w-11 h-11 text-lg font-bold transition-colors hover:bg-[#f4f9f7]"
-                        style={{ color: 'var(--mute)' }}
-                      >−</button>
-                      <span className="text-base font-bold w-12 text-center tabular-nums" style={{ color: 'var(--ink)' }}>{qty}</span>
-                      <button
-                        type="button"
-                        onClick={() => setQty(Math.min(svc.quantityMax ?? 99, qty + 1))}
-                        className="w-11 h-11 text-lg font-bold transition-colors hover:bg-[#f4f9f7]"
-                        style={{ color: GREEN }}
-                      >+</button>
-                    </div>
-                    <span className="ml-3 text-[11px]" style={{ color: 'var(--mute)' }}>
-                      {svc.quantityMin || 1}–{svc.quantityMax ?? '∞'} {svc.quantityLabel.toLowerCase()}
-                    </span>
-                  </div>
-                )}
-
-                {/* Add-ons */}
-                {!isQuote && svc.addons.length > 0 && (
-                  <div>
-                    <p className="text-[12px] font-semibold mb-2.5 inline-flex items-center gap-1.5" style={{ color: 'var(--mute)' }}>
-                      <Sparkles size={12} style={{ color: GREEN }} /> Popular add-ons
-                    </p>
-                    <div className="space-y-2">
-                      {svc.addons.map((a) => {
-                        const on = addonIds.has(a.id);
-                        return (
-                          <button
-                            key={a.id}
-                            type="button"
-                            onClick={() => setAddonIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(a.id)) next.delete(a.id); else next.add(a.id);
-                              return next;
-                            })}
-                            className="w-full flex items-center justify-between rounded-2xl border-2 px-4 py-3 text-left transition-all"
-                            style={{
-                              borderColor: on ? GREEN : LINE,
-                              background: on ? TINT : '#fff',
-                            }}
-                          >
-                            <span className="flex items-center gap-3">
-                              <span
-                                className="w-5 h-5 rounded-md flex items-center justify-center border-2 transition-colors"
-                                style={{ borderColor: on ? GREEN : LINE, background: on ? GREEN : '#fff' }}
-                              >{on && <Check size={12} style={{ color: '#fff' }} />}</span>
-                              <span className="text-sm font-medium" style={{ color: 'var(--ink-2)' }}>{a.name}</span>
-                            </span>
-                            <span className="text-sm font-bold whitespace-nowrap" style={{ color: on ? GREEN_DD : 'var(--ink)' }}>
-                              +AED {fmtAed(a.price)}{a.priceUnit === 'per_hour' ? '/hr' : ''}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </StepCard>
-            )}
-
-            {/* Step: schedule */}
-            <StepCard no={nextStep()} title="Pick a date & time" icon={CalendarDays} done={scheduleDone}>
-              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-                {days.map((d) => {
-                  const on = day === d.value;
-                  return (
-                    <button
-                      key={d.value}
-                      type="button"
-                      onClick={() => setDay(d.value)}
-                      className="flex flex-col items-center justify-center w-[62px] h-[72px] rounded-2xl border-2 flex-shrink-0 transition-all"
-                      style={{
-                        borderColor: on ? GREEN : LINE,
-                        background: on ? TINT : '#fff',
-                        boxShadow: on ? 'var(--shadow-card)' : 'none',
-                      }}
-                    >
-                      <span className="text-[10px] font-semibold uppercase" style={{ color: on ? GREEN_DD : 'var(--mute)' }}>{d.wd}</span>
-                      <span className="text-lg font-bold leading-tight tabular-nums" style={{ color: on ? GREEN_DD : 'var(--ink-2)' }}>{d.num}</span>
-                      <span className="text-[10px]" style={{ color: 'var(--mute)' }}>{d.mon}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[12px] font-semibold mt-3 mb-2" style={{ color: 'var(--mute)' }}>Start time</p>
-              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                {SLOT_HOURS.map((h) => {
-                  const on = hour === h;
-                  return (
-                    <button
-                      key={h}
-                      type="button"
-                      onClick={() => setHour(h)}
-                      className="py-2.5 rounded-xl border-2 text-[12.5px] font-semibold tabular-nums transition-all"
-                      style={{
-                        borderColor: on ? GREEN : LINE,
-                        background: on ? TINT : '#fff',
-                        color: on ? GREEN_DD : 'var(--mute)',
-                      }}
-                    >
-                      {String(h).padStart(2, '0')}:00
-                    </button>
-                  );
-                })}
-              </div>
-            </StepCard>
-
-            {/* Step: address */}
-            <StepCard no={nextStep()} title="Where should we come?" icon={MapPin} done={addressDone}>
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_170px] gap-3">
-                <input
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Building, street, area — e.g. Marina Heights, Tower 2, Apt 1204"
-                  className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
-                  style={{ borderColor: LINE }}
-                />
-                <select
-                  value={emirate}
-                  onChange={(e) => setEmirate(e.target.value)}
-                  className="rounded-xl border-2 px-3 py-3 text-sm bg-white"
-                  style={{ borderColor: LINE }}
-                >
-                  {EMIRATES.map((e) => <option key={e.value} value={e.value}>{e.label}</option>)}
-                </select>
-              </div>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Anything the professional should know? (optional)"
-                rows={2}
-                className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full mt-2.5 transition-colors focus:border-[#2e9f82]"
-                style={{ borderColor: LINE }}
-              />
-            </StepCard>
+                </div>
+              );
+            })}
           </div>
 
           {/* RIGHT — sticky summary, sign-in, payment */}
@@ -598,28 +738,41 @@ export default function BookServicePage() {
 
                 {/* Schedule + address recap */}
                 {(day || address) && (
-                  <div className="space-y-1.5 mb-4 pt-3 text-xs" style={{ borderTop: `1px dashed ${'var(--line)'}`, color: 'var(--mute)' }}>
+                  <div className="space-y-1.5 mb-4 pt-3 text-xs" style={{ borderTop: `1px dashed var(--line)`, color: 'var(--mute)' }}>
                     {day && hour != null && (
                       <p className="inline-flex items-center gap-1.5 w-full">
-                        <CalendarDays size={12} style={{ color: GREEN }} />
-                        {(() => { const d = days.find((x) => x.value === day); return d ? `${d.wd} ${d.num} ${d.mon}` : day; })()} · {String(hour).padStart(2, '0')}:00
+                        <CalendarDays size={12} style={{ color: GREEN }} /> {dayLabel} · {String(hour).padStart(2, '0')}:00
                       </p>
                     )}
                     {address && <p className="inline-flex items-start gap-1.5 w-full"><MapPin size={12} className="mt-0.5 flex-shrink-0" style={{ color: GREEN }} /> {address}</p>}
                   </div>
                 )}
 
-                {/* Total */}
+                {/* Totals — subtotal / VAT / total (prices are VAT-inclusive) */}
                 {!isQuote && (
                   <>
-                    <div className="flex items-center justify-between py-3" style={{ borderTop: `1px solid ${'var(--line)'}` }}>
+                    <div className="pt-3 space-y-1.5" style={{ borderTop: `1px solid var(--line)` }}>
+                      <div className="flex items-baseline justify-between text-[12.5px]">
+                        <span style={{ color: 'var(--mute)' }}>Subtotal (excl. VAT)</span>
+                        <span className="tabular-nums" style={{ color: 'var(--ink-2)' }}>
+                          {vatSplit ? `AED ${fmtAed2(vatSplit.net)}` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between text-[12.5px]">
+                        <span style={{ color: 'var(--mute)' }}>VAT ({Math.round(VAT_RATE * 100)}%)</span>
+                        <span className="tabular-nums" style={{ color: 'var(--ink-2)' }}>
+                          {vatSplit ? `AED ${fmtAed2(vatSplit.vat)}` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between py-3 mt-2" style={{ borderTop: `1px solid var(--line)` }}>
                       <span className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Total</span>
                       <span className="text-[22px] font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
                         {estimate != null ? `AED ${fmtAed(Number(estimate))}` : '—'}
                       </span>
                     </div>
                     <p className="text-[11px] mb-4" style={{ color: 'var(--mute)' }}>
-                      VAT included · free cancellation up to 6 hours before your slot
+                      Free cancellation up to 6 hours before your slot
                     </p>
                   </>
                 )}
@@ -680,7 +833,7 @@ export default function BookServicePage() {
                   </div>
                 )}
                 {user && isCustomer && (
-                  <p className="text-xs rounded-xl px-3.5 py-2.5 mb-4 inline-flex items-center gap-1.5 w-full" style={{ background: '#f0faf6', color: '#1a7a5a' }}>
+                  <p className="text-xs rounded-xl px-3.5 py-2.5 mb-4 inline-flex items-center gap-1.5 w-full" style={{ background: 'var(--green-tint)', color: GREEN_DD }}>
                     <BadgeCheck size={13} /> Booking as {user.email ?? 'your account'}
                   </p>
                 )}
@@ -698,7 +851,7 @@ export default function BookServicePage() {
                   type="button"
                   disabled={!selectionsComplete || !isCustomer || submitting}
                   onClick={submit}
-                  className="w-full rounded-2xl px-5 py-4 text-[15px] font-bold text-white inline-flex items-center justify-center gap-2 transition-opacity"
+                  className="w-full rounded-xl px-5 py-4 text-[15px] font-bold text-white inline-flex items-center justify-center gap-2 transition-opacity"
                   style={{
                     background: GREEN,
                     opacity: !selectionsComplete || !isCustomer || submitting ? 0.45 : 1,
@@ -727,32 +880,6 @@ export default function BookServicePage() {
           </aside>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Numbered step card — Justlife/UC-style checkout section with a done tick. */
-function StepCard({ no, title, icon: Icon, done, children }: {
-  no: string; title: string; icon?: React.ElementType; done?: boolean; children: React.ReactNode;
-}) {
-  return (
-    <div
-      className="rounded-[18px] border bg-white p-6 mb-5 transition-shadow"
-      style={{ borderColor: done ? 'var(--green)' : 'var(--line)', boxShadow: 'var(--shadow-card)' }}
-    >
-      <h2 className="text-[15px] font-bold mb-4 flex items-center gap-2.5" style={{ color: 'var(--ink)' }}>
-        <span
-          className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0 transition-colors"
-          style={done
-            ? { background: 'var(--green)', color: '#fff' }
-            : { background: 'color-mix(in srgb, var(--green) 10%, white)', color: 'var(--green)' }}
-        >
-          {done ? <Check size={14} /> : no}
-        </span>
-        {title}
-        {Icon && <Icon size={15} style={{ color: 'var(--mute)' }} />}
-      </h2>
-      {children}
     </div>
   );
 }
