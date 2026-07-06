@@ -4,9 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Menu, X, LogOut, Building2, Home, Factory, Wrench, Leaf, Wind,
-  Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check,
-  User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain,
+  Menu, X, LogOut, Building2, Home, Factory, Wrench, Leaf, Wind, Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check, User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain, Sparkles, Droplets, Zap, Hammer, PaintRoller, Bug, Car,
 } from 'lucide-react';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
@@ -123,13 +121,12 @@ interface SpaceCat {
 
 interface ServiceItem {
   title: string;
-  prov: string;
   price: string;
   per: string;
-  rate: number;
-  n: string;
+  meta: string;      // honest meta line — category · duration/packages
   badge?: string;
   img: string;
+  href: string;      // direct booking page
 }
 
 interface ServiceCat {
@@ -183,56 +180,70 @@ function fallbackImg(category: string, id: number): string {
   return `${UPH}${pool[id % pool.length]}${UQ}`;
 }
 
-const SERVICE_CATS: ServiceCat[] = [
-  {
-    id: 'home-office',
-    label: 'Home & Office',
-    blurb: 'AC, plumbing, electrical, carpentry & appliances',
-    href: '/services?category=home-office-maintenance',
-    items: [
-      { title: 'AC Servicing & Repair',  prov: 'CoolCare Technical', price: 'AED 99',  per: '/visit', rate: 4.96, n: '1.2k', badge: 'Same day',  img: `${UPH}1581094794329-c8112a89af12${UQ}` },
-      { title: 'Plumbing & Leak Fix',    prov: 'AquaFix UAE',        price: 'AED 120', per: '/job',   rate: 4.88, n: '840',               img: `${UPH}1607472586893-edb57bdc0e39${UQ}` },
-      { title: 'Electrical & Wiring',    prov: 'Voltify',             price: 'AED 90',  per: '/visit', rate: 4.91, n: '610',               img: `${UPH}1558618666-fcd25c85cd64${UQ}` },
-      { title: 'Handyman & Carpentry',   prov: 'FixMate',             price: 'AED 80',  per: '/hour',  rate: 4.85, n: '930', badge: 'Top rated', img: `${UPH}1504148455328-c376907d081c${UQ}` },
-    ],
-  },
-  {
-    id: 'cleaning',
-    label: 'Cleaning & Hygiene',
-    blurb: 'Home, office, deep cleaning & sanitization',
-    href: '/services?category=cleaning-hygiene',
-    items: [
-      { title: 'Deep Home Cleaning', prov: 'Sparkle Co.', price: 'AED 150', per: '/session', rate: 4.94, n: '2.1k', badge: 'Popular', img: `${UPH}1581578731548-c64695cc6952${UQ}` },
-      { title: 'Office Cleaning',    prov: 'PureSpace',   price: 'AED 200', per: '/visit',   rate: 4.87, n: '560',                  img: `${UPH}1628177142898-93e36e4e3a50${UQ}` },
-      { title: 'Sofa & Carpet Care', prov: 'FreshNest',   price: 'AED 110', per: '/item',    rate: 4.83, n: '720',                  img: `${UPH}1527515637462-cff94eecc1ac${UQ}` },
-      { title: 'Sanitization',       prov: 'BioShield',   price: 'AED 130', per: '/visit',   rate: 4.90, n: '410',                  img: `${UPH}1563453392212-326f5e854473${UQ}` },
-    ],
-  },
-  {
-    id: 'wellness',
-    label: 'Lifestyle & Wellness',
-    blurb: 'Grooming, healthcare, pet care & family support',
-    href: '/services?category=wellness',
-    items: [
-      { title: 'At-home Salon & Spa', prov: 'GlowUp',   price: 'AED 99',  per: '/session', rate: 4.95, n: '1.5k', badge: 'Trending', img: `${UPH}1560066984-138dadb4c035${UQ}` },
-      { title: 'Home Nursing',         prov: 'CarePlus', price: 'AED 180', per: '/visit',   rate: 5.0,  n: '320',                    img: `${UPH}1576091160550-2173dba999ef${UQ}` },
-      { title: 'Pet Grooming',         prov: 'PawsUp',   price: 'AED 120', per: '/pet',     rate: 4.86, n: '480',                    img: `${UPH}1601758228041-f3b2795255f1${UQ}` },
-      { title: 'Personal Training',    prov: 'FitHome',  price: 'AED 150', per: '/session', rate: 4.92, n: '390',                    img: `${UPH}1571019613454-1cb2f99b2d8b${UQ}` },
-    ],
-  },
-  {
-    id: 'outdoor',
-    label: 'Outdoor & Landscaping',
-    blurb: 'Gardens, pools, pest control & facade care',
-    href: '/services?category=outdoor-landscaping',
-    items: [
-      { title: 'Garden & Landscaping',    prov: 'GreenScape', price: 'AED 250', per: '/visit',     rate: 4.89, n: '410', badge: 'Seasonal', img: `${UPH}1416879595882-3373a0480b5b${UQ}` },
-      { title: 'Pool Maintenance',        prov: 'AquaBlue',   price: 'AED 200', per: '/month',     rate: 4.84, n: '260',                   img: `${UPH}1558904541-efa843a96f01${UQ}` },
-      { title: 'Pest Control',            prov: 'ShieldPest', price: 'AED 140', per: '/treatment', rate: 4.90, n: '680',                   img: `${UPH}1599629954294-14df9ec8bc02${UQ}` },
-      { title: 'Facade & Window Clean',   prov: 'ClearView',  price: 'AED 300', per: '/job',       rate: 4.81, n: '190',                   img: `${UPH}1604762524889-3e2fcc145683${UQ}` },
-    ],
-  },
-];
+// Landing category imagery — keyed by REAL catalog codes (migr 0107 taxonomy).
+// The rails themselves render from GET /api/catalog/public; nothing hardcoded.
+const SERVICE_CAT_IMGS: Record<string, string[]> = {
+  home_cleaning:       ['1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50', '1527515637462-cff94eecc1ac', '1563453392212-326f5e854473'],
+  ac_services:         ['1581094794329-c8112a89af12', '1558618666-fcd25c85cd64', '1621905251189-08b45d6a269e', '1581092160562-40aa08e78837'],
+  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7', '1581092918056-0c4c3acd3789', '1504148455328-c376907d081c'],
+  electrical:          ['1558618666-fcd25c85cd64', '1621905252507-b35492cc74b4', '1581092160562-40aa08e78837', '1473341304170-971dccb5ac1e'],
+  handyman:            ['1504148455328-c376907d081c', '1581092918056-0c4c3acd3789', '1416879595882-3373a0480b5b', '1581094794329-c8112a89af12'],
+  painting:            ['1562259949-e8e7689d7828', '1589939705384-5185137a7f0f', '1504148455328-c376907d081c', '1581578731548-c64695cc6952'],
+  pest_control:        ['1599629954294-14df9ec8bc02', '1563453392212-326f5e854473', '1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50'],
+  car_vehicle:         ['1601362840469-51e4d8d58785', '1558904541-efa843a96f01', '1607472586893-edb57bdc0e39', '1581094794329-c8112a89af12'],
+  commercial_services: ['1497366216548-37526070297c', '1628177142898-93e36e4e3a50', '1497366811353-6870744d04b2', '1581092160562-40aa08e78837'],
+};
+const svcImg = (code: string, i: number) => {
+  const pool = SERVICE_CAT_IMGS[code] ?? SERVICE_CAT_IMGS.home_cleaning;
+  return `${UPH}${pool[i % pool.length]}${UQ}`;
+};
+
+interface PublicCatalogService {
+  code: string; name: string; pricingMode: string; priceUnit: string;
+  basePrice: number | null; isFromPrice: boolean; isEmergency: boolean;
+  estimatedDuration: number | null; estimatedDurationMax: number | null;
+  packages: { id: number }[]; packageGroupLabel: string | null;
+}
+interface PublicCatalogCategory { code: string; name: string; services: PublicCatalogService[] }
+
+function svcPrice(sv: PublicCatalogService): { price: string; per: string } {
+  if (sv.pricingMode === 'quote' || sv.basePrice == null) return { price: 'Free quote', per: '' };
+  return {
+    price: `AED ${Number(sv.basePrice).toLocaleString('en-AE')}`,
+    per: sv.priceUnit === 'per_hour' ? '/hour' : '',
+  };
+}
+function svcMeta(catName: string, sv: PublicCatalogService): string {
+  if (sv.packages.length > 0) return `${catName} · ${sv.packages.length} ${(sv.packageGroupLabel || 'options').toLowerCase()} options`;
+  if (sv.estimatedDuration) {
+    const f = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`);
+    return `${catName} · ${f(sv.estimatedDuration)}${sv.estimatedDurationMax && sv.estimatedDurationMax !== sv.estimatedDuration ? `–${f(sv.estimatedDurationMax)}` : ''}`;
+  }
+  return `${catName} · Vetted, licensed providers`;
+}
+/** Map the admin-configured catalog into the landing rail model. */
+function toServiceCats(categories: PublicCatalogCategory[]): ServiceCat[] {
+  return categories
+    .filter((c) => c.code !== 'commercial_services' && c.services.length > 0)
+    .map((c) => ({
+      id: c.code,
+      label: c.name,
+      blurb: c.services.slice(0, 4).map((sv) => sv.name).join(', '),
+      href: `/services#cat-${c.code}`,
+      items: c.services.slice(0, 4).map((sv, i) => {
+        const { price, per } = svcPrice(sv);
+        return {
+          title: sv.name,
+          price,
+          per,
+          meta: svcMeta(c.name, sv),
+          badge: sv.isEmergency ? '24/7' : sv.pricingMode === 'quote' ? 'Free quote' : undefined,
+          img: svcImg(c.code, i),
+          href: `/services/book/${sv.code}`,
+        };
+      }),
+    }));
+}
 
 const SPACE_CAT_ICONS: Record<string, React.ReactNode> = {
   residential: <Home size={16} />,
@@ -243,10 +254,15 @@ const SPACE_CAT_ICONS: Record<string, React.ReactNode> = {
 };
 
 const SERVICE_CAT_ICONS: Record<string, React.ReactNode> = {
-  'home-office': <Wrench size={16} />,
-  cleaning: <Wind size={16} />,
-  wellness: <Leaf size={16} />,
-  outdoor: <Leaf size={16} />,
+  home_cleaning: <Sparkles size={16} />,
+  ac_services: <Wind size={16} />,
+  plumbing: <Droplets size={16} />,
+  electrical: <Zap size={16} />,
+  handyman: <Hammer size={16} />,
+  painting: <PaintRoller size={16} />,
+  pest_control: <Bug size={16} />,
+  car_vehicle: <Car size={16} />,
+  commercial_services: <Wrench size={16} />,
 };
 
 // ─── SpaceCard ────────────────────────────────────────────────────────────────
@@ -327,7 +343,7 @@ function ServiceCard({ item }: { item: ServiceItem }) {
   const pc = phClass(item.title);
 
   return (
-    <article className="l-pcard">
+    <Link href={item.href} className="l-pcard" style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}>
       <div className="ph">
         <div className={`img ${pc}`}>
           <div className="l-ph-glyph"><Wrench size={46} /></div>
@@ -347,16 +363,11 @@ function ServiceCard({ item }: { item: ServiceItem }) {
       <div className="body">
         <div className="r1">
           <div className="ttl">{item.title}</div>
-          <span className="rate">
-            <Star size={12} fill="#d99036" stroke="none" style={{ display: 'inline', marginRight: 3 }} />
-            {item.rate}
-            <span style={{ color: '#6b7a74', fontWeight: 500 }}> ({item.n})</span>
-          </span>
         </div>
-        <div className="loc">{item.prov}</div>
-        <div className="price">From {item.price} <small>{item.per}</small></div>
+        <div className="loc">{item.meta}</div>
+        <div className="price">{item.price === 'Free quote' ? item.price : <>From {item.price}</>} <small>{item.per}</small></div>
       </div>
-    </article>
+    </Link>
   );
 }
 
@@ -694,11 +705,13 @@ function Hero({
   setMode,
   activeCat,
   setActiveCat,
+  serviceCatDefs,
 }: {
   mode: 'services' | 'spaces';
   setMode: (m: 'services' | 'spaces') => void;
   activeCat: string;
   setActiveCat: (c: string) => void;
+  serviceCatDefs: { id: string; label: string }[];
 }) {
   const router = useRouter();
   const searchRef = useRef<HTMLDivElement>(null);
@@ -796,7 +809,7 @@ function Hero({
     router.push(`${base}${params.toString() ? `?${params.toString()}` : ''}`);
   };
 
-  const cats: { id: string; label: string }[] = mode === 'spaces' ? SPACE_CAT_DEFS : SERVICE_CATS;
+  const cats: { id: string; label: string }[] = mode === 'spaces' ? SPACE_CAT_DEFS : serviceCatDefs;
   const catIcons = mode === 'spaces' ? SPACE_CAT_ICONS : SERVICE_CAT_ICONS;
   const allLabel = `All ${mode === 'spaces' ? 'spaces' : 'services'}`;
 
@@ -1063,6 +1076,15 @@ function GrowSection() {
 export function LandingPageV2() {
   const [mode, setMode] = useState<'services' | 'spaces'>('services');
   const [activeCat, setActiveCat] = useState<string>('all');
+  const [serviceCats, setServiceCats] = useState<ServiceCat[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  useEffect(() => {
+    fetch('/api/catalog/public')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { categories?: PublicCatalogCategory[] }) => setServiceCats(toServiceCats(d.categories ?? [])))
+      .catch(() => setServiceCats([]))
+      .finally(() => setServicesLoading(false));
+  }, []);
   const [spaceCats, setSpaceCats] = useState<SpaceCat[]>([]);
   const [spacesLoading, setSpacesLoading] = useState(true);
 
@@ -1088,7 +1110,7 @@ export function LandingPageV2() {
   };
 
   const visibleSpaceCats = activeCat === 'all' ? spaceCats : spaceCats.filter((c) => c.id === activeCat);
-  const visibleServiceCats = activeCat === 'all' ? SERVICE_CATS : SERVICE_CATS.filter((c) => c.id === activeCat);
+  const visibleServiceCats = activeCat === 'all' ? serviceCats : serviceCats.filter((c) => c.id === activeCat);
 
   return (
     <>
@@ -1100,6 +1122,7 @@ export function LandingPageV2() {
           setMode={handleSetMode}
           activeCat={activeCat}
           setActiveCat={setActiveCat}
+          serviceCatDefs={serviceCats.map((c) => ({ id: c.id, label: c.label }))}
         />
 
         {/* Category rails */}
@@ -1118,7 +1141,13 @@ export function LandingPageV2() {
                     ))}
                   </CategoryRail>
                 ))
-            : visibleServiceCats.map((cat) => (
+            : servicesLoading
+              ? Array.from({ length: 3 }).map((_, r) => (
+                  <CategoryRail key={r} title="Loading…" blurb="" href="/services">
+                    {Array.from({ length: 4 }).map((_, i) => <SpaceCardSkeleton key={i} />)}
+                  </CategoryRail>
+                ))
+              : visibleServiceCats.map((cat) => (
                 <CategoryRail key={cat.id} title={cat.label} blurb={cat.blurb} href={cat.href}>
                   {cat.items.map((item) => (
                     <ServiceCard key={item.title} item={item} />

@@ -12,9 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees,
-  Building2, Wrench, Clock, Loader2, ChevronDown, ChevronUp, BadgeCheck,
-  Briefcase, AlarmClockCheck,
+  Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Clock, Loader2, ChevronDown, ChevronUp, BadgeCheck, Briefcase, AlarmClockCheck,
 } from 'lucide-react';
 
 /* ── Shapes (GET /api/catalog/public) ──────────────────────────────────────── */
@@ -68,6 +66,26 @@ const CATEGORY_TONES: Record<string, { bg: string; fg: string }> = {
   commercial_services: { bg: '#f3f4f6', fg: '#374151' },
 };
 
+// Category imagery — same pools as the landing rails (LandingPageV2) for a
+// consistent look across the funnel. Keep the two maps in sync.
+const UPH = 'https://images.unsplash.com/photo-';
+const UQ = '?auto=format&fit=crop&w=800&q=60';
+const CATEGORY_IMGS: Record<string, string[]> = {
+  home_cleaning:       ['1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50', '1527515637462-cff94eecc1ac', '1563453392212-326f5e854473'],
+  ac_services:         ['1581094794329-c8112a89af12', '1558618666-fcd25c85cd64', '1621905251189-08b45d6a269e', '1581092160562-40aa08e78837'],
+  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7', '1581092918056-0c4c3acd3789', '1504148455328-c376907d081c'],
+  electrical:          ['1558618666-fcd25c85cd64', '1621905252507-b35492cc74b4', '1581092160562-40aa08e78837', '1473341304170-971dccb5ac1e'],
+  handyman:            ['1504148455328-c376907d081c', '1581092918056-0c4c3acd3789', '1416879595882-3373a0480b5b', '1581094794329-c8112a89af12'],
+  painting:            ['1562259949-e8e7689d7828', '1589939705384-5185137a7f0f', '1504148455328-c376907d081c', '1581578731548-c64695cc6952'],
+  pest_control:        ['1599629954294-14df9ec8bc02', '1563453392212-326f5e854473', '1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50'],
+  car_vehicle:         ['1601362840469-51e4d8d58785', '1558904541-efa843a96f01', '1607472586893-edb57bdc0e39', '1581094794329-c8112a89af12'],
+  commercial_services: ['1497366216548-37526070297c', '1628177142898-93e36e4e3a50', '1497366811353-6870744d04b2', '1581092160562-40aa08e78837'],
+};
+const catImg = (code: string, i: number) => {
+  const pool = CATEGORY_IMGS[code] ?? CATEGORY_IMGS.home_cleaning;
+  return `${UPH}${pool[i % pool.length]}${UQ}`;
+};
+
 const FOR_BUSINESS_CODE = 'commercial_services';
 
 function fmtAed(n: number) { return n.toLocaleString('en-AE'); }
@@ -83,69 +101,88 @@ function durLabel(min: number | null, max: number | null): string | null {
 }
 
 /* ── Service card ──────────────────────────────────────────────────────────── */
-function ServiceCard({ s, tone }: { s: PublicService; tone: { bg: string; fg: string } }) {
+function ServiceCard({ s, tone, catCode, idx }: {
+  s: PublicService; tone: { bg: string; fg: string }; catCode: string; idx: number;
+}) {
   const [open, setOpen] = useState(false);
+  const [imgErr, setImgErr] = useState(false);
   const dur = durLabel(s.estimatedDuration, s.estimatedDurationMax);
   const hasPackages = s.packages.length > 0;
+  const isQuote = s.pricingMode === 'quote';
   return (
-    <div className="rounded-2xl border bg-white p-5 flex flex-col" style={{ borderColor: 'var(--color-base-200)' }}>
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-[15px] font-semibold leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{s.name}</h3>
-        {s.isEmergency && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full flex-shrink-0" style={{ background: '#fee2e2', color: '#b91c1c' }}>
-            <AlarmClockCheck size={11} /> 24/7
+    <div
+      className="group flex flex-col overflow-hidden bg-white"
+      style={{ borderRadius: 20, boxShadow: '0 4px 20px -4px rgba(0,0,0,0.10)' }}
+    >
+      {/* image header — same visual family as the landing rails */}
+      <Link href={`/services/book/${s.code}`} className="relative block h-36 overflow-hidden" style={{ background: tone.bg }}>
+        {!imgErr && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={catImg(catCode, idx)} alt="" loading="lazy" onError={() => setImgErr(true)}
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+        )}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.35) 100%)' }} />
+        {(s.isEmergency || isQuote) && (
+          <span className="absolute top-3 left-3 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full"
+            style={s.isEmergency ? { background: '#fee2e2', color: '#b91c1c' } : { background: '#fff', color: 'var(--color-neutral-700)' }}>
+            {s.isEmergency ? (<><AlarmClockCheck size={11} /> 24/7</>) : 'Free quote'}
           </span>
         )}
-      </div>
-      {s.description && (
-        <p className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--color-neutral-500)' }}>{s.description}</p>
-      )}
-      <div className="flex items-center gap-3 mt-3 text-sm">
-        <span className="font-bold" style={{ color: tone.fg }}>{priceLabel(s)}</span>
-        {dur && (
-          <span className="inline-flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-400)' }}>
-            <Clock size={12} /> {dur}
-          </span>
-        )}
-      </div>
+      </Link>
 
-      {hasPackages && (
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => setOpen(!open)}
-            className="inline-flex items-center gap-1 text-xs font-semibold"
-            style={{ color: 'var(--color-neutral-600)' }}
-          >
-            {s.packageGroupLabel ?? 'Options'} · {s.packages.length}
-            {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          </button>
-          {open && (
-            <div className="mt-2 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-base-200)' }}>
-              {s.packages.map((p, i) => (
-                <div key={p.id} className="flex items-center justify-between px-3 py-2 text-xs" style={{ borderTop: i ? '1px solid var(--color-base-200)' : undefined }}>
-                  <span style={{ color: 'var(--color-neutral-700)' }}>{p.name}</span>
-                  <span className="font-semibold whitespace-nowrap" style={{ color: 'var(--color-neutral-900)' }}>
-                    {p.basePrice != null ? `AED ${fmtAed(Number(p.basePrice))}` : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
+      <div className="flex flex-col flex-1 p-4">
+        <h3 className="text-[15px] font-bold leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{s.name}</h3>
+        <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-500)' }}>
+          {s.description ?? (dur ? `Typical duration ${dur}` : 'Vetted, licensed providers')}
+        </p>
+
+        <div className="flex items-center justify-between gap-2 mt-3">
+          <span className="text-sm font-bold" style={{ color: tone.fg }}>{priceLabel(s)}</span>
+          {dur && (
+            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>
+              <Clock size={12} /> {dur}
+            </span>
           )}
         </div>
-      )}
 
-      <div className="mt-4 pt-3 flex items-center justify-between" style={{ borderTop: '1px solid var(--color-base-100)' }}>
-        <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>
-          <BadgeCheck size={13} style={{ color: 'var(--color-primary)' }} /> Vetted, licensed providers
-        </span>
-        <Link
-          href={`/services/book/${s.code}`}
-          className="text-[11px] font-bold px-3 py-1.5 rounded-full text-white"
-          style={{ background: tone.fg }}
-        >
-          {s.pricingMode === 'quote' ? 'Get free quote' : 'Book now'}
-        </Link>
+        {hasPackages && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => setOpen(!open)}
+              className="inline-flex items-center gap-1 text-xs font-semibold"
+              style={{ color: 'var(--color-neutral-600)' }}
+            >
+              {s.packageGroupLabel ?? 'Options'} · {s.packages.length}
+              {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+            {open && (
+              <div className="mt-2 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-base-200)' }}>
+                {s.packages.map((p, i) => (
+                  <div key={p.id} className="flex items-center justify-between px-3 py-2 text-xs" style={{ borderTop: i ? '1px solid var(--color-base-200)' : undefined }}>
+                    <span style={{ color: 'var(--color-neutral-700)' }}>{p.name}</span>
+                    <span className="font-semibold whitespace-nowrap" style={{ color: 'var(--color-neutral-900)' }}>
+                      {p.basePrice != null ? `AED ${fmtAed(Number(p.basePrice))}` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-auto pt-3 flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>
+            <BadgeCheck size={13} style={{ color: 'var(--color-primary)' }} /> Vetted providers
+          </span>
+          <Link
+            href={`/services/book/${s.code}`}
+            className="text-[11px] font-bold px-3.5 py-1.5 rounded-full text-white"
+            style={{ background: tone.fg }}
+          >
+            {isQuote ? 'Get free quote' : 'Book now'}
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -169,6 +206,18 @@ export default function ServicesCatalogClient() {
     () => categories.filter((c) => c.code !== FOR_BUSINESS_CODE && c.services.length > 0),
     [categories],
   );
+  // Inbound category links (landing rails, old ?category= URLs): scroll to the
+  // section once the async catalog has rendered — native anchors fire too early.
+  useEffect(() => {
+    if (loading || failed) return;
+    const hash = window.location.hash.replace('#', '');
+    const param = new URLSearchParams(window.location.search).get('category');
+    const target = hash.startsWith('cat-') ? hash : param ? `cat-${param}` : null;
+    if (!target) return;
+    const el = document.getElementById(target);
+    if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+  }, [loading, failed]);
+
   const business = useMemo(
     () => categories.find((c) => c.code === FOR_BUSINESS_CODE),
     [categories],
@@ -236,7 +285,7 @@ export default function ServicesCatalogClient() {
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {c.services.map((s) => <ServiceCard key={s.id} s={s} tone={tone} />)}
+              {c.services.map((s, i) => <ServiceCard key={s.id} s={s} tone={tone} catCode={c.code} idx={i} />)}
             </div>
           </section>
         );
