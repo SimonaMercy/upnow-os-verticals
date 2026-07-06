@@ -21,6 +21,8 @@ interface BookingRow {
   cancellationFee: number | string | null;
   pricingMode: string | null;
   addressText: string | null;
+  serviceName?: string | null;
+  packageName?: string | null;
   template?: { name?: string | null } | null;
   variant?: { name?: string | null } | null;
 }
@@ -145,7 +147,9 @@ export default function CustomerServicesPage() {
                 <button type="button" onClick={() => toggleDetail(b.id)} className="w-full flex items-center gap-4 px-5 py-4 text-left">
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>
-                      {b.template?.name ?? 'Service'}{b.variant?.name ? ` — ${b.variant.name}` : ''}{b.hours ? ` · ${b.hours}h` : ''}
+                      {b.serviceName ?? b.template?.name ?? 'Service'}
+                      {(b.packageName ?? b.variant?.name) ? ` — ${b.packageName ?? b.variant?.name}` : ''}
+                      {b.hours ? ` · ${b.hours}h` : ''}
                     </div>
                     <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
                       <span className="inline-flex items-center gap-1"><CalendarDays size={12} /> {fmtWhen(b.scheduledAt)}</span>
