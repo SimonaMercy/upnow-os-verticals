@@ -3,7 +3,6 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import {
   Building2, FileText, Eye, Users, AlertTriangle, ChevronRight,
   RefreshCw, LogIn, LogOut, XCircle, Wrench, Clock,
@@ -12,7 +11,6 @@ import { apiGet } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useManagerPermissions, type RpPermissions } from '@/contexts/ManagerPermissionsContext';
 import { DashboardPage, StatCard, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
-import { RpDashboardHome } from '@/app/rental-provider/dashboard/page';
 
 interface OverviewStats {
   properties:      number;
@@ -40,14 +38,12 @@ function permLabel(key: string) {
 }
 
 /**
- * Manager home (hybrid). No landlord selected → the cross-landlord overview +
- * picker below. A landlord selected in the switcher (?rp) → the rich RP-style
- * dashboard scoped to that landlord (reuses RpDashboardHome; sections the
- * manager lacks permission for come back empty via the /manager/* gates).
+ * Manager home — ALWAYS the manager's own dashboard (cross-landlord overview +
+ * action center + landlords list). Selecting a landlord in the switcher scopes
+ * the other manager pages via ?rp=; the home stays the manager dashboard and
+ * never swaps into the RP/landlord dashboard.
  */
 export default function ManagerOverview() {
-  const rpParam = useSearchParams().get('rp');
-  if (rpParam) return <RpDashboardHome manager={{ rp: Number(rpParam) }} />;
   return <ManagerMultiOverview />;
 }
 
