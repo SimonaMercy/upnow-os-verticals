@@ -9,7 +9,6 @@
  */
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Zap } from 'lucide-react';
 import ServicesCatalogClient from './ServicesCatalogClient';
 
 export const metadata: Metadata = {
@@ -21,37 +20,8 @@ export const metadata: Metadata = {
 export default function ServicesPage() {
   return (
     <div className="min-h-screen bg-white">
-      {/* Hero */}
-      <section style={{ background: 'linear-gradient(180deg, #f0faf6 0%, #fff 100%)', paddingBlock: '64px 56px' }}>
-        <div className="container text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--primary)' }}>
-            Home &amp; Business Services
-          </p>
-          <h1
-            className="mt-4 font-bold"
-            style={{ fontSize: 48, lineHeight: 1.1, color: 'var(--neutral-900)', letterSpacing: '-0.02em' }}
-          >
-            Trusted Services Across UAE
-          </h1>
-          <p className="mt-4 mx-auto max-w-[540px] text-lg" style={{ color: 'var(--neutral-500)', lineHeight: 1.7 }}>
-            Transparent prices, vetted licensed providers — from a one-hour clean
-            to a full AC service, see exactly what it costs before you book.
-          </p>
-
-          <div
-            className="mt-8 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium"
-            style={{ backgroundColor: '#d8f2e8', color: '#1a7a5a' }}
-          >
-            <Zap size={14} />
-            Online booking is live — Dubai pilot
-          </div>
-        </div>
-      </section>
-
-      {/* Admin-configured catalog */}
-      <section className="container py-12">
-        <ServicesCatalogClient />
-      </section>
+      {/* Admin-configured catalog — listings-style hero + chips + grid */}
+      <ServicesCatalogClient />
 
       {/* Provider recruitment CTA */}
       <section

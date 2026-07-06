@@ -1,198 +1,141 @@
 /**
- * Public services catalog — renders EXACTLY what the admin console configures
- * (GET /api/catalog/public): active categories → services → sub-type packages.
- * No hardcoded taxonomy: opening a PHASE-2 service or fixing a price in
- * /dashboard/admin/catalog changes this page on the next load (CEO Pack 4
- * model). Booking itself arrives with SP Sprint 2 — CTAs communicate that
- * honestly; the Commercial category renders as a "For Business" band with a
- * proposal CTA instead of consumer booking (Decision 1, Pack 1).
+ * Public services browse — the LISTINGS layout applied to services, for a
+ * consistent design across the marketplace (/listings ⇄ /services):
+ * lst-hero (breadcrumb + title + search) → category chips (l-catchip) →
+ * flat lcard grid. Data comes exclusively from GET /api/catalog/public —
+ * the admin console is the single source of truth; no hardcoded taxonomy.
+ * Filters work: category chips + text search + ?category=<code> deep links
+ * (used by the landing rails).
  */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Clock, Loader2, ChevronDown, ChevronUp, BadgeCheck, Briefcase, AlarmClockCheck,
+  Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees,
+  Building2, Wrench, Loader2, Search, X, LayoutGrid, AlarmClockCheck, Clock,
 } from 'lucide-react';
 
 /* ── Shapes (GET /api/catalog/public) ──────────────────────────────────────── */
 interface PublicPackage {
-  id: number;
-  code: string;
-  name: string;
-  basePrice: number | null;
-  estimatedDuration: number | null;
-  estimatedDurationMax: number | null;
+  id: number; code: string; name: string; basePrice: number | null;
+  estimatedDuration: number | null; estimatedDurationMax: number | null;
 }
+interface PublicAddon { id: number; code: string; name: string; price: number; priceUnit: string }
 interface PublicService {
-  id: number;
-  code: string;
-  name: string;
-  description: string | null;
-  priceUnit: string;
-  pricingMode: string;
-  basePrice: number | null;
-  isFromPrice: boolean;
-  minCalloutCharge: number | null;
-  isEmergency: boolean;
-  estimatedDuration: number | null;
-  estimatedDurationMax: number | null;
+  id: number; code: string; name: string; description: string | null;
+  priceUnit: string; pricingMode: string; basePrice: number | null; isFromPrice: boolean;
+  minCalloutCharge: number | null; isEmergency: boolean;
+  estimatedDuration: number | null; estimatedDurationMax: number | null;
   packageGroupLabel: string | null;
+  quantityLabel: string | null; quantityMin: number; quantityMax: number | null;
+  addons: PublicAddon[];
   packages: PublicPackage[];
 }
 interface PublicCategory {
-  id: number;
-  code: string;
-  name: string;
-  iconKey: string | null;
-  services: PublicService[];
+  id: number; code: string; name: string; iconKey: string | null; services: PublicService[];
 }
 
-/* ── Icon + accent mapping (keys owned by admin console / seed 0107) ───────── */
+/* ── Category icons (admin icon_key → lucide) ──────────────────────────────── */
 const CATEGORY_ICONS: Record<string, typeof Sparkles> = {
   sparkles: Sparkles, wind: Wind, droplets: Droplets, zap: Zap, hammer: Hammer,
   'paint-roller': PaintRoller, bug: Bug, car: Car, trees: Trees, 'building-2': Building2,
 };
-const CATEGORY_TONES: Record<string, { bg: string; fg: string }> = {
-  home_cleaning:       { bg: '#e0f2fe', fg: '#0369a1' },
-  ac_services:         { bg: '#ecfeff', fg: '#0e7490' },
-  plumbing:            { bg: '#dbeafe', fg: '#1d4ed8' },
-  electrical:          { bg: '#fef9c3', fg: '#ca8a04' },
-  handyman:            { bg: '#fef3c7', fg: '#b45309' },
-  painting:            { bg: '#fae8ff', fg: '#a21caf' },
-  pest_control:        { bg: '#dcfce7', fg: '#15803d' },
-  car_vehicle:         { bg: '#e0e7ff', fg: '#4338ca' },
-  landscaping_outdoor: { bg: '#d1fae5', fg: '#047857' },
-  commercial_services: { bg: '#f3f4f6', fg: '#374151' },
-};
 
-// Category imagery — same pools as the landing rails (LandingPageV2) for a
-// consistent look across the funnel. Keep the two maps in sync.
+const FOR_BUSINESS_CODE = 'commercial_services';
+
+/* ── Category imagery — RELEVANT per category, only photo ids already proven
+      in this codebase. Same pools as the landing rails (keep the two in sync).
+      Cards fall back to a plain tinted panel if a photo ever fails. ────────── */
 const UPH = 'https://images.unsplash.com/photo-';
 const UQ = '?auto=format&fit=crop&w=800&q=60';
 const CATEGORY_IMGS: Record<string, string[]> = {
-  home_cleaning:       ['1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50', '1527515637462-cff94eecc1ac', '1563453392212-326f5e854473'],
-  ac_services:         ['1581094794329-c8112a89af12', '1558618666-fcd25c85cd64', '1621905251189-08b45d6a269e', '1581092160562-40aa08e78837'],
-  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7', '1581092918056-0c4c3acd3789', '1504148455328-c376907d081c'],
-  electrical:          ['1558618666-fcd25c85cd64', '1621905252507-b35492cc74b4', '1581092160562-40aa08e78837', '1473341304170-971dccb5ac1e'],
-  handyman:            ['1504148455328-c376907d081c', '1581092918056-0c4c3acd3789', '1416879595882-3373a0480b5b', '1581094794329-c8112a89af12'],
-  painting:            ['1562259949-e8e7689d7828', '1589939705384-5185137a7f0f', '1504148455328-c376907d081c', '1581578731548-c64695cc6952'],
-  pest_control:        ['1599629954294-14df9ec8bc02', '1563453392212-326f5e854473', '1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50'],
-  car_vehicle:         ['1601362840469-51e4d8d58785', '1558904541-efa843a96f01', '1607472586893-edb57bdc0e39', '1581094794329-c8112a89af12'],
-  commercial_services: ['1497366216548-37526070297c', '1628177142898-93e36e4e3a50', '1497366811353-6870744d04b2', '1581092160562-40aa08e78837'],
+  home_cleaning:       ['1581578731548-c64695cc6952', '1563453392212-326f5e854473', '1628177142898-93e36e4e3a50', '1584622650111-993a426fbf0a'],
+  ac_services:         ['1590756254933-2873d72a83b6', '1621905251918-48416bd8575a'],
+  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7'],
+  electrical:          ['1621905252507-b35492cc74b4', '1544724569-5f546fd6f2b5', '1555963966-b7ae5404b6ed'],
+  handyman:            ['1504148455328-c376907d081c', '1530124566582-a618bc2615dc', '1426927308491-6380b6a9936f'],
+  painting:            ['1562259949-e8e7689d7828', '1717281234297-3def5ae3eee1'],
+  pest_control:        ['1687749927928-96276b1d0cb9'],
+  car_vehicle:         ['1520340356584-f9917d1eea6f', '1607860108855-64acf2078ed9', '1601362840469-51e4d8d58785'],
+  landscaping_outdoor: ['1416879595882-3373a0480b5b', '1558904541-efa843a96f01'],
+  commercial_services: ['1497366216548-37526070297c', '1497366811353-6870744d04b2', '1558882224-dda166733046'],
 };
 const catImg = (code: string, i: number) => {
   const pool = CATEGORY_IMGS[code] ?? CATEGORY_IMGS.home_cleaning;
   return `${UPH}${pool[i % pool.length]}${UQ}`;
 };
 
-const FOR_BUSINESS_CODE = 'commercial_services';
-
-function fmtAed(n: number) { return n.toLocaleString('en-AE'); }
-function priceLabel(s: PublicService): string {
-  if (s.pricingMode === 'quote' || s.basePrice == null) return 'Free quote';
-  const suffix = s.priceUnit === 'per_hour' ? '/hr' : '';
-  return `${s.isFromPrice ? 'From ' : ''}AED ${fmtAed(Number(s.basePrice))}${suffix}`;
-}
+const fmtAed = (n: number) => n.toLocaleString('en-AE');
 function durLabel(min: number | null, max: number | null): string | null {
   if (!min) return null;
   const f = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10} h` : `${m} min`);
   return max && max !== min ? `${f(min)}–${f(max)}` : f(min);
 }
 
-/* ── Service card ──────────────────────────────────────────────────────────── */
-function ServiceCard({ s, tone, catCode, idx }: {
-  s: PublicService; tone: { bg: string; fg: string }; catCode: string; idx: number;
+/* ── Service card — the /listings lcard, adapted to services ──────────────── */
+function ServiceLCard({ s, catName, catCode, idx }: {
+  s: PublicService; catName: string; catCode: string; idx: number;
 }) {
-  const [open, setOpen] = useState(false);
   const [imgErr, setImgErr] = useState(false);
-  const dur = durLabel(s.estimatedDuration, s.estimatedDurationMax);
-  const hasPackages = s.packages.length > 0;
   const isQuote = s.pricingMode === 'quote';
+  const dur = durLabel(s.estimatedDuration, s.estimatedDurationMax);
+  const pkgChips = s.packages.slice(0, 3);
   return (
-    <div
-      className="group flex flex-col overflow-hidden bg-white"
-      style={{ borderRadius: 20, boxShadow: '0 4px 20px -4px rgba(0,0,0,0.10)' }}
-    >
-      {/* image header — same visual family as the landing rails */}
-      <Link href={`/services/book/${s.code}`} className="relative block h-36 overflow-hidden" style={{ background: tone.bg }}>
+    <Link href={`/services/book/${s.code}`} className="lcard">
+      <div className="ph">
         {!imgErr && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={catImg(catCode, idx)} alt="" loading="lazy" onError={() => setImgErr(true)}
-            className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          <img src={catImg(catCode, idx)} alt={s.name} loading="lazy" onError={() => setImgErr(true)} />
         )}
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.35) 100%)' }} />
-        {(s.isEmergency || isQuote) && (
-          <span className="absolute top-3 left-3 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full"
-            style={s.isEmergency ? { background: '#fee2e2', color: '#b91c1c' } : { background: '#fff', color: 'var(--color-neutral-700)' }}>
-            {s.isEmergency ? (<><AlarmClockCheck size={11} /> 24/7</>) : 'Free quote'}
-          </span>
+        <span className="cbadge">{catName}</span>
+        {s.isEmergency && (
+          <span className="feat-tag"><AlarmClockCheck size={12} /> 24/7</span>
         )}
-      </Link>
-
-      <div className="flex flex-col flex-1 p-4">
-        <h3 className="text-[15px] font-bold leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{s.name}</h3>
-        <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-500)' }}>
-          {s.description ?? (dur ? `Typical duration ${dur}` : 'Vetted, licensed providers')}
-        </p>
-
-        <div className="flex items-center justify-between gap-2 mt-3">
-          <span className="text-sm font-bold" style={{ color: tone.fg }}>{priceLabel(s)}</span>
+      </div>
+      <div className="body">
+        <div className="r1">
+          <div className="ttl">{s.name}</div>
           {dur && (
-            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>
-              <Clock size={12} /> {dur}
+            <span className="rate" style={{ fontWeight: 600, color: 'var(--mute)' }}>
+              <Clock size={12} style={{ marginRight: 3 }} /> {dur}
             </span>
           )}
         </div>
-
-        {hasPackages && (
-          <div className="mt-2">
-            <button
-              type="button"
-              onClick={() => setOpen(!open)}
-              className="inline-flex items-center gap-1 text-xs font-semibold"
-              style={{ color: 'var(--color-neutral-600)' }}
-            >
-              {s.packageGroupLabel ?? 'Options'} · {s.packages.length}
-              {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-            </button>
-            {open && (
-              <div className="mt-2 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--color-base-200)' }}>
-                {s.packages.map((p, i) => (
-                  <div key={p.id} className="flex items-center justify-between px-3 py-2 text-xs" style={{ borderTop: i ? '1px solid var(--color-base-200)' : undefined }}>
-                    <span style={{ color: 'var(--color-neutral-700)' }}>{p.name}</span>
-                    <span className="font-semibold whitespace-nowrap" style={{ color: 'var(--color-neutral-900)' }}>
-                      {p.basePrice != null ? `AED ${fmtAed(Number(p.basePrice))}` : '—'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+        <div className="loc">
+          <span>{s.description ?? 'Vetted, licensed providers'}</span>
+        </div>
+        {(pkgChips.length > 0 || s.quantityLabel || s.addons.length > 0) && (
+          <div className="amens">
+            {pkgChips.map((p) => <span key={p.id} className="amchip">{p.name}</span>)}
+            {s.packages.length > 3 && <span className="amchip more">+{s.packages.length - 3} more</span>}
+            {s.quantityLabel && <span className="amchip">By {s.quantityLabel.toLowerCase()}</span>}
+            {s.addons.length > 0 && <span className="amchip">{s.addons.length} extra{s.addons.length > 1 ? 's' : ''}</span>}
           </div>
         )}
-
-        <div className="mt-auto pt-3 flex items-center justify-between">
-          <span className="inline-flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>
-            <BadgeCheck size={13} style={{ color: 'var(--color-primary)' }} /> Vetted providers
+        <div className="price">
+          <span className="amt">
+            {isQuote || s.basePrice == null
+              ? 'Free quote'
+              : <>{s.isFromPrice ? 'From ' : ''}AED {fmtAed(Number(s.basePrice))}<small>{s.priceUnit === 'per_hour' ? '/hour' : ''}</small></>}
           </span>
-          <Link
-            href={`/services/book/${s.code}`}
-            className="text-[11px] font-bold px-3.5 py-1.5 rounded-full text-white"
-            style={{ background: tone.fg }}
-          >
-            {isQuote ? 'Get free quote' : 'Book now'}
-          </Link>
+          <span className="ut">{isQuote ? 'pay after approval' : 'VAT included'}</span>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
 /* ── Page body ─────────────────────────────────────────────────────────────── */
 export default function ServicesCatalogClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [categories, setCategories] = useState<PublicCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [activeCat, setActiveCat] = useState<string>('all');
+  const [q, setQ] = useState('');
 
   useEffect(() => {
     fetch('/api/catalog/public')
@@ -202,121 +145,157 @@ export default function ServicesCatalogClient() {
       .finally(() => setLoading(false));
   }, []);
 
-  const consumer = useMemo(
+  // Deep links: ?category=<code> (landing rails) and legacy #cat-<code>.
+  useEffect(() => {
+    const param = searchParams.get('category');
+    const hash = typeof window !== 'undefined' ? window.location.hash.replace('#cat-', '') : '';
+    const target = param || hash;
+    if (target) setActiveCat(target);
+  }, [searchParams]);
+
+  const consumerCats = useMemo(
     () => categories.filter((c) => c.code !== FOR_BUSINESS_CODE && c.services.length > 0),
     [categories],
   );
-  // Inbound category links (landing rails, old ?category= URLs): scroll to the
-  // section once the async catalog has rendered — native anchors fire too early.
-  useEffect(() => {
-    if (loading || failed) return;
-    const hash = window.location.hash.replace('#', '');
-    const param = new URLSearchParams(window.location.search).get('category');
-    const target = hash.startsWith('cat-') ? hash : param ? `cat-${param}` : null;
-    if (!target) return;
-    const el = document.getElementById(target);
-    if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
-  }, [loading, failed]);
+  const business = useMemo(() => categories.find((c) => c.code === FOR_BUSINESS_CODE), [categories]);
 
-  const business = useMemo(
-    () => categories.find((c) => c.code === FOR_BUSINESS_CODE),
-    [categories],
-  );
+  const results = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const pool = consumerCats
+      .filter((c) => activeCat === 'all' || c.code === activeCat)
+      .flatMap((c) => c.services.map((s, i) => ({ s, catName: c.name, catCode: c.code, idx: i })));
+    if (!needle) return pool;
+    return pool.filter(({ s, catName }) =>
+      `${s.name} ${s.description ?? ''} ${catName}`.toLowerCase().includes(needle));
+  }, [consumerCats, activeCat, q]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-3 py-24">
-        <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-primary)' }} />
-        <span className="text-sm" style={{ color: 'var(--color-neutral-500)' }}>Loading services…</span>
-      </div>
-    );
-  }
-
-  if (failed || consumer.length === 0) {
-    return (
-      <div className="text-center py-24 px-6">
-        <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: 'var(--color-primary-50)' }}>
-          <Wrench size={24} style={{ color: 'var(--color-primary)' }} />
-        </div>
-        <h2 className="text-lg font-semibold mb-1.5" style={{ color: 'var(--color-neutral-900)' }}>Services are on the way</h2>
-        <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--color-neutral-500)' }}>
-          Our home-services catalog is being prepared. Check back soon.
-        </p>
-      </div>
-    );
-  }
+  const selectCat = (code: string) => {
+    setActiveCat(code);
+    router.replace(code === 'all' ? '/services' : `/services?category=${code}`, { scroll: false });
+  };
 
   return (
     <>
-      {/* Category pill nav */}
-      <nav className="flex gap-2 overflow-x-auto pb-2 mb-8 -mx-1 px-1">
-        {consumer.map((c) => {
-          const Icon = CATEGORY_ICONS[c.iconKey ?? ''] ?? Wrench;
-          const tone = CATEGORY_TONES[c.code] ?? CATEGORY_TONES.commercial_services;
-          return (
-            <a
-              key={c.id}
-              href={`#cat-${c.code}`}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap border bg-white"
-              style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-700)' }}
-            >
-              <span className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: tone.bg }}>
-                <Icon size={12} style={{ color: tone.fg }} />
-              </span>
-              {c.name}
-            </a>
-          );
-        })}
-      </nav>
-
-      {/* Category sections */}
-      {consumer.map((c) => {
-        const Icon = CATEGORY_ICONS[c.iconKey ?? ''] ?? Wrench;
-        const tone = CATEGORY_TONES[c.code] ?? CATEGORY_TONES.commercial_services;
-        return (
-          <section key={c.id} id={`cat-${c.code}`} className="mb-12 scroll-mt-24">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: tone.bg }}>
-                <Icon size={17} style={{ color: tone.fg }} />
-              </span>
-              <h2 className="text-lg font-bold" style={{ color: 'var(--color-neutral-900)' }}>{c.name}</h2>
-              <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-400)' }}>
-                {c.services.length} service{c.services.length === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {c.services.map((s, i) => <ServiceCard key={s.id} s={s} tone={tone} catCode={c.code} idx={i} />)}
-            </div>
-          </section>
-        );
-      })}
-
-      {/* For Business band (commercial trio routed out of the consumer flow) */}
-      {business && business.services.length > 0 && (
-        <section className="rounded-3xl p-8 mb-6" style={{ background: 'var(--color-neutral-900)' }}>
-          <div className="flex items-start justify-between gap-6 flex-wrap">
-            <div className="min-w-[240px]">
-              <p className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#9ca3af' }}>
-                <Briefcase size={13} /> For Business
-              </p>
-              <h2 className="text-xl font-bold text-white mb-1.5">
-                {business.services.map((s) => s.name).join(' · ')}
-              </h2>
-              <p className="text-sm max-w-xl" style={{ color: '#9ca3af' }}>
-                Offices, buildings and facilities are quoted on inspection with agreed
-                response times. Tell us what you need and we&apos;ll come back with a proposal.
-              </p>
-            </div>
-            <a
-              href="mailto:business@upnow.ae?subject=Business%20services%20proposal%20request"
-              className="rounded-xl px-5 py-3 text-sm font-semibold flex-shrink-0"
-              style={{ background: 'var(--color-primary)', color: '#fff' }}
-            >
-              Request a proposal
-            </a>
+      {/* ── Hero — same pattern as /listings ── */}
+      <section className="lst-hero">
+        <div className="l-wrap">
+          <nav className="crumb">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Link href="/">Home</Link>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span className="sep">/</span>
+              <span className="here">Services</span>
+            </span>
+          </nav>
+          <div className="lst-head">
+            <h1>Home &amp; business services in Dubai</h1>
           </div>
-        </section>
-      )}
+          {/* Search */}
+          <div style={{ position: 'relative', maxWidth: 560, marginTop: 18 }}>
+            <Search size={17} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--mute)' }} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search services — AC cleaning, leak repair, deep cleaning…"
+              style={{
+                width: '100%', padding: '14px 44px 14px 44px', fontSize: 15,
+                border: '1px solid var(--line)', borderRadius: 14, background: '#fff',
+                outline: 'none', boxShadow: '0 2px 10px -4px rgba(0,0,0,0.08)',
+              }}
+            />
+            {q && (
+              <button type="button" onClick={() => setQ('')}
+                style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer' }}>
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Body ── */}
+      <section className="lst-body" style={{ paddingBlock: 22 }}>
+        <div className="l-wrap">
+          {/* Category chips — the working filter */}
+          <div className="l-chiprow" style={{ marginBottom: 18 }}>
+            <button type="button" onClick={() => selectCat('all')} className={`l-catchip${activeCat === 'all' ? ' active' : ''}`}>
+              <span className="ci"><LayoutGrid size={15} /></span> All services
+            </button>
+            {consumerCats.map((c) => {
+              const Icon = CATEGORY_ICONS[c.iconKey ?? ''] ?? Wrench;
+              return (
+                <button key={c.id} type="button" onClick={() => selectCat(c.code)}
+                  className={`l-catchip${activeCat === c.code ? ' active' : ''}`}>
+                  <span className="ci"><Icon size={15} /></span> {c.name}
+                </button>
+              );
+            })}
+          </div>
+
+          {loading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '80px 0', color: 'var(--mute)' }}>
+              <Loader2 size={18} className="animate-spin" /> Loading services…
+            </div>
+          ) : failed || consumerCats.length === 0 ? (
+            <div className="lst-empty">
+              <div className="ei"><Wrench size={26} /></div>
+              <h3>Services are on the way</h3>
+              <p>Our home-services catalog is being prepared. Check back soon.</p>
+            </div>
+          ) : results.length === 0 ? (
+            <div className="lst-empty">
+              <div className="ei"><Search size={26} /></div>
+              <h3>No services match your search</h3>
+              <p>Try a different word, or clear the category filter.</p>
+              <button type="button" onClick={() => { setQ(''); selectCat('all'); }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 999, background: '#2e9f82', color: '#fff', fontWeight: 700, fontSize: 14, border: 'none', cursor: 'pointer', marginTop: 4 }}>
+                Reset filters
+              </button>
+            </div>
+          ) : (
+            <>
+              <p style={{ fontSize: 13.5, color: 'var(--mute)', margin: '0 0 14px' }}>
+                {results.length} service{results.length === 1 ? '' : 's'}
+                {activeCat !== 'all' ? ` in ${consumerCats.find((c) => c.code === activeCat)?.name ?? ''}` : ''}
+                {q.trim() ? ` matching “${q.trim()}”` : ''}
+              </p>
+              <div className="lst-results">
+                {results.map(({ s, catName, catCode, idx }) => (
+                  <ServiceLCard key={s.id} s={s} catName={catName} catCode={catCode} idx={idx} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* For Business band (commercial trio → proposal channel) */}
+          {business && business.services.length > 0 && (
+            <section className="p-8 mt-10" style={{ background: '#0e1a16', borderRadius: 24 }}>
+              <div className="flex items-start justify-between gap-6 flex-wrap">
+                <div className="min-w-[240px]">
+                  <p className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#9ca3af' }}>
+                    <Building2 size={13} /> For Business
+                  </p>
+                  <h2 className="text-xl font-bold text-white mb-1.5">
+                    {business.services.map((s) => s.name).join(' · ')}
+                  </h2>
+                  <p className="text-sm max-w-xl" style={{ color: '#9ca3af' }}>
+                    Offices, buildings and facilities are quoted on inspection with agreed
+                    response times. Tell us what you need and we&apos;ll come back with a proposal.
+                  </p>
+                </div>
+                <a
+                  href="mailto:business@upnow.ae?subject=Business%20services%20proposal%20request"
+                  className="rounded-xl px-5 py-3 text-sm font-semibold flex-shrink-0"
+                  style={{ background: '#2e9f82', color: '#fff' }}
+                >
+                  Request a proposal
+                </a>
+              </div>
+            </section>
+          )}
+        </div>
+      </section>
     </>
   );
 }

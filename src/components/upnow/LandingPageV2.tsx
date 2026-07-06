@@ -183,15 +183,16 @@ function fallbackImg(category: string, id: number): string {
 // Landing category imagery — keyed by REAL catalog codes (migr 0107 taxonomy).
 // The rails themselves render from GET /api/catalog/public; nothing hardcoded.
 const SERVICE_CAT_IMGS: Record<string, string[]> = {
-  home_cleaning:       ['1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50', '1527515637462-cff94eecc1ac', '1563453392212-326f5e854473'],
-  ac_services:         ['1581094794329-c8112a89af12', '1558618666-fcd25c85cd64', '1621905251189-08b45d6a269e', '1581092160562-40aa08e78837'],
-  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7', '1581092918056-0c4c3acd3789', '1504148455328-c376907d081c'],
-  electrical:          ['1558618666-fcd25c85cd64', '1621905252507-b35492cc74b4', '1581092160562-40aa08e78837', '1473341304170-971dccb5ac1e'],
-  handyman:            ['1504148455328-c376907d081c', '1581092918056-0c4c3acd3789', '1416879595882-3373a0480b5b', '1581094794329-c8112a89af12'],
-  painting:            ['1562259949-e8e7689d7828', '1589939705384-5185137a7f0f', '1504148455328-c376907d081c', '1581578731548-c64695cc6952'],
-  pest_control:        ['1599629954294-14df9ec8bc02', '1563453392212-326f5e854473', '1581578731548-c64695cc6952', '1628177142898-93e36e4e3a50'],
-  car_vehicle:         ['1601362840469-51e4d8d58785', '1558904541-efa843a96f01', '1607472586893-edb57bdc0e39', '1581094794329-c8112a89af12'],
-  commercial_services: ['1497366216548-37526070297c', '1628177142898-93e36e4e3a50', '1497366811353-6870744d04b2', '1581092160562-40aa08e78837'],
+  home_cleaning:       ['1581578731548-c64695cc6952', '1563453392212-326f5e854473', '1628177142898-93e36e4e3a50', '1584622650111-993a426fbf0a'],
+  ac_services:         ['1590756254933-2873d72a83b6', '1621905251918-48416bd8575a'],
+  plumbing:            ['1607472586893-edb57bdc0e39', '1585704032915-c3400ca199e7'],
+  electrical:          ['1621905252507-b35492cc74b4', '1544724569-5f546fd6f2b5', '1555963966-b7ae5404b6ed'],
+  handyman:            ['1504148455328-c376907d081c', '1530124566582-a618bc2615dc', '1426927308491-6380b6a9936f'],
+  painting:            ['1562259949-e8e7689d7828', '1717281234297-3def5ae3eee1'],
+  pest_control:        ['1687749927928-96276b1d0cb9'],
+  car_vehicle:         ['1520340356584-f9917d1eea6f', '1607860108855-64acf2078ed9', '1601362840469-51e4d8d58785'],
+  landscaping_outdoor: ['1416879595882-3373a0480b5b', '1558904541-efa843a96f01'],
+  commercial_services: ['1497366216548-37526070297c', '1497366811353-6870744d04b2', '1558882224-dda166733046'],
 };
 const svcImg = (code: string, i: number) => {
   const pool = SERVICE_CAT_IMGS[code] ?? SERVICE_CAT_IMGS.home_cleaning;
@@ -229,7 +230,7 @@ function toServiceCats(categories: PublicCatalogCategory[]): ServiceCat[] {
       id: c.code,
       label: c.name,
       blurb: c.services.slice(0, 4).map((sv) => sv.name).join(', '),
-      href: `/services#cat-${c.code}`,
+      href: `/services?category=${c.code}`,
       items: c.services.slice(0, 4).map((sv, i) => {
         const { price, per } = svcPrice(sv);
         return {
