@@ -82,6 +82,7 @@ export default function BookServicePage() {
   const [hour, setHour] = useState<number | null>(null);
   const [pin, setPin] = useState<PickedAddress | null>(null);
   const [addrDetails, setAddrDetails] = useState(''); // flat / villa / floor / access
+  const [landmark, setLandmark] = useState('');       // nearby landmark (Gulf-style addressing)
   const [emirate, setEmirate] = useState('dubai');
   const [notes, setNotes] = useState('');
 
@@ -190,7 +191,9 @@ export default function BookServicePage() {
 
   const optionsDone = Boolean(svc) && (!hasLadder || isHourly || pkgId != null);
   const scheduleDone = Boolean(day) && hour != null;
-  const address = pin ? (addrDetails.trim() ? `${addrDetails.trim()} — ${pin.address}` : pin.address) : '';
+  const address = pin
+    ? [addrDetails.trim(), landmark.trim() ? `Near ${landmark.trim()}` : '', pin.address].filter(Boolean).join(' — ')
+    : '';
   const inServiceArea = pin == null || pin.emirate == null || EMIRATES.some((e) => e.value === pin.emirate);
   const addressDone = pin != null && address.trim().length >= 8 && inServiceArea;
   const selectionsComplete = optionsDone && scheduleDone && addressDone;
@@ -575,19 +578,36 @@ export default function BookServicePage() {
           </div>
         )}
 
-        {/* Door details + notes — the pin finds the building, this finds the door */}
-        <div className="mt-4">
-          <p className="text-[12px] font-semibold mb-1.5" style={{ color: 'var(--mute)' }}>
-            Apartment / villa &amp; floor <span className="font-normal">(optional — the pin finds your building, this finds your door)</span>
-          </p>
-          <input
-            value={addrDetails}
-            onChange={(e) => setAddrDetails(e.target.value)}
-            placeholder="e.g. Apt 1204, Tower 2, 12th floor"
-            className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
-            style={{ borderColor: LINE }}
-          />
+        {/* Door details — the pin finds the building, these find the door */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+          <div>
+            <p className="text-[12px] font-semibold mb-1.5" style={{ color: 'var(--mute)' }}>
+              Apartment / villa &amp; floor <span className="font-normal">(optional)</span>
+            </p>
+            <input
+              value={addrDetails}
+              onChange={(e) => setAddrDetails(e.target.value)}
+              placeholder="e.g. Apt 1204, Tower 2, 12th floor"
+              className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+              style={{ borderColor: LINE }}
+            />
+          </div>
+          <div>
+            <p className="text-[12px] font-semibold mb-1.5" style={{ color: 'var(--mute)' }}>
+              Nearby landmark <span className="font-normal">(optional)</span>
+            </p>
+            <input
+              value={landmark}
+              onChange={(e) => setLandmark(e.target.value)}
+              placeholder="e.g. Near Spinneys, opposite ENOC"
+              className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+              style={{ borderColor: LINE }}
+            />
+          </div>
         </div>
+        <p className="text-[11px] mt-1.5" style={{ color: 'var(--mute)' }}>
+          The pin finds your building — these help the professional find your door.
+        </p>
         <div className="mt-3">
           <p className="text-[12px] font-semibold mb-1.5" style={{ color: 'var(--mute)' }}>
             Notes for the professional <span className="font-normal">(optional)</span>
