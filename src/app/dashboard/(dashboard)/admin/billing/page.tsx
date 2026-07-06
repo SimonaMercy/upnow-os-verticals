@@ -18,12 +18,15 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Receipt, Landmark, FilePlus2, RefreshCw, Scale, ChevronLeft, ChevronRight,
-  ChevronDown, Loader2, Pencil, Check, X, Building2, Users,
+  ChevronDown, Loader2, Pencil, Check, X, Building2, Users, Download,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import {
+  downloadPlatformReceipt, type PlatformReceiptDoc,
+} from '@/components/upnow/PlatformReceiptPdf';
 
 /* ── API types (exact contract) ── */
 interface BillingFees {
@@ -253,6 +256,40 @@ function ProviderDetail({ rpId, month }: { rpId: number; month: string }) {
     return () => { live = false; };
   }, [rpId, month]);
 
+  // Issued receipts for this provider-month (RP tax invoice + UpNow-Admin receipt).
+  const [receipts, setReceipts] = useState<{ rpInvoice: PlatformReceiptDoc; upnowAdmin: PlatformReceiptDoc } | null>(null);
+  const [issuing, setIssuing] = useState(false);
+  const [receiptErr, setReceiptErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setReceipts(null); setReceiptErr(null);
+    apiGet<{ month: string; receipts: PlatformReceiptDoc[] }>(`/admin/billing/receipts?month=${month}`)
+      .then((d) => {
+        if (!live) return;
+        const mine = d.receipts.filter((r) => r.rentalProviderId === rpId);
+        const rp = mine.find((r) => r.series === 'rp_invoice');
+        const adm = mine.find((r) => r.series === 'upnow_admin');
+        if (rp && adm) setReceipts({ rpInvoice: rp, upnowAdmin: adm });
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [rpId, month]);
+
+  const issueReceipts = async () => {
+    setIssuing(true); setReceiptErr(null);
+    try {
+      const d = await apiPost<{ rpInvoice: PlatformReceiptDoc; upnowAdmin: PlatformReceiptDoc }>(
+        `/admin/billing/receipts/${rpId}?month=${month}`,
+      );
+      setReceipts({ rpInvoice: d.rpInvoice, upnowAdmin: d.upnowAdmin });
+    } catch (e) {
+      setReceiptErr((e as Error)?.message || 'Could not issue receipts');
+    } finally {
+      setIssuing(false);
+    }
+  };
+
   if (failed) return <p className="text-[12px] text-[#9b9890] py-3">Could not load line items.</p>;
   if (!detail) return <p className="text-[12px] text-[#9b9890] py-3 flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Loading line items…</p>;
 
@@ -329,6 +366,51 @@ function ProviderDetail({ rpId, month }: { rpId: number; month: string }) {
             </tr>
           </tfoot>
         </table>
+      )}
+
+      {/* Receipts — issue the RP tax invoice + UpNow-Admin receipt (gapless numbered) */}
+      {detail.totals.grossAed > 0 && (
+        <div className="mt-4 pt-3 border-t border-[#f0ede8]">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">Receipts</span>
+            {!receipts && (
+              <button
+                type="button"
+                onClick={issueReceipts}
+                disabled={issuing}
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-60"
+                style={{ backgroundColor: GREEN }}
+              >
+                {issuing ? (<><Loader2 size={12} className="animate-spin" /> Issuing…</>) : (<><FilePlus2 size={12} /> Issue receipts</>)}
+              </button>
+            )}
+          </div>
+          {receiptErr && <p className="text-[11px] text-red-600 mb-1.5">{receiptErr}</p>}
+          {receipts ? (
+            <div className="space-y-1.5">
+              {[receipts.rpInvoice, receipts.upnowAdmin].map((r) => (
+                <div key={r.series} className="flex items-center justify-between gap-3 rounded-lg border border-[#f0ede8] px-3 py-2">
+                  <span className="min-w-0 text-[12px]">
+                    <span className="font-semibold text-[#1a1916]">{r.docType}</span>
+                    <span className="text-[#9b9890]"> · </span>
+                    <span className="tabular-nums text-[#6b6860]">{r.receiptNo}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => downloadPlatformReceipt(r)}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md border border-[#e2ded7] text-[#1a1916] hover:bg-[#faf9f6]"
+                  >
+                    <Download size={12} /> PDF
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-[#9b9890]">
+              Issue the Rental-Provider tax invoice (UPN-RP) + UpNow-Admin receipt (UPN-ADM) for {monthLong(month)} — each a separate gapless numbered series.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
