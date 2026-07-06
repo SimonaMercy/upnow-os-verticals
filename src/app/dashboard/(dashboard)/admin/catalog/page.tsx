@@ -215,6 +215,8 @@ export default function AdminCatalogPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
+  // Third browser column: the service whose package ladder is shown on-page.
+  const [selectedTplId, setSelectedTplId] = useState<number | null>(null);
   const deepLinkCode = useRef<string | null>(null);
 
   /* Modals + confirm */
@@ -269,6 +271,14 @@ export default function AdminCatalogPage() {
     [templates, selectedCatId],
   );
   const selectedCat = selectedCatId == null ? null : categories.find(c => c.id === selectedCatId) ?? null;
+
+  // Switching category clears a packages selection that is no longer visible.
+  useEffect(() => {
+    setSelectedTplId(prev =>
+      prev != null && visibleTemplates.some(t => t.id === prev) ? prev : null,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCatId]);
 
   const chartData = useMemo(() =>
     categories.filter(c => c.isActive).map(c => ({
@@ -356,8 +366,8 @@ export default function AdminCatalogPage() {
           sub={`${categories.filter(c => c.hasOverride).length} category overrides`} />
       </div>
 
-      {/* 3 — Main split: category rail + services panel */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 items-start">
+      {/* 3 — Main split: Categories → Services → Packages (3-column browser) */}
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-[280px_1fr_300px] gap-4 items-start">
         {/* LEFT: category rail */}
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-[#f0ede8] text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">Categories</div>
@@ -428,9 +438,17 @@ export default function AdminCatalogPage() {
               {visibleTemplates.map(t => {
                 const pill = pricePill(t);
                 const cat = categories.find(c => c.id === t.categoryId);
+                const tplSelected = selectedTplId === t.id;
                 return (
-                  <li key={t.id} className={`flex items-center gap-3 px-4 py-2.5 ${t.isActive ? '' : 'opacity-55'}`}>
-                    <div className="flex-1 min-w-0">
+                  <li
+                    key={t.id}
+                    className={`flex items-center gap-3 px-4 py-2.5 ${t.isActive ? '' : 'opacity-55'} ${tplSelected ? 'bg-[#f0faf6]' : ''}`}
+                  >
+                    <div
+                      className="flex-1 min-w-0 cursor-pointer"
+                      onClick={() => setSelectedTplId(tplSelected ? null : t.id)}
+                      title="Show packages"
+                    >
                       <p className="text-[13px] font-semibold text-[#1a1916] truncate">
                         {t.name}
                         {t.nameAr && <span className="ml-2 text-[11px] font-normal text-[#9b9890]" dir="rtl">{t.nameAr}</span>}
@@ -469,6 +487,71 @@ export default function AdminCatalogPage() {
               })}
             </ul>
           )}
+        </div>
+
+        {/* THIRD COLUMN: package ladder of the selected service */}
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
+          {(() => {
+            const tpl = templates.find(t => t.id === selectedTplId) ?? null;
+            const pkgs = (tpl?.variants ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+            return (
+              <>
+                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#f0ede8]">
+                  <h3 className="font-semibold text-[13px] flex-1 text-[#1a1916] truncate">
+                    {tpl ? (tpl.variantGroupLabel || 'Packages') : 'Packages'}
+                    {tpl && <span className="ml-2 text-[11px] font-normal text-[#9b9890]">{tpl.name}</span>}
+                  </h3>
+                  {tpl && (
+                    <button
+                      onClick={() => setSvcModal({ tpl })}
+                      className="text-[11px] font-semibold text-[#2e9f82] hover:opacity-80 shrink-0"
+                    >Edit</button>
+                  )}
+                </div>
+                {!tpl ? (
+                  <p className="px-4 py-10 text-center text-[12px] text-[#9b9890]">
+                    Select a service to see its package ladder.
+                  </p>
+                ) : pkgs.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <p className="text-[12px] text-[#9b9890]">
+                      Single price — {tpl.basePrice != null ? fmtAED(tpl.basePrice) : 'quote-based'}, no packages.
+                    </p>
+                    <button
+                      onClick={() => setSvcModal({ tpl })}
+                      className="mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-[#2e9f82] hover:opacity-80"
+                    ><Plus size={13} /> Add packages</button>
+                  </div>
+                ) : (
+                  <>
+                    <ul className="divide-y divide-[#f0ede8]">
+                      {pkgs.map(v => (
+                        <li key={v.id} className={`flex items-center gap-2.5 px-4 py-2.5 ${v.isActive ? '' : 'opacity-55'}`}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] text-[#1a1916] truncate">{v.name}</p>
+                            {(v.estimatedDuration || v.estimatedDurationMax) && (
+                              <p className="text-[10px] text-[#9b9890] mt-0.5">
+                                {fmtDuration(v.estimatedDuration, v.estimatedDurationMax)}
+                              </p>
+                            )}
+                          </div>
+                          {!v.isActive && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-[#f5f4f0] text-[#9b9890]">Off</span>
+                          )}
+                          <span className="text-[12px] font-semibold text-[#1a1916] tabular-nums whitespace-nowrap">
+                            {fmtAED(v.basePrice)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="px-4 py-2 border-t border-[#f0ede8] text-[10px] text-[#9b9890]">
+                      From-price auto-tracks the cheapest active package · edit rows via Edit
+                    </p>
+                  </>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 
