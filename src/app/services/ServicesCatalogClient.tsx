@@ -338,7 +338,7 @@ export default function ServicesCatalogClient() {
             </span>
           </nav>
           <div className="lst-head">
-            <h1>{activeCatName ? `${activeCatName} services` : 'Home & business services in Dubai'}</h1>
+            <h1>{activeCatName ? `${activeCatName} services` : 'Services'}</h1>
           </div>
 
           {/* Search bar — lst-search, mirroring ListingsSearchBar */}
