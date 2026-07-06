@@ -8,6 +8,7 @@
  * metadata, hero, and the provider-recruitment CTA.
  */
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import Link from 'next/link';
 import ServicesCatalogClient from './ServicesCatalogClient';
 
@@ -21,7 +22,9 @@ export default function ServicesPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Admin-configured catalog — listings-style hero + chips + grid */}
-      <ServicesCatalogClient />
+      <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>Loading services…</div>}>
+        <ServicesCatalogClient />
+      </Suspense>
 
       {/* Provider recruitment CTA */}
       <section
