@@ -217,6 +217,11 @@ export default function BookServicePage() {
     const next = Math.min(idx + 1, steps.length);
     setMaxReached((m) => Math.max(m, next));
     setActiveStep(next); // steps.length ⇒ everything collapsed, focus on summary
+    // Let the next step mount, then glide to it (summary card if we're done).
+    setTimeout(() => {
+      document.getElementById(next < steps.length ? `bk-step-${next}` : 'bk-summary')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
   };
 
   const isCustomer = user?.role === 'customer';
@@ -370,7 +375,7 @@ export default function BookServicePage() {
                     key={p.id}
                     type="button"
                     onClick={() => setPkgId(p.id)}
-                    className="relative rounded-[14px] border-2 px-4 py-3.5 text-left transition-all"
+                    className="bk-tile relative rounded-[14px] border-2 px-4 py-3.5 text-left"
                     style={{
                       borderColor: on ? GREEN : LINE,
                       background: on ? TINT : '#fff',
@@ -405,7 +410,7 @@ export default function BookServicePage() {
                   key={h}
                   type="button"
                   onClick={() => setHours(h)}
-                  className="w-[54px] h-12 rounded-[14px] border-2 text-sm font-bold transition-all"
+                  className="bk-tile w-[54px] h-12 rounded-[14px] border-2 text-sm font-bold"
                   style={{
                     borderColor: hours === h ? GREEN : LINE,
                     background: hours === h ? TINT : '#fff',
@@ -461,7 +466,7 @@ export default function BookServicePage() {
                       if (next.has(a.id)) next.delete(a.id); else next.add(a.id);
                       return next;
                     })}
-                    className="w-full flex items-center justify-between rounded-[14px] border-2 px-4 py-3 text-left transition-all"
+                    className="bk-tile w-full flex items-center justify-between rounded-[14px] border-2 px-4 py-3 text-left"
                     style={{
                       borderColor: on ? GREEN : LINE,
                       background: on ? TINT : '#fff',
@@ -495,7 +500,7 @@ export default function BookServicePage() {
                 key={d.value}
                 type="button"
                 onClick={() => setDay(d.value)}
-                className="flex flex-col items-center justify-center w-[62px] h-[72px] rounded-[14px] border-2 flex-shrink-0 transition-all"
+                className="bk-tile flex flex-col items-center justify-center w-[62px] h-[72px] rounded-[14px] border-2 flex-shrink-0"
                 style={{
                   borderColor: on ? GREEN : LINE,
                   background: on ? TINT : '#fff',
@@ -518,7 +523,7 @@ export default function BookServicePage() {
                 key={h}
                 type="button"
                 onClick={() => setHour(h)}
-                className="py-2.5 rounded-xl border-2 text-[12.5px] font-semibold tabular-nums transition-all"
+                className="bk-tile py-2.5 rounded-xl border-2 text-[12.5px] font-semibold tabular-nums"
                 style={{
                   borderColor: on ? GREEN : LINE,
                   background: on ? TINT : '#fff',
@@ -619,10 +624,10 @@ export default function BookServicePage() {
               const clickable = state === 'done';
               const Icon = meta.icon;
               return (
-                <div key={key} className="relative pl-11 mb-4">
+                <div key={key} id={`bk-step-${idx}`} className="bk-step relative pl-11 mb-4">
                   {/* timeline node */}
                   <span
-                    className="absolute left-0 top-4 w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold border-2 bg-white z-10 transition-colors"
+                    className={`absolute left-0 top-4 w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold border-2 bg-white z-10 transition-colors${state === 'done' ? ' bk-node-done' : ''}`}
                     style={state === 'done'
                       ? { background: GREEN, borderColor: GREEN, color: '#fff' }
                       : { borderColor: GREEN, color: GREEN_DD }}
@@ -658,14 +663,14 @@ export default function BookServicePage() {
 
                     {/* collapsed recap */}
                     {state === 'done' && stepRecap[key] && (
-                      <p className="px-5 pb-4 -mt-1 text-[13px] truncate" style={{ color: 'var(--mute)' }}>
+                      <p className="bk-recap px-5 pb-4 -mt-1 text-[13px] truncate" style={{ color: 'var(--mute)' }}>
                         {stepRecap[key]}
                       </p>
                     )}
 
                     {/* expanded body */}
                     {state === 'active' && (
-                      <div className="px-5 pb-5">
+                      <div className="bk-body px-5 pb-5">
                         {stepBody[key]}
                         <button
                           type="button"
@@ -690,7 +695,7 @@ export default function BookServicePage() {
           </div>
 
           {/* RIGHT — sticky summary, sign-in, payment */}
-          <aside className="lg:sticky lg:top-24">
+          <aside id="bk-summary" className="lg:sticky lg:top-24">
             <div className="rounded-[18px] border bg-white overflow-hidden" style={{ borderColor: LINE, boxShadow: 'var(--shadow-card)' }}>
               {/* Service photo header */}
               <div className="relative h-28">
@@ -721,7 +726,7 @@ export default function BookServicePage() {
                       </p>
                     )}
                     {lineItems.map((li, i) => (
-                      <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
+                      <div key={li.label + i} className="bk-recap flex items-baseline justify-between gap-3 text-[13px]">
                         <span style={{ color: 'var(--mute)' }}>{li.label}</span>
                         <span className="font-semibold whitespace-nowrap tabular-nums" style={{ color: 'var(--ink-2)' }}>
                           {li.amount != null ? `AED ${fmtAed(li.amount)}` : '—'}
@@ -762,7 +767,7 @@ export default function BookServicePage() {
                     </div>
                     <div className="flex items-center justify-between py-3 mt-2" style={{ borderTop: `1px solid var(--line)` }}>
                       <span className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Total</span>
-                      <span className="text-[22px] font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
+                      <span key={estimate ?? -1} className="bk-total-flash text-[22px] font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
                         {estimate != null ? `AED ${fmtAed(Number(estimate))}` : '—'}
                       </span>
                     </div>

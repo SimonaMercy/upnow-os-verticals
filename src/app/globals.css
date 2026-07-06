@@ -869,3 +869,17 @@ body:has(.slideover-panel) { overflow-x: clip; }
   .lst-head { flex-direction: column; align-items: flex-start; }
   .lst-modeswitch { align-self: flex-start; }
 }
+
+/* ── Booking timeline animations (/services/book) ─────────────── */
+@keyframes bkStepIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.bk-step { animation: bkStepIn .42s cubic-bezier(.22,.9,.3,1) both; }
+@keyframes bkBodyIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.bk-body { animation: bkBodyIn .32s ease both; }
+@keyframes bkPop { 0% { transform: scale(.55); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.bk-node-done { animation: bkPop .38s cubic-bezier(.22,.9,.3,1); }
+@keyframes bkFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.bk-recap { animation: bkFadeIn .3s ease .05s both; }
+@keyframes bkTotalFlash { 0% { color: var(--green-d); transform: scale(1.07); } 100% { color: var(--ink); transform: scale(1); } }
+.bk-total-flash { display: inline-block; animation: bkTotalFlash .5s ease; }
+.bk-tile { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }
+.bk-tile:hover { transform: translateY(-1px); }
