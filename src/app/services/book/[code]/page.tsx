@@ -611,9 +611,11 @@ export default function BookServicePage() {
             <div className="absolute left-[15px] top-5 bottom-8 w-px" style={{ background: LINE }} />
 
             {steps.map((key, idx) => {
+              // Progressive reveal — a step only appears once the previous
+              // one is completed (never show upcoming steps).
+              if (idx > maxReached) return null;
               const meta = stepMeta[key];
-              const state: 'active' | 'done' | 'locked' =
-                idx === activeStep ? 'active' : idx < maxReached || stepDone[key] && idx < activeStep ? 'done' : idx < activeStep ? 'done' : 'locked';
+              const state: 'active' | 'done' = idx === activeStep ? 'active' : 'done';
               const clickable = state === 'done';
               const Icon = meta.icon;
               return (
@@ -623,9 +625,7 @@ export default function BookServicePage() {
                     className="absolute left-0 top-4 w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold border-2 bg-white z-10 transition-colors"
                     style={state === 'done'
                       ? { background: GREEN, borderColor: GREEN, color: '#fff' }
-                      : state === 'active'
-                        ? { borderColor: GREEN, color: GREEN_DD }
-                        : { borderColor: LINE, color: 'var(--mute)' }}
+                      : { borderColor: GREEN, color: GREEN_DD }}
                   >
                     {state === 'done' ? <Check size={14} /> : idx + 1}
                   </span>
@@ -636,16 +636,14 @@ export default function BookServicePage() {
                     style={{
                       borderColor: state === 'active' ? GREEN : LINE,
                       boxShadow: state === 'active' ? 'var(--shadow-card)' : 'none',
-                      opacity: state === 'locked' ? 0.55 : 1,
                     }}
                   >
                     {/* header */}
                     <button
                       type="button"
-                      disabled={state === 'locked'}
                       onClick={() => clickable && setActiveStep(idx)}
                       className="w-full flex items-center gap-2.5 px-5 py-4 text-left"
-                      style={{ cursor: state === 'done' ? 'pointer' : 'default' }}
+                      style={{ cursor: clickable ? 'pointer' : 'default' }}
                     >
                       <span className="text-[15px] font-bold flex-1 flex items-center gap-2" style={{ color: 'var(--ink)' }}>
                         {meta.title}
@@ -655,9 +653,6 @@ export default function BookServicePage() {
                         <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: GREEN_DD }}>
                           <Pencil size={12} /> Edit
                         </span>
-                      )}
-                      {state === 'locked' && (
-                        <Lock size={13} style={{ color: 'var(--mute)' }} />
                       )}
                     </button>
 
