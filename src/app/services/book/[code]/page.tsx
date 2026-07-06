@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   BadgeCheck, CalendarDays, Check, CheckCircle2, Clock, Loader2,
-  MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles, Pencil, Info,
+  MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles, Pencil, Info, X,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navbar } from '@/components/upnow/Navbar';
@@ -81,18 +81,53 @@ function tierRows(tiers: CancelTier[], word: string, slot: Date | null): string[
   });
 }
 
-/** Small terms panel — every step states its rules plainly. */
-function TermsNote({ title, rows }: { title: string; rows: string[] }) {
+/** Compact policy link — opens the terms in a popup instead of inline. */
+function TermsLink({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <div className="rounded-[14px] px-4 py-3 mt-4" style={{ background: 'var(--green-tint-2)', border: '1px solid var(--line)' }}>
-      <p className="text-[11px] font-bold uppercase tracking-wide mb-1.5 inline-flex items-center gap-1.5" style={{ color: GREEN_DD }}>
-        <Info size={11} /> {title}
-      </p>
-      <ul className="space-y-0.5">
-        {rows.map((r, i) => (
-          <li key={i} className="text-[12px] leading-relaxed" style={{ color: 'var(--ink-2)' }}>{r}</li>
-        ))}
-      </ul>
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-semibold hover:underline"
+      style={{ color: GREEN_DD }}
+    >
+      <Info size={13} /> {label}
+    </button>
+  );
+}
+
+/** Themed popup for policy terms. */
+function PolicyModal({ title, rows, onClose }: { title: string; rows: string[]; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bk-body w-full max-w-md rounded-[18px] bg-white overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--line)' }}>
+          <h3 className="text-[15px] font-bold inline-flex items-center gap-2" style={{ color: 'var(--ink)' }}>
+            <Info size={15} style={{ color: GREEN_DD }} /> {title}
+          </h3>
+          <button onClick={onClose} aria-label="Close" style={{ color: 'var(--mute)' }}><X size={17} /></button>
+        </div>
+        <ul className="px-5 py-4 space-y-2.5">
+          {rows.map((r, i) => (
+            <li key={i} className="flex items-start gap-2.5 text-[13px] leading-relaxed" style={{ color: 'var(--ink-2)' }}>
+              <span className="w-1.5 h-1.5 rounded-full mt-[7px] flex-shrink-0" style={{ background: GREEN }} />
+              {r}
+            </li>
+          ))}
+        </ul>
+        <div className="px-5 pb-5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white"
+            style={{ background: GREEN }}
+          >
+            Got it
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -124,6 +159,7 @@ export default function BookServicePage() {
   const [notes, setNotes] = useState('');
 
   // timeline
+  const [policyModal, setPolicyModal] = useState<'pricing' | 'cancel' | 'visit' | null>(null);
   const [activeStep, setActiveStep] = useState(0);
   const [maxReached, setMaxReached] = useState(0);
 
@@ -545,16 +581,7 @@ export default function BookServicePage() {
             </div>
           </div>
         )}
-        <TermsNote
-          title="Pricing terms"
-          rows={[
-            'All prices include 5% VAT — no surprises at checkout.',
-            ...(isHourly ? ['Hourly services are billed per hour, per professional.'] : []),
-            ...(hasLadder && !isHourly ? ['The price shown applies to the selected package size.'] : []),
-            ...(svc.addons.length > 0 && !isQuote ? ['Add-ons are charged together with the service.'] : []),
-            'The final amount is confirmed before you pay — no hidden charges.',
-          ]}
-        />
+        <TermsLink label="Pricing terms" onClick={() => setPolicyModal('pricing')} />
       </>
     ),
     schedule: (
@@ -603,17 +630,7 @@ export default function BookServicePage() {
           })}
         </div>
         {cancelPolicy && (
-          <TermsNote
-            title="Cancellation & reschedule terms"
-            rows={[
-              ...tierRows(cancelPolicy.cancel, 'cancellation', slotDate),
-              ...tierRows(cancelPolicy.reschedule, 'reschedule', slotDate).slice(0, 1),
-              ...(cancelPolicy.reschedule.some((t) => t.feePct > 0)
-                ? [`Later reschedules: ${[...cancelPolicy.reschedule].sort((a, b) => b.minHoursBefore - a.minHoursBefore).filter((t) => t.feePct > 0).map((t) => `${t.feePct}%${t.minHoursBefore > 0 ? ` (${t.minHoursBefore}h+)` : ' (same-slot window)'}`).join(' · ')}`]
-                : []),
-              `No-show: ${cancelPolicy.noShowFeePct}% of the booking value.`,
-            ]}
-          />
+          <TermsLink label="Cancellation & reschedule policy" onClick={() => setPolicyModal('cancel')} />
         )}
       </>
     ),
@@ -687,14 +704,7 @@ export default function BookServicePage() {
             style={{ borderColor: LINE }}
           />
         </div>
-        <TermsNote
-          title="Visit terms"
-          rows={[
-            'We serve Dubai during the pilot — your pin confirms the service area.',
-            'The professional calls when nearby; gate codes and parking notes prevent delays.',
-            'Someone 18+ should be present (or provide access instructions above).',
-          ]}
-        />
+        <TermsLink label="Visit terms" onClick={() => setPolicyModal('visit')} />
       </>
     ),
   };
@@ -902,12 +912,18 @@ export default function BookServicePage() {
                         {estimate != null ? `AED ${fmtAed(Number(estimate))}` : '—'}
                       </span>
                     </div>
-                    <p className="text-[11px] mb-4" style={{ color: 'var(--mute)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPolicyModal('cancel')}
+                      className="inline-flex items-center gap-1 text-[11px] mb-4 hover:underline"
+                      style={{ color: 'var(--mute)' }}
+                    >
+                      <Info size={11} />
                       {(() => {
                         const free = cancelPolicy ? [...cancelPolicy.cancel].sort((a, b) => b.minHoursBefore - a.minHoursBefore).find((t) => t.feePct === 0) : null;
-                        return free ? `Free cancellation up to ${free.minHoursBefore} hours before your slot` : 'Flexible cancellation — see the terms in the date step';
+                        return free ? `Free cancellation up to ${free.minHoursBefore} hours before your slot` : 'Cancellation policy';
                       })()}
-                    </p>
+                    </button>
                   </>
                 )}
 
@@ -1014,6 +1030,43 @@ export default function BookServicePage() {
           </aside>
         </div>
       </div>
+
+      {/* Policy popups — terms live behind info links, not inline */}
+      {policyModal === 'pricing' && (
+        <PolicyModal
+          title="Pricing terms"
+          onClose={() => setPolicyModal(null)}
+          rows={[
+            'All prices include 5% VAT — no surprises at checkout.',
+            ...(isHourly ? ['Hourly services are billed per hour, per professional.'] : []),
+            ...(hasLadder && !isHourly ? ['The price shown applies to the selected package size.'] : []),
+            ...(svc.addons.length > 0 && !isQuote ? ['Add-ons are charged together with the service.'] : []),
+            'The final amount is confirmed before you pay — no hidden charges.',
+          ]}
+        />
+      )}
+      {policyModal === 'cancel' && cancelPolicy && (
+        <PolicyModal
+          title="Cancellation & reschedule"
+          onClose={() => setPolicyModal(null)}
+          rows={[
+            ...tierRows(cancelPolicy.cancel, 'cancellation', slotDate),
+            ...tierRows(cancelPolicy.reschedule, 'reschedule', slotDate),
+            `No-show: ${cancelPolicy.noShowFeePct}% of the booking value.`,
+          ]}
+        />
+      )}
+      {policyModal === 'visit' && (
+        <PolicyModal
+          title="Visit terms"
+          onClose={() => setPolicyModal(null)}
+          rows={[
+            'We serve Dubai during the pilot — your pin confirms the service area.',
+            'The professional calls when nearby; gate codes and parking notes prevent delays.',
+            'Someone 18+ should be present (or provide access instructions in the notes).',
+          ]}
+        />
+      )}
     </div>
   );
 }
