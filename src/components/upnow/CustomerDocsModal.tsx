@@ -7,6 +7,7 @@
  * both surfaces share ONE module instead of navigating away.
  */
 import { useEffect, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Files, FileText, Eye, X, Loader2, AlertTriangle } from 'lucide-react';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
@@ -67,10 +68,21 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
   // contract page's cross-lease history groups per lease too.
   const [leaseList, setLeaseList] = useState<LeaseMeta[] | null>(leases ?? null);
   const [err, setErr] = useState<string | null>(null);
+  // This modal is rendered on both the RP and manager copies of the contract /
+  // customer pages. A manager has no RP profile, so the RP-only /contracts
+  // endpoint 404s ("Rental Provider profile not found"); scope to the mirror
+  // /manager endpoint (same service, resolves the landlord from ?rp=).
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isManager = (pathname ?? '').startsWith('/dashboard/manager');
+  const rpParam = searchParams.get('rp');
 
   useEffect(() => {
     if (docs || !tenantId) return;
-    fetch(`/api/contracts/tenants/${tenantId}`, { credentials: 'include' })
+    const url = isManager
+      ? `/api/manager/tenants/${tenantId}?rp=${rpParam ?? ''}`
+      : `/api/contracts/tenants/${tenantId}`;
+    fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status === 403 ? 'Not available for this account.' : `Error ${r.status}`)))
       .then((d: { documents?: CustomerDoc[]; leases?: LeaseMeta[]; customer?: { name?: string | null } }) => {
         setDocs(d.documents ?? []);
@@ -78,7 +90,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
         if (d.leases?.length) setLeaseList(prev => prev ?? d.leases!.map(l => ({ id: l.id, ref: l.ref, startDate: l.startDate, endDate: l.endDate })));
       })
       .catch(e => setErr(e instanceof Error ? e.message : 'Failed to load'));
-  }, [docs, tenantId]);
+  }, [docs, tenantId, isManager, rpParam]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
