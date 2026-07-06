@@ -245,7 +245,7 @@ export default function AdminCatalogPage() {
 
   /* Modals + confirm */
   const [catModal, setCatModal] = useState<{ cat: CatCategory | null } | null>(null);
-  const [svcModal, setSvcModal] = useState<{ tpl: Template | null } | null>(null);
+  const [svcModal, setSvcModal] = useState<{ tpl: Template | null; focus?: 'packages' } | null>(null);
   const [confirm, setConfirm] = useState<{ message: string; run: () => Promise<void> } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -537,6 +537,10 @@ export default function AdminCatalogPage() {
                           <Chip c={BLUE}>Callout {fmtAED(t.minCalloutCharge)}</Chip>
                         )}
                         {t.adoptionCount > 0 && <Chip c={'#6b6860'}>{t.adoptionCount} provider{t.adoptionCount === 1 ? '' : 's'}</Chip>}
+                        {t.quantityLabel && <Chip c={'#3b6fb5'}>Asks: {t.quantityLabel}</Chip>}
+                        {(t.addons?.filter(a => a.isActive).length ?? 0) > 0 && (
+                          <Chip c={'#3b6fb5'}>+{t.addons!.filter(a => a.isActive).length} extra{t.addons!.filter(a => a.isActive).length === 1 ? '' : 's'}</Chip>
+                        )}
                       </div>
                     </div>
                     <span className="text-[11px] text-[#9b9890] tabular-nums w-14 text-right shrink-0">
@@ -569,16 +573,34 @@ export default function AdminCatalogPage() {
             const pkgs = (tpl?.variants ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
             return (
               <>
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#f0ede8]">
-                  <h3 className="font-semibold text-[13px] flex-1 text-[#1a1916] truncate">
-                    {tpl ? (tpl.variantGroupLabel || 'Packages') : 'Packages'}
-                    {tpl && <span className="ml-2 text-[11px] font-normal text-[#9b9890]">{tpl.name}</span>}
-                  </h3>
+                <div className="px-4 py-2.5 border-b border-[#f0ede8]">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-[13px] flex-1 text-[#1a1916] truncate">
+                      {tpl ? (tpl.variantGroupLabel || 'Packages') : 'Packages'}
+                    </h3>
+                    {tpl && (
+                      <button
+                        onClick={() => setSvcModal({ tpl, focus: 'packages' })}
+                        className="text-[11px] font-semibold text-[#2e9f82] hover:opacity-80 shrink-0"
+                      >Edit</button>
+                    )}
+                  </div>
                   {tpl && (
-                    <button
-                      onClick={() => setSvcModal({ tpl })}
-                      className="text-[11px] font-semibold text-[#2e9f82] hover:opacity-80 shrink-0"
-                    >Edit</button>
+                    <>
+                      <p className="text-[10px] text-[#9b9890] mt-0.5 truncate">
+                        {categories.find(c => c.id === tpl.categoryId)?.nameEn ?? tpl.categoryCode} → {tpl.name}
+                      </p>
+                      <p className="text-[11px] text-[#1a1916] mt-1.5">
+                        {tpl.priceUnit === 'quote_after_callout'
+                          ? 'Free quote — priced after the visit'
+                          : tpl.priceUnit === 'per_hour'
+                            ? `AED ${tpl.basePrice ?? '—'} per hour`
+                            : `${tpl.isFromPrice ? 'From ' : ''}AED ${tpl.basePrice ?? '—'}`}
+                        {templateDuration(tpl) !== '—' && (
+                          <span className="text-[#9b9890]"> · {templateDuration(tpl)}</span>
+                        )}
+                      </p>
+                    </>
                   )}
                 </div>
                 {!tpl ? (
@@ -588,12 +610,16 @@ export default function AdminCatalogPage() {
                 ) : pkgs.length === 0 ? (
                   <div className="px-4 py-8 text-center">
                     <p className="text-[12px] text-[#9b9890]">
-                      Single price — {tpl.basePrice != null ? fmtAED(tpl.basePrice) : 'quote-based'}, no packages.
+                      {tpl.priceUnit === 'quote_after_callout'
+                        ? 'Priced by quote — free-quote services don\u2019t use packages.'
+                        : `Single price — ${tpl.basePrice != null ? fmtAED(tpl.basePrice) : '—'}, no packages.`}
                     </p>
-                    <button
-                      onClick={() => setSvcModal({ tpl })}
-                      className="mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-[#2e9f82] hover:opacity-80"
-                    ><Plus size={13} /> Add packages</button>
+                    {tpl.priceUnit !== 'quote_after_callout' && (
+                      <button
+                        onClick={() => setSvcModal({ tpl, focus: 'packages' })}
+                        className="mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-[#2e9f82] hover:opacity-80"
+                      ><Plus size={13} /> Add packages</button>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -707,6 +733,7 @@ export default function AdminCatalogPage() {
       {svcModal && (
         <ServiceModal
           tpl={svcModal.tpl}
+          focus={svcModal.focus}
           categories={categories}
           defaultCategoryId={selectedCatId}
           nextSortOrder={Math.max(0, ...templates.filter(t => t.categoryId === (svcModal.tpl?.categoryId ?? selectedCatId)).map(t => t.sortOrder)) + 1}
@@ -1116,8 +1143,8 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved }: {
 
 /* ═════════════════════════ Service modal ═════════════════════════ */
 
-function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClose, onSaved, onRefetch }: {
-  tpl: Template | null; categories: CatCategory[]; defaultCategoryId: number | null; nextSortOrder: number;
+function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder, onClose, onSaved, onRefetch }: {
+  tpl: Template | null; focus?: 'packages'; categories: CatCategory[]; defaultCategoryId: number | null; nextSortOrder: number;
   onClose: () => void; onSaved: () => void; onRefetch: () => void;
 }) {
   const isNew = tpl == null;
@@ -1143,6 +1170,9 @@ function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Opened from the packages pane → show ONLY packages + booking questions;
+  // the full form is one click away and never in the way.
+  const [showFull, setShowFull] = useState(focus !== 'packages' || tpl == null);
   const isQuote = priceUnit === 'quote_after_callout';
   const num = (s: string): number | null => (s.trim() === '' ? null : Number(s));
   // With ≥1 active variant, base_price auto-tracks the cheapest variant server-side (read-only here).
@@ -1193,10 +1223,11 @@ function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClo
   };
 
   return (
-    <Modal title={isNew ? 'New service' : `Edit — ${tpl.name}`} onClose={onClose} wide>
+    <Modal title={isNew ? 'New service' : showFull ? `Edit — ${tpl.name}` : `Packages — ${tpl.name}`} onClose={onClose} wide>
       <div className="space-y-3.5">
 
         {/* ① Basics */}
+        {showFull && (
         <SectionCard step="1" title="The basics" sub="What customers see on the services page.">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Service name *">
@@ -1215,8 +1246,10 @@ function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClo
             <input className={inputCls} dir="rtl" value={nameAr} onChange={e => setNameAr(e.target.value)} />
           </Field>
         </SectionCard>
+        )}
 
         {/* ② Pricing */}
+        {showFull && (
         <SectionCard step="2" title="How is it priced?" sub="Pick one — the booking page adapts automatically.">
           <div className="grid grid-cols-3 gap-2">
             {([
@@ -1297,6 +1330,7 @@ function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClo
             </div>
           </details>
         </SectionCard>
+        )}
 
         {/* ③ Packages — fixed-price services only */}
         {priceUnit === 'fixed' && (
@@ -1350,10 +1384,17 @@ function ServiceModal({ tpl, categories, defaultCategoryId, nextSortOrder, onClo
           </SectionCard>
         )}
 
-        <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
-          <input type="checkbox" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="accent-[#dc2626]" />
-          24/7 emergency service — shows the red badge
-        </label>
+        {showFull ? (
+          <label className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
+            <input type="checkbox" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="accent-[#dc2626]" />
+            24/7 emergency service — shows the red badge
+          </label>
+        ) : (
+          <button type="button" onClick={() => setShowFull(true)}
+            className="text-[11px] font-semibold text-[#9b9890] hover:text-[#1a7a5a] text-left">
+            Need to change the name, category or price? Edit the full service →
+          </button>
+        )}
 
         {error && <p className="text-[12px] text-[#b91c1c]">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
