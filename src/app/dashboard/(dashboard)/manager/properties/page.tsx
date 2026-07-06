@@ -1,32 +1,42 @@
 'use client';
 
 /**
- * Manager — Properties. Mirrors the RP Portfolio experience (same
- * portfolio.module.css: hero, KPI strip, range tabs, filters, property cards)
- * so a manager sees the identical UI as a landlord. The only differences:
- *   • a LandlordSwitcher (scope to one landlord or "All")
- *   • actions (edit / add) gated by the manager's granted permissions
+ * Manager — Properties. Mirrors the RP Portfolio page 1:1 (same
+ * portfolio.module.css chrome: Briefcase hero, four-up KPI strip, search + type +
+ * sort controls, and Row · Grid · Map views). Every card shows PROPERTY details
+ * only and opens the shared PropertyDetailsModal — where the units + documents
+ * live (no inline unit expansion). Manager-specific deltas:
+ *   • ?rp= scopes the list to one landlord (or "All landlords")
+ *   • cards carry a landlord tag in the multi-landlord ("All") view
+ *   • actions (edit / add) are gated by the manager's granted permissions
+ *   • data comes from the scoped /manager/* endpoints
  */
 
-import { useState, useMemo, type CSSProperties } from 'react';
+import { useState, useMemo, type CSSProperties, type ReactNode } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, MapPin, Search, X, Loader2, Lock, ChevronDown, Eye, Pencil, Plus,
-  LayoutGrid, Rows3, Map as MapIcon, Check, ArrowRight,
+  Building2, MapPin, Search, Loader2, Lock, Pencil, Plus,
+  LayoutGrid, Rows3, Map as MapIcon, Image as ImageIcon,
+  Briefcase, DoorClosed, Gauge, Coins, AlertCircle,
 } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
-import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { PortfolioMapView } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import { PropertyFormModal, categoryDisplayLabel, type PropertyFormData } from '@/components/upnow/PropertyFormModal';
+import {
+  PropertyFormModal,
+  categoryDisplayLabel,
+  SPACE_CATEGORIES,
+  type PropertyFormData,
+} from '@/components/upnow/PropertyFormModal';
 import s from '@/app/rental-provider/dashboard/portfolio/portfolio.module.css';
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
 
+// ─── Types ────────────────────────────────────────────────
 interface ManagedProperty {
   id:              number;
   buildingName:    string;
@@ -39,6 +49,8 @@ interface ManagedProperty {
   rpName?:         string;
   unitCount?:      number;
   listedCount?:    number;
+  occupiedCount?:  number;
+  rentTotal?:      number;
   coverPhotoUrl?:  string | null;
   emirate?:        { nameEn: string } | null;
   community?:      { nameEn: string } | null;
@@ -61,8 +73,90 @@ interface ManagedProperty {
   leasingType?:    'direct' | 'sub' | 'management' | null;
 }
 
-/** Map the property-form values to the create/update DTO (mirrors the RP portfolio). */
-function formToCreateDto(data: PropertyFormData) {
+interface OverviewStats {
+  properties: number; units: number; activeContracts: number; openLeads: number;
+  rps: { id: number; name: string; propertyCount: number }[];
+}
+
+// ─── Helpers (shared visual model with the RP portfolio) ──────
+function categoryLabel(c: string) {
+  return categoryDisplayLabel(c);
+}
+
+// Type-tag palette (matches the RP portfolio: green / brown / blue / grey).
+function typeStyle(label: string): { color: string; bg: string } {
+  if (label === 'Mixed-use')   return { color: '#1a7a4f', bg: '#e7f3ec' };
+  if (label === 'Industrial')  return { color: '#7a5a2e', bg: '#f3ecdd' };
+  if (label === 'Residential') return { color: '#3f6f8f', bg: '#e8f1f6' };
+  return { color: '#6b756f', bg: '#eef1ec' };
+}
+
+const fmtAed = (n: number) => 'AED ' + Math.round(n).toLocaleString('en-US');
+// Portfolio gross is large in practice → compact M form ("AED 9.48M"). Degrade
+// gracefully to a full figure for small portfolios so we never show "0.25M".
+const fmtRentKpi = (n: number) =>
+  n >= 1_000_000 ? 'AED ' + (n / 1_000_000).toFixed(2) + 'M' : fmtAed(n);
+
+// Filter / sort dropdowns — flat white pill with a hand-drawn chevron (matches
+// the RP portfolio's <select> styling).
+const SELECT_STYLE: CSSProperties = {
+  fontSize: 13.5, fontWeight: 600, color: '#3a443d', background: '#fff',
+  border: '1px solid #e2e7e1', borderRadius: 11, padding: '11px 36px 11px 14px',
+  outline: 'none', appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer',
+  backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%238d978f' stroke-width='2'><path d='M4 8l4 4 4-4'/></svg>")`,
+  backgroundRepeat: 'no-repeat', backgroundPosition: 'right 13px center',
+};
+
+// Per-property display model shared by the Row and Grid cards. `landlord` is the
+// only manager addition (surfaced in the "All landlords" view).
+interface CardVM {
+  name: string;
+  typeLabel: string;
+  address: string | null;
+  hasPin: boolean;
+  tagColor: string;
+  tagBg: string;
+  coverUrl: string | null;
+  hasVacancy: boolean;
+  vacancyLabel: string;
+  occText: string;
+  rentText: string;
+  rentUnit: string;
+  rentColor: string;
+  landlord: string | null;
+}
+
+function toCardVM(p: ManagedProperty, showLandlord: boolean): CardVM {
+  const units = p.unitCount ?? 0;
+  const occ = p.occupiedCount ?? 0;
+  const vac = Math.max(0, units - occ);
+  const occPct = units ? (occ / units) * 100 : 0;
+  const typeLabel = categoryLabel(p.spaceCategory);
+  const ts = typeStyle(typeLabel);
+  const rent = p.rentTotal ?? 0;
+  const hasPin = p.latitude != null && p.longitude != null;
+  const joined = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ');
+  const loc = p.fullAddress ?? (joined || null);
+  return {
+    name: p.buildingName || 'Unnamed Property',
+    typeLabel,
+    address: loc ?? (hasPin ? 'Pinned on map' : null),
+    hasPin,
+    tagColor: ts.color,
+    tagBg: ts.bg,
+    coverUrl: p.coverPhotoUrl ?? null,
+    hasVacancy: vac > 0,
+    vacancyLabel: `${vac} vacant`,
+    occText: units ? `${occ}/${units} · ${Math.round(occPct)}%` : 'No units',
+    rentText: rent ? fmtAed(rent) : 'No rent set',
+    rentUnit: rent ? ' /yr' : '',
+    rentColor: rent ? '#1a6b4d' : '#aab2ab',
+    landlord: showLandlord ? (p.rpName ?? null) : null,
+  };
+}
+
+/** Map the property-form values to the update DTO (mirrors the RP portfolio). */
+function formToUpdateDto(data: PropertyFormData) {
   const parts = [data.street, data.communityName, data.emirateName].filter(Boolean);
   return {
     buildingName: data.buildingName,
@@ -91,56 +185,163 @@ function formToCreateDto(data: PropertyFormData) {
   };
 }
 
-interface ManagedUnit {
-  id:            number;
-  unitNumber:    string;
-  unitType:      string;
-  bedrooms:      number | null;
-  bathrooms:     number | null;
-  unitSizeSqft:  number | string | null;
-  unitSizeSqm:   number | string | null;
-  view:          string | null;
-  rentalPrice:   number | string | null;
-  marketPrice:   number | string | null;
-  availability:  string;
-  listingStatus: string;
+// Cover image (or a placeholder tile when no photo is on file).
+function Cover({ url, iconSize, iconColor }: { url: string | null; iconSize: number; iconColor: string }) {
+  if (url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />;
+  }
+  return <ImageIcon size={iconSize} style={{ color: iconColor }} />;
 }
 
-interface OverviewStats {
-  properties: number; units: number; activeContracts: number; openLeads: number;
-  rps: { id: number; name: string; propertyCount: number }[];
+// Landlord tag (multi-landlord "All" view only). Muted grey chip, truncated.
+function LandlordTag({ name }: { name: string }) {
+  return (
+    <span title={`Landlord: ${name}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, color: '#6b756f', background: '#eef1ec', padding: '3px 8px', borderRadius: 6, flex: '0 1 auto', minWidth: 0, maxWidth: 160, overflow: 'hidden' }}>
+      <Building2 size={11} style={{ flex: '0 0 auto' }} />
+      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+    </span>
+  );
 }
 
-function categoryLabel(c: string) {
-  return categoryDisplayLabel(c);
+// ─── Property card (Row view + Map list) ──────────────────
+// Image-left row: photo · name + type tag (+ landlord tag) · address (+ vacancy) ·
+// annual rent + occupancy · edit. The whole row opens the details popup (units
+// live inside it). Mirrors the RP portfolio ROW VIEW; delete is RP-only.
+function PropertyCard({
+  vm, canEdit, onEdit, onShowDetails,
+}: {
+  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void;
+}) {
+  return (
+    <div onClick={onShowDetails} role="button" title="View property details" className={s.dxRowCard}>
+      {/* Lead — photo + name/address (shrinks first) */}
+      <div className={s.dxRowLead}>
+        <div style={{ width: 52, height: 52, flex: '0 0 52px', borderRadius: 10, background: '#f1f3f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <Cover url={vm.coverUrl} iconSize={22} iconColor="#b9c1ba" />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+            <span style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-.01em', color: '#1d2823', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.name}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: vm.tagColor, background: vm.tagBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.typeLabel}</span>
+            {vm.landlord && <LandlordTag name={vm.landlord} />}
+          </div>
+          {vm.address && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#9aa39c', marginTop: 4 }}>
+              <MapPin size={13} style={{ flex: '0 0 auto', color: vm.hasPin ? '#1a9a64' : '#9aa39c' }} />
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.address}</span>
+              {vm.hasVacancy && <span style={{ color: '#c79a2e', fontWeight: 600, flex: '0 0 auto' }}>· {vm.vacancyLabel}</span>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tail — rent + occupancy + action (wraps below on mobile) */}
+      <div className={s.dxRowTail}>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
+            {vm.rentText}<span style={{ fontSize: 11.5, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
+          </div>
+          <div style={{ fontSize: 11.5, color: '#9aa39c', marginTop: 2 }}>{vm.occText}</div>
+        </div>
+        {canEdit && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: '0 0 auto' }}>
+            <button type="button" className={cn(s.dxIconBtn, s.dxEdit)} title="Edit property" aria-label="Edit property"
+              style={{ width: 30, height: 30, borderRadius: 8, color: '#aab2ab' }}
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}><Pencil size={15} /></button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
+// ─── Property grid card (Grid view) ───────────────────────
+// Cover tile that surfaces the SAME information as the Row view (type tag,
+// address + vacancy, annual rent + occupancy text, landlord tag).
+function PropertyGridCard({
+  vm, canEdit, onEdit, onShowDetails,
+}: {
+  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void;
+}) {
+  const footBtn: CSSProperties = {
+    width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', cursor: 'pointer',
+  };
+  return (
+    <div onClick={onShowDetails} role="button" title="View property details" className={s.dxGridCard}
+      style={{ background: '#fff', border: '1px solid #e7ebe6', borderRadius: 15, overflow: 'hidden', cursor: 'pointer', boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
+      {/* Cover + type badge */}
+      <div style={{ height: 138, background: '#f1f3f0', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
+        <Cover url={vm.coverUrl} iconSize={22} iconColor="#b3bcb4" />
+        <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
+      </div>
+
+      {/* Body — same fields as the Row view */}
+      <div style={{ padding: '14px 16px' }}>
+        <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.name}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8a938c', marginTop: 5 }}>
+          <MapPin size={13} style={{ color: vm.hasPin ? '#1a9a64' : '#a0a8a1', flex: '0 0 auto' }} />
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.address ?? 'No location set'}</span>
+          {vm.hasVacancy && <span style={{ color: '#c79a2e', fontWeight: 600, flex: '0 0 auto' }}>· {vm.vacancyLabel}</span>}
+        </div>
+        {vm.landlord && <div style={{ marginTop: 8 }}><LandlordTag name={vm.landlord} /></div>}
+
+        {/* Footer: rent + occupancy + action */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 13, paddingTop: 12, borderTop: '1px solid #f1f3f0' }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums' }}>
+              {vm.rentText}<span style={{ fontSize: 11, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#9aa39c' }}>{vm.occText}</div>
+          </div>
+          {canEdit && (
+            <div style={{ display: 'flex', gap: 7 }}>
+              <button type="button" title="Edit property" aria-label="Edit property"
+                style={{ ...footBtn, border: '1px solid #e2e7e1', color: '#5a635c' }}
+                onClick={(e) => { e.stopPropagation(); onEdit(); }}><Pencil size={15} /></button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────
 export default function ManagerPropertiesPage() {
   const { can, loading: permsLoading } = useManagerPermissions();
   const params   = useSearchParams();
   const router   = useRouter();
   const rpFilter = params.get('rp') ? Number(params.get('rp')) : null;
+  const qc = useQueryClient();
 
-  // 'all' or any spaceCategory id present in the loaded properties (incl. land /
-  // mixed_use / legacy buckets) — the tab list is derived dynamically below.
-  const [category, setCategory] = useState<string>('all');
-  const [search, setSearch]     = useState('');
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
+  // Property-type filter (spaceCategory), chosen from a dropdown.
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  // Sort order for the property list (matches the RP portfolio Sort dropdown).
+  const [sort, setSort] = useState<'default' | 'rent' | 'occ' | 'vac' | 'name'>('default');
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: ManagedProperty }>({ open: false });
-  // Read-only preview popups (shared with the landlord portal)
+  // Read-only preview popup (shows the property's units + documents inside).
   const [detailsProperty, setDetailsProperty] = useState<ManagedProperty | null>(null);
-  const [unitPreview, setUnitPreview] = useState<{ property: ManagedProperty; unit: ManagedUnit } | null>(null);
-  // Main content view: Row (accordion) · Grid (tiles + side panel) · Map (inline).
+  // Main content view: Row (list) · Grid (tiles) · Map. All cards open the popup.
   const [view, setView] = useState<'row' | 'grid' | 'map'>('row');
-  const queryClient = useQueryClient();
 
-  // The modal is used only for EDITING property details (Add uses the full
-  // wizard at /dashboard/manager/properties/add). Unit add/edit lives in the
-  // wizard + accordion, same as the landlord portal.
+  const { data: properties = [], isLoading, error } = useQuery<ManagedProperty[]>({
+    queryKey: ['manager-properties'],
+    queryFn:  () => apiGet<ManagedProperty[]>('/manager/properties'),
+  });
+  // Overview backs only the managed-landlord count in the hero subtitle.
+  const { data: stats } = useQuery<OverviewStats>({
+    queryKey: ['manager-overview'],
+    queryFn:  () => apiGet<OverviewStats>('/manager/overview'),
+  });
+
+  // The modal is used only for EDITING property details (Add uses the wizard at
+  // /dashboard/manager/properties/add, which requires a landlord context).
   async function handleSaveProperty(form: PropertyFormData, titleDeed?: File | null, drawings?: File[], extraDocs?: Record<string, File[]>) {
     if (!propertyModal.editing) return;
     const propertyId = propertyModal.editing.id;
-    await apiPatch(`/properties/${propertyId}`, formToCreateDto(form));
+    await apiPatch(`/properties/${propertyId}`, formToUpdateDto(form));
     // Standalone title deed (property-level) + building drawings (multiple).
     if (titleDeed) {
       try {
@@ -156,33 +357,29 @@ export default function ManagerPropertiesPage() {
     }
     const docErrs = await uploadExtraPropertyDocs(propertyId, extraDocs);
     if (docErrs.length) alert(`Saved, but some documents failed to upload:\n${docErrs.join('\n')}`);
-    await queryClient.invalidateQueries({ queryKey: ['manager-properties'] });
+    await qc.invalidateQueries({ queryKey: ['manager-properties'] });
     setPropertyModal({ open: false });
   }
 
-  const { data: properties = [], isLoading } = useQuery<ManagedProperty[]>({
-    queryKey: ['manager-properties'],
-    queryFn:  () => apiGet<ManagedProperty[]>('/manager/properties'),
-  });
-  const { data: stats } = useQuery<OverviewStats>({
-    queryKey: ['manager-overview'],
-    queryFn:  () => apiGet<OverviewStats>('/manager/overview'),
-  });
-
+  // Scope: rp filter (landlord) only — KPIs + type options are portfolio-wide
+  // within the selected landlord, matching the RP portfolio semantics.
   const scoped = useMemo(
     () => properties.filter(p => !rpFilter || p.rentalProviderId === rpFilter),
     [properties, rpFilter],
   );
+  const multiLandlord = !rpFilter;
 
-  // Category filter chips, derived from the loaded properties so land / mixed_use
-  // (and any legacy bucket present) get a chip automatically. 'all' always leads.
-  const categoryTabs = useMemo<string[]>(
-    () => ['all', ...Array.from(new Set(scoped.map(p => p.spaceCategory).filter(Boolean))).sort()],
-    [scoped],
-  );
+  // Type-filter options: the full canonical category list (so every property type
+  // is always selectable), plus any legacy types present in the scoped data.
+  const categoryOptions = useMemo(() => {
+    const canonical = SPACE_CATEGORIES.map((c) => c.id);
+    const present = new Set(scoped.map((p) => p.spaceCategory).filter(Boolean));
+    const extras = Array.from(present).filter((c) => !canonical.includes(c)).sort();
+    return [...canonical, ...extras];
+  }, [scoped]);
 
-  const filtered = scoped.filter(p => {
-    if (category !== 'all' && p.spaceCategory !== category) return false;
+  const filteredProperties = scoped.filter((p) => {
+    if (categoryFilter !== 'all' && p.spaceCategory !== categoryFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       return (
@@ -196,16 +393,35 @@ export default function ManagerPropertiesPage() {
     return true;
   });
 
-  // Grid view is master–detail: expandedId = the property whose listings show
-  // in the side panel. Null (or filtered-out) → the panel shows a prompt.
-  const selectedManaged = filtered.find(p => p.id === expandedId) ?? null;
+  // Apply the chosen sort (default keeps API order — newest first).
+  const visibleProperties = useMemo(() => {
+    const occRate = (p: ManagedProperty) => (p.occupiedCount ?? 0) / ((p.unitCount ?? 0) || 1);
+    const vacancies = (p: ManagedProperty) => Math.max(0, (p.unitCount ?? 0) - (p.occupiedCount ?? 0));
+    const list = filteredProperties.slice();
+    if (sort === 'rent') list.sort((a, b) => (b.rentTotal ?? 0) - (a.rentTotal ?? 0));
+    else if (sort === 'occ') list.sort((a, b) => occRate(b) - occRate(a));
+    else if (sort === 'vac') list.sort((a, b) => vacancies(b) - vacancies(a));
+    else if (sort === 'name') list.sort((a, b) => a.buildingName.localeCompare(b.buildingName));
+    return list;
+  }, [filteredProperties, sort]);
 
-  // KPIs — scoped to the selected landlord, or all
-  const kpiProps = rpFilter
-    ? (stats?.rps.find(r => r.id === rpFilter)?.propertyCount ?? scoped.length)
-    : (stats?.properties ?? properties.length);
-  const kpiUnits     = rpFilter ? undefined : stats?.units;
-  const kpiContracts = rpFilter ? undefined : stats?.activeContracts;
+  // ── Property-level KPIs (from the scoped properties list) ──
+  const totalProperties = scoped.length;
+  const totalUnits      = scoped.reduce((sum, p) => sum + (p.unitCount ?? 0), 0);
+  const totalOccupied   = scoped.reduce((sum, p) => sum + (p.occupiedCount ?? 0), 0);
+  const totalVacant     = Math.max(0, totalUnits - totalOccupied);
+  const occRate         = totalUnits ? Math.round((totalOccupied / totalUnits) * 100) : 0;
+  const totalRent       = scoped.reduce((sum, p) => sum + (p.rentTotal ?? 0), 0);
+  const landlordCount   = rpFilter ? 1 : (stats?.rps.length ?? 0);
+
+  const kpis: Array<{ label: string; value: string; sub: string; icon: ReactNode; iconBg: string; iconColor: string; color: string }> = [
+    { label: 'PROPERTIES', value: String(totalProperties), sub: rpFilter ? 'For this landlord' : 'Across your landlords', icon: <Building2 size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
+    { label: 'TOTAL UNITS', value: String(totalUnits), sub: 'Across all properties', icon: <DoorClosed size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
+    { label: 'OCCUPANCY', value: `${occRate}%`, sub: `${totalOccupied} occupied · ${totalVacant} vacant`, icon: <Gauge size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
+    { label: 'ANNUAL RENT', value: fmtRentKpi(totalRent), sub: 'Gross across portfolio', icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
+  ];
+
+  const filtersDirty = !!search || categoryFilter !== 'all' || sort !== 'default';
 
   // ── Permission gate ──
   if (!permsLoading && !can('canListProperties')) {
@@ -224,207 +440,208 @@ export default function ManagerPropertiesPage() {
     <div className={s.app}>
       <div className={s.main}>
 
-        {/* Hero — same chrome as RP, switcher replaces "Add property" */}
-        <div className={s.hero}>
-          <div className={s.heroLeft}>
-            <div className={s.heroEyebrow}><Building2 size={12} /> Portfolio</div>
-            <h1 className={s.heroTitle}>Managed properties</h1>
-            <p className={s.heroDesc}>
-              {kpiProps === 0
+        {/* Hero */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, letterSpacing: '.1em', color: '#1a7a4f' }}>
+              <Briefcase size={13} /> PORTFOLIO
+            </div>
+            <h1 style={{ margin: '6px 0 0', fontSize: 30, fontWeight: 800, letterSpacing: '-.025em', color: '#1d2823' }}>Managed properties</h1>
+            <p style={{ margin: '10px 0 0', fontSize: 14, color: '#6b756f', maxWidth: '54ch', lineHeight: 1.55 }}>
+              {totalProperties === 0
                 ? 'No properties assigned to you yet — your landlords will appear here once they grant access.'
-                : `Managing ${kpiProps} propert${kpiProps === 1 ? 'y' : 'ies'}${rpFilter ? '' : ` across your landlords`}.`}
+                : `Managing ${totalProperties} propert${totalProperties === 1 ? 'y' : 'ies'}${rpFilter ? ' for this landlord' : landlordCount ? ` across ${landlordCount} landlord${landlordCount === 1 ? '' : 's'}` : ''}.`}
             </p>
           </div>
-          <div className={s.heroRight}>
-            {can('canEditProperties') && (
-              <button
-                type="button"
-                className={cn(s.btn, s.btnPrimary)}
-                style={rpFilter ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
-                title={rpFilter ? 'Add a property on this landlord’s behalf' : 'Pick a landlord from the switcher first'}
-                onClick={() => rpFilter
-                  ? router.push(`/dashboard/manager/properties/add?rp=${rpFilter}`)
-                  : alert('Select a specific landlord (top-right) to add a property on their behalf.')}
-              >
-                <Plus size={14} /> Add property
-              </button>
-            )}
-          </div>
+          {can('canEditProperties') && (
+            <button
+              type="button"
+              className={s.dxAddBtn}
+              style={rpFilter ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
+              title={rpFilter ? 'Add a property on this landlord’s behalf' : 'Pick a landlord from the switcher first'}
+              onClick={() => rpFilter
+                ? router.push(`/dashboard/manager/properties/add?rp=${rpFilter}`)
+                : alert('Select a specific landlord (top-right) to add a property on their behalf.')}
+            >
+              <Plus size={17} /> Add property
+            </button>
+          )}
         </div>
 
         {/* KPI strip */}
-        {kpiProps > 0 && (
-          <div className={s.summary}>
-            <div className={s.kpi}>
-              <div className={s.kpiLbl}>Properties</div>
-              <div className={s.kpiVal}>{kpiProps}</div>
-              <div className={s.kpiSub}>{rpFilter ? 'For this landlord' : 'Across all landlords'}</div>
-            </div>
-            {kpiUnits != null && (
-              <div className={s.kpi}>
-                <div className={s.kpiLbl}>Total units</div>
-                <div className={s.kpiVal}>{kpiUnits}</div>
-                <div className={s.kpiSub}>Across all properties</div>
+        {totalProperties > 0 && (
+          <div className={s.dxKpiGrid}>
+            {kpis.map((k) => (
+              <div key={k.label} style={{ background: '#fff', border: '1px solid #e7ebe6', borderRadius: 14, padding: '16px 18px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 30, height: 30, flex: '0 0 30px', borderRadius: 9, background: k.iconBg, color: k.iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{k.icon}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: '#a0a8a1' }}>{k.label}</span>
+                </div>
+                <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-.02em', color: k.color, marginTop: 11, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
+                <div style={{ fontSize: 11.5, color: '#9aa39c', marginTop: 2 }}>{k.sub}</div>
               </div>
-            )}
-            {kpiContracts != null && (
-              <div className={s.kpi}>
-                <div className={s.kpiLbl}>Active leases</div>
-                <div className={s.kpiVal}>{kpiContracts}</div>
-                <div className={s.kpiSub}>Currently occupied</div>
-              </div>
-            )}
-            <div className={s.kpi}>
-              <div className={s.kpiLbl}>Landlords</div>
-              <div className={s.kpiVal}>{rpFilter ? 1 : (stats?.rps.length ?? 0)}</div>
-              <div className={s.kpiSub}>You manage</div>
-            </div>
+            ))}
           </div>
         )}
 
-        {/* Range tabs */}
-        <div className={s.rangetabs}>
-          <div className={s.rangetabsTabs}>
-            {categoryTabs.map(key => {
-              const label = key === 'all' ? 'All' : categoryLabel(key);
-              const count = key === 'all' ? scoped.length : scoped.filter(p => p.spaceCategory === key).length;
-              return (
-                <button key={key} type="button" onClick={() => setCategory(key)}
-                  className={cn(s.rangetabBtn, category === key && s.active)}>
-                  {label}<span className={s.rangetabCount}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Search + view toggle */}
-        {kpiProps > 0 && (
-          <div className={s.filters}>
-            <div className={s.search}>
-              <Search size={14} className={s.searchIc} />
-              <input type="text" placeholder="Search building, area, emirate…"
-                value={search} onChange={e => setSearch(e.target.value)} />
-              {search && <button type="button" className={s.searchClear} onClick={() => setSearch('')}><X size={12} /></button>}
+        {/* Controls — search · type · sort · view toggle */}
+        {totalProperties > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+              <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#9aa39c', display: 'inline-flex' }}><Search size={17} /></span>
+              <input
+                type="text"
+                placeholder="Search building, area, emirate…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ width: '100%', fontSize: 14, color: '#1d2823', background: '#fff', border: '1px solid #e2e7e1', borderRadius: 11, padding: '11px 14px 11px 40px', outline: 'none' }}
+              />
             </div>
+
+            {/* Property-type dropdown */}
+            {categoryOptions.length > 0 && (
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={SELECT_STYLE}>
+                <option value="all">All property types</option>
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c}>{categoryLabel(c)}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Sort dropdown */}
+            <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={SELECT_STYLE}>
+              <option value="default">Sort: Default</option>
+              <option value="rent">Rent (high → low)</option>
+              <option value="occ">Occupancy</option>
+              <option value="vac">Vacancies first</option>
+              <option value="name">Name A–Z</option>
+            </select>
 
             {/* View toggle — Row · Grid · Map */}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, padding: 4, borderRadius: 10, background: '#f1efe9' }}>
-              {([['row', Rows3, 'Row'], ['grid', LayoutGrid, 'Grid'], ['map', MapIcon, 'Map']] as const).map(([v, Icon, label]) => (
-                <button key={v} type="button" onClick={() => setView(v)} title={`${label} view`} aria-pressed={view === v}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                    fontSize: 12.5, fontWeight: 600, border: 0, cursor: 'pointer',
-                    ...(view === v
-                      ? { background: '#fff', color: '#1a1916', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }
-                      : { background: 'transparent', color: '#6b6860' }),
-                  }}>
-                  <Icon size={15} /> <span>{label}</span>
-                </button>
-              ))}
+            <div style={{ display: 'flex', background: '#eef1ec', borderRadius: 11, padding: 3 }}>
+              {([['row', Rows3, 'Row'], ['grid', LayoutGrid, 'Grid'], ['map', MapIcon, 'Map']] as const).map(([v, Icon, label]) => {
+                const active = view === v;
+                return (
+                  <button key={v} type="button" onClick={() => setView(v)} title={`${label} view`} aria-pressed={active}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700,
+                      padding: '7px 13px', borderRadius: 9, cursor: 'pointer', border: 0,
+                      color: active ? '#1d2823' : '#7d8780', background: active ? '#fff' : 'transparent',
+                      boxShadow: active ? '0 1px 3px rgba(20,40,30,.12)' : 'none',
+                    }}>
+                    <Icon size={14} /> {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* List */}
-        {isLoading || permsLoading ? (
+        {/* Result count */}
+        {!isLoading && !permsLoading && totalProperties > 0 && (
+          <div style={{ fontSize: 12.5, color: '#8a938c', marginBottom: 12 }}>
+            Showing <span style={{ color: '#1d2823', fontWeight: 700 }}>{visibleProperties.length}</span> of {totalProperties} properties
+          </div>
+        )}
+
+        {/* Error — surfaced instead of the misleading "no properties" empty state */}
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', background: 'var(--danger-bg)', color: 'var(--danger-fg)', borderRadius: 10, marginBottom: 16, fontSize: 13.5 }}>
+            <AlertCircle size={14} /> {(error as Error).message || 'Could not load properties. Please try again.'}
+          </div>
+        )}
+
+        {/* Loading */}
+        {(isLoading || permsLoading) && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '60px 0', color: 'var(--mute)' }}>
             <Loader2 size={18} className="animate-spin" /> Loading properties…
           </div>
-        ) : filtered.length === 0 ? (
+        )}
+
+        {/* First-run empty state (only when the fetch succeeded and returned none) */}
+        {!isLoading && !permsLoading && !error && scoped.length === 0 && (
           <div className={s.empty}>
-            <div className={s.emptyIc}><Building2 size={20} /></div>
-            <h3 className={s.emptyTtl}>{search || category !== 'all' ? 'No matches' : 'No properties yet'}</h3>
-            <p className={s.emptyDesc}>
-              {search || category !== 'all' ? 'Try a different search or filter.' : 'Your landlords haven’t assigned any properties to you yet.'}
-            </p>
+            <div className={s.emptyIc}><Building2 size={22} /></div>
+            <h3 className={s.emptyTtl}>No properties yet</h3>
+            <p className={s.emptyDesc}>Your landlords haven’t assigned any properties to you yet.</p>
           </div>
-        ) : (
-          <>
-            {/* Row — accordion */}
-            {view === 'row' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {filtered.map(p => (
-                  <PropertyCard
-                    key={p.id}
-                    p={p}
-                    expanded={expandedId === p.id}
-                    onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
-                    canEdit={can('canEditProperties')}
-                    onEdit={() => setPropertyModal({ open: true, editing: p })}
-                    multiLandlord={!rpFilter}
-                    onShowDetails={() => setDetailsProperty(p)}
-                    onPreviewUnit={(u) => setUnitPreview({ property: p, unit: u })}
-                  />
-                ))}
-              </div>
-            )}
+        )}
 
-            {/* Grid — master–detail (tiles left, selected property's units right) */}
-            {view === 'grid' && (
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {filtered.map(p => (
-                    <ManagerPropertyGridCard
-                      key={p.id}
-                      p={p}
-                      selected={expandedId === p.id}
-                      multiLandlord={!rpFilter}
-                      canEdit={can('canEditProperties')}
-                      onSelect={() => setExpandedId(expandedId === p.id ? null : p.id)}
-                      onEdit={() => setPropertyModal({ open: true, editing: p })}
-                      onShowDetails={() => setDetailsProperty(p)}
-                    />
-                  ))}
-                </div>
-                <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-auto">
-                  {selectedManaged ? (
-                    <ManagerUnitsPanel
-                      p={selectedManaged}
-                      canEdit={can('canEditProperties')}
-                      onEdit={() => setPropertyModal({ open: true, editing: selectedManaged })}
-                      onPreviewUnit={(u) => setUnitPreview({ property: selectedManaged, unit: u })}
-                    />
-                  ) : (
-                    <div className="rounded-2xl bg-white p-10 text-center" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-                      <Building2 size={22} className="mx-auto mb-2" style={{ color: '#c5c3bc' }} />
-                      <p className="text-sm" style={{ color: '#9b9890' }}>Select a property to see its unit listings.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+        {/* ── Main content (Row · Grid · Map). Every card opens the popup. ── */}
+        {!isLoading && !permsLoading && visibleProperties.length > 0 && view === 'row' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {visibleProperties.map((p) => (
+              <PropertyCard
+                key={p.id}
+                vm={toCardVM(p, multiLandlord)}
+                canEdit={can('canEditProperties')}
+                onEdit={() => setPropertyModal({ open: true, editing: p })}
+                onShowDetails={() => setDetailsProperty(p)}
+              />
+            ))}
+          </div>
+        )}
 
-            {/* Map — inline */}
-            {view === 'map' && (
-              <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-                <PortfolioMapView
-                  heightClass="h-[68vh]"
-                  properties={filtered.map(p => ({
-                    id: p.id,
-                    buildingName: p.buildingName,
-                    latitude: p.latitude ?? null,
-                    longitude: p.longitude ?? null,
-                    fullAddress: p.fullAddress ?? null,
-                    unitCount: p.unitCount,
-                    coverPhotoUrl: p.coverPhotoUrl,
-                    spaceCategory: p.spaceCategory,
-                  }))}
-                  onViewDetails={(id) => {
-                    const p = filtered.find((x) => x.id === id);
-                    if (p) setDetailsProperty(p);
-                  }}
-                  onEdit={can('canEditProperties') ? (id) => {
-                    const p = filtered.find((x) => x.id === id);
-                    if (p) setPropertyModal({ open: true, editing: p });
-                  } : undefined}
-                />
-              </div>
+        {!isLoading && !permsLoading && visibleProperties.length > 0 && view === 'grid' && (
+          <div className={s.dxGrid}>
+            {visibleProperties.map((p) => (
+              <PropertyGridCard
+                key={p.id}
+                vm={toCardVM(p, multiLandlord)}
+                canEdit={can('canEditProperties')}
+                onEdit={() => setPropertyModal({ open: true, editing: p })}
+                onShowDetails={() => setDetailsProperty(p)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Map — full-width. Click a pin to surface that property's details. */}
+        {!isLoading && !permsLoading && visibleProperties.length > 0 && view === 'map' && (
+          <div style={{ background: '#fff', borderRadius: 16, padding: 8, boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+            <PortfolioMapView
+              heightClass="h-[78vh]"
+              properties={visibleProperties.map((p) => ({
+                id: p.id,
+                buildingName: p.buildingName,
+                latitude: p.latitude ?? null,
+                longitude: p.longitude ?? null,
+                fullAddress: p.fullAddress ?? null,
+                unitCount: p.unitCount,
+                occupiedCount: p.occupiedCount,
+                rentTotal: p.rentTotal,
+                coverPhotoUrl: p.coverPhotoUrl,
+                spaceCategory: p.spaceCategory,
+              }))}
+              onViewDetails={(id) => {
+                const p = visibleProperties.find((x) => x.id === id);
+                if (p) setDetailsProperty(p);
+              }}
+              onEdit={can('canEditProperties') ? (id) => {
+                const p = visibleProperties.find((x) => x.id === id);
+                if (p) setPropertyModal({ open: true, editing: p });
+              } : undefined}
+            />
+          </div>
+        )}
+
+        {/* No matches for the active search / filters (Row + Grid views). */}
+        {!isLoading && !permsLoading && scoped.length > 0 && visibleProperties.length === 0 && view !== 'map' && (
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9aa39c' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#3a443d' }}>No properties match your search</div>
+            <div style={{ fontSize: 13, marginTop: 5 }}>Try a different name, area, or type.</div>
+            {filtersDirty && (
+              <button type="button" onClick={() => { setSearch(''); setCategoryFilter('all'); setSort('default'); }}
+                style={{ marginTop: 14, fontSize: 12.5, fontWeight: 600, color: '#1a7a4f', background: 'transparent', border: 0, cursor: 'pointer', textDecoration: 'underline' }}>
+                Clear filters
+              </button>
             )}
-          </>
+          </div>
         )}
       </div>
 
+      {/* ── Modals ── */}
+      {/* Edit only — Add uses the wizard (needs a landlord context). */}
       <PropertyFormModal
         open={propertyModal.open}
         title={propertyModal.editing ? 'Edit Property' : 'Add Property'}
@@ -455,7 +672,9 @@ export default function ManagerPropertiesPage() {
         onClose={() => setPropertyModal({ open: false })}
         onSave={handleSaveProperty}
       />
-      {/* Read-only preview popups + map (shared components, manager-scoped data) */}
+
+      {/* Read-only preview popup (shared component, manager-scoped data). Units +
+          documents live inside it — fetched from the scoped /manager base. */}
       {detailsProperty && (
         <PropertyDetailsModal
           fetchBase="/manager/properties"
@@ -469,7 +688,7 @@ export default function ManagerPropertiesPage() {
             fullAddress: detailsProperty.fullAddress ?? null,
             emirateName: detailsProperty.emirate?.nameEn ?? null,
             communityName: detailsProperty.community?.nameEn ?? null,
-            street: null,
+            street: detailsProperty.street ?? null,
             makaniNumber: detailsProperty.makaniNumber ?? null,
             plotNumber: detailsProperty.plotNumber ?? null,
             latitude: detailsProperty.latitude ?? null,
@@ -485,7 +704,11 @@ export default function ManagerPropertiesPage() {
             createdAt: '',
             unitCount: detailsProperty.unitCount,
           }}
-          stats={detailsProperty.unitCount != null ? { units: detailsProperty.unitCount, occupied: 0, rentTotal: 0 } : null}
+          stats={{
+            units: detailsProperty.unitCount ?? 0,
+            occupied: detailsProperty.occupiedCount ?? 0,
+            rentTotal: detailsProperty.rentTotal ?? 0,
+          }}
           onEdit={can('canEditProperties') ? () => {
             const editing = detailsProperty;
             setDetailsProperty(null);
@@ -494,285 +717,6 @@ export default function ManagerPropertiesPage() {
           onClose={() => setDetailsProperty(null)}
         />
       )}
-      {unitPreview && (
-        <UnitPreviewModal
-          propertyId={unitPreview.property.id}
-          propertyName={unitPreview.property.buildingName}
-          fetchBase="/manager/properties"
-          fetchQuery={`rp=${unitPreview.property.rentalProviderId}`}
-          unit={{
-            id: unitPreview.unit.id,
-            propertyId: unitPreview.property.id,
-            unitNumber: unitPreview.unit.unitNumber,
-            unitName: null,
-            unitType: unitPreview.unit.unitType,
-            unitTier: '',
-            floor: null,
-            premiseNumber: null,
-            bedrooms: unitPreview.unit.bedrooms,
-            bathrooms: unitPreview.unit.bathrooms,
-            unitSizeSqft: unitPreview.unit.unitSizeSqft != null ? Number(unitPreview.unit.unitSizeSqft) : null,
-            unitSizeSqm: unitPreview.unit.unitSizeSqm != null ? Number(unitPreview.unit.unitSizeSqm) : null,
-            view: unitPreview.unit.view,
-            furnishing: null,
-            facilities: null,
-            rentalPrice: unitPreview.unit.rentalPrice != null ? Number(unitPreview.unit.rentalPrice) : null,
-            marketPrice: unitPreview.unit.marketPrice != null ? Number(unitPreview.unit.marketPrice) : null,
-            securityDeposit: null,
-            adminFee: null,
-            ejariFeeFils: null,
-            commission: null,
-            serviceCharges: null,
-            availability: unitPreview.unit.availability,
-            description: null,
-            isListed: unitPreview.unit.listingStatus === 'published',
-            listingStatus: unitPreview.unit.listingStatus,
-          }}
-          onClose={() => setUnitPreview(null)}
-        />
-      )}
     </div>
   );
 }
-
-/* ── Property card — mirrors the RP portfolio accordion (units on expand) ── */
-function PropertyCard({
-  p, expanded, onToggle, canEdit, onEdit, multiLandlord, onShowDetails, onPreviewUnit,
-}: {
-  p: ManagedProperty; expanded: boolean; onToggle: () => void; canEdit: boolean; onEdit: () => void; multiLandlord: boolean;
-  onShowDetails: () => void; onPreviewUnit: (u: ManagedUnit) => void;
-}) {
-  const loc = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ') || p.fullAddress || '—';
-  const { data: units = [], isLoading: unitsLoading } = useQuery<ManagedUnit[]>({
-    queryKey: ['manager-units', p.id],
-    queryFn:  () => apiGet<ManagedUnit[]>(`/manager/properties/${p.id}/units`),
-    enabled:  expanded,
-  });
-
-  return (
-    <div className={cn(s.prop, expanded && s.expanded)}>
-      <div className={s.propH} role="button" onClick={onToggle}>
-        <div className={s.propInfo}>
-          <div className={s.propName}>
-            {p.buildingName || 'Unnamed Property'}
-            <span className={s.propCat}>{categoryLabel(p.spaceCategory)}</span>
-          </div>
-          <div className={s.propAddr}>
-            <MapPin size={12} />
-            <span>{loc}</span>
-            {p.makaniNumber && <code>Makani {p.makaniNumber}</code>}
-          </div>
-        </div>
-        <div className={s.propAgg}>
-          <div className={s.aggItem}>
-            <div className={s.aggV}>{p.unitCount ?? 0}</div>
-            <div className={s.aggL}>Units</div>
-          </div>
-          {(p.listedCount ?? 0) > 0 && (
-            <div className={s.aggItem}>
-              <div className={s.aggV}>{p.listedCount}</div>
-              <div className={s.aggL}>Listed</div>
-            </div>
-          )}
-          {multiLandlord && (
-            <div className={s.aggItem}>
-              <div className={s.aggV} style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-primary)', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.rpName ?? '—'}</div>
-              <div className={s.aggL}>Landlord</div>
-            </div>
-          )}
-          <button
-            type="button"
-            className={s.actsBtn}
-            title="View property details"
-            aria-label="View property details"
-            onClick={(e) => { e.stopPropagation(); onShowDetails(); }}
-          >
-            <Eye size={14} />
-          </button>
-          {canEdit && (
-            <button
-              type="button"
-              className={s.actsBtn}
-              title="Edit property"
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-          <ChevronDown size={16} className={s.chev} />
-        </div>
-      </div>
-
-      {expanded && (
-        <div className={s.propBody}>
-          <div className={s.unitH}>
-            <div className={s.unitHTtl}>Units ({units.length})</div>
-          </div>
-          <ManagerUnitsList units={units} loading={unitsLoading} canEdit={canEdit} onPreviewUnit={onPreviewUnit} onEdit={onEdit} />
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-/* ── Shared unit rendering (Row accordion + Grid side panel) ── */
-function pillFor(u: ManagedUnit) {
-  if (u.availability === 'occupied')    return { cls: s.pillOcc,       label: 'Occupied' };
-  if (u.availability === 'maintenance') return { cls: s.pillMaint,     label: 'Maintenance' };
-  switch (u.listingStatus) {
-    case 'published': return { cls: s.pillPublished, label: 'Published' };
-    case 'pending':   return { cls: s.pillPending,   label: 'Pending' };
-    case 'in_review': return { cls: s.pillReview,    label: 'In review' };
-    case 'rejected':  return { cls: s.pillRejected,  label: 'Rejected' };
-    default:          return { cls: s.pillDraft,     label: 'Draft' };
-  }
-}
-
-function ManagerUnitsList({ units, loading, canEdit, onPreviewUnit, onEdit }: {
-  units: ManagedUnit[]; loading: boolean; canEdit: boolean;
-  onPreviewUnit: (u: ManagedUnit) => void; onEdit: () => void;
-}) {
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '20px 0', color: 'var(--mute)', fontSize: 13 }}>
-      <Loader2 size={14} className="animate-spin" /> Loading units…
-    </div>
-  );
-  if (units.length === 0) return (
-    <div className={s.empty}>
-      <div className={s.emptyIc}><Building2 size={18} /></div>
-      <h3 className={s.emptyTtl}>No units</h3>
-      <p className={s.emptyDesc}>This property has no units yet.</p>
-    </div>
-  );
-  return (
-    <div className={s.units}>
-      {units.map(u => {
-        const info = pillFor(u);
-        const sizeStr = u.unitSizeSqft
-          ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
-          : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
-        return (
-          <div key={u.id} className={s.unit}>
-            <div className={s.unitNum}>{u.unitNumber}</div>
-            <div className={s.unitMeta}>
-              <div className={s.unitTop}>
-                <span className={s.unitType}>{u.unitType.replace(/_/g, ' ')}</span>
-                {u.bedrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bedrooms} BR</span></>)}
-                {u.bathrooms != null && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.bathrooms} BA</span></>)}
-                {sizeStr && (<><span className={s.unitDot} /><span className={s.unitSpec}>{sizeStr}</span></>)}
-                {u.view && (<><span className={s.unitDot} /><span className={s.unitSpec}>{u.view}</span></>)}
-              </div>
-            </div>
-            <div className={s.unitRight}>
-              {(u.rentalPrice ?? u.marketPrice) && (
-                <div className={s.unitPrice}>
-                  AED {Number(u.rentalPrice ?? u.marketPrice).toLocaleString('en-AE')}<small>per year</small>
-                </div>
-              )}
-              <span className={cn(s.pill, info.cls)}><span className={s.pdot} /> {info.label}</span>
-              <div className={s.unitActs}>
-                <button type="button" className={s.actsBtn} title="Preview unit" onClick={() => onPreviewUnit(u)}>
-                  <Eye size={14} />
-                </button>
-                {canEdit && (
-                  <button type="button" className={s.actsBtn} title="Edit property" onClick={onEdit}>
-                    <Pencil size={14} />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ── Property grid card (Grid view, master–detail) ── */
-function ManagerPropertyGridCard({
-  p, selected, multiLandlord, canEdit, onSelect, onEdit, onShowDetails,
-}: {
-  p: ManagedProperty; selected: boolean; multiLandlord: boolean; canEdit: boolean;
-  onSelect: () => void; onEdit: () => void; onShowDetails: () => void;
-}) {
-  const loc = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ') || p.fullAddress || '—';
-  const iconBtn: CSSProperties = {
-    width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center',
-    justifyContent: 'center', background: '#fff', border: '1px solid #e8e6e0', cursor: 'pointer',
-  };
-  return (
-    <div onClick={onSelect} role="button" aria-pressed={selected}
-      className="flex flex-col overflow-hidden cursor-pointer"
-      style={{
-        background: '#fff', borderRadius: 16,
-        boxShadow: selected
-          ? '0 0 0 2px #2e9f82, 0 2px 12px -2px rgba(0,0,0,0.10)'
-          : '0 2px 12px -2px rgba(0,0,0,0.06)',
-      }}>
-      <div className="p-5 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="font-semibold text-base truncate" style={{ color: '#1a1916' }}>{p.buildingName || 'Unnamed Property'}</div>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1.5 inline-block" style={{ background: '#f1efe9', color: '#57544d' }}>{categoryLabel(p.spaceCategory)}</span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button type="button" onClick={(e) => { e.stopPropagation(); onShowDetails(); }} title="View property details" style={iconBtn}><Eye size={14} color="#6b6860" /></button>
-            {canEdit && <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit property" style={iconBtn}><Pencil size={14} color="#6b6860" /></button>}
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 mt-2.5 text-xs" style={{ color: '#6b6860' }}>
-          <MapPin size={12} className="shrink-0" /><span className="truncate">{loc}</span>
-        </div>
-        <div className="flex items-end gap-5 mt-4">
-          <div>
-            <div className="text-lg font-bold" style={{ color: '#1a1916' }}>{p.unitCount ?? 0}</div>
-            <div className="text-[11px]" style={{ color: '#9b9890' }}>Units</div>
-          </div>
-          {(p.listedCount ?? 0) > 0 && (
-            <div>
-              <div className="text-lg font-bold" style={{ color: '#1a1916' }}>{p.listedCount}</div>
-              <div className="text-[11px]" style={{ color: '#9b9890' }}>Listed</div>
-            </div>
-          )}
-          {multiLandlord && p.rpName && (
-            <div className="ml-auto text-right min-w-0">
-              <div className="text-xs font-semibold truncate" style={{ color: 'var(--color-primary, #2e9f82)', maxWidth: 120 }}>{p.rpName}</div>
-              <div className="text-[11px]" style={{ color: '#9b9890' }}>Landlord</div>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold"
-        style={{ borderTop: '1px solid #f0ede8', color: selected ? '#2e9f82' : '#6b6860' }}>
-        {selected ? <>Showing units <Check size={13} /></> : <>View units <ArrowRight size={13} /></>}
-      </div>
-    </div>
-  );
-}
-
-/* ── Side panel — the selected property's units (own fetch) ── */
-function ManagerUnitsPanel({ p, canEdit, onEdit, onPreviewUnit }: {
-  p: ManagedProperty; canEdit: boolean; onEdit: () => void; onPreviewUnit: (u: ManagedUnit) => void;
-}) {
-  const loc = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ') || p.fullAddress || '—';
-  const { data: units = [], isLoading } = useQuery<ManagedUnit[]>({
-    queryKey: ['manager-units', p.id],
-    queryFn:  () => apiGet<ManagedUnit[]>(`/manager/properties/${p.id}/units`),
-  });
-  return (
-    <div className={cn(s.prop, s.expanded)}>
-      <div style={{ padding: '16px 18px 0' }}>
-        <div className="font-semibold text-base" style={{ color: '#1a1916' }}>{p.buildingName || 'Unnamed Property'}</div>
-        <div className="flex items-center gap-1.5 text-xs mt-1" style={{ color: '#6b6860' }}>
-          <MapPin size={12} className="shrink-0" /><span className="truncate">{loc}</span>
-        </div>
-      </div>
-      <div className={s.propBody}>
-        <div className={s.unitH}><div className={s.unitHTtl}>Units ({units.length})</div></div>
-        <ManagerUnitsList units={units} loading={isLoading} canEdit={canEdit} onPreviewUnit={onPreviewUnit} onEdit={onEdit} />
-      </div>
-    </div>
-  );
-}
-
