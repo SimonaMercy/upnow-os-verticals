@@ -20,11 +20,17 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 
 interface Pkg { id: number; name: string; basePrice: number | null; estimatedDuration: number | null; estimatedDurationMax: number | null }
+interface SvcAddon { id: number; code: string; name: string; price: number; priceUnit: string }
 interface Svc {
   id: number; code: string; name: string; description: string | null;
   priceUnit: string; pricingMode: string; basePrice: number | null; isFromPrice: boolean;
   isEmergency: boolean; estimatedDuration: number | null; estimatedDurationMax: number | null;
-  packageGroupLabel: string | null; packages: Pkg[];
+  packageGroupLabel: string | null;
+  quantityLabel: string | null;
+  quantityMin: number;
+  quantityMax: number | null;
+  addons: SvcAddon[];
+  packages: Pkg[];
 }
 interface Cat { id: number; code: string; name: string; services: Svc[] }
 
@@ -45,6 +51,8 @@ export default function BookServicePage() {
   // selections
   const [pkgId, setPkgId] = useState<number | null>(null);
   const [hours, setHours] = useState<number>(2);
+  const [qty, setQty] = useState<number>(1);
+  const [addonIds, setAddonIds] = useState<Set<number>>(new Set());
   const [day, setDay] = useState<string>('');
   const [hour, setHour] = useState<number | null>(null);
   const [address, setAddress] = useState('');
@@ -68,6 +76,7 @@ export default function BookServicePage() {
       .then((d: { categories?: Cat[] }) => {
         const found = (d.categories ?? []).flatMap((c) => c.services).find((s) => s.code === code) ?? null;
         setSvc(found);
+        if (found?.quantityLabel) setQty(found.quantityMin || 1);
       })
       .catch(() => setSvc(null))
       .finally(() => setLoading(false));
@@ -94,11 +103,18 @@ export default function BookServicePage() {
   // Display-only estimate — the server recomputes authoritatively on submit.
   const estimate = useMemo(() => {
     if (!svc || isQuote) return null;
-    if (isHourly) return (chosenPkg?.basePrice ?? svc.basePrice ?? 0) * hours;
-    if (chosenPkg) return chosenPkg.basePrice;
-    if (hasLadder) return null;
-    return svc.basePrice;
-  }, [svc, isQuote, isHourly, chosenPkg, hours, hasLadder]);
+    const q = svc.quantityLabel ? qty : 1;
+    let base: number | null;
+    if (isHourly) base = (chosenPkg?.basePrice ?? svc.basePrice ?? 0) * hours * q;
+    else if (chosenPkg) base = chosenPkg.basePrice != null ? chosenPkg.basePrice * q : null;
+    else if (hasLadder) base = null;
+    else base = svc.basePrice != null ? svc.basePrice * q : null;
+    if (base == null) return null;
+    const addonsTotal = svc.addons
+      .filter((a) => addonIds.has(a.id))
+      .reduce((sum, a) => sum + (a.priceUnit === 'per_hour' ? a.price * (isHourly ? hours : 1) : a.price), 0);
+    return base + addonsTotal;
+  }, [svc, isQuote, isHourly, chosenPkg, hours, hasLadder, qty, addonIds]);
 
   const selectionsComplete =
     Boolean(svc) && Boolean(day) && hour != null && address.trim().length >= 8 &&
@@ -151,6 +167,8 @@ export default function BookServicePage() {
           templateId: svc.id,
           variantId: !isHourly && pkgId != null ? pkgId : undefined,
           hours: isHourly ? hours : undefined,
+          quantity: svc.quantityLabel ? qty : undefined,
+          addonIds: addonIds.size ? [...addonIds] : undefined,
           scheduledAt,
           addressText: address.trim(),
           emirate,
@@ -306,6 +324,68 @@ export default function BookServicePage() {
           </Section>
         )}
 
+        {/* Quantity (admin-configured: Cleaners, AC units, …) */}
+        {svc.quantityLabel && (
+          <Section title={`How many ${svc.quantityLabel.toLowerCase()}?`}>
+            <div className="inline-flex items-center gap-4 rounded-xl border-2 px-4 py-2.5" style={{ borderColor: 'var(--color-base-200)' }}>
+              <button
+                type="button"
+                onClick={() => setQty(Math.max(svc.quantityMin || 1, qty - 1))}
+                className="w-8 h-8 rounded-lg border text-lg font-bold"
+                style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-700)' }}
+              >−</button>
+              <span className="text-base font-bold w-8 text-center" style={{ color: 'var(--color-neutral-900)' }}>{qty}</span>
+              <button
+                type="button"
+                onClick={() => setQty(Math.min(svc.quantityMax ?? 99, qty + 1))}
+                className="w-8 h-8 rounded-lg border text-lg font-bold"
+                style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-700)' }}
+              >+</button>
+            </div>
+          </Section>
+        )}
+
+        {/* Add-ons (admin-configured priced extras) */}
+        {!isQuote && svc.addons.length > 0 && (
+          <Section title="Add-ons">
+            <div className="space-y-2">
+              {svc.addons.map((a) => {
+                const on = addonIds.has(a.id);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setAddonIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(a.id)) next.delete(a.id); else next.add(a.id);
+                      return next;
+                    })}
+                    className="w-full flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left"
+                    style={{
+                      borderColor: on ? 'var(--color-primary)' : 'var(--color-base-200)',
+                      background: on ? 'color-mix(in srgb, var(--color-primary) 6%, white)' : '#fff',
+                    }}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <span
+                        className="w-5 h-5 rounded flex items-center justify-center border-2"
+                        style={{
+                          borderColor: on ? 'var(--color-primary)' : 'var(--color-base-200)',
+                          background: on ? 'var(--color-primary)' : '#fff',
+                        }}
+                      >{on && <CheckCircle2 size={12} style={{ color: '#fff' }} />}</span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--color-neutral-800)' }}>{a.name}</span>
+                    </span>
+                    <span className="text-sm font-bold" style={{ color: 'var(--color-neutral-900)' }}>
+                      +AED {fmtAed(a.price)}{a.priceUnit === 'per_hour' ? '/hr' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
         {/* Schedule */}
         <Section title="When should we come?" icon={CalendarDays}>
           <div className="flex gap-2 overflow-x-auto pb-2">
@@ -377,7 +457,7 @@ export default function BookServicePage() {
         <div className="rounded-3xl border bg-white p-6" style={{ borderColor: 'var(--color-base-200)' }}>
           <div className="flex items-center justify-between mb-1">
             <span className="text-sm" style={{ color: 'var(--color-neutral-500)' }}>
-              {isQuote ? 'Assessment visit' : isHourly ? `${svc.name} · ${hours}h` : chosenPkg ? `${svc.name} — ${chosenPkg.name}` : svc.name}
+              {isQuote ? 'Assessment visit' : `${svc.name}${chosenPkg ? ` — ${chosenPkg.name}` : ''}${isHourly ? ` · ${hours}h` : ''}${svc.quantityLabel ? ` · ${qty} ${svc.quantityLabel.toLowerCase()}` : ''}${addonIds.size ? ` · +${addonIds.size} add-on${addonIds.size > 1 ? 's' : ''}` : ''}`}
             </span>
             <span className="text-lg font-bold" style={{ color: 'var(--color-neutral-900)' }}>
               {isQuote ? 'Free quote' : estimate != null ? `AED ${fmtAed(Number(estimate))}` : '—'}

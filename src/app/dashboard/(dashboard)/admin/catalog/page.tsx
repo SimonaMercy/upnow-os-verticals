@@ -10,12 +10,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees,
-  Building2, Wrench, Pencil, Plus, X, Loader2, RefreshCw, AlertTriangle,
-  Percent, Layers, ListChecks, Tags, BadgePercent, Landmark, Rocket,
-  ChevronUp, ChevronDown,
-} from 'lucide-react';
+import { Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees, Building2, Wrench, Pencil, Plus, X, Loader2, RefreshCw, AlertTriangle, Percent, Layers, ListChecks, Tags, BadgePercent, Landmark, Rocket, ChevronUp, ChevronDown, Trash2 } from 'lucide-react';
 import {
   ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
@@ -51,6 +46,10 @@ interface TemplateVariant {
   basePrice: number; estimatedDuration: number | null; estimatedDurationMax: number | null;
   sortOrder: number; isActive: boolean;
 }
+interface TemplateAddon {
+  id: number; code: string; name: string; nameAr: string | null;
+  price: number; priceUnit: 'flat' | 'per_hour'; sortOrder: number; isActive: boolean;
+}
 interface Template {
   id: number; categoryId: number; categoryCode: string; code: string;
   name: string; nameAr: string | null; description: string | null;
@@ -62,6 +61,11 @@ interface Template {
   variantGroupLabel?: string | null;
   variantCount?: number;               // active variants
   variants?: TemplateVariant[];        // ALL variants incl inactive, sorted sort_order,id
+  // Booking options (migr 0118)
+  quantityLabel?: string | null;
+  quantityMin?: number;
+  quantityMax?: number | null;
+  addons?: TemplateAddon[];            // ALL add-ons incl inactive
 }
 interface CommissionResult {
   globalBps: number;
@@ -548,6 +552,25 @@ export default function AdminCatalogPage() {
                       From-price auto-tracks the cheapest active package · edit rows via Edit
                     </p>
                   </>
+                )}
+                {tpl && (tpl.quantityLabel || (tpl.addons?.length ?? 0) > 0) && (
+                  <div className="border-t border-[#f0ede8]">
+                    <div className="px-4 pt-2.5 pb-1 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">Booking options</div>
+                    {tpl.quantityLabel && (
+                      <p className="px-4 pb-1.5 text-[12px] text-[#1a1916]">
+                        {tpl.quantityLabel}: {tpl.quantityMin ?? 1}–{tpl.quantityMax ?? '∞'}
+                      </p>
+                    )}
+                    <ul>
+                      {(tpl.addons ?? []).map(a => (
+                        <li key={a.id} className={`flex items-center justify-between px-4 py-1.5 text-[12px] ${a.isActive ? '' : 'opacity-55'}`}>
+                          <span className="truncate text-[#1a1916]">{a.name}</span>
+                          <span className="font-semibold tabular-nums text-[#1a1916]">+{fmtAED(a.price)}{a.priceUnit === 'per_hour' ? '/hr' : ''}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="pb-2" />
+                  </div>
                 )}
               </>
             );
@@ -1049,6 +1072,10 @@ function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, on
   const [sortOrder, setSortOrder] = useState(tpl?.sortOrder != null ? String(tpl.sortOrder) : '');
   const [variantGroupLabel, setVariantGroupLabel] = useState(tpl?.variantGroupLabel ?? '');
   const [variants, setVariants] = useState<TemplateVariant[]>(() => (tpl?.variants ?? []).slice());
+  const [addons, setAddons] = useState<TemplateAddon[]>(() => (tpl?.addons ?? []).slice());
+  const [quantityLabel, setQuantityLabel] = useState(tpl?.quantityLabel ?? '');
+  const [quantityMin, setQuantityMin] = useState(String(tpl?.quantityMin ?? 1));
+  const [quantityMax, setQuantityMax] = useState(tpl?.quantityMax != null ? String(tpl.quantityMax) : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1080,6 +1107,11 @@ function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, on
     if (nameAr.trim()) payload.nameAr = nameAr.trim(); else if (!isNew) payload.nameAr = null;
     if (sortOrder.trim() !== '') payload.sortOrder = Number(sortOrder);
     if (!isNew) payload.variantGroupLabel = variantGroupLabel.trim() || null;
+    if (!isNew) {
+      payload.quantityLabel = quantityLabel.trim() || null;
+      payload.quantityMin = Math.max(1, Number(quantityMin) || 1);
+      payload.quantityMax = quantityMax.trim() === '' ? null : Math.max(1, Number(quantityMax) || 1);
+    }
     if (lockedBase) { delete payload.basePrice; delete payload.isFromPrice; } // read-only while variants drive the from-price
     try {
       if (isNew) {
@@ -1179,6 +1211,18 @@ function ServiceModal({ tpl, categories, defaultCategoryId, onClose, onSaved, on
                   onChange={e => setVariantGroupLabel(e.target.value)} />
               </Field>
               <VariantsEditor templateId={tpl.id} variants={variants} setVariants={setVariants} onRefetch={onRefetch} />
+              <Field label="Booking options" hint="Quantity control shown at checkout ('Cleaners', 'AC units') — blank = none. Add-ons are priced extras; per-hour add-ons multiply by booked hours.">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <input className={`${inputCls} flex-1`} placeholder="Quantity label — e.g. Cleaners" value={quantityLabel}
+                    onChange={e => setQuantityLabel(e.target.value)} />
+                  <input className={`${inputCls} !w-16 text-right`} type="number" min={1} placeholder="min" value={quantityMin}
+                    onChange={e => setQuantityMin(e.target.value)} disabled={!quantityLabel.trim()} />
+                  <span className="text-[11px] text-[#9b9890]">–</span>
+                  <input className={`${inputCls} !w-16 text-right`} type="number" min={1} placeholder="max" value={quantityMax}
+                    onChange={e => setQuantityMax(e.target.value)} disabled={!quantityLabel.trim()} />
+                </div>
+                <AddonsEditor templateId={tpl.id} addons={addons} setAddons={setAddons} onRefetch={onRefetch} />
+              </Field>
             </div>
           )}
         </div>
@@ -1316,6 +1360,97 @@ function VariantsEditor({ templateId, variants, setVariants, onRefetch }: {
         >{adding ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Add</button>
       </div>
       {error && <p className="px-2.5 pb-2 pt-1 text-[11px] text-[#b91c1c]">{error}</p>}
+    </div>
+  );
+}
+
+
+/* ═════════════════════════ Add-ons editor (inside service modal) ═════════════════════════ */
+
+function AddonsEditor({ templateId, addons, setAddons, onRefetch }: {
+  templateId: number;
+  addons: TemplateAddon[];
+  setAddons: React.Dispatch<React.SetStateAction<TemplateAddon[]>>;
+  onRefetch: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [addName, setAddName] = useState('');
+  const [addPrice, setAddPrice] = useState('');
+  const [addUnit, setAddUnit] = useState<'flat' | 'per_hour'>('flat');
+  const [adding, setAdding] = useState(false);
+
+  const fail = (e: unknown, fallback: string) => setError(e instanceof Error ? e.message : fallback);
+
+  const patchAddon = async (id: number, body: Record<string, unknown>) => {
+    setError(null);
+    try {
+      const row = await apiPatch<TemplateAddon>(`/admin/catalog/addons/${id}`, body);
+      setAddons(prev => prev.map(a => (a.id === id ? { ...a, ...(row && typeof row.id === 'number' ? row : body) } : a)));
+      onRefetch();
+    } catch (e) { fail(e, 'Add-on update failed.'); }
+  };
+
+  const remove = async (a: TemplateAddon) => {
+    if (!window.confirm(`Delete add-on \u201c${a.name}\u201d? This is permanent.`)) return;
+    setError(null);
+    try {
+      await apiDelete(`/admin/catalog/addons/${a.id}`);
+      setAddons(prev => prev.filter(x => x.id !== a.id));
+      onRefetch();
+    } catch (e) { fail(e, 'Could not delete the add-on.'); }
+  };
+
+  const add = async () => {
+    const price = Number(addPrice);
+    if (!addName.trim()) { setError('Add-on name is required.'); return; }
+    if (addPrice.trim() === '' || !isFinite(price) || !(price > 0)) { setError('Add-on price must be greater than 0.'); return; }
+    setAdding(true); setError(null);
+    try {
+      const row = await apiPost<TemplateAddon>(`/admin/catalog/templates/${templateId}/addons`, {
+        name: addName.trim(), price, priceUnit: addUnit,
+      });
+      if (row && typeof row.id === 'number') setAddons(prev => [...prev, row]);
+      setAddName(''); setAddPrice(''); setAddUnit('flat');
+      onRefetch();
+    } catch (e) { fail(e, 'Could not add the add-on.'); }
+    finally { setAdding(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-[#f0ede8] overflow-hidden">
+      {addons.length > 0 && (
+        <ul className="divide-y divide-[#f0ede8]">
+          {addons.map(a => (
+            <li key={a.id} className={`flex items-center gap-2 px-2.5 py-1.5 ${a.isActive ? '' : 'opacity-55'}`}>
+              <span className="flex-1 min-w-0 truncate text-[12px] text-[#1a1916]">{a.name}</span>
+              <span className="text-[11px] font-semibold tabular-nums text-[#1a1916]">
+                +{fmtAED(a.price)}{a.priceUnit === 'per_hour' ? '/hr' : ''}
+              </span>
+              <Toggle on={a.isActive} onChange={() => patchAddon(a.id, { isActive: !a.isActive })} />
+              <button type="button" onClick={() => remove(a)} title="Delete add-on"
+                className="text-[#c9c6bf] hover:text-[#b91c1c]"><Trash2 size={13} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {addons.length === 0 && (
+        <p className="px-2.5 py-2 text-[11px] text-[#9b9890]">No add-ons — customers see none at checkout.</p>
+      )}
+      <div className="flex items-center gap-1.5 border-t border-[#f0ede8] bg-[#faf9f6] px-2.5 py-2">
+        <input className={`${inputCls} !py-1 flex-1`} placeholder="New add-on — e.g. Cleaning materials" value={addName}
+          onChange={e => setAddName(e.target.value)} />
+        <input className={`${inputCls} !py-1 !w-[70px] text-right`} type="number" min={0} placeholder="AED" value={addPrice}
+          onChange={e => setAddPrice(e.target.value)} />
+        <select className={`${inputCls} !py-1 !w-[86px]`} value={addUnit} onChange={e => setAddUnit(e.target.value as 'flat' | 'per_hour')}>
+          <option value="flat">flat</option>
+          <option value="per_hour">per hour</option>
+        </select>
+        <button type="button" disabled={adding} onClick={add}
+          className="flex items-center gap-1 rounded-lg bg-[#2e9f82] px-2 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
+          {adding ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Add
+        </button>
+      </div>
+      {error && <p className="px-2.5 py-1.5 text-[11px] text-[#b91c1c] border-t border-[#f0ede8]">{error}</p>}
     </div>
   );
 }
