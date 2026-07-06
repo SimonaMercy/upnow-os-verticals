@@ -100,10 +100,22 @@ function pickPrimaryContract(contracts: TenantContract[], unitId: number | null 
   if (!unitId) return undefined;
   const onUnit = contracts.filter(c => c.unit?.id === unitId);
   if (onUnit.length === 0) return undefined;
-  const nonRenewal = onUnit.filter(c => c.contractType !== 'renewal' && !c.parentContractId);
-  const pool = nonRenewal.length > 0 ? nonRenewal : onUnit;
-  const rank = (s: string) => (s === 'active' ? 0 : s === 'issued' ? 1 : s === 'pending' ? 2 : 3);
-  return [...pool].sort((a, b) => rank(a.status) - rank(b.status))[0];
+  // Walk from the TIP of the renewal chain (newest start date, then highest id)
+  // so the row reflects the CURRENT lease / live renewal — NOT the original root.
+  // The old "prefer the non-renewal rootless contract" rule returned the ORIGINAL
+  // lease, which on a renewed unit is expired → the row read "Lease Ended" and
+  // hid both the active renewal lease and its pending renewal offer. Mirrors the
+  // detail page's proven byRecency/tip resolution (spaces/v2/[spaceKey]).
+  const byRecency = (a: TenantContract, b: TenantContract) =>
+    (b.startDate ?? '').localeCompare(a.startDate ?? '') || (b.id - a.id);
+  const tip = [...onUnit].sort(byRecency)[0];
+  // Tip is a renewal still being processed (a pending/issued child) → the CURRENT
+  // in-force lease is its parent; surface the parent so an active lease with a
+  // proposed renewal reads Active/Renewal-Offered, not the pending child.
+  if (tip && tip.parentContractId && tip.status !== 'active') {
+    return onUnit.find(c => c.id === tip.parentContractId) ?? tip;
+  }
+  return tip;
 }
 
 function fmtShort(iso: string) {
@@ -114,6 +126,10 @@ function rowStatusConfig(row: SpaceRow): { label: string; bg: string; text: stri
   const c = row.contract;
 
   if (c) {
+    // A live renewal offer on the active lease is a call-to-action — surface it
+    // ahead of the plain "Active Tenancy" label so the customer acts on it.
+    if (c.status === 'active' && c.renewalAccepted === 'pending')
+      return { label: 'Renewal Offered', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
     if (c.status === 'active') return { label: 'Active Tenancy', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false };
     if (c.status === 'issued' && !c.tenantSignedAt) return { label: 'Sign Contract', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
     if (c.status === 'issued' && c.tenantSignedAt)  return { label: 'Awaiting Ejari', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };

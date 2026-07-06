@@ -47,6 +47,7 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
+import { buildCurrentPlan } from '@/lib/currentPlan';
 import { openDocViewer } from '@/lib/docViewer';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
@@ -238,6 +239,10 @@ interface DerivedState {
   /** Optional utility close-out documents (between move-out and settlement). */
   closeout: { clearance: boolean; finalBill: boolean };
   settlementStatus: 'draft' | 'sent' | 'agreed' | 'paid' | null;
+  /** Renewal 'terms' step is DONE only once the customer actually accepts the
+   *  offer (renewalAccepted='accepted'). While it's merely proposed/pending the
+   *  step is the live "awaiting customer" step — never auto-marked agreed. */
+  termsAccepted: boolean;
 }
 
 function isDone(key: StepKey, st: DerivedState): boolean {
@@ -255,7 +260,7 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     // step machinery skips the "Activate" override for ended leases and lands
     // the RP on the wind-down (or terminal panel) instead.
     case 'active':  return st.status === 'active' || st.status === 'expired' || st.status === 'terminated';
-    case 'terms':   return true; // renewal flow only shows terms once accepted by customer
+    case 'terms':   return st.termsAccepted; // done only once the customer accepts (not merely proposed)
     default:        return false;
   }
 }
@@ -366,6 +371,13 @@ function deriveState(contract: ContractDetail, signatures: { role: string; metho
     moveOutDoc,
     closeout: { clearance, finalBill },
     settlementStatus,
+    // The renewal 'terms' step is done for any renewal that is past the proposal
+    // stage — a still-'pending' proposal is done only once the customer accepts.
+    // `renewalAccepted` is overloaded: on the PROPOSAL child it (mirrored) means
+    // "these terms accepted?"; on a LIVE lease it means "is the NEXT renewal
+    // accepted?" — so keying purely off it would wrongly pull an active lease
+    // (whose own terms were long agreed) back to the Terms step. Gate on status.
+    termsAccepted: contract.status !== 'pending' || contract.renewalAccepted === 'accepted',
   };
 }
 
@@ -1017,12 +1029,55 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
   }
 
   if (key === 'terms') {
+    // The 'terms' step reflects the REAL offer state — it is NOT agreed the moment
+    // the RP sends it. renewalAccepted: 'accepted' → locked in; 'pending' → sent &
+    // awaiting the customer; null/'draft' → not yet sent. In the two not-yet-agreed
+    // states the RP sees the FULL proposed terms (the exact schedule + rent/fees/
+    // discount the customer received), reusing the same PaymentPlanCard rendering as
+    // the "Payment Plan" binder — plus a link to preview the full renewal contract.
+    const ra = h.contract.renewalAccepted;
+    // A live lease (already active/issued) or an accepted proposal → terms agreed.
+    // Only a still-'pending' proposal that hasn't been accepted shows the
+    // "sent/draft, awaiting" state below (status guards against the overloaded
+    // renewalAccepted on an active lease that has its OWN renewal in flight).
+    const isPendingProposal = h.contract.status === 'pending';
+    if (!isPendingProposal || ra === 'accepted') {
+      return {
+        tone: 'celebrate', icon: 'envelope', sub: 'Renewal · step 1', label: 'Terms agreed',
+        headline: 'Renewal terms agreed.',
+        body: `${TEN} accepted the new annual rent of ${fmtAed(h.contract.annualRent)}.`,
+        timing: null,
+        node: <Completed title="Customer accepted the terms" sub="Renewal locked in" />,
+      };
+    }
+    const sent = ra === 'pending';
+    const proposedPlan = buildCurrentPlan(h.contract, h.contract.payments ?? []);
     return {
-      tone: 'celebrate', icon: 'envelope', sub: 'Renewal · step 1', label: 'Terms agreed',
-      headline: 'Renewal terms agreed.',
-      body: `${TEN} accepted the new annual rent of ${fmtAed(h.contract.annualRent)}.`,
-      timing: null,
-      node: <Completed title="Customer accepted the terms" sub="Renewal locked in" />,
+      tone: sent ? 'waiting' : 'action', icon: 'envelope', sub: 'Renewal · step 1', label: 'Terms',
+      headline: sent ? `Renewal sent — awaiting ${TEN}.` : 'Renewal draft — not yet sent.',
+      body: sent
+        ? `These are the exact terms ${TEN} received. They haven't accepted yet.`
+        : `Review the proposed terms below, then send them to ${TEN} from the Active step.`,
+      timing: sent ? `Awaiting ${TEN}'s decision` : null,
+      node: (
+        <>
+          <PaymentPlanCard
+            plan={proposedPlan}
+            refLabel={h.contract.ref}
+            contractType={h.contract.contractType}
+            tenantName={h.contract.tenant.companyName || h.contract.tenant.name}
+            landlordName={h.contract.landlord.bankAccountName || h.contract.landlord.companyName || h.contract.landlord.name}
+            unitNumber={h.contract.unit.number}
+            buildingName={h.contract.property.buildingName}
+            community={h.contract.property.community || h.contract.property.emirate}
+            periodStart={h.contract.startDate}
+            periodEnd={h.contract.endDate}
+          />
+          <Link href={h.printUrl} target="_blank" className="btn btn-ghost btn-block" style={{ marginTop: 12 }}>
+            <Eye size={14} /> Preview full renewal contract
+          </Link>
+        </>
+      ),
     };
   }
 
@@ -1202,17 +1257,17 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               <CreditCard size={13} /> Next payment {fmtAed(next.amount)} due {fmtDate(next.transactionDate)}
             </div>
           )}
-          {h.contract.renewalAccepted === 'pending' && (
+          {/* Only the PARENT lease (which owns the proposal) has a renewalChild.
+              The child proposal itself sees a mirrored renewalAccepted='pending'
+              (from getContractById) but renewalChild=null — gate on renewalChild
+              so the banner never self-references on the proposal row. */}
+          {h.contract.renewalAccepted === 'pending' && h.contract.renewalChild && (
             <div className="flag waiting" style={{ alignSelf: 'flex-start' }}>
               <RotateCcw size={13} /> Renewal proposed — awaiting {TEN}
-              {h.contract.renewalChild && (
-                <>
-                  {' · '}
-                  <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
-                    View proposal · CID-{h.contract.renewalChild.id}
-                  </Link>
-                </>
-              )}
+              {' · '}
+              <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
+                View proposal · CID-{h.contract.renewalChild.id}
+              </Link>
             </div>
           )}
           {/* Renewal DRAFT — saved for RP review; the customer has NOT been
