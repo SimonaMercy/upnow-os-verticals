@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
+import { ManagerPerformanceCharts, LeaseActivityCharts } from '@/components/upnow/ReportCharts';
 
 type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
@@ -1532,6 +1533,17 @@ export function ReportDetailView({
             );
           })}
         </div>
+      )}
+
+      {/* Charts — analytics-style visuals for the reports that carry them */}
+      {!loading && !error && data && slug === 'manager-performance' && (
+        <ManagerPerformanceCharts
+          rows={(data.rows ?? []) as never}
+          daily={((data as Record<string, unknown>).daily ?? []) as never}
+        />
+      )}
+      {!loading && !error && data && slug === 'lease-activity' && (
+        <LeaseActivityCharts rows={(data.rows ?? []) as never} />
       )}
 
       {/* Search */}
