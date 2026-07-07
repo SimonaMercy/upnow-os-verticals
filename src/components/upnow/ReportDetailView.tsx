@@ -301,6 +301,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'otherActions', label: 'Other', align: 'right', type: 'number' },
       { key: 'totalActions', label: 'Total actions', align: 'right', type: 'number' },
       { key: 'signatures', label: 'Signatures', align: 'right', type: 'number' },
+      { key: 'logins', label: 'Logins', align: 'right', type: 'number' },
       { key: 'lastActiveAt', label: 'Last active', type: 'date' },
     ],
     totals: [
