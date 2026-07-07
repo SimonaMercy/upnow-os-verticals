@@ -309,6 +309,20 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'totalActions', label: 'Total actions', type: 'number', keep: true },
       { key: 'signatures', label: 'Signatures', type: 'number', keep: true },
     ],
+    // Click a team member → their chronological activity feed (most recent
+    // first, capped at 200 in the period). Contract items link to the lease.
+    drilldown: {
+      childKey: 'activity',
+      titleKey: 'name',
+      countLabel: 'recent actions',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'at', label: 'When' },
+        { key: 'action', label: 'Action' },
+        { key: 'detail', label: 'On' },
+        { key: 'ip', label: 'IP' },
+      ],
+    },
   },
 
   'lease-activity': {
