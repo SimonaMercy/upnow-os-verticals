@@ -121,9 +121,6 @@ interface CardVM {
   hasPin: boolean;
   tagColor: string;
   tagBg: string;
-  ownLabel: string;
-  ownColor: string;
-  ownBg: string;
   coverUrl: string | null;
   hasVacancy: boolean;
   vacancyLabel: string;
@@ -140,8 +137,6 @@ function toCardVM(p: Property): CardVM {
   const occPct = units ? (occ / units) * 100 : 0;
   const typeLabel = categoryLabel(p.spaceCategory);
   const ts = typeStyle(typeLabel);
-  const own = (p.leasingType ?? 'direct') as LeasingType;
-  const os = ownershipStyle(own);
   const rent = p.rentTotal ?? 0;
   const hasPin = p.latitude != null && p.longitude != null;
   return {
@@ -151,9 +146,6 @@ function toCardVM(p: Property): CardVM {
     hasPin,
     tagColor: ts.color,
     tagBg: ts.bg,
-    ownLabel: OWNERSHIP_LABEL[own] ?? OWNERSHIP_LABEL.direct,
-    ownColor: os.color,
-    ownBg: os.bg,
     coverUrl: p.coverPhotoUrl ?? null,
     hasVacancy: vac > 0,
     vacancyLabel: `${vac} vacant`,
@@ -223,7 +215,6 @@ function PropertyCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
             <span style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-.01em', color: '#1d2823', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.name}</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: vm.tagColor, background: vm.tagBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.typeLabel}</span>
-            <span style={{ fontSize: 10, fontWeight: 700, color: vm.ownColor, background: vm.ownBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.ownLabel}</span>
           </div>
           {vm.address && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#9aa39c', marginTop: 4 }}>
@@ -273,10 +264,7 @@ function PropertyGridCard({
       {/* Cover + type badge */}
       <div style={{ height: 138, background: '#f1f3f0', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
         <Cover url={vm.coverUrl} iconSize={22} iconColor="#b3bcb4" />
-        <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 6 }}>
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: vm.ownColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.ownLabel}</span>
-        </div>
+        <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
       </div>
 
       {/* Body — same fields as the Row view */}
@@ -398,6 +386,32 @@ export default function PortfolioPage() {
     else if (sort === 'name') list.sort((a, b) => a.buildingName.localeCompare(b.buildingName));
     return list;
   }, [filteredProperties, sort]);
+
+  // Group the visible properties by ownership — section header + count chip,
+  // largest group first (mirrors the units page's building groups). Items keep
+  // the active sort order within each group.
+  const ownershipGroups = useMemo(() => {
+    const order: LeasingType[] = ['direct', 'sub', 'management'];
+    const m = new Map<LeasingType, Property[]>();
+    for (const p of visibleProperties) {
+      const k = (p.leasingType ?? 'direct') as LeasingType;
+      (m.get(k) ?? m.set(k, []).get(k)!).push(p);
+    }
+    return Array.from(m.entries())
+      .map(([own, items]) => ({ own, items }))
+      .sort((a, b) => (b.items.length - a.items.length) || (order.indexOf(a.own) - order.indexOf(b.own)));
+  }, [visibleProperties]);
+
+  // Shared group header (Owned / Sub-lease / Managed + property count).
+  const groupHeader = (own: LeasingType, count: number) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '6px 0 12px' }}>
+      <span style={{ width: 9, height: 9, borderRadius: '50%', background: ownershipStyle(own).color, flex: '0 0 auto' }} />
+      <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-.01em', color: '#1d2823' }}>{OWNERSHIP_LABEL[own]}</div>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: '#7d8780', background: '#eef1ec', padding: '4px 10px', borderRadius: 7 }}>
+        {count} {count === 1 ? 'property' : 'properties'}
+      </span>
+    </div>
+  );
 
   const createProperty = useMutation({
     mutationFn: (dto: ReturnType<typeof formToCreateDto>) => apiPost<Property>('/properties', dto),
@@ -635,31 +649,45 @@ export default function PortfolioPage() {
 
         {/* ── Main content (Row · Grid · Map). Every card opens the popup. ── */}
         {!isLoading && visibleProperties.length > 0 && view === 'row' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            {visibleProperties.map((p) => (
-              <PropertyCard
-                key={p.id}
-                vm={toCardVM(p)}
-                onEdit={() => setPropertyModal({ open: true, editing: p })}
-                onDelete={() => deleteProperty.mutate(p.id)}
-                onShowDetails={() => setDetailsProperty(p)}
-              />
+          <>
+            {ownershipGroups.map((g) => (
+              <section key={g.own} style={{ marginBottom: 26 }}>
+                {groupHeader(g.own, g.items.length)}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                  {g.items.map((p) => (
+                    <PropertyCard
+                      key={p.id}
+                      vm={toCardVM(p)}
+                      onEdit={() => setPropertyModal({ open: true, editing: p })}
+                      onDelete={() => deleteProperty.mutate(p.id)}
+                      onShowDetails={() => setDetailsProperty(p)}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
-          </div>
+          </>
         )}
 
         {!isLoading && visibleProperties.length > 0 && view === 'grid' && (
-          <div className={s.dxGrid}>
-            {visibleProperties.map((p) => (
-              <PropertyGridCard
-                key={p.id}
-                vm={toCardVM(p)}
-                onEdit={() => setPropertyModal({ open: true, editing: p })}
-                onDelete={() => deleteProperty.mutate(p.id)}
-                onShowDetails={() => setDetailsProperty(p)}
-              />
+          <>
+            {ownershipGroups.map((g) => (
+              <section key={g.own} style={{ marginBottom: 26 }}>
+                {groupHeader(g.own, g.items.length)}
+                <div className={s.dxGrid}>
+                  {g.items.map((p) => (
+                    <PropertyGridCard
+                      key={p.id}
+                      vm={toCardVM(p)}
+                      onEdit={() => setPropertyModal({ open: true, editing: p })}
+                      onDelete={() => deleteProperty.mutate(p.id)}
+                      onShowDetails={() => setDetailsProperty(p)}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
-          </div>
+          </>
         )}
 
         {/* Map — full-width. Click a pin to surface that property's details.
