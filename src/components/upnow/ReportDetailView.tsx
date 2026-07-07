@@ -19,7 +19,7 @@ import {
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -284,6 +284,29 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
+  'manager-performance': {
+    title: 'Manager Performance Report',
+    description: 'Team activity & throughput — one row per team member (the landlord and every assigned manager). Lead / contract / document actions come from the server-side activity trail, which records every write with who did it and for which landlord; attribution began 7 Jul 2026, so earlier periods show zero actions by design. Signatures executed covers full history (every signature stores its executing account). Use the date range to scope a period; leave it empty for everything.',
+    endpoint: '/api/reports/manager-performance',
+    controlKey: 'dateRange',
+    columns: [
+      { key: 'name', label: 'Team member' },
+      { key: 'role', label: 'Role', type: 'stage' },
+      { key: 'leadActions', label: 'Leads & viewings', align: 'right', type: 'number' },
+      { key: 'contractActions', label: 'Contracts', align: 'right', type: 'number' },
+      { key: 'documentActions', label: 'Documents', align: 'right', type: 'number' },
+      { key: 'otherActions', label: 'Other', align: 'right', type: 'number' },
+      { key: 'totalActions', label: 'Total actions', align: 'right', type: 'number' },
+      { key: 'signatures', label: 'Signatures', align: 'right', type: 'number' },
+      { key: 'lastActiveAt', label: 'Last active', type: 'date' },
+    ],
+    totals: [
+      { key: 'teamMembers', label: 'Team members', type: 'number', keep: true },
+      { key: 'totalActions', label: 'Total actions', type: 'number', keep: true },
+      { key: 'signatures', label: 'Signatures', type: 'number', keep: true },
     ],
   },
 
