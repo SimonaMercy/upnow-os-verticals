@@ -2487,18 +2487,18 @@ function DetailsDrawer({
                                     {f.chequeStatus ?? 'pending'}
                                   </span>
                                 )}
-                                {perms.collections && (
+                                {/* A cleared fee is received money (and may carry an issued
+                                    receipt number) — no Edit and no Delete once cleared. */}
+                                {perms.collections && f.chequeStatus !== 'cleared' && (
                                   <>
-                                    {f.chequeStatus !== 'cleared' && (
-                                      <button
-                                        type="button"
-                                        className="mini-btn view"
-                                        title="Edit fee amount / VAT / method / reference / date"
-                                        onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
-                                      >
-                                        <Pencil size={12} /> Edit
-                                      </button>
-                                    )}
+                                    <button
+                                      type="button"
+                                      className="mini-btn view"
+                                      title="Edit fee amount / VAT / method / reference / date"
+                                      onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
+                                    >
+                                      <Pencil size={12} /> Edit
+                                    </button>
                                     <button
                                       type="button"
                                       className="mini-btn"
