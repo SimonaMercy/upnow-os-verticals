@@ -196,7 +196,7 @@ interface ContractDetail {
 // Step model
 // ────────────────────────────────────────────────────────────────────────────
 
-type StepKey = 'issue' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'closeout' | 'settlement';
+type StepKey = 'issue' | 'cheques' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'closeout' | 'settlement';
 type Tone = 'action' | 'waiting' | 'celebrate' | 'declined';
 type IconKey = 'document' | 'pen' | 'stamp' | 'bolt' | 'key' | 'active' | 'envelope' | 'alert' | 'clock' | 'wallet';
 
@@ -211,10 +211,11 @@ const STEPS_NEW: Step[] = [
   { key: 'active',  short: 'Active',  label: 'Active tenancy',    icon: 'active'   },
 ];
 const STEPS_RENEWAL: Step[] = [
-  { key: 'terms',  short: 'Terms',   label: 'Terms agreed',    icon: 'envelope' },
-  { key: 'sign',   short: 'Sign',    label: 'Signatures',       icon: 'pen'      },
-  { key: 'ejari',  short: 'Ejari',   label: 'Ejari renewal',    icon: 'stamp'    },
-  { key: 'active', short: 'Active',  label: 'Renewal active',   icon: 'active'   },
+  { key: 'terms',   short: 'Terms',   label: 'Terms agreed',    icon: 'envelope' },
+  { key: 'cheques', short: 'Cheques', label: 'Cheques / PDC',   icon: 'wallet'   },
+  { key: 'sign',    short: 'Sign',    label: 'Signatures',      icon: 'pen'      },
+  { key: 'ejari',   short: 'Ejari',   label: 'Ejari renewal',   icon: 'stamp'    },
+  { key: 'active',  short: 'Active',  label: 'Renewal active',  icon: 'active'   },
 ];
 // Appended after "Active" once a termination is accepted and the lease is
 // winding down (Phase 6c) — the actionable move-out inspection + settlement steps.
@@ -227,6 +228,9 @@ const SETTLEMENT_STEP: Step = { key: 'settlement', short: 'Settlement', label: '
 interface DerivedState {
   status: ContractDetail['status'];
   ejariStatus: ContractDetail['ejariStatus'];
+  /** RP confirmed the post-dated cheques were collected — gates the renewal from
+   *  the Cheques/PDC step to Signatures (matches the Operations renewal kanban). */
+  pdcConfirmed: boolean;
   tenantSigned: boolean;
   landlordSigned: boolean;
   /** All signatures are method 'on_file' — imported lease signed on paper,
@@ -253,6 +257,8 @@ interface DerivedState {
 function isDone(key: StepKey, st: DerivedState): boolean {
   switch (key) {
     case 'issue':   return st.status !== 'pending';
+    // Renewal Cheques/PDC step — done once the RP confirms the cheques collected.
+    case 'cheques': return st.pdcConfirmed;
     case 'sign':    return st.tenantSigned && st.landlordSigned;
     case 'ejari':   return st.ejariStatus === 'registered';
     case 'utility': return st.utilityDoc;
@@ -358,6 +364,7 @@ function deriveState(contract: ContractDetail, signatures: { role: string; metho
   return {
     status: contract.status,
     ejariStatus: contract.ejariStatus,
+    pdcConfirmed: contract.pdcConfirmed === true,
     tenantSigned: signatures.some(s => s.role === 'tenant'),
     landlordSigned: signatures.some(s => s.role === 'landlord'),
     sigsOnFile: signatures.length > 0 && signatures.every(s => s.method === 'on_file'),
@@ -665,6 +672,9 @@ interface StepHandlers {
   /** Bypass digital signing — record both signatures as on file (paper/imported). */
   onMarkSignedOnFile: () => Promise<void>;
   onVerifyUtility: () => Promise<void>;
+  /** Confirm the post-dated cheques were collected → PATCH /contracts/:id/confirm-pdc.
+   *  Unlocks the Signatures step on a renewal (Cheques/PDC → Signatures). */
+  onConfirmPdc: () => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
@@ -704,7 +714,7 @@ interface StepHandlers {
 
 function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new' | 'renewal'): StepContent {
   const TEN = h.contract.tenant.name || 'the customer';
-  const totalSteps = mode === 'renewal' ? 4 : 6;
+  const totalSteps = mode === 'renewal' ? 5 : 6;
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of ${totalSteps}`;
 
   // Once a contract is active/terminated/expired, the activation steps
@@ -738,6 +748,47 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             <button className="btn btn-jade btn-lg btn-block" onClick={() => h.onIssue()}>
               <FileSignature size={15} /> Issue contract to {TEN}
             </button>
+          ),
+        };
+  }
+
+  if (key === 'cheques') {
+    // Renewal-only Cheques/PDC step — collect + confirm the post-dated cheques
+    // BEFORE signatures, matching the Operations renewal kanban.
+    const done = isDone('cheques', st);
+    return done
+      ? {
+          tone: 'celebrate', icon: 'wallet', sub: 'Renewal · Stop 2 · complete', label: 'Cheques collected',
+          headline: 'Renewal cheques collected.',
+          body: 'The post-dated cheques are confirmed — the renewal is ready for signature.',
+          timing: null,
+          node: (
+            <div className="chklist">
+              <ChkRow on locked label="Post-dated cheques confirmed" onToggle={() => {}} />
+            </div>
+          ),
+        }
+      : {
+          tone: 'action', icon: 'wallet', sub: stopOf(2), label: 'Cheques / PDC',
+          headline: 'Collect the renewal cheques.',
+          body: `Collect ${TEN}'s post-dated cheques (or transfers) against the renewal schedule, then confirm here to unlock signing.`,
+          timing: null,
+          node: (
+            <>
+              <div className="chklist">
+                <ChkRow
+                  on={false}
+                  label="Post-dated cheques collected"
+                  hint="awaiting confirmation"
+                  onToggle={() => {}}
+                  actionLabel={h.perms.collections ? 'Confirm collected' : undefined}
+                  onAction={h.perms.collections ? () => void h.onConfirmPdc() : undefined}
+                />
+              </div>
+              <button className="ca" style={{ justifySelf: 'start', marginTop: 4, padding: 0 }} onClick={() => h.openDrawer('payments')}>
+                Review renewal cheque schedule
+              </button>
+            </>
           ),
         };
   }
@@ -777,7 +828,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           ),
         }
       : {
-          tone: 'action', icon: 'pen', sub: stopOf(2), label: 'Signatures',
+          tone: 'action', icon: 'pen', sub: stopOf(mode === 'renewal' ? 3 : 2), label: 'Signatures',
           headline: 'Capture both signatures.',
           body: `${TEN} signs from their portal and you countersign here — or, for a paper-signed / imported lease, mark both as already on file.`,
           timing: 'Takes ~2 min',
@@ -4951,7 +5002,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,

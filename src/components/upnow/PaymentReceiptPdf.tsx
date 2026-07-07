@@ -130,7 +130,7 @@ interface Props {
   contract: ReceiptContract;
   selectedId?: number | null;
   selectedIdx?: number;
-  kind?: 'deposit' | 'contract' | 'rental' | 'management' | 'all' | null;
+  kind?: 'deposit' | 'contract' | 'rental' | 'management' | 'vat' | 'all' | null;
 }
 
 // ─── Model helpers ──────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ function isRenewalContract(c: ReceiptContract): boolean {
 
 interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; method?: string | null; reference?: string | null; receiptNo?: string | null; }
 interface Receipt {
-  kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management';
+  kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management' | 'vat';
   title: string;
   receiptNo: string;
   date: string | null;
@@ -364,6 +364,30 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
     lines, scheduleCount: feeCount || lines.length };
 }
 
+/** GOVERNMENT — VAT receipt. The separate rent/fee VAT cheques (new model), each
+ *  a pass-through federal tax carrying its own gapless receipt number. Grouped
+ *  under the binder's "Government" section (VAT is a government charge, not rent
+ *  income or a management fee). Null for legacy contracts with no vat rows. */
+function buildVatReceipt(contract: ReceiptContract): Receipt | null {
+  const vats = (contract.payments ?? []).filter(isVat);
+  if (vats.length === 0) return null;
+  const refOf = (p: ReceiptPayment) => contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null;
+  const lines: LineItem[] = vats.map((p) => ({
+    desc: p.description || 'VAT',
+    net: 0, vat: round2(p.amount || 0), total: round2(p.amount || 0),
+    date: p.transactionDate ?? null,
+    method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
+    receiptNo: refOf(p),
+  }));
+  // One VAT cheque prints its own gapless year-wise number as the header; multiple
+  // aggregate under the plan number (each line still carries its own RCP number).
+  const header = vats.length === 1 ? (refOf(vats[0]) ?? contract.paymentRefs?.planRefNo) : contract.paymentRefs?.planRefNo;
+  return { kind: 'vat', title: 'VAT RECEIPT',
+    receiptNo: header ?? `RCP-${contract.ref}-VAT`,
+    date: vats[0]?.transactionDate ?? contract.startDate ?? null,
+    lines, scheduleCount: vats.length };
+}
+
 function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
   // Legacy combined receipt: fee lines + a single rolled-up rent line. The binder
   // now links the three segmented receipts above; this is retained for old links.
@@ -423,6 +447,7 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   if (kind === 'contract') return buildContractReceipt(contract, payments);
   if (kind === 'rental') return buildRentalReceipt(contract, rentals);
   if (kind === 'management') return buildManagementReceipt(contract, rentals);
+  if (kind === 'vat') return buildVatReceipt(contract);
   if (kind === 'deposit') {
     const dep = resolveDeposit(contract);
     return dep ? buildSingleReceipt(dep, contract, rentals) : null;

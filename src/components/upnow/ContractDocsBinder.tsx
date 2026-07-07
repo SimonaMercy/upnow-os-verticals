@@ -258,6 +258,7 @@ export interface ContractDocsBinderProps {
 type Slot =
   | { kind: 'plan' }
   | { kind: 'receipts' }
+  | { kind: 'govt' }
   | { kind: 'agreement' }
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
@@ -279,12 +280,17 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const hasPlan = currentPlan.rentFils > 0 || currentPlan.items.length > 0;
   const showReceipts = receipt != null;
   const hasReceiptData = planPayments.length > 0 || (planContract.fees?.length ?? 0) > 0;
+  // Government section — separate rent/fee VAT cheques (new model) are a federal
+  // (FTA) tax, not rent income or a management fee, so they get their own
+  // "Government" receipt rather than being folded into the rent receipt.
+  const showGovtVat = showReceipts && planPayments.some(p => (p.paymentType ?? '').toLowerCase() === 'vat');
 
   // RIGHT column order.
   const seq: Slot[] = [
     { kind: 'plan' },
     { kind: 'doc', key: 'payment_advice', label: 'Payment Advice' },
     ...(showReceipts ? [{ kind: 'receipts' } as Slot] : []),
+    ...(showGovtVat ? [{ kind: 'govt' } as Slot] : []),
     { kind: 'agreement' },
     { kind: 'doc', key: 'ejari_certificate', label: 'Ejari' },
   ];
@@ -318,7 +324,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const isMoveInDoc = (d: BinderDoc) => /move_?in/.test(norm(d.documentKey)) || /move[ -]?in/i.test(d.displayName || '');
   const leftover = all.filter(d => !isIdentity(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && (isSalaryDoc(d) || isMoveInDoc(d))));
 
-  const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'agreement' ? 'Agreement' : s.label;
+  const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'govt' ? 'Government' : s.kind === 'agreement' ? 'Agreement' : s.label;
   const slotId = (s: Slot) => s.kind === 'doc' ? `r-${s.key}` : `r-${s.kind}`;
   const leftNav = [
     ...primaryId.map(d => ({ id: `l-${d.id}`, label: idLabel(d) })),
@@ -370,6 +376,15 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         make: async () => {
           const [{ pdf }, { PaymentReceiptDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentReceiptPdf')]);
           return reactPdfBytes(await pdf(<PaymentReceiptDoc contract={receiptWithRefs as ReceiptContract} kind="all" selectedId={null} selectedIdx={0} />).toBlob());
+        },
+      });
+    } else if (s.kind === 'govt') {
+      if (!receipt) continue;
+      downloadItems.push({
+        id: 'g-govt', label: 'VAT Receipt', group: 'Government',
+        make: async () => {
+          const [{ pdf }, { PaymentReceiptDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentReceiptPdf')]);
+          return reactPdfBytes(await pdf(<PaymentReceiptDoc contract={receiptWithRefs as ReceiptContract} kind="vat" selectedId={null} selectedIdx={0} />).toBlob());
         },
       });
     } else if (s.kind === 'agreement') {
@@ -454,6 +469,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receiptWithRefs as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;
+            else if (s.kind === 'govt') inner = <Block label="Government"><ReceiptInline contract={receiptWithRefs as ReceiptContract} kind="vat" height={FULL} showDownload /></Block>;
             else if (s.kind === 'agreement') inner = <Block label="Agreement"><EjariInline data={ejari} addendums={addendums} height={FULL} showDownload /></Block>;
             else {
               const docs = matchDocs(s.key);

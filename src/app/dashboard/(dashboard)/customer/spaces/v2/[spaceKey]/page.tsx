@@ -213,6 +213,12 @@ interface ApiContract {
   ejariStatus: string | null;
   utilityStatus: string | null;
   utilityAccountNumber: string | null;
+  /** RP has confirmed the post-dated cheques were collected — gates the renewal
+   *  from the Cheques/PDC step to Signatures (mirrors the new-lease flow). */
+  pdcConfirmed?: boolean;
+  /** Customer has confirmed their renewal cheques are ready → waiting for the RP
+   *  to collect/confirm (pdcConfirmed). */
+  tenantChequesSubmittedAt?: string | null;
   numberOfInstallments: number | null;
   startDate: string | null;
   endDate: string | null;
@@ -294,17 +300,18 @@ const STATE_DEFS: Record<StateKey, StateDef> = {
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
   termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting rental provider',        mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the rental provider.',               body: "Your contract stays active until they accept. We'll notify you the moment they respond.",                                                                                                       timing: 'Awaiting rental provider response' },
 
-  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 4',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, confirm your payments are ready, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
+  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 5',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, confirm your payments are ready, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
   // Kept defined so the state map stays exhaustive, but no longer rendered
   // as a default timeline step. Routing only lands here if a future phase
   // turns the renewal docs step back on for expired KYC.
   renewal_documents:             { label: 'Renewal documents',             sub: 'Renewal step — documents',           mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',               body: "Old Emirates ID and visa copies don't carry over — please re-upload.",                                                                                                                         timing: 'Takes ~3 min' },
-  // Defined for back-compat with old proposed renewals that never went
-  // through accept; new renewals skip this state entirely.
-  renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step — payments',            mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
-  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 2 of 4',             mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
-  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 3 of 4',             mode: 'renewal', currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is renewing Ejari.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
-  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 4 of 4 — done',      mode: 'renewal', currentIndex: 3,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
+  // Cheques/PDC step — the customer reviews + confirms the renewal cheques and
+  // the RP confirms collection BEFORE signature is unlocked (matches the RP
+  // renewal pipeline / Operations kanban and the new-lease payment step).
+  renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step 2 of 5',                mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
+  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 3 of 5',             mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
+  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 4 of 5',             mode: 'renewal', currentIndex: 3,  tone: 'waiting',   headline: 'Your rental provider is renewing Ejari.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
+  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 5 of 5 — done',      mode: 'renewal', currentIndex: 4,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
   rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
   terminated:                    { label: 'Tenancy terminated',            sub: 'Contract closed',                 mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                                body: 'Final settlements processed; security deposit return pending move-out inspection.',                                                                                                             timing: null },
@@ -331,13 +338,14 @@ const STEPS_NEW: Step[] = [
   { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
   { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
 ];
-// Renewal journey trimmed in Phase 6 to 4 steps. The customer confirms
-// payment readiness via a checkbox on the Terms card itself, so the
-// dedicated "Cheques" step is gone. Document refresh is handled as a
-// conditional gate inside the renewal flow (only fires when KYC has
-// actually expired) — so we don't show it as a default step either.
+// Renewal journey mirrors the RP renewal pipeline (Operations kanban):
+// Terms → Cheques/PDC → Signatures → Ejari → Active. The customer reviews and
+// confirms the renewal cheques BEFORE signing (the RP confirms collection in
+// between), matching the new-lease order. Document refresh stays a conditional
+// gate (only fires when KYC has actually expired), so it isn't a default step.
 const STEPS_RENEWAL: Step[] = [
   { key: 'terms_offered',   label: 'Terms offered',      short: 'Terms',    icon: 'envelope' },
+  { key: 'cheques',         label: 'Cheques / PDC',      short: 'Cheques',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen'      },
   { key: 'ejari',           label: 'Ejari renewal',      short: 'Ejari',    icon: 'stamp'    },
   { key: 'active',          label: 'Renewal active',     short: 'Active',   icon: 'active'   },
@@ -467,13 +475,15 @@ function deriveStateKey(r: Resolved): StateKey {
     if (rc.status === 'active') return 'renewal_active';
     if (rc.ejariStatus === 'registered') return 'renewal_ejari';
     if (rc.status === 'issued') {
-      // Once the TENANT has signed, they are DONE signing — never ask them to
-      // sign the same renewal twice. They then wait at the Ejari/finalisation
-      // step while the RP confirms the post-dated cheques and registers Ejari
-      // (the renewal activates on PDC-confirm, not on a landlord signature on
-      // the child — which this flow never captures). Mirrors the new-lease flow,
-      // where the tenant's signature alone advances past the signing step.
+      // Renewal setup order MATCHES the RP renewal pipeline (Operations kanban):
+      //   Terms → Cheques/PDC → Signatures → Ejari → Active.
+      // Once the TENANT has signed, they are DONE — never ask them to sign twice;
+      // they wait at Ejari while the RP registers it.
       if (rc.tenantSignedAt) return 'renewal_ejari';
+      // Cheques/PDC BEFORE signing: the customer reviews + confirms the renewal
+      // cheques and the RP confirms collection (pdcConfirmed) before signature is
+      // unlocked — same gate as a new lease (payment_review → RP confirm → sign).
+      if (!rc.pdcConfirmed) return 'renewal_cheques';
       return 'renewal_progress';
     }
     return 'renewal_cheques';
@@ -738,7 +748,7 @@ function QuestMap({ steps, currentIndex, mode }: { steps: (Step & { state: 'done
           <MapPin size={14} style={{ color: 'var(--brick)' }} />
           <span style={{ fontSize: 10, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 600 }}>Your tenancy journey</span>
         </div>
-        <span style={{ fontSize: 12, color: 'var(--mute)' }}>{mode === 'renewal' ? 'renewal · 6 stops' : `${n} stops`}</span>
+        <span style={{ fontSize: 12, color: 'var(--mute)' }}>{mode === 'renewal' ? `renewal · ${n} stops` : `${n} stops`}</span>
       </div>
       <svg viewBox={`0 0 ${width} ${innerH}`} width="100%" height={innerH} style={{ display: 'block' }}>
         {donePath && <path d={donePath} fill="none" stroke="var(--jade-deep)" strokeWidth="3" strokeLinecap="round" />}
@@ -4360,10 +4370,8 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   if (!parent) return <ErrorBox msg="Parent contract not found." />;
 
   async function act(verb: 'accept' | 'reject') {
-    if (verb === 'accept' && child?.id && renewalProofs.length === 0) {
-      setErr('Please upload a picture of your cheque or bank transfer to proceed.');
-      return;
-    }
+    // Accepting only agrees the TERMS. Cheque upload + submission now happen on the
+    // next step (Cheques/PDC) — the customer isn't marked cheques-submitted here.
     if (verb === 'accept' && !paymentReady) {
       setErr('Please confirm your payments are ready to proceed.');
       return;
@@ -4377,13 +4385,6 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
       }
       const res = await fetch(`/api/contracts/${parent!.id}/renewal/${verb}`, init);
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
-      // Capture the payment-readiness ack on the child contract so the RP
-      // sees the customer agreed at accept time. Best-effort — if it errors
-      // (e.g. no child fetched yet) we don't block the user; the timeline
-      // still routes them to the signature step.
-      if (verb === 'accept' && child?.id) {
-        await fetch(`/api/contracts/tenant/${child.id}/cheques-submitted`, { method: 'PATCH', credentials: 'include' }).catch(() => undefined);
-      }
       if (verb === 'reject') {
         setRejectOpen(false);
         setRejectReason('');
@@ -4438,93 +4439,12 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
       <RenewalTermsSummary parent={parent} child={child} />
 
-      {/* Proof of payment — mirrors the new-lease payment_review step, but here
-          it is REQUIRED: the customer must attach a photo of their cheque(s) or
-          bank-transfer receipt before they can accept, so the RP has evidence to
-          collect against. Multi-file, in-page preview via the doc viewer. */}
-      {child?.id && (
-        <div style={{ background: 'var(--paper)', border: `1px solid ${renewalProofs.length > 0 ? 'var(--mist-strong)' : 'var(--jade)'}`, borderRadius: 14, padding: '16px 18px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
-              Upload a picture of your cheque or bank transfer <span style={{ color: 'var(--jade-deep)' }}>*</span>
-            </p>
-            <span style={{ fontSize: 11, color: 'var(--mute)' }}>{renewalProofs.length} uploaded</span>
-          </div>
-          <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>
-            Required — attach a photo of your signed cheque(s) or your bank-transfer receipt. A phone photo (JPG, PNG or HEIC) or a PDF is fine.
-          </p>
-          <label style={{
-            marginTop: 12,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)',
-            background: 'var(--surface)', cursor: uploadingProofs ? 'progress' : 'pointer',
-            fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)',
-          }}>
-            <input
-              ref={proofFileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              disabled={uploadingProofs > 0}
-              onChange={(e) => handleRenewalProofFiles(e.target.files)}
-              style={{ display: 'none' }}
-              data-testid="renewal-proof-input"
-            />
-            {uploadingProofs > 0
-              ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploadingProofs} file{uploadingProofs === 1 ? '' : 's'}…</>
-              : <><UploadCloud size={14} /> Choose files</>}
-          </label>
+      {/* Cheque / PDC upload moved to the next step (Cheques/PDC) — the customer
+          agrees the terms here, then uploads their cheques against the schedule,
+          which the RP reviews & collects before signing. */}
 
-          {proofErr && <div style={{ marginTop: 10 }}><ErrorBox msg={proofErr} /></div>}
-
-          {renewalProofs.length > 0 && (
-            <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-              {renewalProofs.map((d, i) => {
-                const isPdf = (d.mimeType ?? '').includes('pdf') || (d.fileUrl ?? '').toLowerCase().split('?')[0].endsWith('.pdf');
-                return (
-                  <div key={d.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
-                    {d.fileUrl && !isPdf ? (
-                      <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Payment ${i + 1}`, mimeType: d.mimeType })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={d.fileUrl} alt={d.displayName ?? ''} style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
-                      </button>
-                    ) : d.fileUrl ? (
-                      <span style={{ width: 44, height: 30, display: 'grid', placeItems: 'center', background: 'var(--mist)', borderRadius: 4, flexShrink: 0 }}>
-                        <FileText size={14} color="var(--ink-2)" />
-                      </span>
-                    ) : null}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.displayName ?? `Payment ${i + 1}`}</p>
-                    </div>
-                    {d.fileUrl && (
-                      <button
-                        type="button"
-                        onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Payment ${i + 1}`, mimeType: d.mimeType })}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, textDecoration: 'none', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
-                      >
-                        <ExternalLink size={12} /> View
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeRenewalProof(d.id)}
-                      style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
-                      aria-label="Remove payment reference"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Payment-readiness confirmation — replaces the standalone cheques
-          step. The customer ticks this to confirm their payments are ready
-          to be collected; the accept handler then advances them straight to
-          the signature step. */}
+      {/* Payment-readiness confirmation. The customer ticks this to confirm their
+          payments are prepared; the next step captures the actual cheque uploads. */}
       <label
         style={{
           display: 'flex', gap: 12, alignItems: 'flex-start',
@@ -4543,7 +4463,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
         <div style={{ minWidth: 0, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
           <p style={{ margin: 0, fontWeight: 700, color: 'var(--ink)' }}>I confirm my payments are ready to be collected</p>
           <p style={{ margin: '2px 0 0' }}>
-            By ticking this, you agree the renewal payments listed above are prepared and your rental provider can collect them after you sign.
+            By ticking this, you agree the renewal payments listed above are prepared. On the next step you&rsquo;ll upload your cheques, and your rental provider collects them before you sign.
           </p>
         </div>
       </label>
@@ -4552,7 +4472,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
       {/* Accept / Reject actions */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 4 }}>
-        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy || !paymentReady || (!!child?.id && renewalProofs.length === 0)}>
+        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy || !paymentReady}>
           {busy === 'accept' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
           {busy === 'accept' ? 'Accepting…' : 'Accept renewal terms'}
         </PrimaryBtn>
@@ -4666,8 +4586,77 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const child = resolved.renewalContract;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Uploaded cheque images / PDC. These MUST be registered under a Payment-Advice
+  // key so they land in the contract's "Payment Advice" binder slot (which both
+  // the RP and customer read cheques from). The binder matches documentKey
+  // 'payment_advice' + the shared cheque aliases (pdc, cheques, …) after stripping
+  // a trailing _<10+digits> suffix — so 'payment_advice_<unique>' snaps in, whereas
+  // the old 'renewal_payment_proof' key matched NO slot and orphaned the file.
+  type PdcDoc = { id: number; displayName?: string | null; fileUrl?: string | null; mimeType?: string | null; documentKey?: string };
+  const [pdcDocs, setPdcDocs] = useState<PdcDoc[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const PAYMENT_ADVICE_KEYS = ['payment_advice', 'pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques', 'renewal_payment_proof'];
+
+  useEffect(() => {
+    if (!child?.id) return;
+    fetch(`/api/documents?ownerType=tenancy_contract&ownerId=${child.id}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: PdcDoc[]) => {
+        if (!Array.isArray(rows)) return;
+        setPdcDocs(rows.filter(d => PAYMENT_ADVICE_KEYS.includes((d.documentKey ?? '').toLowerCase().replace(/_\d{10,}$/, ''))));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [child?.id]);
+
   if (!child) return <ErrorBox msg="Renewal contract not found." />;
-  async function confirm() {
+  const submitted = !!child.tenantChequesSubmittedAt;
+
+  async function uploadPdc(file: File, index: number): Promise<PdcDoc> {
+    if (!child?.id) throw new Error('Renewal contract not ready');
+    const mime = file.type || 'application/octet-stream';
+    // Unique Payment-Advice key: the binder strips the _<digits> suffix so each
+    // cheque coexists yet snaps into the single Payment Advice slot.
+    const key = `payment_advice_${Date.now()}${String(index).padStart(2, '0')}`;
+    const urlRes = await fetch('/api/documents/upload-url', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: child.id, documentKey: key, originalName: file.name, mimeType: mime }),
+    });
+    if (!urlRes.ok) { const b = await urlRes.json().catch(() => ({})); throw new Error(b?.message ?? 'Failed to start upload'); }
+    const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey: string };
+    const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+    const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': mime } });
+    if (!putRes.ok) throw new Error('File upload failed');
+    const regRes = await fetch('/api/documents', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: child.id, documentKey: key, category: 'payment', displayName: file.name, fileUrl, mimeType: mime, s3Key: fileKey, isVisibleToTenant: true }),
+    });
+    if (!regRes.ok) { const b = await regRes.json().catch(() => ({})); throw new Error(b?.message ?? 'Reference registration failed'); }
+    return (await regRes.json()) as PdcDoc;
+  }
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0 || !child?.id) return;
+    setUploadErr(null); setUploading(files.length);
+    try {
+      let i = 0;
+      for (const file of Array.from(files)) {
+        const saved = await uploadPdc(file, i++);
+        setPdcDocs(prev => [...prev, saved]);
+      }
+    } catch (e) { setUploadErr(e instanceof Error ? e.message : 'Upload failed'); }
+    finally { setUploading(0); if (fileRef.current) fileRef.current.value = ''; }
+  }
+
+  async function removePdc(docId: number) {
+    const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) setPdcDocs(prev => prev.filter(d => d.id !== docId));
+  }
+
+  async function submit() {
+    if (pdcDocs.length === 0) { setErr('Please upload your cheque(s) / PDC before submitting.'); return; }
     setBusy(true); setErr(null);
     try {
       const res = await fetch(`/api/contracts/tenant/${child!.id}/cheques-submitted`, { method: 'PATCH', credentials: 'include' });
@@ -4675,20 +4664,68 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(false); }
   }
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-          Your rental provider prepared the renewal payment schedule on the renewal contract. Once you&rsquo;ve prepared your payments, confirm here and we&rsquo;ll let your rental provider collect them.
+          {submitted
+            ? 'Thanks — your cheques are uploaded and submitted. Your rental provider will review and collect them, then you’ll sign the renewal. We’ll notify you the moment it’s your turn.'
+            : 'Review the renewal schedule below, then upload a picture / PDF of your post-dated cheques (or transfer receipts) to match it. Your rental provider reviews and collects them before you sign.'}
         </p>
       </div>
       <RenewalTermsSummary parent={resolved.contract} child={child} />
+
+      {/* PDC upload → filed as Payment Advice (see key note above). */}
+      <div style={{ background: 'var(--paper)', border: `1px solid ${pdcDocs.length > 0 ? 'var(--mist-strong)' : 'var(--jade)'}`, borderRadius: 14, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Upload your cheques / PDC {!submitted && <span style={{ color: 'var(--jade-deep)' }}>*</span>}</p>
+          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{pdcDocs.length} uploaded</span>
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>Attach a photo or PDF of your signed post-dated cheques (or bank-transfer receipts), matching the schedule above. These are filed as your Payment Advice for the renewal.</p>
+        {!submitted && (
+          <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)', background: 'var(--surface)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)' }}>
+            <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={(e) => handleFiles(e.target.files)} style={{ display: 'none' }} data-testid="renewal-pdc-input" />
+            {uploading > 0 ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploading} file{uploading === 1 ? '' : 's'}…</> : <><UploadCloud size={14} /> Choose files</>}
+          </label>
+        )}
+        {uploadErr && <div style={{ marginTop: 10 }}><ErrorBox msg={uploadErr} /></div>}
+        {pdcDocs.length > 0 && (
+          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {pdcDocs.map((d, i) => {
+              const isPdf = (d.mimeType ?? '').includes('pdf') || (d.fileUrl ?? '').toLowerCase().split('?')[0].endsWith('.pdf');
+              return (
+                <div key={d.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
+                  {d.fileUrl && !isPdf ? (
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: d.displayName ?? `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={d.fileUrl} alt={d.displayName ?? ''} style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                    </button>
+                  ) : d.fileUrl ? (
+                    <span style={{ width: 44, height: 30, display: 'grid', placeItems: 'center', background: 'var(--mist)', borderRadius: 4, flexShrink: 0 }}><FileText size={14} color="var(--ink-2)" /></span>
+                  ) : null}
+                  <div style={{ flex: 1, minWidth: 0 }}><p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.displayName ?? `Cheque ${i + 1}`}</p></div>
+                  {d.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: d.displayName ?? `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ExternalLink size={12} /> View</button>}
+                  {!submitted && <button type="button" onClick={() => removePdc(d.id)} style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }} aria-label="Remove cheque">Remove</button>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {err && <ErrorBox msg={err} />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <PrimaryBtn onClick={confirm} disabled={busy}>
-          {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          {busy ? 'Confirming…' : 'Confirm renewal cheques ready'}
-        </PrimaryBtn>
+        {submitted ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'var(--jade-soft, #eef8f4)', color: 'var(--jade-deep, #1f5a3f)', fontSize: 13, fontWeight: 600 }}>
+            <CheckCircle2 size={16} /> Cheques submitted — waiting for your rental provider to review &amp; collect them
+          </div>
+        ) : (
+          <PrimaryBtn onClick={submit} disabled={busy || pdcDocs.length === 0}>
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            {busy ? 'Submitting…' : 'Submit cheques for review'}
+          </PrimaryBtn>
+        )}
         <SecondaryBtn href={`/dashboard/customer/contracts/${child.id}`}>View renewal contract <ExternalLink size={14} /></SecondaryBtn>
       </div>
     </div>
