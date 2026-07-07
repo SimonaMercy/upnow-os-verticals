@@ -18,6 +18,8 @@ export interface ReportTile {
   Icon: React.ComponentType<{ size?: number; className?: string }>;
   available: boolean;
   group: GroupKey;
+  /** RP-hub only — never shown in (or served to) the manager portal. */
+  rpOnly?: boolean;
 }
 
 /** Section order + headers for the grouped hub. Coming-soon reports sit
@@ -59,7 +61,7 @@ export const REPORT_TILES: ReportTile[] = [
   // ── Data & Operations ──────────────────────────────────────────────────
   { slug: 'data-gaps',          title: 'Data Gaps & Exceptions',   description: 'A live worklist of missing data — contracts missing docs/payment plans/deposit, property & unit fields, customer KYC, and the landlord profile. Print to PDF.', Icon: AlertCircle, available: true, group: 'operations' },
   { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false, group: 'operations' },
-  { slug: 'manager-performance', title: 'Manager Performance Report', description: 'Team activity & throughput — per manager (and the landlord): lead/viewing actions, contract actions, document work, signatures executed, and when they were last active. Attributed activity is recorded from 7 Jul 2026; signatures cover full history.', Icon: Users, available: true, group: 'operations' },
+  { slug: 'manager-performance', title: 'Manager Performance Report', description: 'What each manager delivered — leads attended, contracts and renewals progressed, documents processed, and days active. Landlord-only report (managers don\u2019t see their own scorecard).', Icon: Users, available: true, group: 'operations', rpOnly: true },
   // ── Missing Data Worklists (separate live report per entity) ────────────
   { slug: 'missing-properties', title: 'Missing Properties Data',   description: 'Properties missing location or descriptive fields — geo, floors, street, makani, plot, description.', Icon: MapPin,      available: true, group: 'missingdata' },
   { slug: 'missing-units',      title: 'Missing Units Data',        description: 'Units missing pricing, fees, specs or media — rent, deposit, admin/ejari/commission, beds/baths, size, floor plan, images.', Icon: Building2,  available: true, group: 'missingdata' },

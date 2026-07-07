@@ -109,8 +109,9 @@ export default function ManagerReportsPage() {
 
   // ── Hub: executive overview + grouped catalog (same as the RP hub) ──
   const filtered = REPORT_TILES.filter(r =>
-    r.title.toLowerCase().includes(search.toLowerCase())
-    || r.description.toLowerCase().includes(search.toLowerCase()),
+    !r.rpOnly // landlord-only reports (e.g. Manager Performance) never appear here
+    && (r.title.toLowerCase().includes(search.toLowerCase())
+      || r.description.toLowerCase().includes(search.toLowerCase())),
   );
   const sections = GROUPS
     .map(g => ({ ...g, tiles: filtered.filter(r => r.group === g.key) }))

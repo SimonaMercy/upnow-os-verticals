@@ -290,7 +290,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'manager-performance': {
     title: 'Manager Performance Report',
-    description: 'What each team member actually delivered — one row per person (the landlord and every assigned manager), counting REAL things worked, not clicks: distinct leads attended (and how many they converted), distinct contracts and renewals they progressed, documents processed, signatures executed, and days active. System-generated entries (receipt numbering etc.) are excluded. Click a row for the person\u2019s play-by-play. Attribution began 7 Jul 2026; signatures cover full history. Use the date range to scope a period.',
+    description: 'What each manager actually delivered — one row per assigned manager, counting REAL things worked, not clicks: distinct leads attended (and how many they converted), distinct contracts and renewals they progressed, documents processed, and days active. Contract signatures are the landlord\u2019s record and stay out of this scorecard. System-generated entries (receipt numbering etc.) are excluded. Click a row for the person\u2019s play-by-play. Attribution began 7 Jul 2026. Use the date range to scope a period.',
     endpoint: '/api/reports/manager-performance',
     controlKey: 'dateRange',
     columns: [
@@ -301,7 +301,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'contractsWorked', label: 'Contracts worked', align: 'right', type: 'number' },
       { key: 'renewalsWorked', label: 'Renewals', align: 'right', type: 'number' },
       { key: 'documentsWorked', label: 'Documents', align: 'right', type: 'number' },
-      { key: 'signatures', label: 'Signatures', align: 'right', type: 'number' },
       { key: 'activeDays', label: 'Days active', align: 'right', type: 'number' },
       { key: 'lastActiveAt', label: 'Last active', type: 'date' },
     ],
@@ -309,7 +308,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'teamMembers', label: 'Team members', type: 'number', keep: true },
       { key: 'leadsWorked', label: 'Leads attended', type: 'number', keep: true },
       { key: 'contractsWorked', label: 'Contracts worked', type: 'number', keep: true },
-      { key: 'signatures', label: 'Signatures', type: 'number', keep: true },
     ],
     // Click a team member → their chronological activity feed (most recent
     // first, capped at 200 in the period). Contract items link to the lease.
