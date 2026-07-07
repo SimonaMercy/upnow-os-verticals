@@ -12,6 +12,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
+import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
@@ -358,7 +359,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
         : asInspector ? `/contracts/${contractId}/inspection/counter-sign`
         : `/contracts/${contractId}/inspection/sign`;
       const body = kind === 'contract'
-        ? { signatureImage, signatoryName: name.trim() }
+        ? { signatureImage, signatoryName: name.trim(), consent: agreed, clientMeta: collectClientMeta() }
         : asInspector
           ? { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage, signatoryName: name.trim() }
           : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage };
@@ -373,7 +374,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
       {kind === 'contract' && (
         <label className="flex items-start gap-2 text-xs text-[#1a1916] cursor-pointer">
           <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5" />
-          <span>I have read the contract above and agree to its terms.</span>
+          <span>I have read the contract above and agree to its terms. {ESIGN_CONSENT_TEXT}</span>
         </label>
       )}
       <input className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg" placeholder={asInspector ? 'Your full name (inspection manager)' : 'Full name'} value={name} onChange={e => setName(e.target.value)} />
@@ -426,7 +427,9 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
   const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
     const res = await fetch(API(token, `/contracts/${id}/sign-landlord`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signatureImage, signatoryName }),
+      // consent: the binder's ContractSignBar gates signing behind its
+      // review-and-agree checkbox, so reaching here means it was ticked.
+      body: JSON.stringify({ signatureImage, signatoryName, consent: true, clientMeta: collectClientMeta() }),
     });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
     onSigned();

@@ -46,6 +46,22 @@ function isTokenIssuingPath(pathStr: string): boolean {
   return /^\/invitations\/[^/]+\/accept$/.test(pathStr);
 }
 
+/**
+ * Signer-evidence forwarding: this proxy sits between every browser and the
+ * backend, so without these headers the API would record the Next server as
+ * the "signer". x-forwarded-for carries the browser's IP chain (Next/Amplify
+ * populate it; client first) and x-client-user-agent carries the browser's
+ * user-agent (fetch() would otherwise overwrite user-agent with its own).
+ */
+function evidenceHeaders(req: NextRequest): Record<string, string> {
+  const out: Record<string, string> = {};
+  const xff = req.headers.get('x-forwarded-for');
+  if (xff) out['X-Forwarded-For'] = xff;
+  const ua = req.headers.get('user-agent');
+  if (ua) out['X-Client-User-Agent'] = ua;
+  return out;
+}
+
 async function proxy(
   req: NextRequest,
   context: { params: Promise<{ path: string[] }> },
@@ -74,7 +90,7 @@ async function proxy(
   if (pathStr.startsWith('/documents/_upload/')) {
     const bodyBuf = await req.arrayBuffer();
     const contentType = req.headers.get('content-type') ?? 'application/octet-stream';
-    const fwdHeaders: Record<string, string> = { 'Content-Type': contentType };
+    const fwdHeaders: Record<string, string> = { 'Content-Type': contentType, ...evidenceHeaders(req) };
     if (token) fwdHeaders['Authorization'] = `Bearer ${token}`;
     let upstream: Response;
     try {
@@ -94,7 +110,7 @@ async function proxy(
   const contentTypeHeader = req.headers.get('content-type') ?? '';
   if (contentTypeHeader.startsWith('multipart/form-data')) {
     const bodyBuf = await req.arrayBuffer();
-    const fwdHeaders: Record<string, string> = { 'Content-Type': contentTypeHeader };
+    const fwdHeaders: Record<string, string> = { 'Content-Type': contentTypeHeader, ...evidenceHeaders(req) };
     if (token) fwdHeaders['Authorization'] = `Bearer ${token}`;
     let upstream: Response;
     try {
@@ -113,7 +129,7 @@ async function proxy(
     return NextResponse.json(parsed, { status: upstream.status });
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...evidenceHeaders(req) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   // ── Forward body for mutating methods ────────────────────────────────────

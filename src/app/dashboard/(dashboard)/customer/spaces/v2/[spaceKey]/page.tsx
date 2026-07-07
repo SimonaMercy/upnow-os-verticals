@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
+import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
@@ -2983,6 +2984,7 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   const c = renewal ? resolved.renewalContract : resolved.contract;
   const [sig, setSig] = useState<string | null>(null);
   const [name, setName] = useState(personName(user));
+  const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!c) return <ErrorBox msg="Contract not found." />;
@@ -2990,9 +2992,10 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   async function sign() {
     if (!sig) { setErr('Please draw your signature.'); return; }
     if (!name.trim()) { setErr('Please enter your full name.'); return; }
+    if (!consent) { setErr('Please confirm the electronic-signature agreement.'); return; }
     setBusy(true); setErr(null);
     try {
-      const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: name.trim(), signatureImage: sig }) });
+      const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: name.trim(), signatureImage: sig, consent, clientMeta: collectClientMeta() }) });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to sign'); } finally { setBusy(false); }
@@ -3040,6 +3043,11 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
         <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Signature</label>
         <SignatureCanvas onChange={setSig} />
       </div>
+
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: 'var(--ink-2)', cursor: 'pointer', lineHeight: 1.5 }}>
+        <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 2 }} />
+        <span>{ESIGN_CONSENT_TEXT}</span>
+      </label>
 
       {err && <ErrorBox msg={err} />}
 

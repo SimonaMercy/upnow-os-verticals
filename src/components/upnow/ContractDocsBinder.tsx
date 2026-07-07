@@ -236,12 +236,18 @@ export interface ContractDocsBinderProps {
   addendums?: EjariAddendum[];
   planContract: PlanContract;
   planPayments: PlanPayment[];
+  /** RP reconciliation references — plan number + per-payment receipt numbers. */
+  paymentRefs?: import('@/lib/paymentRefs').PaymentRefs | null;
   /** When provided, the Receipts slot renders; null/omitted hides it. */
   receipt?: ReceiptContract | null;
   watermark: string;
   /** No-login magic-link token → stored-artifact downloads use the token-scoped
    *  endpoint. Omitted (authed RP/manager) → the JWT /documents endpoint. */
   portalToken?: string | null;
+  /** Certificate-of-completion data (GET /contracts/:id/signature-certificate).
+   *  When provided AND signatures exist, a "Signature certificate" PDF joins the
+   *  download list — the DocuSign-style evidence record for this contract. */
+  signatureCertificate?: import('@/components/upnow/SignatureCertificatePdf').SignatureCertificateData | null;
   headerRight?: React.ReactNode;
   signerName: string;
   signerDefaultName: string;
@@ -256,7 +262,11 @@ type Slot =
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
-  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, receipt, watermark, portalToken, headerRight, signerName, signerDefaultName, landlordSigned, onSign } = props;
+  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, signatureCertificate, headerRight, signerName, signerDefaultName, landlordSigned, onSign } = props;
+  const planRefNo = paymentRefs?.planRefNo ?? null;
+  // Enrich the receipt contract so per-payment receipts print their real gapless
+  // number and the plan number (see PaymentReceiptPdf).
+  const receiptWithRefs = receipt ? { ...receipt, paymentRefs: paymentRefs ?? null } : receipt;
 
   const all = documents.filter(d => !!d.fileUrl && !isDependant(d));
   const matchDocs = (key: string): BinderDoc[] => {
@@ -343,7 +353,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         make: async () => {
           const [{ pdf }, { PaymentPlanDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentPlanPdf')]);
           return reactPdfBytes(await pdf(
-            <PaymentPlanDoc plan={currentPlan} refLabel={refLabel} meta={{
+            <PaymentPlanDoc plan={currentPlan} refLabel={refLabel} planRefNo={planRefNo} meta={{
               contractType, tenantName: tenant.companyName || tenant.name,
               landlordName: ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name,
               unitNumber: ejari.unit?.number, buildingName: ejari.property?.buildingName,
@@ -359,7 +369,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         id: 'g-receipts', label: 'Receipts', group: 'Rental documents',
         make: async () => {
           const [{ pdf }, { PaymentReceiptDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentReceiptPdf')]);
-          return reactPdfBytes(await pdf(<PaymentReceiptDoc contract={receipt} kind="all" selectedId={null} selectedIdx={0} />).toBlob());
+          return reactPdfBytes(await pdf(<PaymentReceiptDoc contract={receiptWithRefs as ReceiptContract} kind="all" selectedId={null} selectedIdx={0} />).toBlob());
         },
       });
     } else if (s.kind === 'agreement') {
@@ -376,6 +386,18 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
       const docs = matchDocs(s.key);
       if (docs.length) downloadItems.push(storedItem(s.label, 'Rental documents', docs));
     }
+  }
+  // Signature certificate — the contract's certificate of completion (who signed,
+  // from where, on what device, with what consent + the envelope event trail).
+  if (signatureCertificate && signatureCertificate.signatures.length > 0) {
+    const certData = signatureCertificate;
+    downloadItems.push({
+      id: 'g-signature-cert', label: 'Signature certificate (audit trail)', group: 'Rental documents',
+      make: async () => {
+        const [{ pdf }, { SignatureCertificateDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/SignatureCertificatePdf')]);
+        return reactPdfBytes(await pdf(<SignatureCertificateDoc data={certData} refLabel={refLabel} />).toBlob());
+      },
+    });
   }
   // Loose uploaded extras are offered under their own group (mirroring the page's
   // "Other documents" section) but arrive UNTICKED — the default selection is the
@@ -428,9 +450,9 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} refLabel={refLabel} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} refLabel={refLabel} planRefNo={planRefNo} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
-              ? <Block label="Receipts"><ReceiptInline contract={receipt as ReceiptContract} height={FULL} showDownload /></Block>
+              ? <Block label="Receipts"><ReceiptInline contract={receiptWithRefs as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;
             else if (s.kind === 'agreement') inner = <Block label="Agreement"><EjariInline data={ejari} addendums={addendums} height={FULL} showDownload /></Block>;
             else {

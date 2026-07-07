@@ -14,6 +14,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
+import { fetchPaymentRefs } from '@/lib/paymentRefs';
 
 function FullScreenLoader() {
   return (
@@ -41,9 +42,13 @@ export default function RentReceiptPage() {
 
   useEffect(() => {
     if (!params?.id) return;
-    fetch(`/api/contracts/${params.id}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
-      .then(setContract).catch(e => setError(e.message));
+    Promise.all([
+      fetch(`/api/contracts/${params.id}`, { credentials: 'include' })
+        .then(r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json() as Promise<ReceiptContract>; }),
+      fetchPaymentRefs(params.id),
+    ])
+      .then(([c, refs]) => setContract({ ...c, paymentRefs: refs }))
+      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load'));
   }, [params?.id]);
 
   if (error) return <div style={{ padding: 40, color: '#c00' }}>Failed to load contract: {error}</div>;

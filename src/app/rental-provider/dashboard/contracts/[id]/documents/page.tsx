@@ -16,6 +16,9 @@ import { ContractDocsBinder, LandlordLinkButton, type BinderDoc } from '@/compon
 import { type PlanPayment } from '@/lib/currentPlan';
 import { toEjari } from '@/lib/toEjari';
 import { currentDocWatermark } from '@/lib/docViewer';
+import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
+import { collectClientMeta } from '@/lib/signEvidence';
+import { fetchSignatureCertificate, type SignatureCertificateData } from '@/components/upnow/SignatureCertificatePdf';
 
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
 interface Contract {
@@ -39,6 +42,8 @@ export default function ContractDocumentsPage() {
   const id = params?.id;
   const [c, setC] = useState<Contract | null>(null);
   const [sigs, setSigs] = useState<Sig[]>([]);
+  const [cert, setCert] = useState<SignatureCertificateData | null>(null);
+  const [refs, setRefs] = useState<PaymentRefs>(EMPTY_PAYMENT_REFS);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const refresh = () => setReloadKey(k => k + 1);
@@ -55,6 +60,8 @@ export default function ContractDocumentsPage() {
       .then(r => (r.ok ? r.json() as Promise<Sig[]> : []))
       .then(s => setSigs(Array.isArray(s) ? s : []))
       .catch(() => { /* non-fatal */ });
+    fetchPaymentRefs(id, ctrl.signal).then(setRefs).catch(() => { /* non-fatal */ });
+    fetchSignatureCertificate(id, ctrl.signal).then(setCert).catch(() => { /* non-fatal */ });
     return () => ctrl.abort();
   }, [id, reloadKey]);
 
@@ -65,7 +72,9 @@ export default function ContractDocumentsPage() {
   const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
     const res = await fetch(`/api/contracts/${c.id}/sign`, {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: 'landlord', signatoryName, signatureImage, method: 'online' }),
+      // consent: the binder's ContractSignBar gates signing behind its
+      // review-and-agree checkbox, so reaching here means it was ticked.
+      body: JSON.stringify({ role: 'landlord', signatoryName, signatureImage, method: 'online', consent: true, clientMeta: collectClientMeta() }),
     });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || `Could not sign (${res.status})`); }
     refresh();
@@ -81,8 +90,10 @@ export default function ContractDocumentsPage() {
       ejari={ejari}
       planContract={c}
       planPayments={c.payments ?? []}
+      paymentRefs={refs}
       receipt={c as unknown as ReceiptContract}
       watermark={watermark}
+      signatureCertificate={cert}
       headerRight={c.tenant?.id ? <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} /> : undefined}
       signerName={c.landlord?.companyName || c.landlord?.name || 'Landlord'}
       signerDefaultName={c.landlord?.name || c.landlord?.companyName || ''}

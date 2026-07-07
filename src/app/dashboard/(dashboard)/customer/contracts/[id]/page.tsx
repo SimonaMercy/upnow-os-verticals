@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { openDocViewer } from '@/lib/docViewer';
+import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -288,6 +289,7 @@ export default function TenantContractDetailPage() {
   const [showSignModal, setShowSignModal] = useState(false);
   const [signatoryName, setSignatoryName] = useState('');
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
+  const [signConsent, setSignConsent] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signSuccess, setSignSuccess] = useState(false);
@@ -379,7 +381,7 @@ export default function TenantContractDetailPage() {
       const res = await fetch(`/api/contracts/tenant/${contract.id}/sign`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatoryName: signatoryName.trim(), signatureImage }),
+        body: JSON.stringify({ signatoryName: signatoryName.trim(), signatureImage, consent: signConsent, clientMeta: collectClientMeta() }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { message?: string };
@@ -1172,6 +1174,10 @@ export default function TenantContractDetailPage() {
                 <label className="text-xs font-medium text-[#1a1916] block mb-1.5">Draw your signature</label>
                 <SignaturePad onSignatureChange={setSignatureImage} />
               </div>
+              <label className="flex items-start gap-2 text-xs text-[#1a1916] cursor-pointer">
+                <input type="checkbox" checked={signConsent} onChange={e => setSignConsent(e.target.checked)} className="mt-0.5" />
+                <span>{ESIGN_CONSENT_TEXT}</span>
+              </label>
               {signError && (
                 <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
                   <AlertCircle size={13} /> {signError}
@@ -1182,7 +1188,7 @@ export default function TenantContractDetailPage() {
                   className="flex-1 py-2.5 rounded-xl border border-[#e8e6e0] text-sm text-[#6b6860] hover:border-[#c5c2bc] transition-colors">
                   Cancel
                 </button>
-                <button onClick={submitSignature} disabled={signing || !signatoryName.trim() || !signatureImage}
+                <button onClick={submitSignature} disabled={signing || !signatoryName.trim() || !signatureImage || !signConsent}
                   className="flex-1 py-2.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                   {signing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
                   {signing ? 'Signing…' : 'Submit Signature'}

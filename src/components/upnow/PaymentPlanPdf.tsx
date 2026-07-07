@@ -48,6 +48,8 @@ export interface PaymentPlanMeta {
 export interface PlanViewerContract extends PlanContract {
   id?: number;
   ref?: string | null;
+  /** Gapless RP plan reference (PP-<rp>-<year>-<nnnnn>), when resolved. */
+  planRefNo?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   property?: { buildingName?: string | null; community?: string | null; emirate?: string | null } | null;
@@ -96,7 +98,7 @@ function planLines(plan: OfferPlan): { label: string; fils: number }[] {
   return lines;
 }
 
-export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refLabel?: string | null; meta?: PaymentPlanMeta }) {
+export function PaymentPlanDoc({ plan, refLabel, planRefNo, meta }: { plan: OfferPlan; refLabel?: string | null; planRefNo?: string | null; meta?: PaymentPlanMeta }) {
   const lines = planLines(plan);
   // By due date; on a same-date tie the security deposit sorts before the rent
   // installments (deposit is collected first, then the plan).
@@ -115,6 +117,7 @@ export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refL
           <View>
             <Text style={s.h1}>Payment Plan</Text>
             <Text style={s.sub}>{refLabel ? `Contract ${refLabel} · ` : ''}Current rent, fees &amp; deposit</Text>
+            {planRefNo ? <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: GREEN, marginTop: 3 }}>Plan reference: {planRefNo}</Text> : null}
           </View>
           {typeBadge ? (
             <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: typeBadge.fg, backgroundColor: typeBadge.bg, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10 }}>{typeBadge.label}</Text>
@@ -176,11 +179,12 @@ export function PaymentPlanDoc({ plan, refLabel, meta }: { plan: OfferPlan; refL
 }
 
 /** Derive the OfferPlan + heading metadata from a fetched contract. */
-export function planFromContract(contract: PlanViewerContract): { plan: OfferPlan; refLabel: string | null; meta: PaymentPlanMeta } {
+export function planFromContract(contract: PlanViewerContract): { plan: OfferPlan; refLabel: string | null; planRefNo: string | null; meta: PaymentPlanMeta } {
   const plan = buildCurrentPlan(contract, contract.payments ?? []);
   return {
     plan,
     refLabel: contract.ref ?? (contract.id != null ? `CID-${contract.id}` : null),
+    planRefNo: contract.planRefNo ?? null,
     meta: {
       contractType: contract.contractType ?? null,
       buildingName: contract.property?.buildingName ?? null,
@@ -196,11 +200,11 @@ export function planFromContract(contract: PlanViewerContract): { plan: OfferPla
 
 // ─── Inline (embeddable) render for the documents binder ──────────────────────
 
-export function PaymentPlanInline({ plan, refLabel, meta, height = 100000, showDownload = false }: {
-  plan: OfferPlan; refLabel?: string | null; meta?: PaymentPlanMeta; height?: number; showDownload?: boolean;
+export function PaymentPlanInline({ plan, refLabel, planRefNo, meta, height = 100000, showDownload = false }: {
+  plan: OfferPlan; refLabel?: string | null; planRefNo?: string | null; meta?: PaymentPlanMeta; height?: number; showDownload?: boolean;
 }) {
-  const key = `plan-inline|${refLabel ?? ''}|${plan.totalAmountFils}|${plan.items?.length ?? 0}`;
-  const { bytes, url, error } = useReactPdfDoc(() => <PaymentPlanDoc plan={plan} refLabel={refLabel} meta={meta} />, key);
+  const key = `plan-inline|${refLabel ?? ''}|${planRefNo ?? ''}|${plan.totalAmountFils}|${plan.items?.length ?? 0}`;
+  const { bytes, url, error } = useReactPdfDoc(() => <PaymentPlanDoc plan={plan} refLabel={refLabel} planRefNo={planRefNo} meta={meta} />, key);
   if (error) return <div style={{ padding: 24, textAlign: 'center', color: '#c00', fontSize: 13 }}>Payment plan unavailable.</div>;
   return (
     <>
@@ -212,9 +216,9 @@ export function PaymentPlanInline({ plan, refLabel, meta, height = 100000, showD
 
 /** Just the "⬇ Download PDF" row for the plan — for surfaces that render their own
  *  native plan table (the binder's OfferBlock) but still want a clean download. */
-export function PaymentPlanDownloadLink({ plan, refLabel, meta }: { plan: OfferPlan; refLabel?: string | null; meta?: PaymentPlanMeta }) {
-  const key = `plan-dl|${refLabel ?? ''}|${plan.totalAmountFils}|${plan.items?.length ?? 0}`;
-  const { url } = useReactPdfDoc(() => <PaymentPlanDoc plan={plan} refLabel={refLabel} meta={meta} />, key);
+export function PaymentPlanDownloadLink({ plan, refLabel, planRefNo, meta }: { plan: OfferPlan; refLabel?: string | null; planRefNo?: string | null; meta?: PaymentPlanMeta }) {
+  const key = `plan-dl|${refLabel ?? ''}|${planRefNo ?? ''}|${plan.totalAmountFils}|${plan.items?.length ?? 0}`;
+  const { url } = useReactPdfDoc(() => <PaymentPlanDoc plan={plan} refLabel={refLabel} planRefNo={planRefNo} meta={meta} />, key);
   return <InlineDownloadRow url={url} fileName={`Payment-plan-${refLabel ?? 'contract'}.pdf`} />;
 }
 
@@ -226,10 +230,10 @@ const CLOSE_BTN = { padding: '6px 16px', border: '1px solid #ccc', borderRadius:
 const DL_BTN = { padding: '6px 16px', background: GREEN, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' } as const;
 
 export default function PaymentPlanViewer({ contract }: { contract: PlanViewerContract }) {
-  const { plan, refLabel, meta } = planFromContract(contract);
+  const { plan, refLabel, planRefNo, meta } = planFromContract(contract);
   const fileName = `Payment-plan-${refLabel ?? 'contract'}.pdf`;
-  const key = `plan|${contract.id ?? refLabel ?? ''}|${plan.totalAmountFils}|${plan.items?.length ?? 0}`;
-  const { bytes, url: downloadUrl, error } = useReactPdfDoc(() => <PaymentPlanDoc plan={plan} refLabel={refLabel} meta={meta} />, key);
+  const key = `plan|${contract.id ?? refLabel ?? ''}|${planRefNo ?? ''}|${plan.totalAmountFils}|${plan.items?.length ?? 0}`;
+  const { bytes, url: downloadUrl, error } = useReactPdfDoc(() => <PaymentPlanDoc plan={plan} refLabel={refLabel} planRefNo={planRefNo} meta={meta} />, key);
 
   return (
     <div style={VIEWER_WRAP}>

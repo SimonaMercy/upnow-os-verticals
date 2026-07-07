@@ -48,7 +48,9 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { buildCurrentPlan } from '@/lib/currentPlan';
+import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
+import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
@@ -747,10 +749,13 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             body: 'This lease was signed physically before it was imported. Digital signature fields are not applicable.',
             timing: null,
             node: (
-              <div className="chklist">
-                <ChkRow on locked label={`${TEN} signed (on file)`} onToggle={() => {}} />
-                <ChkRow on locked label="Landlord signed (on file)" onToggle={() => {}} />
-              </div>
+              <>
+                <div className="chklist">
+                  <ChkRow on locked label={`${TEN} signed (on file)`} onToggle={() => {}} />
+                  <ChkRow on locked label="Landlord signed (on file)" onToggle={() => {}} />
+                </div>
+                <SignatureAuditTrail contractId={h.contract.id} />
+              </>
             ),
           }
         : {
@@ -759,10 +764,13 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           body: 'Customer and landlord signatures are on file.',
           timing: null,
           node: (
-            <div className="chklist">
-              <ChkRow on locked={lock} label={`${TEN} signed`} onToggle={() => h.setState({ tenantSigned: false })} />
-              <ChkRow on locked={lock} label="Landlord signed" onToggle={() => h.setState({ landlordSigned: false })} />
-            </div>
+            <>
+              <div className="chklist">
+                <ChkRow on locked={lock} label={`${TEN} signed`} onToggle={() => h.setState({ tenantSigned: false })} />
+                <ChkRow on locked={lock} label="Landlord signed" onToggle={() => h.setState({ landlordSigned: false })} />
+              </div>
+              <SignatureAuditTrail contractId={h.contract.id} />
+            </>
           ),
         }
       : {
@@ -796,6 +804,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                   Mark as signed on file (paper / imported)
                 </button>
               )}
+              <SignatureAuditTrail contractId={h.contract.id} />
             </>
           ),
         };
@@ -1484,7 +1493,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms, showExtras = true,
+  notes, onAddNote, perms, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
@@ -1532,6 +1541,8 @@ function DetailsDrawer({
    *  (fees/payments/PDC → collections, deposit → deposits, notes → agreements).
    *  RP owners get `true` for every field. */
   perms: ActorPerms;
+  /** RP reconciliation refs — plan number + per-payment receipt numbers. */
+  paymentRefs?: PaymentRefs;
 }) {
   const depositRow = payments.find(p => p.paymentType === 'security_deposit');
   // Receipt links must respect the portal (RP vs manager) — derive the base
@@ -2064,7 +2075,14 @@ function DetailsDrawer({
                         <Fragment>
                           <tr>
                             <td><DollarSign size={13} /></td>
-                            <td>{depositRow.description?.trim() || 'Security deposit'}</td>
+                            <td>
+                              {depositRow.description?.trim() || 'Security deposit'}
+                              {paymentRefs.receiptByPaymentId[depositRow.id] && (
+                                <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
+                                  Receipt {paymentRefs.receiptByPaymentId[depositRow.id]}
+                                </span>
+                              )}
+                            </td>
                             <td className="amt">{fmtAed(depositRow.amount)}</td>
                             <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
                             <td>{fmtMethod(depositRow.paymentMethod)}</td>
@@ -2275,7 +2293,14 @@ function DetailsDrawer({
                         <Fragment key={p.id}>
                         <tr>
                           <td>{i + 1}</td>
-                          <td>{p.description ?? '—'}</td>
+                          <td>
+                            {p.description ?? '—'}
+                            {paymentRefs.receiptByPaymentId[p.id] && (
+                              <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
+                                Receipt {paymentRefs.receiptByPaymentId[p.id]}
+                              </span>
+                            )}
+                          </td>
                           <td className="amt">
                             {fmtAed(p.amount)}
                             {(p.vatAmount ?? 0) > 0 && (
@@ -2412,7 +2437,14 @@ function DetailsDrawer({
                         {feeRows.map(f => (
                           <Fragment key={f.id}>
                           <tr>
-                            <td>{feeLabel(f.paymentType)}</td>
+                            <td>
+                              {feeLabel(f.paymentType)}
+                              {paymentRefs.receiptByPaymentId[f.id] && (
+                                <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
+                                  Receipt {paymentRefs.receiptByPaymentId[f.id]}
+                                </span>
+                              )}
+                            </td>
                             <td>{f.description ?? '—'}</td>
                             <td className="amt">
                               {fmtAed(f.amount)}
@@ -2986,6 +3018,7 @@ function DetailsDrawer({
                     <PaymentPlanCard
                       plan={currentPlan}
                       refLabel={contract.ref}
+                      planRefNo={paymentRefs.planRefNo}
                       contractType={contract.contractType}
                       tenantName={contract.tenant.companyName || contract.tenant.name}
                       landlordName={contract.landlord.bankAccountName || contract.landlord.companyName || contract.landlord.name}
@@ -3305,6 +3338,94 @@ function SignaturePad({ onChange }: { onChange: (d: string | null) => void }) {
 
 /** Inline landlord-signature field shown on the page (no modal) so the landlord
  *  can countersign directly. Same role/endpoint as SignModal. */
+/** Collapsible DocuSign-style signing audit trail: per-signature evidence
+ *  (channel, IP, device, consent, terms hash) + the envelope event history,
+ *  with a one-click "Certificate (PDF)" download. Fetches lazily on expand. */
+function SignatureAuditTrail({ contractId }: { contractId: number }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<import('@/components/upnow/SignatureCertificatePdf').SignatureCertificateData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [dl, setDl] = useState(false);
+
+  const load = async () => {
+    if (data || loading) return;
+    setLoading(true);
+    try {
+      const { fetchSignatureCertificate } = await import('@/components/upnow/SignatureCertificatePdf');
+      setData(await fetchSignatureCertificate(contractId));
+    } finally { setLoading(false); }
+  };
+
+  const download = async () => {
+    if (!data || dl) return;
+    setDl(true);
+    try {
+      const [{ pdf }, mod] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/SignatureCertificatePdf')]);
+      const blob = await pdf(<mod.SignatureCertificateDoc data={data} refLabel={`CID-${contractId}`} />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `Signature-certificate-CID-${contractId}.pdf`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } finally { setDl(false); }
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button className="ca" style={{ padding: 0 }} onClick={() => { setOpen(o => !o); if (!open) void load(); }}>
+        {open ? '▾ Hide signing audit trail' : '▸ View signing audit trail'}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, border: '1px solid var(--edge, #e3e0d9)', borderRadius: 10, padding: '10px 12px', fontSize: 12 }}>
+          {loading && <span className="note">Loading…</span>}
+          {!loading && data && (
+            <>
+              {data.signatures.map(sig => {
+                const mod = { // labels kept inline to avoid a client import at render time
+                  rp_dashboard: 'UpNow dashboard', customer_dashboard: 'Customer dashboard',
+                  tenant_portal: 'Emailed signing link (tenant)', landlord_link: 'Emailed signing link (landlord)',
+                  on_file: 'On file (paper / imported)',
+                } as Record<string, string>;
+                const when = new Date(sig.signedAt).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+                return (
+                  <div key={sig.id} style={{ padding: '6px 0', borderBottom: '1px solid var(--mist, #f0ede7)' }}>
+                    <strong style={{ textTransform: 'capitalize' }}>{sig.role}</strong> — {sig.signatoryName ?? '—'} · {when} GST
+                    <div className="note" style={{ marginTop: 2 }}>
+                      {[mod[sig.signedVia ?? ''] ?? (sig.method === 'on_file' ? mod.on_file : 'Legacy signature (pre-audit)'),
+                        sig.ipAddress ? `IP ${sig.ipAddress}` : null,
+                        sig.signerEmail,
+                        sig.consentGiven ? 'e-sign consent ✓' : null,
+                        sig.termsHash ? `terms #${sig.termsHash.slice(0, 12)}…` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                );
+              })}
+              {data.events.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {data.events.map(e => (
+                    <div key={e.id} className="note" style={{ padding: '2px 0' }}>
+                      {new Date(e.at).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} —{' '}
+                      {({ link_sent: 'Signing link emailed', link_opened: 'Link opened', contract_viewed: 'Contract reviewed', signed: 'Signature executed', addendum_signed: 'Addendum signed', on_file_marked: 'Marked signed on file' } as Record<string, string>)[e.event] ?? e.event}
+                      {e.role ? ` (${e.role})` : ''}{e.ipAddress ? ` · ${e.ipAddress}` : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {data.signatures.length > 0 && (
+                <button className="ca" style={{ padding: 0, marginTop: 8 }} onClick={download} disabled={dl}>
+                  {dl ? 'Preparing…' : '⬇ Download signature certificate (PDF)'}
+                </button>
+              )}
+              {data.signatures.length === 0 && data.events.length === 0 && <span className="note">No signing activity recorded yet.</span>}
+            </>
+          )}
+          {!loading && !data && <span className="note">Audit trail unavailable.</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; onSigned: () => void }) {
   const [sig, setSig] = useState<string | null>(null);
   const [name, setName] = useState(contract.landlord.companyName || contract.landlord.name || '');
@@ -3312,14 +3433,17 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
+  const [consent, setConsent] = useState(false);
 
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string } = {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown> } = {
         role: 'landlord',
         signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
         method: 'online',
+        consent,
+        clientMeta: collectClientMeta(),
       };
       if (mode === 'canvas') body.signatureImage = sig!;
       else                   body.typedName     = name.trim();
@@ -3337,7 +3461,7 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
       setBusy(false);
     }
   };
-  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && !busy;
+  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && consent && !busy;
 
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--jade-edge, #bfe3d6)', borderRadius: 'var(--r-lg)', padding: 16, marginBottom: 14 }}>
@@ -3356,6 +3480,10 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
         </div>
       </div>
       <SignaturePad onChange={setSig} />
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 2 }} />
+        <span className="note">{ESIGN_CONSENT_TEXT}</span>
+      </label>
       {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
         <button className="btn btn-jade" disabled={!canSubmit || done} onClick={submit}>
@@ -3430,14 +3558,17 @@ function SignModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
+  const [consent, setConsent] = useState(false);
 
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string } = {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown> } = {
         role: 'landlord',
         signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
         method: 'online',
+        consent,
+        clientMeta: collectClientMeta(),
       };
       if (mode === 'canvas') body.signatureImage = sig!;
       else                   body.typedName     = name.trim();
@@ -3456,7 +3587,7 @@ function SignModal({
     }
   };
 
-  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && !busy;
+  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && consent && !busy;
 
   return (
     <div className="mscrim" onClick={onClose}>
@@ -3477,6 +3608,10 @@ function SignModal({
             </div>
           </div>
           <SignaturePad onChange={setSig} />
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 2 }} />
+            <span className="note">{ESIGN_CONSENT_TEXT}</span>
+          </label>
           {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
         </div>
         <div className="mf">
@@ -4086,6 +4221,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const { canForRp: managerCanForRp } = useManagerPermissions();
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
+  const [paymentRefs, setPaymentRefs] = useState<PaymentRefs>(EMPTY_PAYMENT_REFS);
   const [notes, setNotes] = useState<ContractNote[]>([]);
   // Optional comment the RP types when accepting / rejecting a customer's
   // termination request — logged to the Notes journal alongside the decision.
@@ -4142,6 +4278,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
           : data;
         setContract(normalized);
         setSignatures(Array.isArray(sigs) ? sigs : []);
+        // RP reconciliation refs — plan number + per-payment receipt numbers.
+        fetchPaymentRefs(id, ctrl.signal).then(setPaymentRefs).catch(() => { /* non-fatal */ });
         fetch(`/api/contracts/${id}/inspection?type=move_in`, { credentials: 'include', signal: ctrl.signal })
           .then(r => (r.ok ? r.json() : null))
           .then((insp: MoveInInsp | null) => setMoveInInsp(insp ?? null))
@@ -5395,6 +5533,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             notes={notes}
             onAddNote={onAddNote}
             perms={perms}
+            paymentRefs={paymentRefs}
             showExtras={view !== 'record'}
           />
         </div>

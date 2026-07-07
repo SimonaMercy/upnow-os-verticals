@@ -39,6 +39,9 @@ function PlanMeta({ label, value, align = 'left' }: { label: string; value?: str
 export interface PaymentPlanCardProps {
   plan: OfferPlan;
   refLabel?: string | null;
+  /** Gapless RP plan reference (PP-<rp>-<year>-<nnnnn>) for bank reconciliation.
+   *  Distinct from refLabel (the CID- display label). */
+  planRefNo?: string | null;
   /** 'renewal' → "Renewal" badge; anything else → "New Lease". */
   contractType?: string | null;
   tenantName?: string | null;
@@ -50,7 +53,7 @@ export interface PaymentPlanCardProps {
   periodEnd?: string | null;
 }
 
-export function PaymentPlanCard({ plan, refLabel, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: PaymentPlanCardProps) {
+export function PaymentPlanCard({ plan, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: PaymentPlanCardProps) {
   const typeBadge = contractType == null ? null
     : contractType === 'renewal'
       ? { label: 'Renewal', bg: '#eaf2fb', fg: '#1e5fae' }
@@ -75,11 +78,16 @@ export function PaymentPlanCard({ plan, refLabel, contractType, tenantName, land
           <div>Payment plan</div>
           <div style={{ fontSize: 11, fontWeight: 500, color: '#6b6860', marginTop: 2 }}>current rent, fees &amp; deposit</div>
         </div>
-        {typeBadge && (
-          <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: typeBadge.bg, color: typeBadge.fg, whiteSpace: 'nowrap' }}>{typeBadge.label}</span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {planRefNo && (
+            <span title="Payment plan reference — for bank reconciliation" style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#eef4f2', color: '#1a5a4a', border: '1px solid #cfe3dc', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', whiteSpace: 'nowrap' }}>{planRefNo}</span>
+          )}
+          {typeBadge && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: typeBadge.bg, color: typeBadge.fg, whiteSpace: 'nowrap' }}>{typeBadge.label}</span>
+          )}
+        </div>
       </div>
-      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
+      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
       {(tenantName || landlordName || unitNumber || buildingName || community || periodStart) && (
         <div style={{ padding: '11px 14px 2px', display: 'grid', gap: 10 }}>
           {(tenantName || landlordName) && (

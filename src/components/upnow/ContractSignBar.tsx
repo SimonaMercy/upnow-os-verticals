@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { PenLine, CheckCircle2, Loader2, X } from 'lucide-react';
+import { ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 
 export function ContractSignBar({
   signerRole = 'Landlord',
@@ -118,7 +119,7 @@ export function ContractSignBar({
             {requireConfirm && (
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#1a1916', cursor: 'pointer', marginBottom: 10 }}>
                 <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
-                <span>I have reviewed all the documents above and agree to execute this contract as the {signerRole.toLowerCase()}.</span>
+                <span>I have reviewed all the documents above and agree to execute this contract as the {signerRole.toLowerCase()}. {ESIGN_CONSENT_TEXT}</span>
               </label>
             )}
             <input

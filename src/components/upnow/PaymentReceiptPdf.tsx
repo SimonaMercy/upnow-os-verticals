@@ -116,6 +116,14 @@ export interface ReceiptContract {
   unit: { number: string | null; name: string | null };
   property: { buildingName: string | null; community?: string | null; emirate?: string | null; fullAddress?: string | null };
   payments?: ReceiptPayment[];
+  /** RP reconciliation references (GET /contracts/:id/payment-refs). When present,
+   *  a per-payment receipt prints its REAL gapless number (RCP-<rp>-<year>-<nnnnn>)
+   *  instead of the derived RCP-<ref>-* label, and receipts carry the plan number. */
+  paymentRefs?: {
+    planRefNo?: string | null;
+    /** payments.id → gapless receipt number. */
+    receiptByPaymentId?: Record<number, string>;
+  } | null;
 }
 
 interface Props {
@@ -199,7 +207,7 @@ function isRenewalContract(c: ReceiptContract): boolean {
   return (c.contractType ?? '').toLowerCase() === 'renewal';
 }
 
-interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; method?: string | null; reference?: string | null; }
+interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; method?: string | null; reference?: string | null; receiptNo?: string | null; }
 interface Receipt {
   kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management';
   title: string;
@@ -215,6 +223,9 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   const gross = sel.amount || 0;
   const vat = sel.vatAmount || 0;
   const net = Math.max(0, gross - vat);
+  // The real, issued gapless receipt number for this payment (once cleared),
+  // falling back to the derived label for un-receipted / preview rows.
+  const realNo = contract.paymentRefs?.receiptByPaymentId?.[sel.id];
   // Payment method + cheque/ref travel ON the line item (shown inline under the
   // description), so every receipt states how each amount was paid without a
   // separate "Payment Details" block.
@@ -222,16 +233,15 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
 
   if (type === 'security_deposit') {
     return { kind: 'deposit', title: 'SECURITY DEPOSIT RECEIPT',
-      receiptNo: `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
+      receiptNo: realNo ?? `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
       lines: [{ desc: 'Security Deposit', net: gross, vat: 0, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
   if (isFee(sel)) {
     const code = type === 'ejari_fee' ? 'EJR' : type === 'commission' ? 'COM' : 'ADM';
     return { kind: 'fee', title: 'FEE RECEIPT',
-      receiptNo: `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
+      receiptNo: realNo ?? `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
-
   const rentalIdx = rentals.findIndex(p => p.id === sel.id);
   const ordinal = rentalIdx >= 0 ? rentalIdx + 1 : 1;
   const n = contract.numberOfInstallments ?? rentals.length ?? 1;
@@ -251,7 +261,7 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   }
 
   return { kind: 'rent', title: 'RENT RECEIPT',
-    receiptNo: `RCP-${contract.ref}-${String(ordinal).padStart(2, '0')}`, date: sel.transactionDate, single: sel, lines };
+    receiptNo: realNo ?? `RCP-${contract.ref}-${String(ordinal).padStart(2, '0')}`, date: sel.transactionDate, single: sel, lines };
 }
 
 /** The Management-Fee lines (Admin / Ejari / Commission), each net + VAT — read
@@ -296,8 +306,9 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
   // mode of payment so the "date - method" line is always present.
   const contractMethod = titleCase(contract.modeOfPayment) || 'Bank Transfer';
   const feeMeta = (row?: ReceiptPayment) => row
-    ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null, date: row.transactionDate ?? null }
-    : { method: contractMethod, reference: null };
+    ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null, date: row.transactionDate ?? null,
+        receiptNo: contract.paymentRefs?.receiptByPaymentId?.[row.id] ?? null }
+    : { method: contractMethod, reference: null, receiptNo: null };
   const lines: LineItem[] = [];
   if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat), ...feeMeta(adminRow) });
   if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat), ...feeMeta(ejariRow) });
@@ -320,10 +331,13 @@ function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]
     let net = Math.max(0, round2(gross - vat));
     if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
     return { desc: `Rent — Installment ${i + 1} of ${n}`, net, vat, total: round2(net + vat), date: p.transactionDate ?? null,
-      method: methodLabel(p, contract), reference: p.chequeNumber ?? null };
+      method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
+      receiptNo: contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null };
   });
+  // Aggregate statement → reference the payment plan (each cleared cheque carries
+  // its own gapless receipt number on its line); never a fake "-RENT" number.
   return { kind: 'rental', title: 'RENT INCOME RECEIPT',
-    receiptNo: `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
+    receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: rentals.length };
 }
 
@@ -334,7 +348,7 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
   if (lines.length === 0) return null;
   const feeRows = (contract.fees ?? []).filter(isFee);
   return { kind: 'management', title: 'MANAGEMENT FEE RECEIPT',
-    receiptNo: `RCP-${contract.ref}-MGMT`,
+    receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-MGMT`,
     date: feeRows[0]?.transactionDate ?? rentRows[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: feeCount || lines.length };
 }
@@ -358,7 +372,7 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
     { desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) }];
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT',
-    receiptNo: `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
+    receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
     lines, scheduleCount: rentRows.length + feeCount };
 }
 
@@ -426,6 +440,15 @@ function isCombined(kind: Props['kind'], selectedId?: number | null): boolean {
   return selectedId == null && (kind == null || kind === 'all');
 }
 
+/** A stable signature of the RP reconciliation refs, for the PDF doc key — changes
+ *  when the plan number or any receipt number resolves, forcing regeneration. */
+function receiptRefsSig(contract: ReceiptContract): string {
+  const r = contract.paymentRefs;
+  if (!r) return '';
+  const ids = Object.keys(r.receiptByPaymentId ?? {}).sort().join('.');
+  return `${r.planRefNo ?? ''}#${ids}`;
+}
+
 // ─── PDF styles ──────────────────────────────────────────────────────────────
 
 const PAD = 34;
@@ -466,6 +489,10 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const grandTotal = round2(receipt.lines.reduce((s, l) => s + l.total, 0));
   const showVat = totalVat > 0;
   const single = receipt.single;
+  // Aggregate statements (rent income / management fee / legacy combined) reference
+  // the payment plan; only a per-cheque single receipt has its own "RECEIPT NO.".
+  const isAggregate = receipt.kind === 'rental' || receipt.kind === 'management' || receipt.kind === 'contract';
+  const numberLabel = isAggregate && contract.paymentRefs?.planRefNo ? 'PLAN REF' : 'RECEIPT NO.';
   const landlordName = contract.landlord?.companyName || contract.landlord?.name || '';
   const propertyDesc = [contract.property?.buildingName, contract.unit?.number || contract.unit?.name, contract.property?.community || contract.property?.emirate].filter(Boolean).join(', ');
 
@@ -502,7 +529,7 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
               ? <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2, marginBottom: 9 }}>{receipt.title}</Text>
               : null}
             <View style={{ flexDirection: 'row', marginBottom: 2 }}>
-              <Text style={{ fontSize: 7, color: HEADER_SUB, letterSpacing: 0.5, marginRight: 6 }}>RECEIPT NO.</Text>
+              <Text style={{ fontSize: 7, color: HEADER_SUB, letterSpacing: 0.5, marginRight: 6 }}>{numberLabel}</Text>
               <Text style={{ fontSize: 8.5, color: '#fff', fontWeight: 500 }}>{receipt.receiptNo}</Text>
             </View>
             <View style={{ flexDirection: 'row' }}>
@@ -558,6 +585,9 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
                     ].filter(Boolean).join(' - ')}
                   </Text>
                 ) : null}
+                {l.receiptNo ? (
+                  <Text style={{ fontSize: 7, color: ACCENT_DK, fontWeight: 500, marginTop: 2 }}>Receipt {l.receiptNo}</Text>
+                ) : null}
               </View>
               {showVat ? <Text style={[st.td, { width: 78, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
               {showVat ? <Text style={[st.td, { width: 60, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
@@ -590,7 +620,7 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
         <View style={{ paddingHorizontal: PAD, paddingTop: 14 }}>
           <View style={{ borderTopWidth: 1, borderTopColor: LINE, paddingTop: 12, alignItems: 'center' }}>
             <Text style={{ fontSize: 8.5, color: INK, fontWeight: 500 }}>This is a system-generated receipt — valid without a signature or stamp.</Text>
-            <Text style={{ fontSize: 7.5, color: MUTE, marginTop: 5 }}>Please retain this receipt against tenancy contract {contract.ref} for your records.</Text>
+            <Text style={{ fontSize: 7.5, color: MUTE, marginTop: 5 }}>Please retain this receipt against tenancy contract {contract.ref}{contract.paymentRefs?.planRefNo ? ` · payment plan ${contract.paymentRefs.planRefNo}` : ''} for your records.</Text>
           </View>
         </View>
 
@@ -644,7 +674,10 @@ export function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: P
  *  — no toolbar, no download, no inner scroll (the page's outer scroll handles
  *  it). Pass a large `height` so EjariCanvas never engages its scroll cap. */
 export function ReceiptInline({ contract, kind = 'all', height = 100000, showDownload = false }: { contract: ReceiptContract; kind?: Props['kind']; height?: number; showDownload?: boolean }) {
-  const docKey = `inline|${contract.id}|${kind ?? 'all'}`;
+  // The refs load async AFTER the contract — fold them into the doc key so the PDF
+  // REGENERATES with real receipt numbers when they arrive (useReactPdfDoc keys on
+  // this string only; a stale key would freeze the derived-label version).
+  const docKey = `inline|${contract.id}|${kind ?? 'all'}|${receiptRefsSig(contract)}`;
   const { bytes, url, error } = useReactPdfDoc(
     () => <PaymentReceiptDoc contract={contract} kind={kind} selectedId={null} selectedIdx={0} />,
     docKey,
@@ -675,7 +708,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   // @react-pdf <PDFViewer> (iframe blob), which renders blank on mobile / in prod.
   // Keyed on the route inputs: the print route fetches `contract` once, so its id is
   // a stable content key.
-  const docKey = `${contract.id}|${kind ?? 'all'}|${selectedId ?? ''}|${selectedIdx ?? 0}`;
+  const docKey = `${contract.id}|${kind ?? 'all'}|${selectedId ?? ''}|${selectedIdx ?? 0}|${receiptRefsSig(contract)}`;
   const { bytes, url: downloadUrl, error: genError } = useReactPdfDoc(
     () => <PaymentReceiptDoc contract={contract} kind={kind} selectedId={selectedId} selectedIdx={selectedIdx} />,
     docKey,
