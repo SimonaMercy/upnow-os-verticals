@@ -191,9 +191,13 @@ const FEE_TYPES = new Set(['admin_fee', 'ejari_fee', 'commission']);
 function isFee(p: ReceiptPayment): boolean {
   return FEE_TYPES.has((p.paymentType ?? '').toLowerCase());
 }
+/** VAT collected as its own cheque (Rental VAT / Fees VAT), payment_type 'vat'. */
+function isVat(p: ReceiptPayment): boolean {
+  return (p.paymentType ?? '').toLowerCase() === 'vat';
+}
 function isRental(p: ReceiptPayment): boolean {
   const t = (p.paymentType ?? '').toLowerCase();
-  return t !== 'security_deposit' && !FEE_TYPES.has(t);
+  return t !== 'security_deposit' && t !== 'vat' && !FEE_TYPES.has(t);
 }
 const FEE_LABEL: Record<string, string> = {
   admin_fee: 'Administration Fee', ejari_fee: 'Ejari Registration Fee', commission: 'Commission',
@@ -242,6 +246,13 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
       receiptNo: realNo ?? `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
+  if (isVat(sel)) {
+    // A VAT cheque (Rental VAT / Fees VAT) is entirely VAT — net 0, vat = gross.
+    return { kind: 'fee', title: 'VAT RECEIPT',
+      receiptNo: realNo ?? `RCP-${contract.ref}-VAT`, date: sel.transactionDate, single: sel,
+      lines: [{ desc: sel.description || 'VAT', net: 0, vat: gross, total: gross, date: sel.transactionDate ?? null, ...meta }] };
+  }
+
   const rentalIdx = rentals.findIndex(p => p.id === sel.id);
   const ordinal = rentalIdx >= 0 ? rentalIdx + 1 : 1;
   const n = contract.numberOfInstallments ?? rentals.length ?? 1;
@@ -356,24 +367,30 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
 function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
   // Legacy combined receipt: fee lines + a single rolled-up rent line. The binder
   // now links the three segmented receipts above; this is retained for old links.
-  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p));
+  // VAT cheques (new model) are their own rows — keep them OUT of the rent line and
+  // show a dedicated VAT line. Legacy contracts have no vat rows; their VAT stays
+  // embedded in the rent cheques' vat_amount (rolled into the rent line below).
+  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p) && !isVat(p));
+  const vatRows = payments.filter(isVat);
   const feeRows = (contract.fees ?? []).filter(isFee);
   const { lines: feeLines, legacyBundle, feeCount } = feeLinesOf(contract, rentRows);
-  if (rentRows.length === 0 && feeLines.length === 0) return null;
+  if (rentRows.length === 0 && feeLines.length === 0 && vatRows.length === 0) return null;
 
   const netOf = (rows: ReceiptPayment[]) =>
     round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
-  const rentVat = round2(rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0));
+  const rentVatEmbedded = round2(rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0)); // legacy embedded
   // legacyBundle = admin+ejari folded into the rent cheques on legacy contracts;
   // 0 when real fee rows exist (those rents are already pure).
   const rentNet = Math.max(0, round2(netOf(rentRows) - legacyBundle));
+  const vatChequeTotal = round2(vatRows.reduce((s, p) => s + (p.amount || 0), 0)); // vat cheque = all VAT
 
   const lines: LineItem[] = [...feeLines,
-    { desc: 'Rent (full lease term)', net: rentNet, vat: rentVat, total: round2(rentNet + rentVat) }];
+    { desc: 'Rent (full lease term)', net: rentNet, vat: rentVatEmbedded, total: round2(rentNet + rentVatEmbedded) }];
+  if (vatChequeTotal > 0) lines.push({ desc: 'VAT (rent & fees)', net: 0, vat: vatChequeTotal, total: vatChequeTotal });
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT',
     receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
-    lines, scheduleCount: rentRows.length + feeCount };
+    lines, scheduleCount: rentRows.length + vatRows.length + feeCount };
 }
 
 /** Resolve the deposit pseudo-payment from the entity / held amount / column. */

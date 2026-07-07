@@ -25,6 +25,7 @@
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
+import { comparePaymentSchedule } from '@/lib/paymentPlan';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, usePathname } from 'next/navigation';
@@ -466,9 +467,13 @@ function deriveStateKey(r: Resolved): StateKey {
     if (rc.status === 'active') return 'renewal_active';
     if (rc.ejariStatus === 'registered') return 'renewal_ejari';
     if (rc.status === 'issued') {
-      // Advance to Ejari only once BOTH parties have signed — not on the
-      // tenant's signature alone. Otherwise stay in the signing step.
-      if (rc.tenantSignedAt && rc.landlordSignedAt) return 'renewal_ejari';
+      // Once the TENANT has signed, they are DONE signing — never ask them to
+      // sign the same renewal twice. They then wait at the Ejari/finalisation
+      // step while the RP confirms the post-dated cheques and registers Ejari
+      // (the renewal activates on PDC-confirm, not on a landlord signature on
+      // the child — which this flow never captures). Mirrors the new-lease flow,
+      // where the tenant's signature alone advances past the signing step.
+      if (rc.tenantSignedAt) return 'renewal_ejari';
       return 'renewal_progress';
     }
     return 'renewal_cheques';
@@ -3547,7 +3552,12 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
     .filter(it => it.type !== 'security_deposit')
     .map(it => ({ description: it.description ?? null, amountFils: it.amountFils ?? 0, dueDate: it.dueDate ?? null, status: null as string | null }));
   const chequeItems = realCheques.length ? realCheques : planCheques;
-  const chequesTotalFils = chequeItems.reduce((s, it) => s + it.amountFils, 0);
+  // Bounced / cancelled cheques are void (replaced) — they still show in the list as
+  // history, but must NOT count in the total (else they double-count the replacement).
+  const chequesTotalFils = chequeItems.reduce(
+    (s, it) => s + (['bounced', 'cancelled'].includes((it.status ?? '').toLowerCase()) ? 0 : it.amountFils),
+    0,
+  );
   // "Next cheque" = the next upcoming RENT installment, NOT the before-move-in
   // first cheque (fees + deposit + installment 1 all share the earliest due
   // date). On an active pass that first cheque is the current/collected one, so
@@ -4132,11 +4142,9 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
   // Payment rows (built by proposeRenewal — first row bundles admin + ejari
   // + commission + rent installment 1). Mirrors the new-lease payment_review
   // step so the customer sees identical detail.
-  const payments = (child?.payments ?? []).slice().sort((a, b) => {
-    const ad = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-    const bd = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-    return ad - bd;
-  });
+  // Grouped by category (deposit → rent cheques → Ejari → Admin → Commission →
+  // custom), chronological within each — matches the cost-breakdown sequence.
+  const payments = (child?.payments ?? []).slice().sort(comparePaymentSchedule);
   const totalScheduled = payments.reduce((s, p) => s + (p.amountPaid ?? 0), 0);
   const fmt = (v: number | null | undefined) => v != null ? fmtAed(v) : '—';
 
@@ -4187,18 +4195,18 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost breakdown</p>
         <div style={{ display: 'grid', gap: 6 }}>
-          <PaymentRow label="Annual rent" amountFils={(newRent ?? 0) * 100} />
+          {securityDeposit != null && securityDeposit > 0 && (
+            <PaymentRow label="Security deposit (carries forward)" amountFils={securityDeposit * 100} />
+          )}
+          <PaymentRow label="Rent (cheques)" amountFils={(newRent ?? 0) * 100} />
           {newRentVat > 0 && (
             <PaymentRow label={`VAT on rent (${rentVatRate}%)`} amountFils={newRentVat * 100} />
-          )}
-          {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
-            <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
           )}
           {child?.ejariFeeFils != null && child.ejariFeeFils > 0 && (
             <PaymentRow label="Ejari fee" amountFils={child.ejariFeeFils * 100} />
           )}
-          {securityDeposit != null && securityDeposit > 0 && (
-            <PaymentRow label="Security deposit (carries forward)" amountFils={securityDeposit * 100} />
+          {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
+            <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
           )}
           <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
           <PaymentRow label="Total scheduled" amountFils={totalScheduled * 100} bold />
@@ -4217,7 +4225,8 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
             )}
           </div>
           {payments.map((p, i) => {
-            const isFirstBundle = i === 0 && (child?.adminFeeFils ?? 0) + (child?.ejariFeeFils ?? 0) > 0;
+            const isVat = (p.paymentType ?? '').toLowerCase() === 'vat';
+            const isFirstBundle = i === 0 && !isVat && (child?.adminFeeFils ?? 0) + (child?.ejariFeeFils ?? 0) > 0;
             const isDeposit = (p.paymentType ?? '').toLowerCase() === 'security_deposit';
             return (
               <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)', background: isFirstBundle ? 'var(--saffron-soft)' : undefined }}>
@@ -4228,12 +4237,13 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
-                  {(p.vatAmount ?? 0) > 0 && (
+                  {/* A VAT cheque is entirely VAT — the "incl. X VAT" note only makes sense on a gross rent/fee cheque. */}
+                  {!isVat && (p.vatAmount ?? 0) > 0 && (
                     <p style={{ fontSize: 10, color: 'var(--mute)', margin: '2px 0 0' }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</p>
                   )}
                 </div>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : 'Rent'}
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : isVat ? 'var(--jade-soft)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : isVat ? 'var(--jade-deep)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : isVat ? 'VAT' : 'Rent'}
                 </span>
               </div>
             );
@@ -4288,19 +4298,25 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
   async function uploadRenewalProof(file: File) {
     if (!child?.id) throw new Error('Renewal contract not ready');
+    // Some browsers (and iPhone HEIC files) report an empty file.type; fall back
+    // to a generic binary type the backend accepts so the upload can start.
+    const mime = file.type || 'application/octet-stream';
     const urlRes = await fetch('/api/documents/upload-url', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ownerType: 'tenancy_contract', ownerId: child.id,
         documentKey: 'renewal_payment_proof',
-        originalName: file.name, mimeType: file.type,
+        originalName: file.name, mimeType: mime,
       }),
     });
-    if (!urlRes.ok) throw new Error('Failed to start upload');
+    if (!urlRes.ok) {
+      const b = await urlRes.json().catch(() => ({}));
+      throw new Error(b?.message ?? 'Failed to start upload');
+    }
     const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey: string };
     const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
-    const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+    const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': mime } });
     if (!putRes.ok) throw new Error('File upload failed');
     const regRes = await fetch('/api/documents', {
       method: 'POST', credentials: 'include',
@@ -4308,7 +4324,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
       body: JSON.stringify({
         ownerType: 'tenancy_contract', ownerId: child.id,
         documentKey: 'renewal_payment_proof', category: 'payment',
-        displayName: file.name, fileUrl, mimeType: file.type, s3Key: fileKey,
+        displayName: file.name, fileUrl, mimeType: mime, s3Key: fileKey,
         isVisibleToTenant: true,
       }),
     });
@@ -4344,6 +4360,10 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   if (!parent) return <ErrorBox msg="Parent contract not found." />;
 
   async function act(verb: 'accept' | 'reject') {
+    if (verb === 'accept' && child?.id && renewalProofs.length === 0) {
+      setErr('Please upload a picture of your cheque or bank transfer to proceed.');
+      return;
+    }
     if (verb === 'accept' && !paymentReady) {
       setErr('Please confirm your payments are ready to proceed.');
       return;
@@ -4418,18 +4438,21 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
       <RenewalTermsSummary parent={parent} child={child} />
 
-      {/* Attach payment references — mirrors the new-lease payment_review
-          step. Optional, multi-file, in-page preview via the existing
-          chequePreview lightbox. Hooked to the renewal child contract so
-          the RP can verify each reference before collection. */}
+      {/* Proof of payment — mirrors the new-lease payment_review step, but here
+          it is REQUIRED: the customer must attach a photo of their cheque(s) or
+          bank-transfer receipt before they can accept, so the RP has evidence to
+          collect against. Multi-file, in-page preview via the doc viewer. */}
       {child?.id && (
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <div style={{ background: 'var(--paper)', border: `1px solid ${renewalProofs.length > 0 ? 'var(--mist-strong)' : 'var(--jade)'}`, borderRadius: 14, padding: '16px 18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
-              Attach payment references (optional)
+              Upload a picture of your cheque or bank transfer <span style={{ color: 'var(--jade-deep)' }}>*</span>
             </p>
             <span style={{ fontSize: 11, color: 'var(--mute)' }}>{renewalProofs.length} uploaded</span>
           </div>
+          <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>
+            Required — attach a photo of your signed cheque(s) or your bank-transfer receipt. A phone photo (JPG, PNG or HEIC) or a PDF is fine.
+          </p>
           <label style={{
             marginTop: 12,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -4529,7 +4552,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
       {/* Accept / Reject actions */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 4 }}>
-        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy || !paymentReady}>
+        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy || !paymentReady || (!!child?.id && renewalProofs.length === 0)}>
           {busy === 'accept' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
           {busy === 'accept' ? 'Accepting…' : 'Accept renewal terms'}
         </PrimaryBtn>

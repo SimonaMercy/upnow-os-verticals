@@ -1,6 +1,7 @@
 'use client';
 
 import { X } from 'lucide-react';
+import { comparePaymentSchedule } from '@/lib/paymentPlan';
 
 /** A payment-plan breakdown (cost lines + cheque schedule) rendered in a modal.
  *  Originally the origin-lead offer snapshot; now also used for the contract's
@@ -48,16 +49,23 @@ export default function OfferReceiptModal({
   title = 'Payment Plan',
   subtitle = 'Current payment plan',
 }: { plan: OfferPlan; contractRef?: string | null; onClose: () => void; title?: string; subtitle?: string }) {
-  const lines: { label: string; fils: number }[] = [
-    { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
-  ];
-  if (plan.adminFeeFils > 0) lines.push({ label: `Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.adminFeeFils + (plan.adminFeeVatFils ?? 0) });
-  if (plan.ejariFils > 0) lines.push({ label: `Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.ejariFils + (plan.ejariVatFils ?? 0) });
-  if (plan.commissionFils > 0) lines.push({ label: `Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.commissionFils + (plan.commissionVatFils ?? 0) });
-  (plan.customFees ?? []).forEach(f => lines.push({ label: `${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`, fils: f.netFils + f.vatFils }));
+  // Same display sequence as the Payment Plan (RP spec): Security deposit → Rent
+  // (cheques, net) → Rent VAT → Fees VAT → Ejari → Admin → Commission → additional
+  // charges. All base amounts NET; VAT is its own lines (rent VAT + fee VAT kept
+  // SEPARATE). Same components as before, so the Total still reconciles.
+  const feeVatFils = (plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0)
+    + (plan.customFees ?? []).reduce((s, f) => s + (f.vatFils ?? 0), 0);
+  const lines: { label: string; fils: number }[] = [];
   if (plan.securityDepositFils > 0) lines.push({ label: 'Security deposit', fils: plan.securityDepositFils });
+  lines.push({ label: 'Rent (cheques)', fils: plan.rentFils });
+  if ((plan.rentVatFils ?? 0) > 0) lines.push({ label: 'Rent VAT', fils: plan.rentVatFils ?? 0 });
+  if (feeVatFils > 0) lines.push({ label: 'Fees VAT', fils: feeVatFils });
+  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils });
+  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils });
+  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils });
+  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils }));
 
-  const items = [...(plan.items ?? [])].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
+  const items = [...(plan.items ?? [])].sort(comparePaymentSchedule);
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">

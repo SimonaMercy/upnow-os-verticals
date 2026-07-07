@@ -10,6 +10,7 @@
  * is offered inline. Money is in fils.
  */
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
+import { comparePaymentSchedule } from '@/lib/paymentPlan';
 import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
 import ds from './ContractDocsBinder.module.css';
 
@@ -58,19 +59,24 @@ export function PaymentPlanCard({ plan, refLabel, planRefNo, contractType, tenan
     : contractType === 'renewal'
       ? { label: 'Renewal', bg: '#eaf2fb', fg: '#1e5fae' }
       : { label: 'New Lease', bg: '#e6f5ee', fg: '#1f6f54' };
-  const lines: { label: string; fils: number }[] = [
-    { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
-  ];
-  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils + (plan.adminFeeVatFils ?? 0) });
-  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils + (plan.ejariVatFils ?? 0) });
-  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils + (plan.commissionVatFils ?? 0) });
-  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils + f.vatFils }));
+  // Display sequence (RP spec): Security deposit → Rent (cheques, net) → Rent VAT
+  // → Fees VAT → Ejari → Admin → Commission → additional per-unit charges. All
+  // base amounts are NET; VAT is shown as its own lines (rent VAT and fee VAT kept
+  // SEPARATE). Same components as before, so the Total still reconciles.
+  const feeVatFils = (plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0)
+    + (plan.customFees ?? []).reduce((s, f) => s + (f.vatFils ?? 0), 0);
+  const lines: { label: string; fils: number }[] = [];
   if (plan.securityDepositFils > 0) lines.push({ label: 'Security deposit', fils: plan.securityDepositFils });
-  // By due date; on a same-date tie the security deposit sorts before the rent
-  // installments (deposit is collected first, then the plan).
-  const items = [...(plan.items ?? [])].sort((a, b) =>
-    (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
-    || (a.type === 'security_deposit' ? -1 : b.type === 'security_deposit' ? 1 : 0));
+  lines.push({ label: 'Rent (cheques)', fils: plan.rentFils });
+  if ((plan.rentVatFils ?? 0) > 0) lines.push({ label: 'Rent VAT', fils: plan.rentVatFils ?? 0 });
+  if (feeVatFils > 0) lines.push({ label: 'Fees VAT', fils: feeVatFils });
+  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils });
+  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils });
+  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils });
+  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils }));
+  // Grouped by category (deposit → rent cheques → Ejari → Admin → Commission →
+  // custom), chronological within each — mirrors the summary sequence above.
+  const items = [...(plan.items ?? [])].sort(comparePaymentSchedule);
   return (
     <div style={cardCss}>
       <div style={{ ...capCss, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>

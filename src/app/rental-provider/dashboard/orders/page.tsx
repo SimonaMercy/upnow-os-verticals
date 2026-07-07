@@ -148,6 +148,9 @@ interface Contract {
   /** Operations vs Leases split: NULL = still in the Operations worklist;
    *  set = blessed → shows here in the Leases register. */
   lockedAt: string | null;
+  /** True once any party has really signed (digital / paper) → terms are locked,
+   *  so the Edit pencil is hidden. On-file-only (imported) leases stay editable. */
+  signed?: boolean;
   tenant: { id: number | null; name: string | null; email: string | null; entityType: string | null; companyName: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property: { id: number | null; buildingName: string | null };
@@ -260,10 +263,14 @@ function Row({
       </div>
 
       <div className="col-chev">
-        <button type="button" className="edit-btn" title="Edit contract" aria-label="Edit contract"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(c.id); }}>
-          <Pencil size={14} />
-        </button>
+        {/* Edit terms — hidden once the contract is signed by any party (the
+            executed agreement is locked; the backend rejects the edit too). */}
+        {!c.signed && (
+          <button type="button" className="edit-btn" title="Edit contract" aria-label="Edit contract"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(c.id); }}>
+            <Pencil size={14} />
+          </button>
+        )}
         <span className="cv">
           <ChevronRight size={14} />
         </span>

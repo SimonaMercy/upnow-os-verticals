@@ -137,6 +137,9 @@ interface ContractDetail {
   /** Owning RP's configured cheque days — lets the renewal preview snap due dates
    *  to the same days the backend stamps (works for managers too). */
   preferredChequeDays?: number[];
+  /** Owning RP's rent-VAT collection mode (Settings → Rules): 'annual' = one Rental
+   *  VAT cheque for the year, 'installment' = one beside each rent cheque. */
+  rentVatMode?: 'annual' | 'installment';
   adminFeeFils: number;
   ejariFeeFils: number;
   customClauses: string[];
@@ -1493,7 +1496,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true,
+  notes, onAddNote, perms, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
@@ -1506,6 +1509,9 @@ function DetailsDrawer({
    *  Leases "record" view (Summary + Payments + Documents only). Defaults to true
    *  (the Operations full view keeps them). */
   showExtras?: boolean;
+  /** True once the contract is signed by any party (non-on_file signature) →
+   *  the Clauses & Notes editor is read-only, matching the backend lock. */
+  editLocked?: boolean;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
   onApproveDoc: (id: number) => void; onRejectDoc: (id: number) => void;
   /** POST /api/contracts/:id/payments — record a new instalment / payment / fee. */
@@ -1665,8 +1671,10 @@ function DetailsDrawer({
     catch { setDepStatusErr('Could not update the cheque status. Please try again.'); }
     finally { setDepStatusBusy(false); }
   };
-  // ── Clause editor state (Flow 2) — editable only while the contract is a draft. ──
-  const clausesEditable = contract.status === 'pending';
+  // ── Clause editor state (Flow 2) — editable only while the contract is a draft
+  //    AND not yet signed by any party (editLocked mirrors the backend guard on
+  //    PATCH /contracts/:id/clauses; on-file/imported leases stay editable). ──
+  const clausesEditable = contract.status === 'pending' && !editLocked;
   const [clauseList, setClauseList] = useState<string[]>(contract.customClauses ?? []);
   const [clauseNotes, setClauseNotes] = useState(contract.notes ?? '');
   const [clauseInput, setClauseInput] = useState('');
@@ -1826,9 +1834,14 @@ function DetailsDrawer({
     try { await onDeletePayment(paymentId); }
     finally { setFeeDeleteBusy(null); }
   };
+  // A bounced or cancelled cheque is void (it never cleared / was replaced by a new
+  // cheque), so it must NOT count toward the rent total — otherwise it double-counts
+  // with its replacement. It still appears in the table above as history.
+  const countsToTotal = (p: { chequeStatus?: string | null }) =>
+    !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
   // Rent VAT (commercial/industrial): amounts are GROSS; split net vs VAT for display.
-  const rentGross = rentRows.reduce((s, p) => s + (p.amount || 0), 0);
-  const rentVat   = rentRows.reduce((s, p) => s + (p.vatAmount || 0), 0);
+  const rentGross = rentRows.reduce((s, p) => s + (countsToTotal(p) ? (p.amount || 0) : 0), 0);
+  const rentVat   = rentRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
@@ -2303,7 +2316,8 @@ function DetailsDrawer({
                           </td>
                           <td className="amt">
                             {fmtAed(p.amount)}
-                            {(p.vatAmount ?? 0) > 0 && (
+                            {/* A VAT cheque is entirely VAT — the "incl. X VAT" note only applies to a gross rent cheque. */}
+                            {p.paymentType !== 'vat' && (p.vatAmount ?? 0) > 0 && (
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>
                             )}
                           </td>
@@ -3862,25 +3876,43 @@ function RenewalProposeModal({
   const adminN = parseFloat(f.adminFee) || 0;
   const ejariN = parseFloat(f.ejariFee) || 0;
   const commN = parseFloat(f.commission) || 0;
-  // Rent VAT (commercial/industrial) carries on the cheque; rate is a whole % (e.g. 5).
-  const vatRate = Number(contract.rentVatRate) || 0;
+  // Rent VAT rate: the parent's stored rentVatRate can be stale/0 on older contracts,
+  // but a renewal's rate is recomputed server-side from the UNIT category
+  // (commercial/industrial = 5%, residential exempt). Mirror that so the preview
+  // matches the actual proposal, not the old rate.
+  const vatRate = Number(contract.rentVatRate)
+    || (spaceCategoryFromUnitType((contract.unit as { type?: string | null } | undefined)?.type ?? null) !== 'residential' ? 5 : 0);
   const vatOf = (x: number) => vatRate ? Math.round(x * vatRate) / 100 : 0;
   // Due dates — spread over the actual renewal term + snapped to the RP's cheque
   // days, identical to what proposeRenewal stamps server-side.
   const dueDates = buildInstallmentDueDates(f.newStartDate, f.newEndDate, n, chequeDays);
 
-  // Preview schedule: rent cheques (each pure rent + VAT), then separate fee rows,
-  // then any extra charges — mirrors the backend's de-bundled payment rows.
+  // Preview mirrors the backend splitVatToOwnCheques: rent cheques are NET, and the
+  // rent VAT is its OWN cheque. The RP's Settings → Rules mode decides how many:
+  //   'annual'      → ONE "Rental VAT" cheque for the year, on the first rent date.
+  //   'installment' → one "Rental VAT N of M" cheque beside each rent cheque.
+  // Fees are net too.
+  const vatMode: 'annual' | 'installment' = contract.rentVatMode ?? 'installment';
   type Row = { key: string; d: string; date: string; net: number; vat: number };
   const rows: Row[] = [];
+  const vatRows: Row[] = [];
   if (n && rent) {
     const base = Math.floor(rent / n);
     const lastA = rent - base * (n - 1);
+    let annualVat = 0;
     for (let i = 0; i < n; i++) {
       const r = i === n - 1 ? lastA : base;
-      rows.push({ key: `r${i}`, d: n === 1 ? 'Annual Rent' : `Rental Instalment ${i + 1} of ${n}`, date: dueDates[i] ?? '', net: r, vat: vatOf(r) });
+      rows.push({ key: `r${i}`, d: n === 1 ? 'Annual Rent' : `Rental Instalment ${i + 1} of ${n}`, date: dueDates[i] ?? '', net: r, vat: 0 });
+      const v = vatOf(r);
+      if (v > 0) {
+        annualVat += v;
+        if (vatMode !== 'annual') vatRows.push({ key: `rv${i}`, d: n === 1 ? `Rental VAT (${vatRate}%)` : `Rental VAT ${i + 1} of ${n} (${vatRate}%)`, date: dueDates[i] ?? '', net: 0, vat: v });
+      }
     }
+    // Annual mode: collapse to a single Rental VAT cheque on the first rent date.
+    if (vatMode === 'annual' && annualVat > 0) vatRows.push({ key: 'rv-annual', d: `Rental VAT (${vatRate}%)`, date: dueDates[0] ?? '', net: 0, vat: annualVat });
   }
+  rows.push(...vatRows);
   const feeDate = dueDates[0] ?? f.newStartDate;
   if (adminN > 0) rows.push({ key: 'admin', d: 'Admin Fee', date: feeDate, net: adminN, vat: 0 });
   if (ejariN > 0) rows.push({ key: 'ejari', d: 'Ejari Fee', date: feeDate, net: ejariN, vat: 0 });
@@ -4109,8 +4141,10 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
   // the security deposit. Falls back to the contract's net rent + computed VAT for
   // a draft that has no rows yet, so the banner is never blank.
   const aed = (n: number) => `AED ${Math.round(n || 0).toLocaleString('en-AE')}`;
-  const g = (arr: ContractPayment[]) => arr.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const v = (arr: ContractPayment[]) => arr.reduce((s, p) => s + (Number(p.vatAmount) || 0), 0);
+  // Bounced / cancelled cheques are void (replaced) — never count them in a total.
+  const activePmt = (p: ContractPayment) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
+  const g = (arr: ContractPayment[]) => arr.reduce((s, p) => s + (activePmt(p) ? (Number(p.amount) || 0) : 0), 0);
+  const v = (arr: ContractPayment[]) => arr.reduce((s, p) => s + (activePmt(p) ? (Number(p.vatAmount) || 0) : 0), 0);
   const rows = payments ?? [];
   const nonDeposit = rows.filter(p => p.paymentType !== 'security_deposit');
   const otherItems = nonDeposit.filter(p => p.paymentType === 'other');
@@ -4483,6 +4517,24 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch {
       window.alert(`Could not ${action} the renewal.`);
+    }
+  };
+
+  // Send an unsent renewal DRAFT to the customer directly from the draft (child)
+  // contract page. The send endpoint lives on the PARENT lease that owns the proposal.
+  const onSendRenewalDraft = async () => {
+    const pid = contract.parentContractId;
+    if (!pid) return;
+    try {
+      const res = await fetch(`/api/contracts/${pid}/renewal/send`, { method: 'PATCH', credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        window.alert(b?.message ?? `Could not send the renewal (${res.status}).`);
+        return;
+      }
+      void reload();
+    } catch {
+      window.alert('Could not send the renewal.');
     }
   };
   // Undo "settlement sent": pull the settlement back to draft so the figures can
@@ -4860,6 +4912,14 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // request termination) were already always editable.
   const readOnlyWorkflow = contract.status === 'expired' || contract.status === 'terminated';
 
+  // Term-edit lock. Once any party has really signed (method 'online' / 'paper'),
+  // the executed agreement is read-only — the Edit affordance is hidden and the
+  // backend PATCH /contracts/:id rejects the change. Imported / paper leases
+  // recorded only as "signed on file" stay editable for data correction.
+  // (Optimistic local sig entries carry no method → treated as not-yet-locking;
+  // a real sign triggers reload(), which brings the authoritative method.)
+  const editLocked = signatures.some(s => s.method != null && s.method !== 'on_file');
+
   // Manager permission gates — RP owners always see every affordance; a manager
   // only sees one they hold the relevant flag for, for THIS contract's landlord.
   // Mirrors the Edit gate's exact mechanism (isManagerView + managerCanForRp +
@@ -5111,9 +5171,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
           <div className="rhs">
             {/* Edit terms — RP owners always; managers only with canManageAgreements
                 for this landlord. Hidden on terminated leases (backend rejects edits
-                there). For a manager the rp scope is carried so the edit page's
-                customer picker reads /manager/tenants/*?rp=. */}
-            {showPipeline && contract.status !== 'terminated' && (() => {
+                there) and once the contract is signed by any party (editLocked —
+                the executed agreement is read-only). For a manager the rp scope is
+                carried so the edit page's customer picker reads /manager/tenants/*?rp=. */}
+            {showPipeline && contract.status !== 'terminated' && !editLocked && (() => {
               const rpForEdit = searchParams.get('rp') ?? (contract.landlord?.id != null ? String(contract.landlord.id) : '');
               const canEdit = !isManagerView
                 || (rpForEdit !== '' && managerCanForRp('canManageAgreements', Number(rpForEdit)));
@@ -5133,6 +5194,16 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Download size={14} /> PDF
             </Link>
+            {/* Unsent renewal DRAFT (child) → send it to the customer directly from
+                here instead of hopping back to the parent lease. Sends via the parent
+                that owns the proposal. */}
+            {contract.contractType === 'renewal' && !!contract.parentContractId
+              && contract.renewalStatus === 'draft' && contract.renewalAccepted !== 'pending'
+              && !contract.renewalChild && perms.renewals && (
+              <button className="btn btn-jade btn-sm" onClick={() => void onSendRenewalDraft()}>
+                <RotateCcw size={14} /> Send to customer
+              </button>
+            )}
             {/* Record view bridge — the read-only contract page has no workflow
                 actions; this is the one-click path into the Operations pipeline
                 so landing here (from a report/deposit/unit link) is never a dead
@@ -5527,6 +5598,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             onDeletePayment={onDeletePayment}
             onUpdateDeposit={onUpdateDeposit}
             onSaveClauses={onSaveClauses}
+            editLocked={editLocked}
             onConfirmPdc={onConfirmPdc}
             onUploadDoc={onUploadDoc}
             onRequestDoc={onRequestDoc}

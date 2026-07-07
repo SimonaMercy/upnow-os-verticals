@@ -15,7 +15,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check, Lock } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
@@ -189,6 +189,9 @@ export default function EditContractPage() {
   const [adminFee, setAdminFee] = useState('');
   const [ejariFee, setEjariFee] = useState('');
   const [installments, setInstallments] = useState('1');
+  // Rent VAT rate on this contract (commercial/industrial = 5%; residential exempt).
+  // Read-only here — the backend recomputes it from the RP's fee rules on save.
+  const [rentVatRate, setRentVatRate] = useState(0);
   // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
   const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
   const [modeOfPayment, setModeOfPayment] = useState('cheque');
@@ -207,6 +210,10 @@ export default function EditContractPage() {
   const [originalTenantId, setOriginalTenantId] = useState('');
   const [tenantName, setTenantName] = useState('');
   const [customerEditable, setCustomerEditable] = useState(false);
+  // Signed lock — once any party has really signed (method 'online' / 'paper'),
+  // the whole contract is read-only. Imported / paper leases recorded only as
+  // "signed on file" stay editable. Mirrors the backend PATCH /contracts/:id guard.
+  const [signedLocked, setSignedLocked] = useState(false);
   const [changingCustomer, setChangingCustomer] = useState(false);
   const [tenantSearch, setTenantSearch] = useState('');
   const [tenantResults, setTenantResults] = useState<Tenant[]>([]);
@@ -218,11 +225,18 @@ export default function EditContractPage() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    // The customer can be reassigned only before signing — gate on whether any
-    // signature exists (mirrors the backend rule).
-    apiGet<{ role: string }[]>(`/contracts/${id}/signatures`)
-      .then((sigs) => { if (!cancelled) setCustomerEditable(Array.isArray(sigs) && sigs.length === 0); })
-      .catch(() => { if (!cancelled) setCustomerEditable(false); });
+    // Signature-derived gates (mirror the backend rules):
+    //  • Customer can be reassigned only before ANY signature exists.
+    //  • Terms are fully locked once a party has really signed (non-on_file);
+    //    imported "signed on file" leases stay editable for data correction.
+    apiGet<{ role: string; method?: string }[]>(`/contracts/${id}/signatures`)
+      .then((sigs) => {
+        if (cancelled) return;
+        const rows = Array.isArray(sigs) ? sigs : [];
+        setCustomerEditable(rows.length === 0);
+        setSignedLocked(rows.some((s) => s.method != null && s.method !== 'on_file'));
+      })
+      .catch(() => { if (!cancelled) { setCustomerEditable(false); setSignedLocked(false); } });
     apiGet<Tenant[]>(tenantsListPath)
       .then((rows) => { if (!cancelled) setActiveTenants(Array.isArray(rows) ? rows : []); })
       .catch(() => undefined);
@@ -242,6 +256,7 @@ export default function EditContractPage() {
         setStartDate(toDateInput(c.startDate));
         setEndDate(toDateInput(c.endDate));
         setListedRent(numStr(c.listedRent ?? c.annualRent));
+        setRentVatRate(Number((c as { rentVatRate?: number | null }).rentVatRate) || 0);
         setDiscountType(c.discountType ?? 'none');
         setDiscountValue(c.discountValue != null ? String(c.discountValue) : '');
         setSecurityDeposit(numStr(c.securityDepositAmount));
@@ -335,10 +350,15 @@ export default function EditContractPage() {
   const rentNum = Math.max(0, listedNum - discountAmt);
   const inst = Number(installments) || 1;
   const chequeAmount = inst > 0 ? rentNum / inst : 0;
+  // Rent VAT (commercial/industrial) is collected as SEPARATE VAT cheque(s), so the
+  // rent cheques stay NET. Shown here so the edit form reflects the tax.
+  const rentVat = rentVatRate > 0 ? Math.round(rentNum * rentVatRate) / 100 : 0;
+  const chequeVat = inst > 0 ? Math.round((rentVat / inst) * 100) / 100 : 0;
   const durationLabel = calcDurationLabel(startDate, endDate);
 
   const save = async () => {
     setError(null);
+    if (signedLocked) { setError('This contract has been signed and can no longer be edited.'); return; }
     if (!startDate || !endDate) { setError('Start and end dates are required.'); return; }
     if (new Date(startDate) >= new Date(endDate)) { setError('End date must be after the start date.'); return; }
     if (listedNum <= 0) { setError('Listed rent must be greater than zero.'); return; }
@@ -383,13 +403,34 @@ export default function EditContractPage() {
           <div>
             <h1 className="text-xl font-bold text-[#1a1916]">Edit Tenancy Contract</h1>
             <p className="text-xs text-[#6b6860] mt-0.5">
-              {meta.ref ?? `CID-${id}`}{meta.status ? ` · ${meta.status}` : ''} — editing terms is recorded in the audit log and does not require re-signing.
+              {meta.ref ?? `CID-${id}`}{meta.status ? ` · ${meta.status}` : ''}
+              {signedLocked
+                ? ' — signed, so its terms are locked.'
+                : ' — editing terms is recorded in the audit log and does not require re-signing.'}
             </p>
           </div>
         </div>
 
         {loading ? (
           <div className="bg-white rounded-2xl p-10 shadow-sm text-center text-sm text-[#9b9890]">Loading contract…</div>
+        ) : signedLocked ? (
+          // Signed → read-only. The Edit affordance is hidden across the app, but
+          // a deep link still lands here, so show a clear locked notice instead of
+          // a form that the backend would reject on save.
+          <div className="bg-white rounded-2xl p-8 shadow-sm max-w-xl mx-auto text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#f4f3ef] flex items-center justify-center mx-auto mb-4 text-[#6b6860]">
+              <Lock size={20} />
+            </div>
+            <h2 className="text-base font-bold text-[#1a1916]">Contract is signed</h2>
+            <p className="text-sm text-[#6b6860] mt-2">
+              {meta.ref ?? `CID-${id}`} has been signed, so its terms are locked and can no longer be edited.
+              Editing after signing would no longer match the executed agreement.
+            </p>
+            <Link href={`${contractsBase}/${id}/v2`}
+              className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-4 py-2.5 hover:bg-[#267a65]">
+              <ArrowLeft size={14} /> Back to contract
+            </Link>
+          </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 items-start">
             {/* Left: form */}
@@ -630,6 +671,18 @@ export default function EditContractPage() {
                       <span className="text-[#1a1916]">Annual rent / Contract value</span>
                       <span className="text-[#2e9f82]">{rentNum > 0 ? fmtAed(rentNum) : '—'}</span>
                     </div>
+                    {rentVat > 0 && (
+                      <>
+                        <div className="flex justify-between text-xs pt-1">
+                          <span className="text-[#6b6860]">VAT on rent ({rentVatRate}%) · separate cheque</span>
+                          <span className="text-[#1a1916] font-medium">{fmtAed(rentVat)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-[#6b6860]">Total incl. VAT</span>
+                          <span className="text-[#1a1916] font-semibold">{fmtAed(rentNum + rentVat)}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -653,6 +706,12 @@ export default function EditContractPage() {
                       <span className="col-span-3 text-xs font-semibold text-[#1a1916]">Total ({inst} cheque{inst === 1 ? '' : 's'})</span>
                       <span className="text-sm font-bold text-[#1a1916] text-right">{fmtAed(rentNum)}</span>
                     </div>
+                    {rentVat > 0 && (
+                      <div className="grid grid-cols-4 px-4 py-2 bg-[#fdf7ea] border-t border-[#e7d8a8]">
+                        <span className="col-span-3 text-xs font-medium text-[#8a6d1f]">+ Rent VAT ({rentVatRate}%) — collected as separate cheque{inst === 1 ? '' : 's'}</span>
+                        <span className="text-xs font-bold text-[#8a6d1f] text-right">{fmtAed(rentVat)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="flex items-start gap-2 rounded-lg bg-[#f4f7f5] px-3 py-2.5 text-xs text-[#6b6860]">
@@ -742,6 +801,7 @@ export default function EditContractPage() {
                   ? ([['Listed rent', fmtAed(listedNum)], ['Discount', `− ${fmtAed(discountAmt)}`]] as [string, string][])
                   : []),
                 [discountAmt > 0 ? 'Annual rent (net)' : 'Annual rent', rentNum > 0 ? fmtAed(rentNum) : '—'],
+                ...(rentVat > 0 ? ([[`VAT on rent (${rentVatRate}%)`, fmtAed(rentVat)]] as [string, string][]) : []),
                 ['Security deposit', securityDeposit ? fmtAed(Number(securityDeposit)) : '—'],
                 ['Admin fee', adminFee ? fmtAed(Number(adminFee)) : '—'],
                 ['Ejari fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],

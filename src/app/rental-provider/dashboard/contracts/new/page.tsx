@@ -285,6 +285,9 @@ export default function NewContractPage() {
   const [preferredChequeDays, setPreferredChequeDays] = useState<number[]>([]);
   // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
   const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
+  // RP's rent-VAT collection mode (Settings → Rules): 'annual' = one Rental VAT
+  // cheque for the year, 'installment' = one beside each rent cheque.
+  const [rentVatMode, setRentVatMode] = useState<'annual' | 'installment'>('installment');
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoaded, setPropertiesLoaded] = useState(false);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -323,12 +326,15 @@ export default function NewContractPage() {
     if (isManager) return;
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { preferredStartDays?: number[] | null; preferredChequeDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
+      .then((data: { profile?: { preferredStartDays?: number[] | null; preferredChequeDays?: number[] | null; allowedInstallments?: number[] | null; rentVatMode?: 'annual' | 'installment' | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) {
           setPreferredStartDays(data!.profile!.preferredStartDays!);
         }
         if (Array.isArray(data?.profile?.preferredChequeDays)) {
           setPreferredChequeDays(data!.profile!.preferredChequeDays!);
+        }
+        if (data?.profile?.rentVatMode === 'annual' || data?.profile?.rentVatMode === 'installment') {
+          setRentVatMode(data.profile.rentVatMode);
         }
         const allowed = data?.profile?.allowedInstallments;
         if (Array.isArray(allowed) && allowed.length) {
@@ -630,6 +636,11 @@ export default function NewContractPage() {
   const commission    = Number(form.commission) || 0;
   const installments  = Number(form.numberOfInstallments) || 4;
   const chequeAmount  = installments > 0 ? annualRent / installments : 0;
+  // Rent VAT (commercial/industrial units = 5%; residential exempt) — collected as
+  // separate VAT cheque(s). Shown so the form reflects the tax (rate is authoritative
+  // on the server at creation).
+  const rentVatable   = selectedUnit ? deriveSpaceCategoryFromUnitType(selectedUnit.unitType) !== 'residential' : false;
+  const rentVat       = rentVatable ? Math.round(annualRent * 5) / 100 : 0;
   const durationLabel = calcDurationLabel(form.contractStartDate, form.contractEndDate);
   // Cheque due dates for the preview — spread over the ACTUAL term and snapped to
   // the RP's configured cheque days, exactly as the backend stamps them.
@@ -1203,9 +1214,31 @@ export default function NewContractPage() {
                       <span className="text-sm font-bold text-[#2e9f82] text-right">{fmtAed(chequeAmount)}</span>
                     </div>
                   ))}
+                  {/* Rent VAT collected as its own cheque(s). Mirrors the backend split
+                      (Settings → Rules): annual = one Rental VAT cheque for the year on
+                      the first rent date; installment = one beside each rent cheque. */}
+                  {rentVat > 0 && (rentVatMode === 'annual' ? (
+                    <div className="grid grid-cols-4 px-4 py-2 items-center bg-[#fdf7ea]">
+                      <span className="text-xs text-[#9b9890]">{installments + 1}</span>
+                      <span className="text-xs text-[#8a6d1f]">Rental VAT (5%)</span>
+                      <span className="text-xs text-[#8a6d1f]">
+                        {form.contractStartDate && previewDueDates[0] ? fmtDueDate(previewDueDates[0]) : <span className="text-[#c0bdb8]">Set start date</span>}
+                      </span>
+                      <span className="text-sm font-bold text-[#8a6d1f] text-right">{fmtAed(rentVat)}</span>
+                    </div>
+                  ) : Array.from({ length: installments }, (_, i) => (
+                    <div key={`v${i}`} className={`grid grid-cols-4 px-4 py-2 items-center bg-[#fdf7ea] ${i < installments - 1 ? 'border-b border-[#f7ecc8]' : ''}`}>
+                      <span className="text-xs text-[#9b9890]">{installments + i + 1}</span>
+                      <span className="text-xs text-[#8a6d1f]">Rental VAT {i + 1} of {installments} (5%)</span>
+                      <span className="text-xs text-[#8a6d1f]">
+                        {form.contractStartDate && previewDueDates[i] ? fmtDueDate(previewDueDates[i]) : <span className="text-[#c0bdb8]">Set start date</span>}
+                      </span>
+                      <span className="text-sm font-bold text-[#8a6d1f] text-right">{fmtAed(Math.round((rentVat / installments) * 100) / 100)}</span>
+                    </div>
+                  )))}
                   <div className="grid grid-cols-4 px-4 py-2.5 bg-[#f0faf6] border-t-2 border-[#c5e8df]">
-                    <span className="col-span-3 text-xs font-semibold text-[#1a1916]">Total ({installments} cheques)</span>
-                    <span className="text-sm font-bold text-[#1a1916] text-right">{fmtAed(annualRent)}</span>
+                    <span className="col-span-3 text-xs font-semibold text-[#1a1916]">Total ({installments} cheque{installments === 1 ? '' : 's'}{rentVat > 0 ? ' + VAT' : ''})</span>
+                    <span className="text-sm font-bold text-[#1a1916] text-right">{fmtAed(annualRent + rentVat)}</span>
                   </div>
                 </div>
               )}

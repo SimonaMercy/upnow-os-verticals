@@ -683,6 +683,11 @@ export default function SettingsPage() {
   // ── Allowed installment plans (Rules) ───────────────────────
   // Subset of [1,2,3,4,6,12] cheque counts this RP offers. Empty = all allowed.
   const [allowedInst,    setAllowedInst]    = useState<number[]>([]);
+  // Rent VAT collection mode (per-RP): 'installment' (one VAT cheque per rent
+  // cheque — quarterly filing) or 'annual' (one VAT cheque for the year).
+  const [vatMode,   setVatMode]   = useState<'annual' | 'installment'>('installment');
+  const [vatSaving, setVatSaving] = useState(false);
+  const [vatSaved,  setVatSaved]  = useState(false);
   const [instSaving,     setInstSaving]     = useState(false);
   const [instSaved,      setInstSaved]      = useState(false);
   const [instError,      setInstError]      = useState<string | null>(null);
@@ -775,6 +780,7 @@ export default function SettingsPage() {
           unauthorizedSharingPenalty: seedPenalty('unauthorizedSharingPenalty'),
         });
         if (Array.isArray(p.allowedInstallments)) setAllowedInst(p.allowedInstallments as number[]);
+        if (p.rentVatMode === 'annual' || p.rentVatMode === 'installment') setVatMode(p.rentVatMode);
         // Parse contactAddress into emirate + street
         const addr = (p.contactAddress as string) ?? '';
         const matched = EMIRATES_LIST.find(e => addr.endsWith(`, ${e}`) || addr === e);
@@ -1146,6 +1152,26 @@ export default function SettingsPage() {
       setInstError('Failed to save. Please try again.');
     } finally {
       setInstSaving(false);
+    }
+  }
+
+  async function saveVatMode(next: 'annual' | 'installment') {
+    setVatMode(next);
+    setVatSaved(false);
+    setVatSaving(true);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rentVatMode: next }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setVatSaved(true);
+    } catch {
+      /* keep the UI selection; a transient failure just won't persist */
+    } finally {
+      setVatSaving(false);
     }
   }
 
@@ -1857,6 +1883,46 @@ export default function SettingsPage() {
                   {instSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   {instSaving ? 'Saving…' : 'Save Plans'}
                 </button>
+              </div>
+            </div>
+
+            {/* Rent VAT collection */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="mb-4">
+                <h2 className="font-semibold text-base text-[#1a1916]">Rent VAT collection</h2>
+                <p className="text-xs text-[#9b9890] mt-0.5">
+                  How the 5% VAT on VATable (commercial / industrial) rent is collected. Rent and fee
+                  cheques are always <strong>net</strong> — VAT is a separate cheque. Rent VAT follows
+                  this setting; fee VAT (admin / ejari / commission) is always one separate cheque.
+                  Applies to new contracts and renewals; VAT-exempt (residential) leases are unaffected.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {([
+                  { value: 'installment' as const, label: 'One VAT cheque per rent cheque', sub: 'Matches quarterly VAT filing' },
+                  { value: 'annual'      as const, label: 'One annual VAT cheque',          sub: 'Single annual tax invoice' },
+                ]).map(opt => {
+                  const active = vatMode === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      disabled={vatSaving}
+                      onClick={() => saveVatMode(opt.value)}
+                      className={`px-3.5 py-2 rounded-lg text-sm font-semibold border transition-colors cursor-pointer disabled:opacity-60 text-left
+                        ${active
+                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
+                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
+                    >
+                      {opt.label}
+                      <span className={`block text-[10px] font-normal ${active ? 'text-white/80' : 'text-[#9b9890]'}`}>{opt.sub}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="h-4">
+                {vatSaving && <p className="text-xs text-[#9b9890]">Saving…</p>}
+                {vatSaved && !vatSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
               </div>
             </div>
           </div>

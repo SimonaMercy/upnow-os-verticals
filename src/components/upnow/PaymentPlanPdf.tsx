@@ -22,6 +22,7 @@ import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
+import { comparePaymentSchedule } from '@/lib/paymentPlan';
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 
 const GREEN = '#1a5a4a'; // --color-primary-dark — brand green accent (was navy)
@@ -87,14 +88,21 @@ const s = StyleSheet.create({
 });
 
 function planLines(plan: OfferPlan): { label: string; fils: number }[] {
-  const lines: { label: string; fils: number }[] = [
-    { label: `Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`, fils: plan.rentFils + (plan.rentVatFils ?? 0) },
-  ];
-  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils + (plan.adminFeeVatFils ?? 0) });
-  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils + (plan.ejariVatFils ?? 0) });
-  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils + (plan.commissionVatFils ?? 0) });
-  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils + f.vatFils }));
+  // Display sequence (RP spec): Security deposit → Rent (cheques, net) → Rent VAT
+  // → Fees VAT → Ejari → Admin → Commission → additional charges. All base amounts
+  // are NET; VAT is its own lines (rent VAT and fee VAT kept SEPARATE). Same
+  // components as before, so the Total still reconciles.
+  const feeVatFils = (plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0)
+    + (plan.customFees ?? []).reduce((s, f) => s + (f.vatFils ?? 0), 0);
+  const lines: { label: string; fils: number }[] = [];
   if (plan.securityDepositFils > 0) lines.push({ label: 'Security deposit', fils: plan.securityDepositFils });
+  lines.push({ label: 'Rent (cheques)', fils: plan.rentFils });
+  if ((plan.rentVatFils ?? 0) > 0) lines.push({ label: 'Rent VAT', fils: plan.rentVatFils ?? 0 });
+  if (feeVatFils > 0) lines.push({ label: 'Fees VAT', fils: feeVatFils });
+  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils });
+  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils });
+  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils });
+  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils }));
   return lines;
 }
 
@@ -102,9 +110,7 @@ export function PaymentPlanDoc({ plan, refLabel, planRefNo, meta }: { plan: Offe
   const lines = planLines(plan);
   // By due date; on a same-date tie the security deposit sorts before the rent
   // installments (deposit is collected first, then the plan).
-  const items = [...(plan.items ?? [])].sort((a, b) =>
-    (a.dueDate ?? '').localeCompare(b.dueDate ?? '')
-    || (a.type === 'security_deposit' ? -1 : b.type === 'security_deposit' ? 1 : 0));
+  const items = [...(plan.items ?? [])].sort(comparePaymentSchedule);
   const schedTotal = items.reduce((sum, it) => sum + (it.amountFils ?? 0), 0);
   const typeBadge = meta?.contractType == null ? null
     : meta.contractType === 'renewal'

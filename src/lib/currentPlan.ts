@@ -80,7 +80,9 @@ export function buildCurrentPlan(contract: PlanContract, payments: PlanPayment[]
     ...((contract.discountAmount ?? 0) > 0 && contract.listedRent != null
       ? { originalRentFils: toFils(contract.listedRent), discountFils: toFils(contract.discountAmount!) }
       : {}),
-    installmentCount: rentRows.length || (contract.numberOfInstallments ?? 0),
+    // Count only true rent instalments — the standalone "Rental VAT" cheque is
+    // not an instalment.
+    installmentCount: rentRows.filter(p => !(p.description ?? '').toLowerCase().includes('vat')).length || (contract.numberOfInstallments ?? 0),
     adminFeeFils: toFils(adminNet), adminFeeVatFils: toFils(adminVat),
     ejariFils: toFils(ejariNet), ejariVatFils: toFils(ejariVat),
     commissionFils: toFils(commNet), commissionVatFils: toFils(commVat),
