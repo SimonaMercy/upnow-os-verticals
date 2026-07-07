@@ -138,8 +138,15 @@ function isImageFile(f: SlotFile): boolean {
 
 function leasingLabel(t: Property['leasingType']): string {
   if (t === 'sub') return 'Sub-lease';
-  if (t === 'management') return 'Management';
-  return 'Direct lease';
+  if (t === 'management') return 'Managed';
+  return 'Owned (direct lease)';
+}
+
+// Header ownership chip — mirrors the portfolio cards' Owned / Sub-lease / Managed badge.
+function ownershipChip(t: Property['leasingType']): { label: string; color: string; bg: string } {
+  if (t === 'sub')        return { label: 'Sub-lease', color: '#6d4fa1', bg: '#f0eaf8' };
+  if (t === 'management') return { label: 'Managed',   color: '#8a6d2e', bg: '#f6f0e0' };
+  return { label: 'Owned', color: '#1a6b4d', bg: '#e6f3ec' };
 }
 
 // ── Unit Mix helpers ──────────────────────────────────────
@@ -582,11 +589,12 @@ export function PropertyDetailsModal({
     ? p.sharedAmenities
     : [p.hasParking && 'Parking', p.hasGym && 'Gym', p.hasPool && 'Pool'].filter(Boolean) as string[];
 
-  // Key facts carries only what isn't shown elsewhere: category + titling are
-  // header chips, total units is the stat strip, and plot / makani live in the
-  // Location card — so none of those are repeated here.
+  // Key facts carries only what isn't shown elsewhere: category + ownership +
+  // titling are header chips, total units is the stat strip, and plot / makani
+  // live in the Location card — so none of those are repeated here. The leasing
+  // model keeps its fuller wording here since the header chip is just "Owned".
   const facts: { label: string; value: string }[] = [];
-  facts.push({ label: 'Leasing model', value: leasingLabel(p.leasingType) });
+  facts.push({ label: 'Ownership / leasing model', value: leasingLabel(p.leasingType) });
   if (p.numberOfFloors) facts.push({ label: 'Number of floors', value: p.numberOfFloors });
 
   const statCells = stats ? [
@@ -644,6 +652,7 @@ export function PropertyDetailsModal({
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: '-.02em', color: C.ink }}>{p.buildingName}</h1>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: C.greenT, background: C.greenBg, padding: '3px 9px', borderRadius: 6 }}>{categoryDisplayLabel(p.spaceCategory)}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: ownershipChip(p.leasingType).color, background: ownershipChip(p.leasingType).bg, padding: '3px 9px', borderRadius: 6 }}>{ownershipChip(p.leasingType).label}</span>
                 <span style={{ fontSize: 10.5, fontWeight: 600, color: C.mute, background: C.line3, padding: '3px 9px', borderRadius: 6 }}>{titling}</span>
               </div>
             </div>

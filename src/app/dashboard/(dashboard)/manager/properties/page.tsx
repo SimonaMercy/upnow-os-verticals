@@ -107,6 +107,18 @@ const SELECT_STYLE: CSSProperties = {
   backgroundRepeat: 'no-repeat', backgroundPosition: 'right 13px center',
 };
 
+// Ownership chip (from properties.leasing_type): Owned = direct lease ·
+// Sub-lease = head-leased then sub-let · Managed = run on the owner's behalf.
+type LeasingType = 'direct' | 'sub' | 'management';
+const OWNERSHIP_LABEL: Record<LeasingType, string> = {
+  direct: 'Owned', sub: 'Sub-lease', management: 'Managed',
+};
+function ownershipStyle(t: LeasingType): { color: string; bg: string } {
+  if (t === 'sub')        return { color: '#6d4fa1', bg: '#f0eaf8' };
+  if (t === 'management') return { color: '#8a6d2e', bg: '#f6f0e0' };
+  return { color: '#1a6b4d', bg: '#e6f3ec' };
+}
+
 // Per-property display model shared by the Row and Grid cards. `landlord` is the
 // only manager addition (surfaced in the "All landlords" view).
 interface CardVM {
@@ -116,6 +128,9 @@ interface CardVM {
   hasPin: boolean;
   tagColor: string;
   tagBg: string;
+  ownLabel: string;
+  ownColor: string;
+  ownBg: string;
   coverUrl: string | null;
   hasVacancy: boolean;
   vacancyLabel: string;
@@ -133,6 +148,8 @@ function toCardVM(p: ManagedProperty, showLandlord: boolean): CardVM {
   const occPct = units ? (occ / units) * 100 : 0;
   const typeLabel = categoryLabel(p.spaceCategory);
   const ts = typeStyle(typeLabel);
+  const own = (p.leasingType ?? 'direct') as LeasingType;
+  const os = ownershipStyle(own);
   const rent = p.rentTotal ?? 0;
   const hasPin = p.latitude != null && p.longitude != null;
   const joined = [p.community?.nameEn, p.emirate?.nameEn].filter(Boolean).join(', ');
@@ -144,6 +161,9 @@ function toCardVM(p: ManagedProperty, showLandlord: boolean): CardVM {
     hasPin,
     tagColor: ts.color,
     tagBg: ts.bg,
+    ownLabel: OWNERSHIP_LABEL[own] ?? OWNERSHIP_LABEL.direct,
+    ownColor: os.color,
+    ownBg: os.bg,
     coverUrl: p.coverPhotoUrl ?? null,
     hasVacancy: vac > 0,
     vacancyLabel: `${vac} vacant`,
@@ -224,6 +244,7 @@ function PropertyCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
             <span style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-.01em', color: '#1d2823', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.name}</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: vm.tagColor, background: vm.tagBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.typeLabel}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: vm.ownColor, background: vm.ownBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.ownLabel}</span>
             {vm.landlord && <LandlordTag name={vm.landlord} />}
           </div>
           {vm.address && (
@@ -273,7 +294,10 @@ function PropertyGridCard({
       {/* Cover + type badge */}
       <div style={{ height: 138, background: '#f1f3f0', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
         <Cover url={vm.coverUrl} iconSize={22} iconColor="#b3bcb4" />
-        <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
+        <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 6 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: vm.ownColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.ownLabel}</span>
+        </div>
       </div>
 
       {/* Body — same fields as the Row view */}
@@ -318,6 +342,8 @@ export default function ManagerPropertiesPage() {
   const [search, setSearch] = useState('');
   // Property-type filter (spaceCategory), chosen from a dropdown.
   const [categoryFilter, setCategoryFilter] = useState('all');
+  // Ownership filter (leasing_type): Owned (direct) · Sub-lease · Managed.
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | LeasingType>('all');
   // Sort order for the property list (matches the RP portfolio Sort dropdown).
   const [sort, setSort] = useState<'default' | 'rent' | 'occ' | 'vac' | 'name'>('default');
   const [propertyModal, setPropertyModal] = useState<{ open: boolean; editing?: ManagedProperty }>({ open: false });
@@ -380,6 +406,7 @@ export default function ManagerPropertiesPage() {
 
   const filteredProperties = scoped.filter((p) => {
     if (categoryFilter !== 'all' && p.spaceCategory !== categoryFilter) return false;
+    if (ownershipFilter !== 'all' && (p.leasingType ?? 'direct') !== ownershipFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       return (
@@ -421,7 +448,7 @@ export default function ManagerPropertiesPage() {
     { label: 'ANNUAL RENT', value: fmtRentKpi(totalRent), sub: 'Gross across portfolio', icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
   ];
 
-  const filtersDirty = !!search || categoryFilter !== 'all' || sort !== 'default';
+  const filtersDirty = !!search || categoryFilter !== 'all' || ownershipFilter !== 'all' || sort !== 'default';
 
   // ── Permission gate ──
   if (!permsLoading && !can('canListProperties')) {
@@ -507,6 +534,14 @@ export default function ManagerPropertiesPage() {
                 ))}
               </select>
             )}
+
+            {/* Ownership dropdown — Owned (direct) · Sub-lease · Managed */}
+            <select value={ownershipFilter} onChange={(e) => setOwnershipFilter(e.target.value as typeof ownershipFilter)} style={SELECT_STYLE}>
+              <option value="all">All ownership</option>
+              <option value="direct">Owned (direct lease)</option>
+              <option value="sub">Sub-lease</option>
+              <option value="management">Managed</option>
+            </select>
 
             {/* Sort dropdown */}
             <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={SELECT_STYLE}>
@@ -631,7 +666,7 @@ export default function ManagerPropertiesPage() {
             <div style={{ fontSize: 15, fontWeight: 700, color: '#3a443d' }}>No properties match your search</div>
             <div style={{ fontSize: 13, marginTop: 5 }}>Try a different name, area, or type.</div>
             {filtersDirty && (
-              <button type="button" onClick={() => { setSearch(''); setCategoryFilter('all'); setSort('default'); }}
+              <button type="button" onClick={() => { setSearch(''); setCategoryFilter('all'); setOwnershipFilter('all'); setSort('default'); }}
                 style={{ marginTop: 14, fontSize: 12.5, fontWeight: 600, color: '#1a7a4f', background: 'transparent', border: 0, cursor: 'pointer', textDecoration: 'underline' }}>
                 Clear filters
               </button>
