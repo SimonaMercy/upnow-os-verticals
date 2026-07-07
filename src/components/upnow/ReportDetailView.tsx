@@ -19,7 +19,7 @@ import {
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -284,6 +284,36 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
+  'lease-activity': {
+    title: 'Lease Status Summary',
+    description: 'The month-by-month operations matrix — for each month of the selected year: leases due for renewal, new and renewal contracts commencing, security deposits recorded, renewal notices issued, tenant and landlord signatures executed, Ejari registered vs pending (for that month\u2019s commencements), move-outs, and the average days from offer to the tenant\u2019s signature. Everything is derived live from the contract records, so history fills itself in — no manual compiling. Pick the year above.',
+    endpoint: '/api/reports/lease-activity',
+    controlKey: 'year',
+    columns: [
+      { key: 'label', label: 'Month' },
+      { key: 'due', label: 'Due for renewal', align: 'right', type: 'number' },
+      { key: 'newLeases', label: 'New contracts', align: 'right', type: 'number' },
+      { key: 'deposits', label: 'Deposits', align: 'right', type: 'number' },
+      { key: 'renewalNotices', label: 'Renewal notices', align: 'right', type: 'number' },
+      { key: 'renewalContracts', label: 'Renewal contracts', align: 'right', type: 'number' },
+      { key: 'tenantSigns', label: 'Tenant signs', align: 'right', type: 'number' },
+      { key: 'landlordSigns', label: 'Landlord signs', align: 'right', type: 'number' },
+      { key: 'ejariRegistered', label: 'Ejari registered', align: 'right', type: 'number' },
+      { key: 'ejariPending', label: 'Ejari pending', align: 'right', type: 'number' },
+      { key: 'moveOuts', label: 'Move-outs', align: 'right', type: 'number' },
+      { key: 'avgDaysToSign', label: 'Avg days to sign', align: 'right', type: 'number' },
+    ],
+    totals: [
+      { key: 'due', label: 'Due for renewal', type: 'number', keep: true },
+      { key: 'renewalContracts', label: 'Renewals signed up', type: 'number', keep: true },
+      { key: 'newLeases', label: 'New contracts', type: 'number' },
+      { key: 'ejariRegistered', label: 'Ejari registered', type: 'number', keep: true },
+      { key: 'ejariPending', label: 'Ejari pending', type: 'number', keep: true },
+      { key: 'moveOuts', label: 'Move-outs', type: 'number' },
+      { key: 'avgDaysToSign', label: 'Avg days to sign', type: 'number' },
     ],
   },
 
