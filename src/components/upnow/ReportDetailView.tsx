@@ -289,24 +289,25 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'manager-performance': {
     title: 'Manager Performance Report',
-    description: 'Team activity & throughput — one row per team member (the landlord and every assigned manager). Lead / contract / document actions come from the server-side activity trail, which records every write with who did it and for which landlord; attribution began 7 Jul 2026, so earlier periods show zero actions by design. Signatures executed covers full history (every signature stores its executing account). Use the date range to scope a period; leave it empty for everything.',
+    description: 'What each team member actually delivered — one row per person (the landlord and every assigned manager), counting REAL things worked, not clicks: distinct leads attended (and how many they converted), distinct contracts and renewals they progressed, documents processed, signatures executed, and days active. System-generated entries (receipt numbering etc.) are excluded. Click a row for the person\u2019s play-by-play. Attribution began 7 Jul 2026; signatures cover full history. Use the date range to scope a period.',
     endpoint: '/api/reports/manager-performance',
     controlKey: 'dateRange',
     columns: [
       { key: 'name', label: 'Team member' },
       { key: 'role', label: 'Role', type: 'stage' },
-      { key: 'leadActions', label: 'Leads & viewings', align: 'right', type: 'number' },
-      { key: 'contractActions', label: 'Contracts', align: 'right', type: 'number' },
-      { key: 'documentActions', label: 'Documents', align: 'right', type: 'number' },
-      { key: 'otherActions', label: 'Other', align: 'right', type: 'number' },
-      { key: 'totalActions', label: 'Total actions', align: 'right', type: 'number' },
+      { key: 'leadsWorked', label: 'Leads attended', align: 'right', type: 'number' },
+      { key: 'leadsConverted', label: 'Converted', align: 'right', type: 'number' },
+      { key: 'contractsWorked', label: 'Contracts worked', align: 'right', type: 'number' },
+      { key: 'renewalsWorked', label: 'Renewals', align: 'right', type: 'number' },
+      { key: 'documentsWorked', label: 'Documents', align: 'right', type: 'number' },
       { key: 'signatures', label: 'Signatures', align: 'right', type: 'number' },
-      { key: 'logins', label: 'Logins', align: 'right', type: 'number' },
+      { key: 'activeDays', label: 'Days active', align: 'right', type: 'number' },
       { key: 'lastActiveAt', label: 'Last active', type: 'date' },
     ],
     totals: [
       { key: 'teamMembers', label: 'Team members', type: 'number', keep: true },
-      { key: 'totalActions', label: 'Total actions', type: 'number', keep: true },
+      { key: 'leadsWorked', label: 'Leads attended', type: 'number', keep: true },
+      { key: 'contractsWorked', label: 'Contracts worked', type: 'number', keep: true },
       { key: 'signatures', label: 'Signatures', type: 'number', keep: true },
     ],
     // Click a team member → their chronological activity feed (most recent
