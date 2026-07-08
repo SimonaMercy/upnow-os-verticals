@@ -296,14 +296,16 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     columns: [
       { key: 'name', label: 'Team member' },
       { key: 'role', label: 'Role', type: 'stage' },
-      { key: 'leadsWorked', label: 'Leads attended', align: 'right', type: 'number' },
-      { key: 'leadsConverted', label: 'Converted', align: 'right', type: 'number' },
-      { key: 'contractsWorked', label: 'Contracts worked', align: 'right', type: 'number' },
-      { key: 'renewalsWorked', label: 'Renewals', align: 'right', type: 'number' },
-      { key: 'documentsWorked', label: 'Documents', align: 'right', type: 'number' },
-      { key: 'pagesViewed', label: 'Pages viewed', align: 'right', type: 'number' },
-      { key: 'reportsViewed', label: 'Reports viewed', align: 'right', type: 'number' },
-      { key: 'activeDays', label: 'Days active', align: 'right', type: 'number' },
+      // keep: the scorecard always shows its full shape — a zero column is
+      // information here ("no leads attended"), not noise to auto-hide.
+      { key: 'leadsWorked', label: 'Leads attended', align: 'right', type: 'number', keep: true },
+      { key: 'leadsConverted', label: 'Converted', align: 'right', type: 'number', keep: true },
+      { key: 'contractsWorked', label: 'Contracts worked', align: 'right', type: 'number', keep: true },
+      { key: 'renewalsWorked', label: 'Renewals', align: 'right', type: 'number', keep: true },
+      { key: 'documentsWorked', label: 'Documents', align: 'right', type: 'number', keep: true },
+      { key: 'pagesViewed', label: 'Pages viewed', align: 'right', type: 'number', keep: true },
+      { key: 'reportsViewed', label: 'Reports viewed', align: 'right', type: 'number', keep: true },
+      { key: 'activeDays', label: 'Days active', align: 'right', type: 'number', keep: true },
       { key: 'lastActiveAt', label: 'Last active', type: 'date' },
     ],
     totals: [
