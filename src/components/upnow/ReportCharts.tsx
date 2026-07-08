@@ -73,11 +73,13 @@ interface PerfRow {
   [k: string]: unknown;
 }
 
-export function ManagerPerformanceCharts({ rows, daily, dailyPages }: {
+export function ManagerPerformanceCharts({ rows, daily, dailyPages, granularity }: {
   rows: PerfRow[];
   daily: Array<Record<string, string | number>>;
   dailyPages?: Array<Record<string, string | number>>;
+  granularity?: 'hour' | 'day';
 }) {
+  const hourly = granularity === 'hour';
   const active = rows.filter(r => r.leadsWorked + r.contractsWorked + r.documentsWorked > 0);
   const verbs = rows.filter(r => (r.created ?? 0) + (r.updated ?? 0) + (r.deleted ?? 0) > 0);
   // ONE member→color assignment shared by both timelines, ranked by action volume.
@@ -151,14 +153,24 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages }: {
         </Card>
       )}
       {actionsHaveData && (
-        <Card title="Daily activity" hint="Work rhythm: how many actions each person took per day over the last 30 days. Hover a day for the exact split.">
+        <Card
+          title={hourly ? 'Hourly activity' : 'Daily activity'}
+          hint={hourly
+            ? 'Work rhythm through the day: how many actions each person took per hour. Hover an hour for the exact split.'
+            : 'Work rhythm: how many actions each person took per day over the last 30 days. Hover a day for the exact split.'}
+        >
           <ResponsiveContainer width="100%" height={210}>
             {memberLines(daily)}
           </ResponsiveContainer>
         </Card>
       )}
       {pagesHaveData && (
-        <Card title="Daily presence" hint="Time in the system: how many pages each person opened per day. Tracking began 8 July 2026.">
+        <Card
+          title={hourly ? 'Hourly presence' : 'Daily presence'}
+          hint={hourly
+            ? 'Time in the system through the day: how many pages each person opened per hour.'
+            : 'Time in the system: how many pages each person opened per day. Tracking began 8 July 2026.'}
+        >
           <ResponsiveContainer width="100%" height={210}>
             {memberLines(dailyPages!)}
           </ResponsiveContainer>

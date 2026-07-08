@@ -1602,6 +1602,7 @@ export function ReportDetailView({
           rows={(data.rows ?? []) as never}
           daily={((data as Record<string, unknown>).daily ?? []) as never}
           dailyPages={((data as Record<string, unknown>).dailyPages ?? []) as never}
+          granularity={(data as Record<string, unknown>).granularity as 'hour' | 'day' | undefined}
         />
       )}
       {!loading && !error && data && slug === 'lease-activity' && (
