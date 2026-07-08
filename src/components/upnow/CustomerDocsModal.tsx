@@ -12,6 +12,7 @@ import { Files, FileText, Eye, X, Loader2, AlertTriangle } from 'lucide-react';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { docLabel } from '@/lib/docLabel';
+import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 
 export type CustomerDoc = {
   id: number; documentKey: string; displayName: string | null; category: string | null;
@@ -184,7 +185,19 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                     ) : null}
                     {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
                     {d.fileUrl && (
-                      <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 shrink-0 cursor-pointer">View <Eye size={12} /></button>
+                      <div className="ml-auto flex items-center gap-3 shrink-0">
+                        <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer">View <Eye size={12} /></button>
+                        {/* Contract paperwork (Contract Attachment, Contract Registration/Ejari, …) is the
+                            counterparty's own document — offer a clean, watermark-free download alongside
+                            the in-app viewer, same as move-in/move-out/settlement artifacts. */}
+                        {groupOf(d) === 'contract' && (
+                          <DownloadDocButton
+                            documentId={d.id}
+                            label="Download"
+                            className="text-xs text-[#6b6860] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
+                          />
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
