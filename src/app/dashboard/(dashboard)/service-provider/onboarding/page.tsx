@@ -45,6 +45,7 @@ const grotesk = Schibsted_Grotesk({ subsets: ["latin"], weight: ["400", "500", "
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { KycDocumentsPanel } from "@/components/dashboard/KycDocumentsPanel";
+import { publishSpOnboardingReady } from "@/components/dashboard/shellChrome";
 import { DayPicker } from "react-day-picker";
 import { format, parse, isValid, subYears } from "date-fns";
 import "react-day-picker/style.css";
@@ -1635,9 +1636,14 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
 
 export default function ServiceProviderOnboardingPage() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [phase, setPhase] = useState<"wizard" | "jobready">("wizard");
+  // Tell the shell to bring the sidebar back once registration is done.
+  useEffect(() => {
+    publishSpOnboardingReady(phase === "jobready");
+    return () => publishSpOnboardingReady(true);
+  }, [phase]);
   const [jrDone, setJrDone] = useState(0);
   const [completed, setCompleted] = useState<Set<number>>(new Set());
   const [initializing, setInitializing] = useState(true);
@@ -1740,39 +1746,9 @@ export default function ServiceProviderOnboardingPage() {
 
   return (
     <div
-      className="fixed inset-0 z-[70] min-h-screen overflow-y-auto"
+      className="min-h-screen"
       style={{ background: "var(--color-base-100, #f9f8f6)" }}
     >
-      {/* Focused mode: while registering, the dashboard chrome is hidden —
-          nothing in the nav works yet. A minimal bar keeps identity + exit. */}
-      <div
-        className="sticky top-0 z-10 flex items-center justify-between border-b bg-white/90 px-5 py-3 backdrop-blur"
-        style={{ borderColor: "var(--color-base-200)" }}
-      >
-        <span className="flex items-center gap-2">
-          <span
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold text-white"
-            style={{ background: "var(--color-primary)" }}
-          >
-            U
-          </span>
-          <span className="text-[15px] font-bold" style={{ color: "var(--color-neutral-900)" }}>UpNow</span>
-          <span className="ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ background: "var(--color-base-200)", color: "var(--color-neutral-500)" }}>
-            Provider setup
-          </span>
-        </span>
-        <span className="flex items-center gap-3">
-          <span className="hidden text-xs sm:block" style={{ color: "var(--color-neutral-400)" }}>{user?.email}</span>
-          <button
-            type="button"
-            onClick={signOut}
-            className="text-sm font-semibold underline underline-offset-2"
-            style={{ color: "var(--color-neutral-500)" }}
-          >
-            Sign out
-          </button>
-        </span>
-      </div>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
         {initializing ? (
           <div className="flex items-center justify-center py-24">

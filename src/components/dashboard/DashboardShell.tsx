@@ -16,6 +16,7 @@ import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { buildDisplayName } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import shell from './DashboardShell.module.css';
+import { getSpOnboardingReady, subscribeSpOnboardingReady } from './shellChrome';
 import { apiGet } from '@/lib/api';
 
 // ── Manager permission cache (loaded once per session) ──────────────────────
@@ -492,6 +493,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const checkedAuthRef = useRef(false);
   // Sidebar count badges — safe before auth resolves (hook no-ops for non-RP / undefined role).
   const navCounts = useNavBadgeCounts(user?.role as UserRole);
+  // SP onboarding: chromeless wizard (top header stays for layout); the page
+  // signals when it hands over to Get Job-Ready and the sidebar returns.
+  const [spOnboardingReady, setSpOnboardingReady] = useState(getSpOnboardingReady);
+  useEffect(() => subscribeSpOnboardingReady(setSpOnboardingReady), []);
 
   useEffect(() => {
     const stored = localStorage.getItem('upnow_sidebar_collapsed');
@@ -552,7 +557,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   // Hide the sidebar entirely on the onboarding page so it's a focused
   // full-screen flow (no nav to escape to before submitting).
-  const hideSidebar = pathname?.endsWith('/rental-provider/dashboard/onboarding');
+  const hideSidebar =
+    pathname?.endsWith('/rental-provider/dashboard/onboarding') ||
+    (pathname?.endsWith('/service-provider/onboarding') && !spOnboardingReady);
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-base-100)' }}>
