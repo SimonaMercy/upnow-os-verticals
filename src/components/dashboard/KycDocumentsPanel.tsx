@@ -216,6 +216,9 @@ export function KycDocumentsPanel({
   // PATCHed to an existing doc when the uploader edits it afterwards.
   const [expiryByKey, setExpiryByKey] = useState<Record<string, string>>({});
   const [expirySaving, setExpirySaving] = useState<string | null>(null);
+  // A file picked for an expiring doc before its date is entered is held here
+  // until the uploader supplies the expiry.
+  const [stagedByKey, setStagedByKey] = useState<Record<string, File>>({});
   // Instant local preview before the S3 URL propagates
   const [localPreviews, setLocalPreviews] = useState<
     Record<string, { url: string; mimeType: string }>
@@ -278,11 +281,56 @@ export function KycDocumentsPanel({
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Expiry UI for a doc row — shown only for identity / licence docs. When a
+  // file is staged (picked before a date was entered), it becomes a required
+  // "enter expiry to finish" prompt; otherwise a plain editable field.
+  const renderExpiryArea = (item: KycChecklistItem, indentClass = "") => {
+    if (!docNeedsExpiry(item.key)) return null;
+    const staged = stagedByKey[item.key];
+    const expiry = expiryByKey[item.key] ?? toDateInput(item.expiryDate);
+    const clear = () => setStagedByKey((p) => { const n = { ...p }; delete n[item.key]; return n; });
+    if (staged) {
+      return (
+        <div className={`${indentClass} mt-2 rounded-lg p-2.5`} style={{ background: "color-mix(in srgb, var(--color-warning, #f59e0b) 8%, white)", border: "1px solid var(--color-warning, #f59e0b)" }}>
+          <p className="text-xs font-semibold" style={{ color: "var(--color-warning, #b45309)" }}>“{staged.name}” selected — enter the document’s expiry date to finish uploading.</p>
+          <DocExpiryField value={expiry} onChange={(v) => setExpiryByKey((p) => ({ ...p, [item.key]: v }))} className="mt-1.5" />
+          <div className="flex items-center gap-2 mt-2">
+            <button type="button" disabled={!expiry || uploading === item.key}
+              onClick={() => { void performUpload(item.key, staged); clear(); }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-60"
+              style={{ background: expiry ? "var(--color-primary)" : "var(--color-neutral-400)", cursor: expiry ? "pointer" : "not-allowed" }}>
+              {uploading === item.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Upload document
+            </button>
+            <button type="button" onClick={clear} className="text-xs font-medium hover:underline cursor-pointer" style={{ color: "var(--color-neutral-600)" }}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className={indentClass}>
+        <DocExpiryField value={expiry} onChange={(v) => handleExpiryChange(item, v)} saving={expirySaving === item.key} className="mt-2" />
+      </div>
+    );
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const docKey = pendingKey.current;
     if (!file || !docKey || !data) return;
     e.target.value = "";
+    const reqItem = checklist.find((c) => c.key === docKey) ?? data.checklist.find((c) => c.key === docKey)!;
+    const storageKey = reqItem.documentKey ?? docKey;
+    // Hold an expiring doc (identity / licence) until its expiry is entered so
+    // the upload can't go out without a date.
+    if (docNeedsExpiry(storageKey) && !expiryByKey[docKey]) {
+      setStagedByKey((p) => ({ ...p, [docKey]: file }));
+      return;
+    }
+    void performUpload(docKey, file);
+  };
+
+  const performUpload = async (docKey: string, file: File) => {
+    if (!data) return;
 
     if (!ALLOWED_MIME.includes(file.type)) {
       setUploadErrors((p) => ({
@@ -666,16 +714,7 @@ export function KycDocumentsPanel({
                       </button>
                     </div>
                   </div>
-                  {docNeedsExpiry(item.key) && (
-                    <div className="mt-2">
-                      <DocExpiryField
-                        value={expiryByKey[item.key] ?? toDateInput(item.expiryDate)}
-                        onChange={(v) => handleExpiryChange(item, v)}
-                        saving={expirySaving === item.key}
-                        className=""
-                      />
-                    </div>
-                  )}
+                  {renderExpiryArea(item)}
                   {uploadErrors[item.key] && (
                     <p className="text-xs mt-1 flex items-center gap-1" style={{ color: "var(--color-error)" }} role="alert">
                       <AlertCircle className="w-3 h-3 flex-shrink-0" />
@@ -862,14 +901,7 @@ export function KycDocumentsPanel({
                   </span>
                 </button>
                 </div>
-                {docNeedsExpiry(item.key) && (
-                  <DocExpiryField
-                    value={expiryByKey[item.key] ?? toDateInput(item.expiryDate)}
-                    onChange={(v) => handleExpiryChange(item, v)}
-                    saving={expirySaving === item.key}
-                    className="pl-[68px]"
-                  />
-                )}
+                {renderExpiryArea(item, "pl-[68px]")}
               </div>
             );
           })}
