@@ -60,11 +60,12 @@ const isImageUrl = (url: string) => /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$
 const isEid = (d: BinderDoc) => /emirates_?id|(^|_)eid(_|$)/.test(norm(d.documentKey));
 const isPassport = (d: BinderDoc) => norm(d.documentKey).includes('passport');
 const isVisa = (d: BinderDoc) => norm(d.documentKey).includes('visa');
+const isLicense = (d: BinderDoc) => /trade_license|business_license|(^|_)licen[cs]e(_|$)/.test(norm(d.documentKey));
 const isIdentity = (d: BinderDoc) => isEid(d) || isPassport(d) || isVisa(d);
 const isOccupant = (d: BinderDoc) => /occupant/.test(norm(d.documentKey)) || /occupant/i.test(d.displayName || '');
 const isDependant = (d: BinderDoc) => /depend[ae]nt/.test(norm(d.documentKey)) || /depend[ae]nt/i.test(d.displayName || '');
 const occNum = (d: BinderDoc) => { const m = norm(d.documentKey).match(/occupant_?(\d+)/); return m ? Number(m[1]) : 1; };
-const idRank = (d: BinderDoc) => (isEid(d) ? 0 : isPassport(d) ? 1 : isVisa(d) ? 2 : 3);
+const idRank = (d: BinderDoc) => (isEid(d) ? 0 : isPassport(d) ? 1 : isVisa(d) ? 2 : isLicense(d) ? 3 : 4);
 // A person has ONE Emirates ID (its front — plus a back only if a separate back
 // was uploaded), ONE Passport and ONE Visa. The same identity doc, though, gets
 // uploaded repeatedly — into the per-customer KYC store AND this lease's contract
@@ -96,6 +97,7 @@ const idLabel = (d: BinderDoc) =>
   isEid(d) ? (isEidBack(d) ? 'Emirates ID — Back' : 'Emirates ID')
   : isPassport(d) ? 'Passport'
   : isVisa(d) ? 'UAE Visa / Residency'
+  : isLicense(d) ? 'Trade Licence'
   : (d.displayName ?? d.documentKey.replace(/_/g, ' '));
 
 const cardCss: React.CSSProperties = { border: '1px solid #e3e0d9', borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: '#fff' };
@@ -269,11 +271,17 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // number and the plan number (see PaymentReceiptPdf).
   const receiptWithRefs = receipt ? { ...receipt, paymentRefs: paymentRefs ?? null } : receipt;
 
+  // A company tenant's trade licence is its identity document (the corporate
+  // equivalent of an individual's Emirates ID) — it belongs in the left "Tenant
+  // & KYC" pane, not the generic "Other documents" bucket.
+  const isCompanyTenant = !!(tenant.companyName || tenant.licenseNumber);
+  const isKyc = (d: BinderDoc) => isIdentity(d) || (isCompanyTenant && isLicense(d));
+
   const all = documents.filter(d => !!d.fileUrl && !isDependant(d));
   const matchDocs = (key: string): BinderDoc[] => {
     const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
     const base = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
-    return all.filter(d => !isIdentity(d) && !isOccupant(d) && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => b.id - a.id);
+    return all.filter(d => !isKyc(d) && !isOccupant(d) && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => b.id - a.id);
   };
   const isRenewal = contractType === 'renewal';
   const currentPlan = buildCurrentPlan(planContract, planPayments);
@@ -309,7 +317,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // LEFT column — primary tenant identity first, then occupants. Dedupe across
   // owner scopes so the same EID/passport/visa stored on both the customer KYC
   // record and this lease's contract record renders once (see dedupeIdentity).
-  const primaryId = dedupeIdentity(all.filter(d => isIdentity(d) && !isOccupant(d))).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id);
+  const primaryId = dedupeIdentity(all.filter(d => isKyc(d) && !isOccupant(d))).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id);
   const occDocs = dedupeIdentity(all.filter(d => isIdentity(d) && isOccupant(d)));
   const occGroups = Array.from(new Set(occDocs.map(occNum))).sort((a, b) => a - b)
     .map(n => ({ n, docs: occDocs.filter(d => occNum(d) === n).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id) }));
@@ -322,7 +330,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // of the tenant), so a renewal never shows one.
   const isSalaryDoc = (d: BinderDoc) => /salary/.test(norm(d.documentKey)) || /salary/i.test(d.displayName || '');
   const isMoveInDoc = (d: BinderDoc) => /move_?in/.test(norm(d.documentKey)) || /move[ -]?in/i.test(d.displayName || '');
-  const leftover = all.filter(d => !isIdentity(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && (isSalaryDoc(d) || isMoveInDoc(d))));
+  const leftover = all.filter(d => !isKyc(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && (isSalaryDoc(d) || isMoveInDoc(d))));
 
   const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'govt' ? 'Government' : s.kind === 'agreement' ? 'Agreement' : s.label;
   const slotId = (s: Slot) => s.kind === 'doc' ? `r-${s.key}` : `r-${s.kind}`;

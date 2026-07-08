@@ -112,7 +112,15 @@ export interface ReceiptContract {
     poaPersonName?: string | null;
     poaPersonPhone?: string | null;
   };
-  tenant: { name: string | null; emiratesId?: string | null; phone?: string | null };
+  tenant: {
+    name: string | null;
+    companyName?: string | null;
+    entityType?: string | null;
+    emiratesId?: string | null;
+    licenseNumber?: string | null;
+    licenseAuthority?: string | null;
+    phone?: string | null;
+  };
   unit: { number: string | null; name: string | null };
   property: { buildingName: string | null; community?: string | null; emirate?: string | null; fullAddress?: string | null };
   payments?: ReceiptPayment[];
@@ -536,6 +544,13 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const isAggregate = receipt.kind === 'rental' || receipt.kind === 'management' || receipt.kind === 'contract';
   const numberLabel = isAggregate && contract.paymentRefs?.planRefNo ? 'PLAN REF' : 'RECEIPT NO.';
   const landlordName = contract.landlord?.companyName || contract.landlord?.name || '';
+  const isTenantCompany = contract.tenant?.entityType === 'company' || !!contract.tenant?.companyName;
+  const tenantName = (isTenantCompany ? contract.tenant?.companyName : contract.tenant?.name) || contract.tenant?.name || '—';
+  const tenantIdLine = isTenantCompany
+    ? (contract.tenant?.licenseNumber || contract.tenant?.licenseAuthority)
+      ? `Trade Licence ${contract.tenant?.licenseNumber || '—'}${contract.tenant?.licenseAuthority ? ` · ${contract.tenant.licenseAuthority}` : ''}`
+      : null
+    : contract.tenant?.emiratesId ? `Emirates ID ${contract.tenant.emiratesId}` : null;
   const propertyDesc = [contract.property?.buildingName, contract.unit?.number || contract.unit?.name, contract.property?.community || contract.property?.emirate].filter(Boolean).join(', ');
 
   // A receipt acknowledges money received. On the SECURITY DEPOSIT receipt an
@@ -596,8 +611,8 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
         <View style={{ paddingHorizontal: PAD, paddingTop: 18, flexDirection: 'row' }}>
           <View style={{ flex: 1, paddingRight: 14 }}>
             <Text style={st.metaLbl}>Billed To</Text>
-            <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{contract.tenant?.name || '—'}</Text>
-            {contract.tenant?.emiratesId ? <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>Emirates ID {contract.tenant.emiratesId}</Text> : null}
+            <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{tenantName}</Text>
+            {tenantIdLine ? <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>{tenantIdLine}</Text> : null}
             {contract.tenant?.phone ? <Text style={{ fontSize: 8, color: MUTE }}>{contract.tenant.phone}</Text> : null}
           </View>
           <View style={{ flex: 1.25 }}>
