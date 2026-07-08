@@ -220,6 +220,11 @@ interface ApiContract {
   /** Customer has confirmed their renewal cheques are ready → waiting for the RP
    *  to collect/confirm (pdcConfirmed). */
   tenantChequesSubmittedAt?: string | null;
+  /** Required KYC docs (EID/passport/visa/licence) that are expired or missing for
+   *  this renewal — the customer must re-upload them. Blank expiry counts as expired. */
+  expiredKycDocKeys?: string[];
+  /** RP has reviewed + accepted the re-uploaded renewal KYC docs → cheques unlock. */
+  renewalDocsAcceptedAt?: string | null;
   numberOfInstallments: number | null;
   startDate: string | null;
   endDate: string | null;
@@ -482,15 +487,20 @@ function deriveStateKey(r: Resolved): StateKey {
     if (rc.ejariStatus === 'registered') return 'renewal_ejari';
     if (rc.status === 'issued') {
       // Renewal setup order MATCHES the RP renewal pipeline (Operations kanban):
-      //   Terms → Cheques/PDC → Signatures → Ejari → Active.
-      // Once the TENANT has signed, they are DONE — never ask them to sign twice;
-      // they wait at Ejari while the RP registers it.
-      if (rc.tenantSignedAt) return 'renewal_ejari';
-      // Cheques/PDC BEFORE signing: the customer reviews + confirms the renewal
-      // cheques and the RP confirms collection (pdcConfirmed) before signature is
-      // unlocked — same gate as a new lease (payment_review → RP confirm → sign).
+      //   Terms → Documents (expired KYC) → Cheques/PDC → Signatures → Ejari → Active.
+      // 1. Expired KYC: re-upload the expired docs; the RP must accept them before
+      //    cheques unlock. (Blank expiry counts as expired → still required.)
+      if ((rc.expiredKycDocKeys?.length ?? 0) > 0 && !rc.renewalDocsAcceptedAt) return 'renewal_documents';
+      // 2. Cheques/PDC BEFORE signing: the customer uploads + submits, the RP
+      //    confirms collection (pdcConfirmed) before signature unlocks.
       if (!rc.pdcConfirmed) return 'renewal_cheques';
-      return 'renewal_progress';
+      // 3. Signatures: advance to Ejari only once BOTH have signed — the customer
+      //    signs and the RP countersigns. While the customer has signed but the RP
+      //    hasn't, SignatureAction shows a "waiting for your landlord" state, so the
+      //    customer is never asked to sign twice.
+      if (!(rc.tenantSignedAt && rc.landlordSignedAt)) return 'renewal_progress';
+      // 4. Both signed → Awaiting Ejari (RP uploads it → auto-activates).
+      return 'renewal_ejari';
     }
     return 'renewal_cheques';
   }
@@ -1830,9 +1840,17 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload, onSaveE
   const needsExpiry = docNeedsExpiry(req.key);
   const [expiry, setExpiry] = useState(toDateInput(existing?.expiryDate));
   const [savingExpiry, setSavingExpiry] = useState(false);
+  // For an expiring doc picked BEFORE an expiry is entered, hold the file and
+  // require the date first — otherwise the row-tap would upload with no expiry.
+  const [staged, setStaged] = useState<File | null>(null);
   const onExpiryChange = async (v: string) => {
     setExpiry(v);
     if (existing?.id != null) { setSavingExpiry(true); try { await onSaveExpiry(existing.id, v); } finally { setSavingExpiry(false); } }
+  };
+  const onPick = (f: File) => {
+    // Expiry already set (or the doc doesn't need one) → upload immediately.
+    if (!needsExpiry || expiry) { onUpload(req, f, needsExpiry ? (expiry || null) : undefined); return; }
+    setStaged(f); // otherwise hold it until the customer enters the expiry
   };
   // A just-uploaded local preview always wins over a stale server status
   // (e.g. re-uploading over a rejected doc before the refetch lands).
@@ -1891,13 +1909,30 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload, onSaveE
         {!isUp && (isRejected || uploaded) && <span>{actionLabel}</span>}
       </span>
       <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={isUp}
-        onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(req, f, needsExpiry ? (expiry || null) : undefined); }} />
+        onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); }} />
     </label>
-      {needsExpiry && (
+      {needsExpiry && staged ? (
+        // File chosen but no expiry yet — require the date, then upload.
+        <div style={{ marginLeft: 14, padding: '10px 12px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', border: '1px solid var(--saffron, #f59e0b)', display: 'grid', gap: 8 }}>
+          <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>
+            “{staged.name}” selected — enter the document&rsquo;s expiry date to finish uploading.
+          </p>
+          <DocExpiryField value={expiry} onChange={setExpiry} className="" />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" disabled={!expiry || isUp}
+              onClick={() => { onUpload(req, staged, expiry || null); setStaged(null); }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: expiry ? 'var(--jade-deep, #16a34a)' : 'var(--mute)', border: 'none', borderRadius: 8, padding: '7px 12px', cursor: expiry ? 'pointer' : 'not-allowed', opacity: isUp ? 0.6 : 1 }}>
+              {isUp ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Upload document
+            </button>
+            <button type="button" onClick={() => setStaged(null)}
+              style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', background: 'none', border: 'none', cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </div>
+      ) : needsExpiry ? (
         <div style={{ paddingLeft: 14 }}>
           <DocExpiryField value={expiry} onChange={onExpiryChange} saving={savingExpiry} className="" />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -3061,6 +3096,16 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!c) return <ErrorBox msg="Contract not found." />;
+
+  // The customer has signed but the landlord hasn't countersigned yet — show a
+  // waiting state instead of the sign pad, so they are never asked to sign twice.
+  if (c.tenantSignedAt && !c.landlordSignedAt) {
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 12, background: 'var(--jade-soft, #eef8f4)', border: '1px solid var(--jade)', color: 'var(--jade-deep, #1f5a3f)', fontSize: 14, fontWeight: 600 }}>
+        <CheckCircle2 size={18} /> You&rsquo;ve signed your renewal. Waiting for your rental provider to countersign — we&rsquo;ll notify you the moment it&rsquo;s done.
+      </div>
+    );
+  }
 
   async function sign() {
     if (!sig) { setErr('Please draw your signature.'); return; }
