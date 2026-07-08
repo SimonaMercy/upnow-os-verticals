@@ -42,15 +42,21 @@ interface PerfRow {
   leadsWorked: number;
   contractsWorked: number;
   documentsWorked: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  pagesViewed: number;
   [k: string]: unknown;
 }
 
-export function ManagerPerformanceCharts({ rows, daily }: {
+export function ManagerPerformanceCharts({ rows, daily, dailyPages }: {
   rows: PerfRow[];
   daily: Array<Record<string, string | number>>;
+  dailyPages?: Array<Record<string, string | number>>;
 }) {
   const active = rows.filter(r => r.leadsWorked + r.contractsWorked + r.documentsWorked > 0);
-  // Daily lines: the (≤4) most active members over the charted window.
+  const verbs = rows.filter(r => (r.created ?? 0) + (r.updated ?? 0) + (r.deleted ?? 0) > 0);
+  // ONE member→color assignment shared by both timelines, ranked by action volume.
   const memberTotals = new Map<string, number>();
   for (const d of daily) {
     for (const [k, v] of Object.entries(d)) {
@@ -58,19 +64,39 @@ export function ManagerPerformanceCharts({ rows, daily }: {
       memberTotals.set(k, (memberTotals.get(k) ?? 0) + (Number(v) || 0));
     }
   }
+  for (const d of dailyPages ?? []) {
+    for (const [k, v] of Object.entries(d)) {
+      if (k === 'date') continue;
+      if (!memberTotals.has(k) && Number(v) > 0) memberTotals.set(k, 0);
+    }
+  }
   const lineMembers = [...memberTotals.entries()]
-    .filter(([, n]) => n > 0)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4)
     .map(([name]) => name);
+  const pagesHaveData = (dailyPages ?? []).some(d => Object.entries(d).some(([k, v]) => k !== 'date' && Number(v) > 0));
+  const actionsHaveData = daily.some(d => Object.entries(d).some(([k, v]) => k !== 'date' && Number(v) > 0));
 
-  if (!active.length && !lineMembers.length) return null;
+  if (!active.length && !verbs.length && !actionsHaveData && !pagesHaveData) return null;
+
+  const memberLines = (data: Array<Record<string, string | number>>) => (
+    <LineChart data={data} margin={{ top: 4, right: 16, bottom: 0, left: -18 }}>
+      <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+      <XAxis dataKey="date" tick={TICK} axisLine={false} tickLine={false} minTickGap={24} />
+      <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
+      <Tooltip />
+      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+      {lineMembers.map((name, i) => (
+        <Line key={name} type="monotone" dataKey={name} stroke={PALETTE[i]} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+      ))}
+    </LineChart>
+  );
 
   return (
     <div className="grid lg:grid-cols-2 gap-3 mb-6">
       {active.length > 0 && (
         <Card title="Output by team member" hint="Distinct leads, contracts and documents worked in the period — system entries excluded.">
-          <ResponsiveContainer width="100%" height={Math.max(140, 40 + active.length * 46)}>
+          <ResponsiveContainer width="100%" height={Math.max(150, 50 + active.length * 46)}>
             <BarChart data={active} layout="vertical" margin={{ top: 4, right: 16, bottom: 0, left: 8 }} barSize={18}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
@@ -84,19 +110,33 @@ export function ManagerPerformanceCharts({ rows, daily }: {
           </ResponsiveContainer>
         </Card>
       )}
-      {lineMembers.length > 0 && (
-        <Card title="Daily activity" hint="Actions per person per day (last 30 days of the period).">
-          <ResponsiveContainer width="100%" height={Math.max(180, 40 + active.length * 46)}>
-            <LineChart data={daily} margin={{ top: 4, right: 16, bottom: 0, left: -18 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-              <XAxis dataKey="date" tick={TICK} axisLine={false} tickLine={false} minTickGap={24} />
-              <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip />
+      {verbs.length > 0 && (
+        <Card title="Shape of the work" hint="Create / update / delete actions per person in the period.">
+          <ResponsiveContainer width="100%" height={Math.max(150, 50 + verbs.length * 46)}>
+            <BarChart data={verbs} layout="vertical" margin={{ top: 4, right: 16, bottom: 0, left: 8 }} barSize={18}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+              <XAxis type="number" tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="name" width={150} tick={TICK} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{ fill: '#fafaf8' }} />
               <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
-              {lineMembers.map((name, i) => (
-                <Line key={name} type="monotone" dataKey={name} stroke={PALETTE[i]} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-              ))}
-            </LineChart>
+              <Bar dataKey="created" name="Created" stackId="v" fill={JADE} stroke="#fff" strokeWidth={2} />
+              <Bar dataKey="updated" name="Updated" stackId="v" fill={BLUE} stroke="#fff" strokeWidth={2} />
+              <Bar dataKey="deleted" name="Deleted" stackId="v" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[0, 3, 3, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+      {actionsHaveData && (
+        <Card title="Daily activity" hint="Actions per person per day (last 30 days of the period).">
+          <ResponsiveContainer width="100%" height={210}>
+            {memberLines(daily)}
+          </ResponsiveContainer>
+        </Card>
+      )}
+      {pagesHaveData && (
+        <Card title="Daily presence" hint="Dashboard pages opened per person per day (tracked from 8 Jul 2026).">
+          <ResponsiveContainer width="100%" height={210}>
+            {memberLines(dailyPages!)}
           </ResponsiveContainer>
         </Card>
       )}

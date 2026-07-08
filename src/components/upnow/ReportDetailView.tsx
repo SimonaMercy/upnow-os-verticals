@@ -1546,6 +1546,7 @@ export function ReportDetailView({
         <ManagerPerformanceCharts
           rows={(data.rows ?? []) as never}
           daily={((data as Record<string, unknown>).daily ?? []) as never}
+          dailyPages={((data as Record<string, unknown>).dailyPages ?? []) as never}
         />
       )}
       {!loading && !error && data && slug === 'lease-activity' && (
