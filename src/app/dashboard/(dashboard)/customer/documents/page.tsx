@@ -32,9 +32,13 @@ import { openDocViewer } from '@/lib/docViewer';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   KYC_DOCS, KYC_DOC_KEYS, getRentalSectionDocs,
-  COMMERCIAL_TYPES, INDUSTRIAL_TYPES,
+  COMMERCIAL_TYPES, INDUSTRIAL_TYPES, docNeedsExpiry,
 } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
+import { DocExpiryField } from '@/components/upnow/DocExpiryField';
+
+// yyyy-mm-dd for a native date input, tolerant of full ISO timestamps.
+const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +51,7 @@ interface MyDoc {
   displayName?: string | null;
   notes?: string | null;
   documentNumber?: string | null;
+  expiryDate?: string | null;
 }
 
 const UTILITY_KEY = 'utility_proof_of_payment';
@@ -76,17 +81,27 @@ function DocRow({
   docRecord,
   uploading,
   onUpload,
+  onSaveExpiry,
 }: {
   req: DocReq;
   docRecord: MyDoc | undefined;
   uploading: boolean;
-  onUpload: (req: DocReq, file: File, existingId?: number) => void;
+  onUpload: (req: DocReq, file: File, existingId?: number, expiryDate?: string | null) => void;
+  onSaveExpiry: (docId: number, expiryDate: string) => Promise<void>;
 }) {
   const uploaded   = !!docRecord && docRecord.status !== 'pending';
   const isRejected = docRecord?.status === 'rejected';
   const isApproved = docRecord?.status === 'complete' || docRecord?.status === 'processed';
   const isPending  = uploaded && !isRejected && !isApproved;
   const needsUpload = !uploaded || isRejected;
+  // Identity / licence docs carry an expiry the customer records here.
+  const needsExpiry = docNeedsExpiry(req.key);
+  const [expiry, setExpiry] = useState(toDateInput(docRecord?.expiryDate));
+  const [savingExpiry, setSavingExpiry] = useState(false);
+  const onExpiryChange = async (v: string) => {
+    setExpiry(v);
+    if (docRecord?.id != null) { setSavingExpiry(true); try { await onSaveExpiry(docRecord.id, v); } finally { setSavingExpiry(false); } }
+  };
 
   return (
     <div className={[
@@ -125,6 +140,9 @@ function DocRow({
         {isPending  && <p className="text-xs text-[#6b6860] mt-0.5">Uploaded · awaiting review</p>}
         {isApproved && <p className="text-xs text-[#16a34a] font-medium mt-0.5">Approved ✓</p>}
         {needsUpload && !isRejected && req.hint && <p className="text-xs text-[#9b9890] mt-0.5">{req.hint}</p>}
+        {needsExpiry && (
+          <DocExpiryField value={expiry} onChange={onExpiryChange} saving={savingExpiry} className="mt-1.5" />
+        )}
       </div>
 
       {/* Actions */}
@@ -148,7 +166,7 @@ function DocRow({
           <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
             onChange={e => {
               const f = e.target.files?.[0];
-              if (f) onUpload(req, f, docRecord?.id);
+              if (f) onUpload(req, f, docRecord?.id, needsExpiry ? (expiry || null) : undefined);
               e.target.value = '';
             }} />
         </label>
@@ -343,7 +361,16 @@ export default function CustomerDocumentsPage() {
 
   // ── Upload handler (required + landlord-requested docs) ───────────────────
 
-  async function handleUpload(req: DocReq, file: File, existingDocId?: number) {
+  async function saveDocExpiry(docId: number, expiryDate: string) {
+    await fetch(`/api/documents/${docId}`, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiryDate: expiryDate || null }),
+    });
+    reloadDocs();
+  }
+
+  async function handleUpload(req: DocReq, file: File, existingDocId?: number, expiryDate?: string | null) {
     if (!tenantProfileId) return;
     setDocUploading(req.key);
     setUploadError(null);
@@ -368,11 +395,12 @@ export default function CustomerDocumentsPage() {
       if (!putRes.ok) { setUploadError('File upload failed'); return; }
 
       let docRes: Response;
+      const expiryPatch = expiryDate !== undefined ? { expiryDate } : {};
       if (existingDocId) {
         docRes = await fetch(`/api/documents/${existingDocId}`, {
           method: 'PATCH', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileUrl, mimeType: file.type, s3Key: fileKey }),
+          body: JSON.stringify({ fileUrl, mimeType: file.type, s3Key: fileKey, ...expiryPatch }),
         });
       } else {
         docRes = await fetch('/api/documents', {
@@ -381,7 +409,7 @@ export default function CustomerDocumentsPage() {
           body: JSON.stringify({
             ownerType: 'customer', ownerId: tenantProfileId,
             documentKey: req.key, category: req.category,
-            displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey,
+            displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey, ...expiryPatch,
           }),
         });
       }
@@ -539,6 +567,7 @@ export default function CustomerDocumentsPage() {
                 docRecord={docRecord}
                 uploading={docUploading === req.key}
                 onUpload={handleUpload}
+                onSaveExpiry={saveDocExpiry}
               />
             );
           })
@@ -566,6 +595,7 @@ export default function CustomerDocumentsPage() {
                 docRecord={docRecord}
                 uploading={docUploading === req.key}
                 onUpload={handleUpload}
+                onSaveExpiry={saveDocExpiry}
               />
             );
           })}

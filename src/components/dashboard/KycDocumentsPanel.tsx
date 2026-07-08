@@ -33,6 +33,11 @@ import { Button } from "@/components/ui/Button";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { SecureDocCanvas } from "@/components/upnow/SecureDocCanvas";
 import { currentDocWatermark } from "@/lib/docViewer";
+import { docNeedsExpiry } from "@/lib/docRequirements";
+import { DocExpiryField } from "@/components/upnow/DocExpiryField";
+
+// yyyy-mm-dd for a native date input, tolerant of full ISO timestamps.
+const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : "");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +52,8 @@ export interface KycChecklistItem {
   documentId: number | null;
   fileUrl: string | null;
   mimeType: string | null;
+  /** Expiry date (identity / licence docs) — prefills the expiry field. */
+  expiryDate?: string | null;
   /** Storage key for the upload when it differs from the UI `key`. */
   documentKey?: string;
   /** Owner this item uploads to, when it differs from the panel default. */
@@ -205,6 +212,10 @@ export function KycDocumentsPanel({
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  // Per-doc expiry (identity / licence docs). Sent atomically with the upload;
+  // PATCHed to an existing doc when the uploader edits it afterwards.
+  const [expiryByKey, setExpiryByKey] = useState<Record<string, string>>({});
+  const [expirySaving, setExpirySaving] = useState<string | null>(null);
   // Instant local preview before the S3 URL propagates
   const [localPreviews, setLocalPreviews] = useState<
     Record<string, { url: string; mimeType: string }>
@@ -251,6 +262,20 @@ export function KycDocumentsPanel({
   const handleUploadClick = (docKey: string) => {
     pendingKey.current = docKey;
     fileInputRef.current?.click();
+  };
+
+  // Update the per-doc expiry. Persist immediately to a doc already on file; a
+  // not-yet-uploaded slot keeps it in state and sends it with the upload.
+  const handleExpiryChange = async (item: KycChecklistItem, v: string) => {
+    setExpiryByKey((p) => ({ ...p, [item.key]: v }));
+    if (item.documentId != null) {
+      setExpirySaving(item.key);
+      try {
+        await apiPatch(`/documents/${item.documentId}`, { expiryDate: v || null });
+        load();
+      } catch { /* leave the entered value; the next upload will carry it */ }
+      finally { setExpirySaving(null); }
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -315,11 +340,17 @@ export function KycDocumentsPanel({
       });
       if (!s3Res.ok) throw new Error("Upload to storage failed");
 
+      // Identity / licence docs (Emirates ID, passport, visa, trade licence)
+      // carry an expiry the uploader records — send it with the upload.
+      const expiryPatch =
+        docNeedsExpiry(storageKey) ? { expiryDate: expiryByKey[docKey] || null } : {};
+
       if (reqItem.documentId) {
         // Document already exists — update file URL instead of inserting a duplicate
         await apiPatch(`/documents/${reqItem.documentId}`, {
           fileUrl,
           mimeType: file.type,
+          ...expiryPatch,
         });
       } else {
         await apiPost("/documents", {
@@ -332,6 +363,7 @@ export function KycDocumentsPanel({
           mimeType: file.type,
           s3Key: fileKey,
           storageProvider: "s3",
+          ...expiryPatch,
         });
       }
 
@@ -634,6 +666,16 @@ export function KycDocumentsPanel({
                       </button>
                     </div>
                   </div>
+                  {docNeedsExpiry(item.key) && (
+                    <div className="mt-2">
+                      <DocExpiryField
+                        value={expiryByKey[item.key] ?? toDateInput(item.expiryDate)}
+                        onChange={(v) => handleExpiryChange(item, v)}
+                        saving={expirySaving === item.key}
+                        className=""
+                      />
+                    </div>
+                  )}
                   {uploadErrors[item.key] && (
                     <p className="text-xs mt-1 flex items-center gap-1" style={{ color: "var(--color-error)" }} role="alert">
                       <AlertCircle className="w-3 h-3 flex-shrink-0" />
@@ -647,7 +689,7 @@ export function KycDocumentsPanel({
             return (
               <div
                 key={item.key}
-                className="rounded-2xl border-2 p-5 flex items-center gap-5 transition-all"
+                className="rounded-2xl border-2 p-5 flex flex-col gap-3 transition-all"
                 style={{
                   borderColor: isRejected
                     ? "var(--color-error)"
@@ -663,6 +705,7 @@ export function KycDocumentsPanel({
                       : "white",
                 }}
               >
+                <div className="flex items-center gap-5 w-full">
                 {/* Status icon */}
                 <div
                   className="flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center"
@@ -818,6 +861,15 @@ export function KycDocumentsPanel({
                     {isRejected ? "Re-upload" : item.uploaded ? "Replace" : "Upload"}
                   </span>
                 </button>
+                </div>
+                {docNeedsExpiry(item.key) && (
+                  <DocExpiryField
+                    value={expiryByKey[item.key] ?? toDateInput(item.expiryDate)}
+                    onChange={(v) => handleExpiryChange(item, v)}
+                    saving={expirySaving === item.key}
+                    className="pl-[68px]"
+                  />
+                )}
               </div>
             );
           })}
