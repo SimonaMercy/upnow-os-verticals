@@ -19,6 +19,7 @@ interface PaymentRow {
   id: string;
   paymentType: string;
   amount: number;
+  description: string | null;
   transactionDate: string | null;
   recordedDate: string | null;
   vatAmount: number | null;
@@ -40,7 +41,12 @@ const ITEM_LABELS: Record<string, string> = {
   refund:          'Refund',
   other:           'Other',
 };
-const itemLabel = (k: string) => ITEM_LABELS[k] ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+// 'other' payments are split into one item PER distinct description (e.g.
+// "Fire Fighting", "5% VAT on Rent") so each can be dragged on its own; their
+// item key is `other:<description>`.
+const OTHER_PREFIX = 'other:';
+const itemLabel = (k: string) =>
+  k.startsWith(OTHER_PREFIX) ? k.slice(OTHER_PREFIX.length) : (ITEM_LABELS[k] ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
 
 interface Category { id: string; name: string }
 const DEFAULT_CATEGORIES: Category[] = [
@@ -115,6 +121,9 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       if (d.paymentType === 'ejari_fee') {
         add('ejari_dld', Math.min(GOVT_EJARI_FEE, amt));
         add('ejari_service', Math.max(0, amt - GOVT_EJARI_FEE));
+      } else if (d.paymentType === 'other') {
+        // One draggable item per distinct "other" description.
+        add(`${OTHER_PREFIX}${(d.description ?? '').trim() || 'Other'}`, amt);
       } else {
         add(d.paymentType, amt);
       }
