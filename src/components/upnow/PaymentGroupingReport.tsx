@@ -79,9 +79,34 @@ const fmtAed = (v: number) => {
   }).format(v);
 };
 
-const rowYear = (d: PaymentRow): number | null => {
-  const s = d.transactionDate ?? d.recordedDate;
-  return s ? Number(s.slice(0, 4)) : (d.fromYear ?? null);
+// Year attribution IDENTICAL to the Payments ledger (yearMatch there): a row
+// belongs to year Y if its lease TERM overlaps Y — falling back to from/to year,
+// then the recorded/transaction year. This keeps the two pages' totals in sync
+// (and scopes deposits by their lease term, not their missing payment date).
+const yearMatch = (d: PaymentRow, y: number): boolean => {
+  if (d.startDate || d.endDate) {
+    const s = d.startDate ? Number(d.startDate.slice(0, 4)) : -Infinity;
+    const e = d.endDate ? Number(d.endDate.slice(0, 4)) : Infinity;
+    return y >= s && y <= e;
+  }
+  if (d.fromYear != null || d.toYear != null) {
+    const lo = d.fromYear ?? d.toYear!;
+    const hi = d.toYear ?? d.fromYear!;
+    return y >= Math.min(lo, hi) && y <= Math.max(lo, hi);
+  }
+  const s = d.recordedDate ?? d.transactionDate;
+  return s ? Number(s.slice(0, 4)) === y : false;
+};
+const yearsOf = (d: PaymentRow): number[] => {
+  if (d.startDate || d.endDate) {
+    const out: number[] = [];
+    if (d.startDate) out.push(Number(d.startDate.slice(0, 4)));
+    if (d.endDate) out.push(Number(d.endDate.slice(0, 4)));
+    return out;
+  }
+  if (d.fromYear != null || d.toYear != null) return [d.fromYear, d.toYear].filter((n): n is number => n != null);
+  const s = d.recordedDate ?? d.transactionDate;
+  return s ? [Number(s.slice(0, 4))] : [];
 };
 
 export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/reports' }: { backHref?: string }) {
@@ -122,7 +147,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
 
   const years = useMemo(() => {
     const s = new Set<number>();
-    for (const d of rows) { const y = rowYear(d); if (y) s.add(y); }
+    for (const d of rows) for (const y of yearsOf(d)) if (Number.isFinite(y) && y > 0) s.add(y);
     return [...s].sort((a, b) => b - a);
   }, [rows]);
   // Default to 2026 when it has data, otherwise the most recent year.
@@ -141,11 +166,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     for (const d of rows) {
       // Ownership segregation — keep only the selected leasing model.
       if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
-      // Security deposits are a standing HELD balance (they carry no payment
-      // date), so they're shown at their full held total in every year view
-      // rather than being dropped by the year filter.
-      const yearScoped = d.paymentType !== 'security_deposit';
-      if (yearScoped && year !== 'all' && rowYear(d) !== Number(year)) continue;
+      if (year !== 'all' && !yearMatch(d, Number(year))) continue;
       const amt = Number(d.amount) || 0;
       if (d.paymentType === 'ejari_fee') {
         add('ejari_dld', Math.min(GOVT_EJARI_FEE, amt));
@@ -219,8 +240,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     const out: Array<{ cat: string; item: string; row: PaymentRow; amount: number; desc: string }> = [];
     for (const d of rows) {
       if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
-      const yearScoped = d.paymentType !== 'security_deposit';
-      if (yearScoped && year !== 'all' && rowYear(d) !== Number(year)) continue;
+      if (year !== 'all' && !yearMatch(d, Number(year))) continue;
       const amt = Number(d.amount) || 0;
       const push = (itemKey: string, amount: number, desc: string) => {
         if (!amount) return;
