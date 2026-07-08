@@ -3087,11 +3087,14 @@ function DetailsDrawer({
               | { kind: 'link'; key: string; label: string; sub: string; href: string | null };
             const moveOutShown = contract.status === 'terminated' || contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
             const receiptsReady = contract.pdcConfirmed || contract.status === 'active' || contract.contractActive;
+            // Separate rent/fee VAT cheques (new model) are a federal (FTA) tax —
+            // included as a page inside the one combined Receipts document below.
+            const showGovtVat = payments.some(p => (p.paymentType ?? '').toLowerCase() === 'vat');
             const binderSeq: BinderSlot[] = [
               { kind: 'link', key: 'offer',          label: 'Payment Plan', sub: 'Current payment plan', href: null },
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
-              // One file → three receipts inside (Rental Income · Security Deposit · Management Fee).
-              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: isRenewal ? 'Rental income & management fee' : 'Rental income, security deposit & management fee', href: receiptsReady ? receiptBase : null },
+              // One file → all receipts inside (Rental Income · Security Deposit · Management Fee · Government fee).
+              { kind: 'link', key: 'receipts',       label: 'Receipts', sub: [isRenewal ? 'Rental income' : 'Rental income, security deposit', 'management fee', showGovtVat ? 'Government fee' : null].filter(Boolean).join(', '), href: receiptsReady ? receiptBase : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
               { kind: 'doc',  key: 'ejari_certificate', label: 'Ejari' },
             ];

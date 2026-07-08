@@ -469,9 +469,9 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   return sel ? buildSingleReceipt(sel, contract, rentals) : null;
 }
 
-/** The three segmented receipts (Rental Income · Security Deposit · Management
- *  Fee) in ledger order — only those with data. These become the three pages of
- *  the combined document. */
+/** The segmented receipts (Rental Income · Security Deposit · Management Fee ·
+ *  Government/VAT) in ledger order — only those with data. These become the
+ *  pages of the combined document. */
 function buildAllReceipts(contract: ReceiptContract): Receipt[] {
   const rentals = (contract.payments ?? []).filter(isRental);
   const out: Receipt[] = [];
@@ -481,6 +481,8 @@ function buildAllReceipts(contract: ReceiptContract): Receipt[] {
   if (dep) { const d = buildSingleReceipt(dep, contract, rentals); if (d) out.push(d); }
   const mgmt = buildManagementReceipt(contract, rentals);
   if (mgmt) out.push(mgmt);
+  const vat = buildVatReceipt(contract);
+  if (vat) out.push(vat);
   return out;
 }
 
@@ -780,6 +782,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   const hasDeposit = !isRenewalContract(contract) && (payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
     || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0);
   const hasManagement = feeLinesOf(contract, rentals).lines.length > 0;
+  const hasVat = payments.some(isVat);
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
   return (
@@ -791,7 +794,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
           </p>
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
             {combined
-              ? (isRenewalContract(contract) ? 'Rental income · management fee — one file' : 'Rental income · security deposit · management fee — one file, three receipts')
+              ? [isRenewalContract(contract) ? 'Rental income' : 'Rental income · security deposit', 'management fee', hasVat ? 'government fee' : null].filter(Boolean).join(' · ') + ' — one file'
               : 'System-generated payment receipt'}
           </p>
         </div>
@@ -801,6 +804,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
             {hasRental && <a href="?kind=rental" style={tab(!combined && receipt?.kind === 'rental')}>Rental Income</a>}
             {hasDeposit && <a href="?kind=deposit" style={tab(!combined && receipt?.kind === 'deposit')}>Security Deposit</a>}
             {hasManagement && <a href="?kind=management" style={tab(!combined && receipt?.kind === 'management')}>Management Fee</a>}
+            {hasVat && <a href="?kind=vat" style={tab(!combined && receipt?.kind === 'vat')}>Government Fee</a>}
           </span>
           <button onClick={() => window.history.back()} style={CLOSE_BTN}>✕ Close</button>
           {downloadUrl
