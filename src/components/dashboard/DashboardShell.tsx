@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  LayoutDashboard, Home, Search, Building2, FileText,
+  LayoutDashboard, CircleCheckBig, Home, Search, Building2, FileText,
   CalendarCheck, Wrench, Users, Star, Wallet, BookOpen,
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
@@ -94,6 +94,7 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
   service_provider: [
     { label: 'Overview',         href: '/dashboard/service-provider',            icon: LayoutDashboard },
+    { label: 'Get job-ready',    href: '/dashboard/service-provider/job-ready',  icon: CircleCheckBig },
     { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList },
     { label: 'Jobs',             href: '/dashboard/service-provider/jobs',       icon: CalendarCheck },
     { label: 'My Services',      href: '/dashboard/service-provider/services',   icon: Briefcase },

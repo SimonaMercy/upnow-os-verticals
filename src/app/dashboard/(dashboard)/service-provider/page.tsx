@@ -127,7 +127,7 @@ function JourneyStrip({ steps }: { steps: JourneyStep[] }) {
         <h2 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Get your business live</h2>
         <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-400)' }}>{doneCount}/{steps.length} complete</span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {steps.map((s, i) => {
           const active = s.key === current;
           return (
@@ -206,6 +206,7 @@ export default function ServiceProviderOverview() {
   const [pendingInvites, setPendingInvites] = useState(0);
   const [bookings, setBookings] = useState<SpBooking[]>([]);
   const [services, setServices] = useState<SpService[]>([]);
+  const [jobReady, setJobReady] = useState<{ jobReady: boolean; cards: Record<string, { complete: boolean }> } | null>(null);
 
   useEffect(() => {
     // Live today: profile, kyc-status, team, invitations.
@@ -216,6 +217,7 @@ export default function ServiceProviderOverview() {
     apiGet<unknown>('/invitations?status=pending').then(d => setPendingInvites(asArray(d).length)).catch(() => {});
     apiGet<unknown>('/service-provider/services').then(d => setServices(asArray<SpService>(d))).catch(() => {});
     apiGet<unknown>('/bookings').then(d => setBookings(asArray<SpBooking>(d))).catch(() => {});
+    apiGet<{ jobReady: boolean; cards: Record<string, { complete: boolean }> }>('/service-provider/job-ready').then(setJobReady).catch(() => {});
   }, []);
 
   const pipelineCounts = useMemo(() => {
@@ -251,8 +253,12 @@ export default function ServiceProviderOverview() {
         sub: compliant ? 'Approved' : compliance },
       { key: 'services',   label: 'List your services', done: services.length > 0, href: '/dashboard/service-provider/services',
         sub: services.length ? `${services.length} listed` : 'Pick from the catalog' },
+      { key: 'jobready',   label: 'Get job-ready',    done: Boolean(jobReady?.jobReady), href: '/dashboard/service-provider/job-ready',
+        sub: jobReady?.jobReady ? 'Receiving jobs' :
+          !compliant ? 'Unlocks after approval' :
+          jobReady ? `${Object.values(jobReady.cards).filter(c => c.complete).length}/5 cards` : 'Coverage, team, vehicles…' },
     ];
-  }, [profile, kyc, services]);
+  }, [profile, kyc, services, jobReady]);
 
   const live = steps.every(s => s.done);
 
@@ -275,6 +281,24 @@ export default function ServiceProviderOverview() {
 
       {/* Go-live journey — hidden once fully live */}
       {!live && <JourneyStrip steps={steps} />}
+
+      {/* Post-approval nudge — approved but not yet job-ready */}
+      {Boolean(kyc?.isCompliant) && jobReady && !jobReady.jobReady && (
+        <Link href="/dashboard/service-provider/job-ready"
+          className="mb-6 flex items-center gap-4 rounded-2xl p-4 transition-shadow hover:shadow-md"
+          style={{ background: '#EAF5EE', border: '1px solid #CBE5D6' }}>
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-white" style={{ background: '#08603D' }}>
+            {Object.values(jobReady.cards).filter(c => c.complete).length}/5
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-bold" style={{ color: '#182420' }}>
+              You&apos;re approved — {5 - Object.values(jobReady.cards).filter(c => c.complete).length} card{5 - Object.values(jobReady.cards).filter(c => c.complete).length === 1 ? '' : 's'} left before bookings reach you
+            </span>
+            <span className="block text-[13px]" style={{ color: '#55645B' }}>Coverage, team, vehicles, hours, job rules — a few minutes total</span>
+          </span>
+          <span className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-bold text-white" style={{ background: '#0B7A4E' }}>Get job-ready →</span>
+        </Link>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

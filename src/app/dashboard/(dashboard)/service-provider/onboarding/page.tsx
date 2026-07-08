@@ -28,6 +28,7 @@ import {
   Layers,
   MapPin,
   UserCheck,
+  Users,
   ShieldCheck,
   Clock,
   Info,
@@ -76,13 +77,20 @@ const STEPS = [
   },
   {
     id: 4,
+    label: "Your strength",
+    subtitle: "Capacity & contact",
+    icon: Users,
+    description: "Help us size the work we send you — team, vehicles, and who answers customer queries. You'll fine-tune this after approval.",
+  },
+  {
+    id: 5,
     label: "Owner details",
     subtitle: "Personal information",
     icon: UserCheck,
     description: "Your Emirates ID, nationality, and date of birth. This helps us verify your identity for KYC.",
   },
   {
-    id: 5,
+    id: 6,
     label: "Documents",
     subtitle: "Upload your KYC files",
     icon: ShieldCheck,
@@ -147,6 +155,12 @@ interface SpProfile {
   dateOfBirth: string | null;
   nationality: string | null;
   emiratesIdNumber: string | null;
+  teamSizeBand?: string | null;
+  fleetSizeBand?: string | null;
+  opsContactName?: string | null;
+  opsContactPhone?: string | null;
+  opsContactWhatsapp?: boolean;
+  opsContactLanguages?: string[] | null;
 }
 
 // ─── Service category options ─────────────────────────────────────────────────
@@ -1063,7 +1077,183 @@ function ServiceAreaStep({ onDone }: { onDone: () => void }) {
   );
 }
 
-// ─── Step 4 · Owner details (skippable) ──────────────────────────────────────
+// ─── Step 4 · Your strength (capacity signals + customer-queries contact) ────
+
+const TEAM_BANDS = ["1-2", "3-5", "6-15", "16-50", "50+"];
+const FLEET_BANDS = ["0", "1", "2-3", "4-10", "10+"];
+const CONTACT_LANGUAGES = ["English", "Arabic", "Hindi/Urdu", "Tagalog", "Other"];
+
+function BandChips({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((o) => {
+        const on = value === o;
+        return (
+          <button key={o} type="button" onClick={() => onChange(o)}
+            className="rounded-full border-2 px-5 py-2.5 text-sm font-semibold transition-all"
+            style={{
+              borderColor: on ? "var(--color-primary)" : "var(--color-base-200)",
+              background: on ? "color-mix(in srgb, var(--color-primary) 8%, white)" : "white",
+              color: on ? "var(--color-primary)" : "var(--color-neutral-700)",
+            }}>
+            {o}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function StrengthStep({ onDone }: { onDone: () => void }) {
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [initialLoaded, setInitialLoaded] = useState(false);
+  const [teamBand, setTeamBand] = useState("");
+  const [fleetBand, setFleetBand] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [whatsapp, setWhatsapp] = useState(true);
+  const [languages, setLanguages] = useState<string[]>(["English"]);
+  const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState(false);
+
+  useEffect(() => {
+    apiGet<{ profile: SpProfile }>("/profiles/service-provider/me")
+      .then(({ profile }) => {
+        setTeamBand(profile.teamSizeBand ?? "");
+        setFleetBand(profile.fleetSizeBand ?? "");
+        // Pre-fill the contact from the signatory — editable if someone else handles queries.
+        setContactName(profile.opsContactName ?? profile.ownerName ?? "");
+        setContactPhone(profile.opsContactPhone ?? "");
+        setWhatsapp(profile.opsContactWhatsapp ?? true);
+        setLanguages(profile.opsContactLanguages?.length ? profile.opsContactLanguages : ["English"]);
+      })
+      .catch(() => {})
+      .finally(() => setInitialLoaded(true));
+  }, []);
+
+  const nameOk = contactName.trim().length >= 2;
+  const phoneOk = /^\+?\d{8,16}$/.test(contactPhone.replace(/[\s-]/g, ""));
+  const valid = teamBand && fleetBand && nameOk && phoneOk;
+
+  const onSubmit = async () => {
+    setTouched(true);
+    if (!valid) return;
+    setServerError(null);
+    setSubmitting(true);
+    try {
+      await apiPatch("/profiles/service-provider/me", {
+        teamSizeBand: teamBand,
+        fleetSizeBand: fleetBand,
+        opsContactName: contactName.trim(),
+        opsContactPhone: contactPhone.replace(/[\s-]/g, ""),
+        opsContactWhatsapp: whatsapp,
+        opsContactLanguages: languages,
+      });
+      onDone();
+    } catch (e: unknown) {
+      setServerError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!initialLoaded) {
+    return (
+      <div className="flex items-center gap-3 py-8">
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-primary)" }} />
+        <span className="text-sm" style={{ color: "var(--color-neutral-500)" }}>Loading&hellip;</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <p className="mb-2.5 text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>People in the field</p>
+        <BandChips value={teamBand} options={TEAM_BANDS} onChange={setTeamBand} />
+        {touched && !teamBand && <p className="mt-1.5 text-xs text-red-600">Pick your team size</p>}
+      </div>
+
+      <div>
+        <p className="mb-2.5 text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>Service vehicles</p>
+        <BandChips value={fleetBand} options={FLEET_BANDS} onChange={setFleetBand} />
+        {touched && !fleetBand && <p className="mt-1.5 text-xs text-red-600">Pick your vehicle count</p>}
+        <p className="mt-2 text-xs" style={{ color: "var(--color-neutral-400)" }}>
+          Signals, not commitments — your exact roster and fleet come after approval.
+        </p>
+      </div>
+
+      <div className="rounded-2xl border p-5" style={{ borderColor: "var(--color-base-200)" }}>
+        <p className="text-sm font-bold" style={{ color: "var(--color-neutral-900)" }}>Who answers customer queries?</p>
+        <p className="mb-4 mt-1 text-xs leading-relaxed" style={{ color: "var(--color-neutral-500)" }}>
+          Customers and UpNow support reach this person about bookings. Expect to reply within 2 working hours.
+        </p>
+
+        <label className="mb-1.5 block text-xs font-semibold" style={{ color: "var(--color-neutral-700)" }}>Name</label>
+        <input value={contactName} onChange={(e) => setContactName(e.target.value)}
+          className="mb-1 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-2"
+          style={{ borderColor: "var(--color-base-200)" }} placeholder="Contact name" />
+        {touched && !nameOk && <p className="mb-2 text-xs text-red-600">Contact name is required</p>}
+
+        <label className="mb-1.5 mt-3 block text-xs font-semibold" style={{ color: "var(--color-neutral-700)" }}>Mobile</label>
+        <div className="flex gap-2">
+          <span className="flex items-center rounded-xl border px-3.5 text-sm font-semibold" style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-500)", background: "var(--color-base-100)" }}>+971</span>
+          <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} inputMode="tel"
+            className="flex-1 rounded-xl border px-4 py-3 text-sm outline-none focus:ring-2"
+            style={{ borderColor: "var(--color-base-200)" }} placeholder="50 712 3482" />
+        </div>
+        {touched && !phoneOk && <p className="mt-1 text-xs text-red-600">Enter a valid mobile (8–16 digits)</p>}
+        <p className="mt-1.5 text-xs" style={{ color: "var(--color-neutral-400)" }}>
+          Pre-filled from your details — edit if someone else handles queries.
+        </p>
+
+        <button type="button" onClick={() => setWhatsapp((v) => !v)}
+          className="mt-4 flex w-full items-center justify-between rounded-xl border px-4 py-3"
+          style={{ borderColor: "var(--color-base-200)" }}>
+          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-neutral-900)" }}>
+            <PhoneCall size={15} style={{ color: "var(--color-primary)" }} /> Available on WhatsApp
+          </span>
+          <span className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+            style={{ background: whatsapp ? "var(--color-primary)" : "var(--color-base-300)" }}>
+            <span className="inline-block h-5 w-5 rounded-full bg-white shadow transition-transform"
+              style={{ transform: whatsapp ? "translateX(22px)" : "translateX(2px)" }} />
+          </span>
+        </button>
+
+        <p className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--color-neutral-700)" }}>
+          Languages spoken <span className="font-normal" style={{ color: "var(--color-neutral-400)" }}>(optional)</span>
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {CONTACT_LANGUAGES.map((lang) => {
+            const on = languages.includes(lang);
+            return (
+              <button key={lang} type="button"
+                onClick={() => setLanguages((ls) => on ? ls.filter((l) => l !== lang) : [...ls, lang])}
+                className="rounded-full border px-4 py-2 text-xs font-semibold transition-all"
+                style={{
+                  borderColor: on ? "var(--color-primary)" : "var(--color-base-200)",
+                  background: on ? "color-mix(in srgb, var(--color-primary) 8%, white)" : "white",
+                  color: on ? "var(--color-primary)" : "var(--color-neutral-600)",
+                }}>
+                {lang}{on && " ✓"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {serverError && <p className="text-sm text-red-600">{serverError}</p>}
+
+      <button type="button" onClick={() => void onSubmit()} disabled={submitting}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white disabled:opacity-60"
+        style={{ background: "var(--color-primary)" }}>
+        {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Continue
+      </button>
+    </div>
+  );
+}
+
+// ─── Step 5 · Owner details (skippable) ──────────────────────────────────────
 
 function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
@@ -1326,7 +1516,7 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
   );
 }
 
-// ─── Step 5 · Documents ───────────────────────────────────────────────────────
+// ─── Step 6 · Documents ───────────────────────────────────────────────────────
 
 function DocumentsStep({ onDone }: { onDone: () => void }) {
   return (
@@ -1370,9 +1560,11 @@ export default function ServiceProviderOnboardingPage() {
         if (p?.serviceCategories && p.serviceCategories.length > 0) done.add(2);
         // Step 3 — at least one emirate selected
         if (p?.emiratesServed && p.emiratesServed.length > 0) done.add(3);
-        // Step 4 — owner details (optional step, skip if no data but also don't block)
+        // Step 4 — strength signals (bands + customer-queries contact)
+        if (p?.teamSizeBand && p?.fleetSizeBand && p?.opsContactName) done.add(4);
+        // Step 5 — owner details (optional step, skip if no data but also don't block)
         // We consider it done if at least one field is filled
-        if (p?.emiratesIdNumber || p?.nationality || p?.dateOfBirth) done.add(4);
+        if (p?.emiratesIdNumber || p?.nationality || p?.dateOfBirth) done.add(5);
       } catch {
         // profile not created yet — steps 1–4 stay incomplete
       }
@@ -1550,8 +1742,9 @@ export default function ServiceProviderOnboardingPage() {
                   <ServiceCategoriesStep onDone={() => advance(2)} />
                 )}
                 {step === 3 && <ServiceAreaStep onDone={() => advance(3)} />}
-                {step === 4 && <OwnerDetailsStep onDone={() => advance(4)} />}
-                {step === 5 && <DocumentsStep onDone={() => advance(5)} />}
+                {step === 4 && <StrengthStep onDone={() => advance(4)} />}
+                {step === 5 && <OwnerDetailsStep onDone={() => advance(5)} />}
+                {step === 6 && <DocumentsStep onDone={() => advance(6)} />}
               </div>
 
               {/* Skip — available only on optional steps (owner details) or before final docs */}
