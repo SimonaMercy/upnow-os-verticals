@@ -25,6 +25,8 @@ type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
   childKey: string;
+  /** Child field to offer as filter chips in the modal (e.g. 'kind'). */
+  filterKey?: string;
   /** Row field used for the modal title (e.g. the month label). */
   titleKey: string;
   /** Plural noun for the count, e.g. "leases". */
@@ -349,6 +351,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       childKey: 'activity',
       titleKey: 'name',
       countLabel: 'recent actions',
+      filterKey: 'kind',
       contractIdKey: 'contractId',
       columns: [
         { key: 'at', label: 'When' },
@@ -868,6 +871,7 @@ export function ReportDetailView({
   // Tenant scope — show active customers only (default) or include ended tenants.
   const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
+  const [drillFilter, setDrillFilter] = useState<string | null>(null);
   const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Fee-taxation building + leasing-model filters. [] buildings = all; lease
@@ -1895,18 +1899,45 @@ export function ReportDetailView({
       {/* Drill-down modal — lists the child items of the clicked row */}
       {def.drilldown && drill && (() => {
         const dd = def.drilldown;
-        const items = (drill[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
+        const allItems = (drill[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
+        // Kind chips: click "Deleted: 5" territory — filter the play-by-play by type.
+        const filterValues = dd.filterKey
+          ? [...new Set(allItems.map(it => String(it[dd.filterKey!] ?? '')).filter(Boolean))]
+          : [];
+        const items = drillFilter ? allItems.filter(it => String(it[dd.filterKey!]) === drillFilter) : allItems;
+        const close = () => { setDrill(null); setDrillFilter(null); };
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={() => setDrill(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={close}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
                 <div>
                   <h3 className="text-base font-bold text-[#1a1916]">{String(drill[dd.titleKey] ?? '')}</h3>
-                  <p className="text-xs text-[#6b6860] mt-0.5">{items.length} {dd.countLabel}</p>
+                  <p className="text-xs text-[#6b6860] mt-0.5">
+                    {items.length}{drillFilter ? ` of ${allItems.length}` : ''} {dd.countLabel}{drillFilter ? ` — ${drillFilter}` : ''}
+                  </p>
                 </div>
-                <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
-                  <X size={16} />
-                </button>
+                <div className="flex items-center gap-2">
+                  {filterValues.length > 1 && (
+                    <div className="flex items-center gap-1.5 mr-1">
+                      <button
+                        onClick={() => setDrillFilter(null)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${!drillFilter ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
+                        All
+                      </button>
+                      {filterValues.map(v => (
+                        <button
+                          key={v}
+                          onClick={() => setDrillFilter(drillFilter === v ? null : v)}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border capitalize transition-colors ${drillFilter === v ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
+                          {v} · {allItems.filter(it => String(it[dd.filterKey!]) === v).length}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button onClick={close} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
               <div className="overflow-auto">
                 <table className="w-full text-sm">
