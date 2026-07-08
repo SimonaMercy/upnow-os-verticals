@@ -45,7 +45,8 @@ interface JobReadyStatus {
   };
 }
 interface CoverageOption { communityId: number; nameEn: string; nameAr: string | null; selected: boolean }
-interface Tech { id: number; name: string; status: string; isLeadCapable: boolean; photoUrl: string | null; skills: string[] }
+interface Tech { id: number; name: string; status: string; isLeadCapable: boolean; photoUrl: string | null; skills: string[]; serviceSkillIds: number[] }
+interface SpService { id: number; name: string; category: string }
 interface Vehicle { id: number; vehicleType: string; label: string | null; categories: string[] | null; isActive: boolean }
 interface HoursRow { weekday: number; opensAt: string; closesAt: string }
 interface TimeOff { id: number; startsOn: string; endsOn: string; reason: string | null }
@@ -447,15 +448,30 @@ function CoverageCard({ status, absorb, back }: CardProps) {
 
 function TeamCard({ status, absorb, back }: CardProps) {
   const [techs, setTechs] = useState<Tech[] | null>(null);
+  const [services, setServices] = useState<SpService[]>([]);
   const t = status.cards.team;
 
-  useEffect(() => { apiGet<Tech[]>('/service-provider/technicians').then(setTechs); }, []);
+  useEffect(() => {
+    apiGet<Tech[]>('/service-provider/technicians').then(setTechs);
+    apiGet<unknown>('/service-provider/services')
+      .then((d) => setServices((Array.isArray(d) ? d : []) as SpService[]))
+      .catch(() => {});
+  }, []);
 
-  const patch = async (tech: Tech, changes: { isLeadCapable?: boolean; skillCategories?: string[] }) => {
-    setTechs((list) => list?.map((x) => x.id === tech.id
-      ? { ...x, isLeadCapable: changes.isLeadCapable ?? x.isLeadCapable, skills: changes.skillCategories ?? x.skills }
-      : x) ?? null);
-    absorb(await apiPatch<JobReadyStatus>(`/service-provider/technicians/${tech.id}/profile`, changes));
+  const byCategory = useMemo(() => {
+    const m = new Map<string, SpService[]>();
+    for (const s of services) m.set(s.category, [...(m.get(s.category) ?? []), s]);
+    return m;
+  }, [services]);
+
+  const patchServices = async (tech: Tech, ids: number[]) => {
+    const cats = [...new Set(services.filter((s) => ids.includes(s.id)).map((s) => s.category))];
+    setTechs((list) => list?.map((x) => x.id === tech.id ? { ...x, serviceSkillIds: ids, skills: cats } : x) ?? null);
+    absorb(await apiPatch<JobReadyStatus>(`/service-provider/technicians/${tech.id}/profile`, { skillServiceIds: ids }));
+  };
+  const patchLead = async (tech: Tech, isLeadCapable: boolean) => {
+    setTechs((list) => list?.map((x) => x.id === tech.id ? { ...x, isLeadCapable } : x) ?? null);
+    absorb(await apiPatch<JobReadyStatus>(`/service-provider/technicians/${tech.id}/profile`, { isLeadCapable }));
   };
 
   if (!techs) return <CardSkeleton back={back} title="Your team" />;
@@ -480,7 +496,7 @@ function TeamCard({ status, absorb, back }: CardProps) {
 
       <div className="space-y-3">
         {techs.map((tech) => {
-          const needsSkill = tech.skills.length === 0;
+          const needsSkill = tech.serviceSkillIds.length === 0 && tech.skills.length === 0;
           const needsPhoto = !tech.photoUrl;
           return (
             <div key={tech.id} className="rounded-2xl bg-white p-4" style={{ boxShadow: 'var(--shadow-sm)', border: needsSkill ? '1px solid #F2D9A6' : '1px solid transparent' }}>
@@ -493,26 +509,56 @@ function TeamCard({ status, absorb, back }: CardProps) {
                 <div className="min-w-0 flex-1">
                   <p className="text-[15px] font-bold" style={{ color: INK }}>{tech.name}</p>
                   <p className="text-[12.5px]" style={{ color: needsSkill || needsPhoto ? '#9A6A00' : '#55645B' }}>
-                    {needsSkill ? 'Pick at least one skill so they count'
+                    {needsSkill ? 'Pick at least one service so they count'
                       : needsPhoto ? 'Add photo — required before their first job'
                       : 'Photo ✓ · ready for jobs'}
                   </p>
                 </div>
                 <div className="flex flex-col items-center gap-0.5">
-                  <Toggle on={tech.isLeadCapable} onChange={(v) => void patch(tech, { isLeadCapable: v })} label={`${tech.name} lead`} />
+                  <Toggle on={tech.isLeadCapable} onChange={(v) => void patchLead(tech, v)} label={`${tech.name} lead`} />
                   <span className="text-[9.5px] font-bold tracking-wider" style={{ color: tech.isLeadCapable ? GREEN_DARK : '#A6B0A9' }}>LEAD</span>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+
+              {/* skills: main category chip + its adopted services as sub-chips */}
+              <div className="mt-3 space-y-2.5">
                 {t.adoptedCategories.map((cat) => {
-                  const on = tech.skills.includes(cat);
+                  const catServices = byCategory.get(cat) ?? [];
+                  const selInCat = catServices.filter((s) => tech.serviceSkillIds.includes(s.id));
+                  const allOn = catServices.length > 0 && selInCat.length === catServices.length;
+                  const someOn = selInCat.length > 0;
                   return (
-                    <button key={cat}
-                      onClick={() => void patch(tech, { skillCategories: on ? tech.skills.filter((s) => s !== cat) : [...tech.skills, cat] })}
-                      className="rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors"
-                      style={on ? { background: '#E3F2EA', borderColor: GREEN, color: GREEN_DARK } : { background: '#fff', borderColor: 'rgba(0,0,0,.12)', color: '#55645B' }}>
-                      {catLabel(cat)}{on && ' ✓'}
-                    </button>
+                    <div key={cat}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const others = tech.serviceSkillIds.filter((id) => !catServices.some((s) => s.id === id));
+                            void patchServices(tech, allOn ? others : [...others, ...catServices.map((s) => s.id)]);
+                          }}
+                          className="rounded-full border px-3.5 py-1.5 text-[13px] font-bold transition-colors"
+                          style={someOn ? { background: '#E3F2EA', borderColor: GREEN, color: GREEN_DARK } : { background: '#fff', borderColor: 'rgba(0,0,0,.12)', color: '#55645B' }}>
+                          {catLabel(cat)}{allOn ? ' ✓' : someOn ? ` · ${selInCat.length}/${catServices.length}` : ''}
+                        </button>
+                        {catServices.length > 1 && (
+                          <span className="text-[11px]" style={{ color: '#A6B0A9' }}>which services?</span>
+                        )}
+                      </div>
+                      {catServices.length > 1 && someOn !== undefined && (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5 pl-3">
+                          {catServices.map((s) => {
+                            const on = tech.serviceSkillIds.includes(s.id);
+                            return (
+                              <button key={s.id}
+                                onClick={() => void patchServices(tech, on ? tech.serviceSkillIds.filter((id) => id !== s.id) : [...tech.serviceSkillIds, s.id])}
+                                className="rounded-full border px-3 py-1 text-[12px] font-medium transition-colors"
+                                style={on ? { background: '#F2F9F5', borderColor: '#9CCDB4', color: GREEN_DARK } : { background: '#fff', borderColor: 'rgba(0,0,0,.1)', color: '#8B978F' }}>
+                                {s.name}{on && ' ✓'}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -533,6 +579,7 @@ function TeamCard({ status, absorb, back }: CardProps) {
     </div>
   );
 }
+
 
 /* ── Card ③ · Your vehicles ──────────────────────────────────────────────── */
 
