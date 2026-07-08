@@ -28,14 +28,25 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
 const CATEGORY_SUB: Record<CategoryKey, string> = {
   rental_income:    'rent collected',
   security_deposit: 'deposits',
-  govt_fee:         'VAT · Ejari',
-  management_fee:   'admin · commission',
+  govt_fee:         'VAT · Ejari DLD',
+  management_fee:   'ejari · admin · commission',
   others:           'maintenance · service · other',
 };
-// Government charges (collected for the FTA / DLD, not provider income).
-const GOVT_TYPES = ['vat', 'ejari_fee'];
-// Payment types that roll up into the Management Fee category, in display order.
+// The DLD Ejari registration is the ONLY government portion of the RP's Ejari
+// charge (a fixed AED 172.5, capped at the amount charged); the remainder is the
+// RP's Ejari handling and stays in Management Fee. VAT is 100% government.
+const GOVT_EJARI_FEE = 172.5;
+// Fully-government payment types (VAT). Ejari is SPLIT across Government Fees
+// (the AED 172.5 DLD registration) and Management Fee (the remainder), handled
+// in buildCategoryRows below — so it isn't routed by categoryOf.
+const GOVT_TYPES = ['vat'];
+// Provider's own fee types (Ejari's management remainder is added in the split).
 const MANAGEMENT_TYPES = ['admin_fee', 'commission'];
+// Per-category display order for the type sub-groups.
+const TYPE_ORDER: Partial<Record<CategoryKey, string[]>> = {
+  govt_fee:       ['vat', 'ejari_fee'],
+  management_fee: ['ejari_fee', 'admin_fee', 'commission'],
+};
 
 function categoryOf(t: string): CategoryKey {
   if (t === 'rental_income') return 'rental_income';
@@ -234,28 +245,43 @@ export default function PaymentsPage() {
     return true;
   }), [yearScoped, filterStatus, filterBuilding, search]);
 
-  const filtered = useMemo(
-    () => (filterCategory === 'all' ? scoped : scoped.filter(d => categoryOf(d.paymentType) === filterCategory)),
-    [scoped, filterCategory],
-  );
+  // Split every payment into its category bucket. Ejari is DIVIDED: AED 172.5
+  // (capped at the amount) goes to Government Fees as the DLD registration, the
+  // remainder to Management Fee as the RP's Ejari handling — so each side's
+  // financial statement is exact. Every other type maps to a single category.
+  const catRowsMap = useMemo(() => {
+    const m: Record<CategoryKey, PaymentRow[]> = { rental_income: [], security_deposit: [], govt_fee: [], management_fee: [], others: [] };
+    for (const r of scoped) {
+      if (r.paymentType === 'ejari_fee') {
+        const gov  = Math.min(GOVT_EJARI_FEE, r.amount);
+        const rest = Math.max(0, r.amount - GOVT_EJARI_FEE);
+        if (gov > 0)  m.govt_fee.push({ ...r, id: `${r.id}:g`, amount: gov,  vatAmount: 0, description: 'Ejari · DLD registration' });
+        if (rest > 0) m.management_fee.push({ ...r, id: `${r.id}:m`, amount: rest, vatAmount: 0, description: 'Ejari · service (handling)' });
+      } else {
+        m[categoryOf(r.paymentType)].push(r);
+      }
+    }
+    return m;
+  }, [scoped]);
 
-  // Per-category totals (over `scoped`, so the cards always show every category's
-  // amount regardless of which one is currently selected).
+  // Per-category totals (over the full scoped set, so the cards always show every
+  // category's amount regardless of which one is currently selected).
   const catTotals = useMemo(() => {
     const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, govt_fee: 0, management_fee: 0, others: 0 };
-    for (const d of scoped) t[categoryOf(d.paymentType)] += d.amount;
+    for (const cat of CATEGORY_ORDER) t[cat] = catRowsMap[cat].reduce((s, r) => s + r.amount, 0);
     return t;
-  }, [scoped]);
+  }, [catRowsMap]);
   const depositsHeld = useMemo(
     () => scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held').reduce((s, d) => s + d.amount, 0),
     [scoped],
   );
 
-  // Group the filtered rows by category in canonical order; hide empty categories.
+  // Category blocks in canonical order; the category card acts as the filter.
   const groups = useMemo(() =>
     CATEGORY_ORDER
+      .filter(cat => filterCategory === 'all' || cat === filterCategory)
       .map(cat => {
-        const catRows = filtered.filter(r => categoryOf(r.paymentType) === cat);
+        const catRows = catRowsMap[cat];
         return {
           cat,
           rows: catRows,
@@ -264,8 +290,9 @@ export default function PaymentsPage() {
         };
       })
       .filter(g => g.rows.length > 0),
-    [filtered],
+    [catRowsMap, filterCategory],
   );
+  const shownCount = useMemo(() => groups.reduce((s, g) => s + g.rows.length, 0), [groups]);
 
   const hasFilters = filterCategory !== 'all' || filterStatus !== 'all' || filterBuilding !== 'all' || search !== '';
   const clearFilters = () => { setFilterCategory('all'); setFilterStatus('all'); setFilterBuilding('all'); setSearch(''); };
@@ -353,7 +380,7 @@ export default function PaymentsPage() {
 
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm text-[#6b6860]">
-          {filtered.length} payment{filtered.length !== 1 ? 's' : ''}
+          {shownCount} line{shownCount !== 1 ? 's' : ''}
           {filterCategory !== 'all' ? ` · ${CATEGORY_LABELS[filterCategory]}` : ''}
         </span>
       </div>
@@ -369,7 +396,7 @@ export default function PaymentsPage() {
             <p className="text-sm text-red-600">{error}</p>
             <button onClick={load} className="text-xs text-[#2e9f82] font-medium hover:underline cursor-pointer">Retry</button>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : shownCount === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
               <Wallet size={24} className="text-[#2e9f82]" />
@@ -433,9 +460,7 @@ function CategoryBlock({
 }) {
   const multiType = category === 'management_fee' || category === 'govt_fee' || category === 'others';
   // Distinct types present in this category, in a stable order.
-  const typeOrder = category === 'management_fee' ? MANAGEMENT_TYPES
-    : category === 'govt_fee' ? GOVT_TYPES
-    : [...new Set(rows.map(r => r.paymentType))];
+  const typeOrder = TYPE_ORDER[category] ?? [...new Set(rows.map(r => r.paymentType))];
   const byType = typeOrder
     .map(t => ({ type: t, rows: rows.filter(r => r.paymentType === t) }))
     .filter(g => g.rows.length > 0);
