@@ -803,15 +803,15 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
           >
             <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
             <div className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
-              <p className="font-semibold mb-1">What a freelance permit covers</p>
+              <p className="font-semibold mb-1">Good to know about licensing</p>
               <p>
-                UAE freelance permits and eTrader licences cover professional and
-                digital services only. <b>Hands-on home services</b> (cleaning, AC,
-                plumbing, electrical, handyman, pest control) <b>legally require a
-                licensed company</b>. If you hold a sole-establishment professional
-                licence (e.g. Technical Services), select <b>Company</b> — that licence
-                qualifies. Otherwise you can join a licensed company as a technician,
-                or our team can guide you on getting licensed.
+                Hands-on home services in the UAE are licensed trades. You can
+                register now — upload your permit or licence with your documents
+                and our team verifies it within 48 hours before your listings go
+                live. If you hold a sole-establishment professional licence (e.g.
+                Technical Services), selecting <b>Company</b> also works. Not
+                licensed yet? Register anyway and we&apos;ll guide you, or join a
+                licensed company as a technician.
               </p>
             </div>
           </div>
@@ -908,10 +908,9 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       .catch(() => {}); // keep the static fallback
   }, [reset]);
 
-  // Eligibility matrix (SP_ONBOARDING_V2_DESIGN §3): every catalog category is
-  // an on-site/manual trade, which UAE freelance permits and eTrader licences
-  // do not cover — so solo traders cannot select any of them. Signpost, don't
-  // silently fail at review time.
+  // Eligibility (CEO, Jul 8): individuals may register and select any category;
+  // the licence/permit check happens at document review (GATE 1) before
+  // listings go live — the notice below sets that expectation.
   const isIndividual = entityType === "individual";
 
   const onSubmit = async (vals: CategoriesValues) => {
@@ -950,15 +949,16 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
           <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
           <div className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
             <p className="font-semibold mb-1">
-              These categories require a licensed company
+              Licensed trades — we verify your permit at review
             </p>
             <p>
-              All current UpNow service categories are hands-on, on-site trades —
-              UAE freelance permits and eTrader licences don&apos;t cover them. If you
-              hold a trade licence or a sole-establishment professional licence, go
-              back to the previous step and select <b>Company</b>. Otherwise you can
-              join a licensed company as a technician, or contact us for guidance
-              on getting licensed.
+              These are hands-on, on-site trades. You can register and pick your
+              services now — upload your licence or permit in <b>Business &amp;
+              documents</b>, and our team verifies that it covers the selected
+              categories within 48 hours, before your listings go live. If you hold
+              a sole-establishment professional licence, selecting <b>Company</b>{" "}on
+              the previous step also works. Not licensed yet? Contact us — we&apos;ll
+              guide you.
             </p>
           </div>
         </div>
@@ -974,9 +974,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                 <button
                   key={cat.value}
                   type="button"
-                  disabled={isIndividual}
                   onClick={() => {
-                    if (isIndividual) return;
                     const next = selected
                       ? field.value.filter((v) => v !== cat.value)
                       : [...field.value, cat.value];
@@ -990,8 +988,6 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                     background: selected
                       ? "color-mix(in srgb, var(--color-primary) 6%, white)"
                       : "white",
-                    opacity: isIndividual ? 0.45 : 1,
-                    cursor: isIndividual ? "not-allowed" : "pointer",
                   }}
                 >
                   <div
