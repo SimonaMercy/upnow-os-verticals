@@ -28,7 +28,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment, type CSSProperties } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
@@ -315,7 +315,7 @@ const BASE_DOC_TYPES = [
   { value: 'passport',               label: 'Passport',               category: 'identity',   needsExpiry: true  },
   { value: 'visa',                   label: 'Visa',                   category: 'identity',   needsExpiry: true  },
   { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
-  { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: true  },
+  { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: false },
   { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
   { value: 'ejari_certificate',      label: 'Ejari',                  category: 'property',   needsExpiry: false },
   { value: 'utility_registration',   label: 'Utility Registration',   category: 'property',   needsExpiry: false },
@@ -677,6 +677,9 @@ interface StepHandlers {
   /** Confirm the post-dated cheques were collected → PATCH /contracts/:id/confirm-pdc.
    *  Unlocks the Signatures step on a renewal (Cheques/PDC → Signatures). */
   onConfirmPdc: () => Promise<void>;
+  /** Edit a payment/cheque row — number / method / date / status. Used by the
+   *  renewal Cheques step so the RP records each cheque against the plan. */
+  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string }) => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
@@ -712,6 +715,104 @@ interface StepHandlers {
    *  (record payment / propose renewal / request termination) are
    *  unaffected — those are live management, not workflow rollback. */
   readOnlyWorkflow: boolean;
+}
+
+/** Renewal Cheques/PDC step body (RP side). Before the customer submits, a waiting
+ *  panel. Once submitted: the RP records each cheque against the payment plan
+ *  (number / method / date / status via the existing payments PATCH), views the
+ *  customer's uploaded cheque(s) filed as Payment Advice, then marks collected —
+ *  which sets pdcConfirmed and unlocks Signatures. */
+function RenewalChequeCollect({ h }: { h: StepHandlers }) {
+  const submitted = !!h.contract.tenantChequesSubmittedAt;
+  const canEdit = h.perms.collections;
+  const rows: ContractPayment[] = [
+    ...(h.contract.payments ?? []).filter(p => (p.paymentType ?? '') !== 'security_deposit'),
+    ...(h.contract.fees ?? []),
+  ];
+  // The customer's uploaded cheque images/PDFs are filed as Payment Advice.
+  const PA_BASES = ['payment_advice', 'pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques', 'renewal_payment_proof'];
+  const chequeDocs = (h.contract.documents ?? []).filter(d => PA_BASES.includes((d.documentKey ?? '').toLowerCase().replace(/_\d{10,}$/, '')));
+
+  const [editId, setEditId] = useState<number | null>(null);
+  const [form, setForm] = useState({ chequeNumber: '', paymentMethod: 'cheque', transactionDate: '', chequeStatus: 'pending' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const inp: CSSProperties = { width: '100%', padding: '7px 9px', borderRadius: 8, border: '1px solid var(--mist-strong)', fontSize: 13, fontFamily: 'inherit', background: 'var(--paper)' };
+  const lbl: CSSProperties = { fontSize: 11, color: 'var(--ink-2)', fontWeight: 600, display: 'grid', gap: 3 };
+
+  const start = (p: ContractPayment) => { setEditId(p.id); setErr(null); setForm({ chequeNumber: p.chequeNumber ?? '', paymentMethod: p.paymentMethod ?? 'cheque', transactionDate: (p.transactionDate ?? '').slice(0, 10), chequeStatus: p.chequeStatus ?? 'pending' }); };
+  const save = async (id: number) => {
+    setBusy(true); setErr(null);
+    try {
+      await h.onUpdatePayment(id, { chequeNumber: form.chequeNumber.trim() || null, paymentMethod: form.paymentMethod, transactionDate: form.transactionDate || null, chequeStatus: form.chequeStatus });
+      setEditId(null);
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save'); } finally { setBusy(false); }
+  };
+
+  if (!submitted) {
+    return (
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', color: 'var(--saffron-deep, #c2410c)', fontSize: 13, fontWeight: 600 }}>
+          Waiting for {h.contract.tenant.name || 'the customer'} to upload &amp; submit their cheques. Once they do, record each cheque here and mark them collected to unlock signing.
+        </div>
+        <button className="ca" style={{ justifySelf: 'start', padding: 0 }} onClick={() => h.openDrawer('payments')}>View the renewal cheque schedule</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      {chequeDocs.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <span className="note" style={{ fontWeight: 600 }}>Customer&rsquo;s uploaded cheque{chequeDocs.length === 1 ? '' : 's'}:</span>
+          {chequeDocs.map((d, i) => (
+            <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
+              <ExternalLink size={12} /> {d.displayName ?? `Cheque ${i + 1}`}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'grid', gap: 6 }}>
+        {rows.map(p => {
+          const editing = editId === p.id;
+          return (
+            <div key={p.id} style={{ border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{p.description ?? '—'}</div>
+                  <div className="note">{fmtDate(p.transactionDate)} · {fmtAed(p.amount)}{p.chequeNumber ? ` · #${p.chequeNumber}` : ''} · {fmtMethod(p.paymentMethod)}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                  <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{p.chequeStatus ?? 'pending'}</span>
+                  {canEdit && !editing && <button type="button" className="mini-btn" onClick={() => start(p)}><Pencil size={12} /> Details</button>}
+                </div>
+              </div>
+              {editing && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 10 }}>
+                  <label style={lbl}>Cheque no.<input style={inp} value={form.chequeNumber} onChange={e => setForm(f => ({ ...f, chequeNumber: e.target.value }))} /></label>
+                  <label style={lbl}>Method<select style={inp} value={form.paymentMethod} onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value }))}>{PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+                  <label style={lbl}>Date<input style={inp} type="date" value={form.transactionDate} onChange={e => setForm(f => ({ ...f, transactionDate: e.target.value }))} /></label>
+                  <label style={lbl}>Status<select style={inp} value={form.chequeStatus} onChange={e => setForm(f => ({ ...f, chequeStatus: e.target.value }))}><option value="pending">Pending</option><option value="cleared">Cleared</option><option value="bounced">Bounced</option><option value="cancelled">Cancelled</option></select></label>
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
+                    <button className="btn btn-jade btn-sm" disabled={busy} onClick={() => void save(p.id)}><Check size={14} /> {busy ? 'Saving…' : 'Save'}</button>
+                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {err && <p className="note" style={{ color: 'var(--brick)' }}>{err}</p>}
+      <div className="chklist">
+        <ChkRow on={false} label="Post-dated cheques collected" hint="mark once every cheque is in hand" onToggle={() => {}}
+          actionLabel={canEdit ? (confirming ? 'Marking…' : 'Mark collected') : undefined}
+          onAction={canEdit ? () => { setConfirming(true); void h.onConfirmPdc().finally(() => setConfirming(false)); } : undefined} />
+      </div>
+    </div>
+  );
 }
 
 function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new' | 'renewal'): StepContent {
@@ -773,25 +874,9 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       : {
           tone: 'action', icon: 'wallet', sub: stopOf(2), label: 'Cheques / PDC',
           headline: 'Collect the renewal cheques.',
-          body: `Collect ${TEN}'s post-dated cheques (or transfers) against the renewal schedule, then confirm here to unlock signing.`,
+          body: `${TEN} uploads their post-dated cheques against the schedule; record each one's number, method and status, view their upload, then mark them collected to unlock signing.`,
           timing: null,
-          node: (
-            <>
-              <div className="chklist">
-                <ChkRow
-                  on={false}
-                  label="Post-dated cheques collected"
-                  hint="awaiting confirmation"
-                  onToggle={() => {}}
-                  actionLabel={h.perms.collections ? 'Confirm collected' : undefined}
-                  onAction={h.perms.collections ? () => void h.onConfirmPdc() : undefined}
-                />
-              </div>
-              <button className="ca" style={{ justifySelf: 'start', marginTop: 4, padding: 0 }} onClick={() => h.openDrawer('payments')}>
-                Review renewal cheque schedule
-              </button>
-            </>
-          ),
+          node: <RenewalChequeCollect h={h} />,
         };
   }
 
@@ -5004,7 +5089,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,
