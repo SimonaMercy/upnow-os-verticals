@@ -37,6 +37,12 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { Schibsted_Grotesk } from "next/font/google";
+import { SpJobReady } from "@/components/upnow/SpJobReady";
+
+// One journey, one place: after the 7 registration steps the SAME page flows
+// into the "Get job-ready" phase (design part B) — no second URL.
+const grotesk = Schibsted_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { KycDocumentsPanel } from "@/components/dashboard/KycDocumentsPanel";
@@ -248,10 +254,12 @@ function Stepper({
   current,
   completed,
   onStepClick,
+  jobReady,
 }: {
   current: number;
   completed: Set<number>;
   onStepClick: (id: number) => void;
+  jobReady?: { active: boolean; unlocked: boolean; done: number; onClick: () => void };
 }) {
   // A step is reachable if it is completed (can re-edit) or is the current step
   // or comes right after the last completed step. Future-incomplete steps are locked.
@@ -355,7 +363,45 @@ function Stepper({
           </p>
         </div>
       </div>
-    </nav>
+    
+      {/* Full-journey stage: the operational profile lives on this SAME page. */}
+      {jobReady && (
+        <button
+          type="button"
+          disabled={!jobReady.unlocked}
+          onClick={() => jobReady.unlocked && jobReady.onClick()}
+          className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-colors text-left w-full"
+          style={{
+            background: jobReady.active
+              ? "color-mix(in srgb, var(--color-primary) 8%, white)"
+              : "transparent",
+            cursor: jobReady.unlocked ? "pointer" : "default",
+            opacity: jobReady.unlocked ? 1 : 0.45,
+          }}
+        >
+          <div
+            className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
+            style={{
+              background: jobReady.done === 5
+                ? "var(--color-success, #22c55e)"
+                : jobReady.active
+                  ? "var(--color-primary)"
+                  : "var(--color-base-200)",
+            }}
+          >
+            <Check className="w-5 h-5" style={{ color: jobReady.active || jobReady.done === 5 ? "#fff" : "var(--color-neutral-400)" }} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold leading-tight" style={{ color: jobReady.active ? "var(--color-primary)" : "var(--color-neutral-700)" }}>
+              Get job-ready{jobReady.done > 0 && ` · ${jobReady.done}/5`}
+            </p>
+            <p className="text-xs leading-tight mt-0.5 truncate" style={{ color: "var(--color-neutral-400)" }}>
+              Coverage · team · vehicles · hours · rules
+            </p>
+          </div>
+        </button>
+      )}
+      </nav>
   );
 }
 
@@ -1535,6 +1581,8 @@ export default function ServiceProviderOnboardingPage() {
   const router = useRouter();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
+  const [phase, setPhase] = useState<"wizard" | "jobready">("wizard");
+  const [jrDone, setJrDone] = useState(0);
   const [completed, setCompleted] = useState<Set<number>>(new Set());
   const [initializing, setInitializing] = useState(true);
   const initializedRef = useRef(false);
@@ -1551,9 +1599,10 @@ export default function ServiceProviderOnboardingPage() {
 
       // Step 1 — business basics confirmed (entityType confirmed + businessName)
       try {
-        const data = await apiGet<{ profile: SpProfile }>(
-          "/profiles/service-provider/me",
-        );
+        const data = await apiGet<{
+          profile: SpProfile;
+          checklist?: Array<{ required?: boolean; uploaded?: boolean }>;
+        }>("/profiles/service-provider/me");
         const p = data.profile;
         if (p?.accountTypeConfirmedAt && p?.businessName) done.add(1);
         // Step 2 — at least one service category selected
@@ -1565,14 +1614,27 @@ export default function ServiceProviderOnboardingPage() {
         // Step 5 — owner details (optional step, skip if no data but also don't block)
         // We consider it done if at least one field is filled
         if (p?.emiratesIdNumber || p?.nationality || p?.dateOfBirth) done.add(5);
+        // Step 6 — documents: every required doc uploaded, or already approved
+        const checklist = data.checklist ?? [];
+        const requiredMissing = checklist.filter((c) => c.required && !c.uploaded).length;
+        if ((checklist.length > 0 && requiredMissing === 0)) done.add(6);
+        try {
+          const kyc = await apiGet<{ isCompliant?: boolean }>("/profiles/service-provider/me/kyc-status");
+          if (kyc?.isCompliant) done.add(6);
+        } catch { /* tolerated */ }
       } catch {
         // profile not created yet — steps 1–4 stay incomplete
       }
 
       setCompleted(done);
+      apiGet<{ cards: Record<string, { complete: boolean }> }>("/service-provider/job-ready")
+        .then((jr) => setJrDone(Object.values(jr.cards).filter((c) => c.complete).length))
+        .catch(() => {});
       const firstIncomplete = STEPS.find((s) => !done.has(s.id));
       if (!firstIncomplete) {
-        router.replace("/dashboard/service-provider");
+        // Registration done → same page flows into the operational phase.
+        setPhase("jobready");
+        setInitializing(false);
         return;
       }
       setStep(firstIncomplete.id);
@@ -1589,11 +1651,43 @@ export default function ServiceProviderOnboardingPage() {
     if (firstIncomplete) {
       setStep(firstIncomplete.id);
     } else {
-      router.replace("/dashboard/service-provider");
+      setPhase("jobready");
     }
   };
 
   const currentStep = STEPS[step];
+
+  const stepperJobReady = {
+    active: phase === "jobready",
+    unlocked: completed.size === STEPS.length || phase === "jobready",
+    done: jrDone,
+    onClick: () => setPhase("jobready"),
+  };
+
+  if (!initializing && phase === "jobready") {
+    return (
+      <div className={grotesk.className} style={{ background: "#F7F8F6", minHeight: "100%", color: "#182420" }}>
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+          <div className="grid items-start gap-6 lg:grid-cols-[300px_1fr]">
+            <aside
+              className="hidden rounded-3xl p-4 lg:block"
+              style={{ background: "#fff", border: "1px solid #EEF0EC" }}
+            >
+              <Stepper
+                current={-1}
+                completed={completed}
+                onStepClick={(id) => { setPhase("wizard"); setStep(id); }}
+                jobReady={stepperJobReady}
+              />
+            </aside>
+            <main>
+              <SpJobReady />
+            </main>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1642,6 +1736,7 @@ export default function ServiceProviderOnboardingPage() {
                 current={step}
                 completed={completed}
                 onStepClick={setStep}
+                jobReady={stepperJobReady}
               />
 
               <div className="mt-6 px-4">
@@ -1760,7 +1855,7 @@ export default function ServiceProviderOnboardingPage() {
                         (s) => s.id > step && !completed.has(s.id),
                       );
                       if (next) setStep(next.id);
-                      else router.replace("/dashboard/service-provider");
+                      else setPhase("jobready");
                     }}
                     className="text-sm underline underline-offset-2"
                     style={{ color: "var(--color-neutral-400)" }}

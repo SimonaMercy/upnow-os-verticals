@@ -253,7 +253,7 @@ export default function ServiceProviderOverview() {
         sub: compliant ? 'Approved' : compliance },
       { key: 'services',   label: 'List your services', done: services.length > 0, href: '/dashboard/service-provider/services',
         sub: services.length ? `${services.length} listed` : 'Pick from the catalog' },
-      { key: 'jobready',   label: 'Get job-ready',    done: Boolean(jobReady?.jobReady), href: '/dashboard/service-provider/job-ready',
+      { key: 'jobready',   label: 'Get job-ready',    done: Boolean(jobReady?.jobReady), href: '/dashboard/service-provider/onboarding',
         sub: jobReady?.jobReady ? 'Receiving jobs' :
           !compliant ? 'Unlocks after approval' :
           jobReady ? `${Object.values(jobReady.cards).filter(c => c.complete).length}/5 cards` : 'Coverage, team, vehicles…' },
@@ -284,7 +284,7 @@ export default function ServiceProviderOverview() {
 
       {/* Post-approval nudge — approved but not yet job-ready */}
       {Boolean(kyc?.isCompliant) && jobReady && !jobReady.jobReady && (
-        <Link href="/dashboard/service-provider/job-ready"
+        <Link href="/dashboard/service-provider/onboarding"
           className="mb-6 flex items-center gap-4 rounded-2xl p-4 transition-shadow hover:shadow-md"
           style={{ background: '#EAF5EE', border: '1px solid #CBE5D6' }}>
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-white" style={{ background: '#08603D' }}>

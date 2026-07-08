@@ -94,7 +94,7 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
   service_provider: [
     { label: 'Overview',         href: '/dashboard/service-provider',            icon: LayoutDashboard },
-    { label: 'Get job-ready',    href: '/dashboard/service-provider/job-ready',  icon: CircleCheckBig },
+    { label: 'Get started',      href: '/dashboard/service-provider/onboarding', icon: CircleCheckBig },
     { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList },
     { label: 'Jobs',             href: '/dashboard/service-provider/jobs',       icon: CalendarCheck },
     { label: 'My Services',      href: '/dashboard/service-provider/services',   icon: Briefcase },
