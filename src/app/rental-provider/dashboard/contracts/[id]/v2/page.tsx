@@ -339,10 +339,12 @@ const BASE_DOC_TYPES = [
   { value: 'other',                  label: 'Others',                 category: 'other',      needsExpiry: false },
 ];
 
-/** Checklist doc keys whose uploads need an expiry date (IDs + licenses). */
+/** Checklist doc keys whose uploads need an expiry date (identity docs + trade
+ *  licence). The VAT Tax Registration Certificate and the business / activity
+ *  licence are excluded — they carry no expiry. */
 const EXPIRY_DOC_KEYS = new Set([
   'emirates_id', 'emirates_id_front', 'emirates_id_back', 'passport', 'uae_visa',
-  'trade_license', 'business_license', 'tax_registration',
+  'trade_license',
 ]);
 
 function spaceCategoryFromUnitType(unitType: string | null): string {

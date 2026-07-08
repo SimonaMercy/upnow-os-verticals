@@ -34,10 +34,11 @@ export const KYC_DOC_KEYS = new Set(KYC_DOCS.map(d => d.key));
  * a "Replace" upload's `_<timestamp>` suffix, etc. Mirrors the EXPIRY_DOC_KEYS
  * config on the contract v2 upload modal so both paths agree on what expires.
  */
-// NB: the VAT Tax Registration Certificate (FTA TRN) has NO expiry — it stays
-// valid until the entity deregisters — so it is deliberately excluded.
+// NB: the VAT Tax Registration Certificate (FTA TRN) and the business /
+// activity licence are deliberately excluded — only identity docs and the
+// trade licence prompt for an expiry.
 export const EXPIRY_DOC_BASES = [
-  'emirates_id', 'passport', 'visa', 'trade_license', 'business_license',
+  'emirates_id', 'passport', 'visa', 'trade_license',
 ];
 
 /** Whether uploading this document key should prompt the RP for an expiry date. */
