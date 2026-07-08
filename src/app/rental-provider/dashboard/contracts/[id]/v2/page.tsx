@@ -317,7 +317,7 @@ const BASE_DOC_TYPES = [
   { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
   { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: true  },
   { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
-  { value: 'ejari',                  label: 'Ejari',                  category: 'property',   needsExpiry: true  },
+  { value: 'ejari_certificate',      label: 'Ejari',                  category: 'property',   needsExpiry: false },
   { value: 'utility_registration',   label: 'Utility Registration',   category: 'property',   needsExpiry: false },
   { value: 'move_out_report',        label: 'Move-out Inspection Report', category: 'inspection', needsExpiry: false },
   { value: 'utility_clearance',      label: 'Utility Clearance',      category: 'property',   needsExpiry: false },
@@ -4661,7 +4661,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onEjariFilePicked = async (file: File) => {
     setEjariUploading(true);
     try {
-      await uploadContractDoc(file, 'Ejari', 'ejari');
+      await uploadContractDoc(file, 'Ejari', 'ejari_certificate');
       // Register Ejari once the certificate is on file.
       await fetch(`/api/contracts/${contract.id}/ejari`, {
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
