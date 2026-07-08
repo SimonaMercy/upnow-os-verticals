@@ -877,7 +877,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   // Live taxonomy from the admin-configured catalog (active categories only);
   // the hardcoded list is only the fallback if the public endpoint is down.
   const [categoryOptions, setCategoryOptions] =
-    useState<{ value: string; label: string }[]>(SERVICE_CATEGORIES);
+    useState<{ value: string; label: string; services?: string[] }[]>(SERVICE_CATEGORIES);
 
   const {
     handleSubmit,
@@ -900,9 +900,13 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
 
     fetch("/api/catalog/public")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { categories?: { code: string; name: string }[] }) => {
+      .then((d: { categories?: { code: string; name: string; services?: { name: string }[] }[] }) => {
         if (d.categories?.length) {
-          setCategoryOptions(d.categories.map((c) => ({ value: c.code, label: c.name })));
+          setCategoryOptions(d.categories.map((c) => ({
+            value: c.code,
+            label: c.name,
+            services: c.services?.map((s) => s.name),
+          })));
         }
       })
       .catch(() => {}); // keep the static fallback
@@ -980,7 +984,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                       : [...field.value, cat.value];
                     field.onChange(next);
                   }}
-                  className="flex items-center gap-3 rounded-2xl border-2 px-4 py-3 text-left transition-all"
+                  className="flex items-start gap-3 rounded-2xl border-2 px-4 py-3 text-left transition-all"
                   style={{
                     borderColor: selected
                       ? "var(--color-primary)"
@@ -991,7 +995,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                   }}
                 >
                   <div
-                    className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-all"
+                    className="w-5 h-5 mt-0.5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-all"
                     style={{
                       borderColor: selected
                         ? "var(--color-primary)"
@@ -1001,15 +1005,25 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                   >
                     {selected && <Check className="w-3 h-3" style={{ color: "#fff" }} />}
                   </div>
-                  <span
-                    className="text-sm font-medium"
-                    style={{
-                      color: selected
-                        ? "var(--color-primary)"
-                        : "var(--color-neutral-800)",
-                    }}
-                  >
-                    {cat.label}
+                  <span className="min-w-0">
+                    <span
+                      className="block text-sm font-medium"
+                      style={{
+                        color: selected
+                          ? "var(--color-primary)"
+                          : "var(--color-neutral-800)",
+                      }}
+                    >
+                      {cat.label}
+                    </span>
+                    {!!cat.services?.length && (
+                      <span
+                        className="block text-xs mt-0.5 leading-snug"
+                        style={{ color: "var(--color-neutral-400)" }}
+                      >
+                        {cat.services.join(" · ")}
+                      </span>
+                    )}
                   </span>
                 </button>
               );
@@ -1621,7 +1635,7 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
 
 export default function ServiceProviderOnboardingPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [step, setStep] = useState(0);
   const [phase, setPhase] = useState<"wizard" | "jobready">("wizard");
   const [jrDone, setJrDone] = useState(0);
@@ -1726,9 +1740,39 @@ export default function ServiceProviderOnboardingPage() {
 
   return (
     <div
-      className="min-h-screen"
+      className="fixed inset-0 z-[70] min-h-screen overflow-y-auto"
       style={{ background: "var(--color-base-100, #f9f8f6)" }}
     >
+      {/* Focused mode: while registering, the dashboard chrome is hidden —
+          nothing in the nav works yet. A minimal bar keeps identity + exit. */}
+      <div
+        className="sticky top-0 z-10 flex items-center justify-between border-b bg-white/90 px-5 py-3 backdrop-blur"
+        style={{ borderColor: "var(--color-base-200)" }}
+      >
+        <span className="flex items-center gap-2">
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold text-white"
+            style={{ background: "var(--color-primary)" }}
+          >
+            U
+          </span>
+          <span className="text-[15px] font-bold" style={{ color: "var(--color-neutral-900)" }}>UpNow</span>
+          <span className="ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ background: "var(--color-base-200)", color: "var(--color-neutral-500)" }}>
+            Provider setup
+          </span>
+        </span>
+        <span className="flex items-center gap-3">
+          <span className="hidden text-xs sm:block" style={{ color: "var(--color-neutral-400)" }}>{user?.email}</span>
+          <button
+            type="button"
+            onClick={signOut}
+            className="text-sm font-semibold underline underline-offset-2"
+            style={{ color: "var(--color-neutral-500)" }}
+          >
+            Sign out
+          </button>
+        </span>
+      </div>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
         {initializing ? (
           <div className="flex items-center justify-center py-24">
