@@ -106,6 +106,12 @@ interface ContractDetail {
   pdcConfirmed: boolean;
   pdcConfirmedAt: string | null;
   tenantChequesSubmittedAt: string | null;
+  /** Renewal KYC re-verification: docs the customer must re-upload (expired/undated). */
+  expiredKycDocKeys?: string[];
+  /** Durable "KYC re-verification was required" flag (snapshotted at accept-time). */
+  renewalDocsRequiredAt?: string | null;
+  /** RP has reviewed + accepted the re-uploaded KYC docs → cheques unlock. */
+  renewalDocsAcceptedAt?: string | null;
   utilityStatus?: string | null;
   utilityAccountNumber?: string | null;
   startDate: string;
@@ -196,7 +202,7 @@ interface ContractDetail {
 // Step model
 // ────────────────────────────────────────────────────────────────────────────
 
-type StepKey = 'issue' | 'cheques' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'closeout' | 'settlement';
+type StepKey = 'issue' | 'documents' | 'cheques' | 'sign' | 'ejari' | 'utility' | 'movein' | 'active' | 'terms' | 'moveout' | 'closeout' | 'settlement';
 type Tone = 'action' | 'waiting' | 'celebrate' | 'declined';
 type IconKey = 'document' | 'pen' | 'stamp' | 'bolt' | 'key' | 'active' | 'envelope' | 'alert' | 'clock' | 'wallet';
 
@@ -211,11 +217,12 @@ const STEPS_NEW: Step[] = [
   { key: 'active',  short: 'Active',  label: 'Active tenancy',    icon: 'active'   },
 ];
 const STEPS_RENEWAL: Step[] = [
-  { key: 'terms',   short: 'Terms',   label: 'Terms agreed',    icon: 'envelope' },
-  { key: 'cheques', short: 'Cheques', label: 'Cheques / PDC',   icon: 'wallet'   },
-  { key: 'sign',    short: 'Sign',    label: 'Signatures',      icon: 'pen'      },
-  { key: 'ejari',   short: 'Ejari',   label: 'Ejari renewal',   icon: 'stamp'    },
-  { key: 'active',  short: 'Active',  label: 'Renewal active',  icon: 'active'   },
+  { key: 'terms',     short: 'Terms',   label: 'Terms agreed',    icon: 'envelope' },
+  { key: 'documents', short: 'KYC',     label: 'Documents',       icon: 'document' },
+  { key: 'cheques',   short: 'Cheques', label: 'Cheques / PDC',   icon: 'wallet'   },
+  { key: 'sign',      short: 'Sign',    label: 'Signatures',      icon: 'pen'      },
+  { key: 'ejari',     short: 'Ejari',   label: 'Ejari renewal',   icon: 'stamp'    },
+  { key: 'active',    short: 'Active',  label: 'Renewal active',  icon: 'active'   },
 ];
 // Appended after "Active" once a termination is accepted and the lease is
 // winding down (Phase 6c) — the actionable move-out inspection + settlement steps.
@@ -231,6 +238,12 @@ interface DerivedState {
   /** RP confirmed the post-dated cheques were collected — gates the renewal from
    *  the Cheques/PDC step to Signatures (matches the Operations renewal kanban). */
   pdcConfirmed: boolean;
+  /** Renewal KYC re-verification was required (a KYC doc was expired at accept). */
+  renewalDocsRequired: boolean;
+  /** RP has reviewed + accepted the customer's re-uploaded KYC docs. */
+  renewalDocsAccepted: boolean;
+  /** KYC doc bases the customer still needs to (re-)upload a valid copy for. */
+  expiredKycDocKeys: string[];
   tenantSigned: boolean;
   landlordSigned: boolean;
   /** All signatures are method 'on_file' — imported lease signed on paper,
@@ -257,6 +270,9 @@ interface DerivedState {
 function isDone(key: StepKey, st: DerivedState): boolean {
   switch (key) {
     case 'issue':   return st.status !== 'pending';
+    // Renewal KYC step — done if no re-verification was needed, or once the RP
+    // has reviewed + accepted the customer's re-uploaded docs.
+    case 'documents': return !st.renewalDocsRequired || st.renewalDocsAccepted;
     // Renewal Cheques/PDC step — done once the RP confirms the cheques collected.
     case 'cheques': return st.pdcConfirmed;
     case 'sign':    return st.tenantSigned && st.landlordSigned;
@@ -367,6 +383,9 @@ function deriveState(contract: ContractDetail, signatures: { role: string; metho
     status: contract.status,
     ejariStatus: contract.ejariStatus,
     pdcConfirmed: contract.pdcConfirmed === true,
+    renewalDocsRequired: !!contract.renewalDocsRequiredAt,
+    renewalDocsAccepted: !!contract.renewalDocsAcceptedAt,
+    expiredKycDocKeys: contract.expiredKycDocKeys ?? [],
     tenantSigned: signatures.some(s => s.role === 'tenant'),
     landlordSigned: signatures.some(s => s.role === 'landlord'),
     sigsOnFile: signatures.length > 0 && signatures.every(s => s.method === 'on_file'),
@@ -677,6 +696,9 @@ interface StepHandlers {
   /** Confirm the post-dated cheques were collected → PATCH /contracts/:id/confirm-pdc.
    *  Unlocks the Signatures step on a renewal (Cheques/PDC → Signatures). */
   onConfirmPdc: () => Promise<void>;
+  /** Accept the customer's re-uploaded renewal KYC documents → PATCH
+   *  /contracts/:id/renewal/accept-docs. Unlocks the Cheques step (Documents → Cheques). */
+  onAcceptDocs: () => Promise<void>;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
   onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string }) => Promise<void>;
@@ -815,9 +837,91 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
   );
 }
 
+/** Renewal Documents step body (RP side). The customer re-uploads the KYC docs that
+ *  expired since the last lease; the RP reviews each fresh copy (with its new expiry)
+ *  and ACCEPTS them, which stamps renewal_docs_accepted_at and unlocks the Cheques
+ *  step. The "Accept" action stays locked until every flagged base has a fresh valid
+ *  copy (expiredKycDocKeys empty). */
+function RenewalDocReview({ h }: { h: StepHandlers }) {
+  const canEdit = h.perms.renewals || h.perms.agreements;
+  const remaining = h.contract.expiredKycDocKeys ?? [];
+  const LABELS: Record<string, string> = {
+    emirates_id: 'Emirates ID', passport: 'Passport', visa: 'UAE Visa / Residency', trade_license: 'Trade License',
+  };
+  const baseOf = (k: string): string | null => {
+    const s = (k ?? '').toLowerCase();
+    if (s.includes('emirates_id') || s.includes('eid')) return 'emirates_id';
+    if (s.includes('passport')) return 'passport';
+    if (s.includes('visa')) return 'visa';
+    if (s.includes('trade_license') || s.includes('licen')) return 'trade_license';
+    return null;
+  };
+  // Every KYC base that was flagged for this renewal = the ones still remaining plus
+  // the ones the customer has already refreshed (no longer in `remaining`). Show the
+  // freshest uploaded copy per base for the RP to view before accepting.
+  const kycDocs = (h.contract.documents ?? []).filter(d => baseOf(d.documentKey ?? ''));
+  const freshestByBase = new Map<string, ContractDoc>();
+  for (const d of kycDocs) {
+    const b = baseOf(d.documentKey ?? '')!;
+    const prev = freshestByBase.get(b);
+    // Prefer the one with the latest (future) expiry; fall back to highest id.
+    if (!prev) { freshestByBase.set(b, d); continue; }
+    const de = d.expiryDate ? Date.parse(d.expiryDate) : 0;
+    const pe = prev.expiryDate ? Date.parse(prev.expiryDate) : 0;
+    if (de > pe || (de === pe && d.id > prev.id)) freshestByBase.set(b, d);
+  }
+  const bases = Array.from(new Set([...remaining, ...Array.from(freshestByBase.keys())]));
+
+  const [accepting, setAccepting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const allRefreshed = remaining.length === 0;
+
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {bases.map(b => {
+          const doc = freshestByBase.get(b);
+          const stillMissing = remaining.includes(b);
+          return (
+            <div key={b} style={{ border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{LABELS[b] ?? b}</div>
+                <div className="note">
+                  {stillMissing
+                    ? 'Awaiting a fresh copy from the customer'
+                    : doc?.expiryDate ? `Valid · expires ${fmtDate(doc.expiryDate)}` : 'On file'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                {stillMissing
+                  ? <span className="cstat bounced">Pending</span>
+                  : <span className="cstat cleared">Valid</span>}
+                {doc && (
+                  <button type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName ?? (LABELS[b] ?? b) })}>
+                    <ExternalLink size={12} /> View
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {err && <p className="note" style={{ color: 'var(--brick)' }}>{err}</p>}
+      {!allRefreshed && (
+        <p className="note">Waiting for {h.contract.tenant.name || 'the customer'} to re-upload the remaining document{remaining.length === 1 ? '' : 's'} before you can accept.</p>
+      )}
+      <div className="chklist">
+        <ChkRow on={false} label="Refreshed KYC documents reviewed" hint="accept once every copy looks good" onToggle={() => {}}
+          actionLabel={canEdit && allRefreshed ? (accepting ? 'Accepting…' : 'Accept documents') : undefined}
+          onAction={canEdit && allRefreshed ? () => { setAccepting(true); setErr(null); void h.onAcceptDocs().catch(e => setErr(e instanceof Error ? e.message : 'Failed to accept')).finally(() => setAccepting(false)); } : undefined} />
+      </div>
+    </div>
+  );
+}
+
 function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new' | 'renewal'): StepContent {
   const TEN = h.contract.tenant.name || 'the customer';
-  const totalSteps = mode === 'renewal' ? 5 : 6;
+  const totalSteps = mode === 'renewal' ? 6 : 6;
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of ${totalSteps}`;
 
   // Once a contract is active/terminated/expired, the activation steps
@@ -855,13 +959,53 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
         };
   }
 
+  if (key === 'documents') {
+    // Renewal-only KYC re-verification step — the customer re-uploads expired /
+    // undated KYC docs (EID / passport / visa / trade licence); the RP reviews and
+    // ACCEPTS them before cheques unlock, matching the Operations renewal kanban.
+    const done = isDone('documents', st);
+    if (done && !st.renewalDocsRequired) {
+      // No re-verification was ever needed for this renewal — nothing to show.
+      return {
+        tone: 'celebrate', icon: 'document', sub: 'Renewal · Stop 2 · complete', label: 'Documents current',
+        headline: 'KYC documents are current.',
+        body: 'No document refresh was needed for this renewal.',
+        timing: null,
+        node: (
+          <div className="chklist">
+            <ChkRow on locked label="KYC documents up to date" onToggle={() => {}} />
+          </div>
+        ),
+      };
+    }
+    return done
+      ? {
+          tone: 'celebrate', icon: 'document', sub: 'Renewal · Stop 2 · complete', label: 'Documents accepted',
+          headline: 'Refreshed documents accepted.',
+          body: `You reviewed and accepted ${TEN}'s refreshed KYC documents — the renewal can proceed to cheques.`,
+          timing: null,
+          node: (
+            <div className="chklist">
+              <ChkRow on locked label="Refreshed KYC documents accepted" onToggle={() => {}} />
+            </div>
+          ),
+        }
+      : {
+          tone: 'action', icon: 'document', sub: stopOf(2), label: 'Documents',
+          headline: 'Review the refreshed documents.',
+          body: `${TEN} is re-uploading KYC documents that expired since the last lease. Review each one below, then accept to unlock the cheques step.`,
+          timing: null,
+          node: <RenewalDocReview h={h} />,
+        };
+  }
+
   if (key === 'cheques') {
     // Renewal-only Cheques/PDC step — collect + confirm the post-dated cheques
     // BEFORE signatures, matching the Operations renewal kanban.
     const done = isDone('cheques', st);
     return done
       ? {
-          tone: 'celebrate', icon: 'wallet', sub: 'Renewal · Stop 2 · complete', label: 'Cheques collected',
+          tone: 'celebrate', icon: 'wallet', sub: 'Renewal · Stop 3 · complete', label: 'Cheques collected',
           headline: 'Renewal cheques collected.',
           body: 'The post-dated cheques are confirmed — the renewal is ready for signature.',
           timing: null,
@@ -872,7 +1016,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           ),
         }
       : {
-          tone: 'action', icon: 'wallet', sub: stopOf(2), label: 'Cheques / PDC',
+          tone: 'action', icon: 'wallet', sub: stopOf(3), label: 'Cheques / PDC',
           headline: 'Collect the renewal cheques.',
           body: `${TEN} uploads their post-dated cheques against the schedule; record each one's number, method and status, view their upload, then mark them collected to unlock signing.`,
           timing: null,
@@ -4947,6 +5091,14 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     void reload();
   };
 
+  const onAcceptDocs = async () => {
+    const res = await fetch(`/api/contracts/${contract.id}/renewal/accept-docs`, {
+      method: 'PATCH', credentials: 'include',
+    });
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    void reload();
+  };
+
   // ── Flow 4: Ejari reset / redo ──  PATCH /api/contracts/:id/ejari/reset
   const onRedoEjari = async () => {
     if (!confirm('Roll the tenancy back to issued and clear the existing Ejari? You will then be able to upload a corrected certificate.')) return;
@@ -5089,7 +5241,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onAcceptDocs, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,

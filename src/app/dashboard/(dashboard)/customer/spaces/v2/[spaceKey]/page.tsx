@@ -223,6 +223,9 @@ interface ApiContract {
   /** Required KYC docs (EID/passport/visa/licence) that are expired or missing for
    *  this renewal — the customer must re-upload them. Blank expiry counts as expired. */
   expiredKycDocKeys?: string[];
+  /** Durable "KYC re-verification was required" flag — snapshotted at accept-time.
+   *  Present ⇒ the renewal routes through the Documents step until the RP accepts. */
+  renewalDocsRequiredAt?: string | null;
   /** RP has reviewed + accepted the re-uploaded renewal KYC docs → cheques unlock. */
   renewalDocsAcceptedAt?: string | null;
   numberOfInstallments: number | null;
@@ -306,18 +309,18 @@ const STATE_DEFS: Record<StateKey, StateDef> = {
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
   termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting rental provider',        mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the rental provider.',               body: "Your contract stays active until they accept. We'll notify you the moment they respond.",                                                                                                       timing: 'Awaiting rental provider response' },
 
-  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 5',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, confirm your payments are ready, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
+  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 6',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, confirm your payments are ready, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
   // Kept defined so the state map stays exhaustive, but no longer rendered
   // as a default timeline step. Routing only lands here if a future phase
   // turns the renewal docs step back on for expired KYC.
-  renewal_documents:             { label: 'Renewal documents',             sub: 'Renewal step — documents',           mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',               body: "Old Emirates ID and visa copies don't carry over — please re-upload.",                                                                                                                         timing: 'Takes ~3 min' },
+  renewal_documents:             { label: 'Renewal documents',             sub: 'Renewal step 2 of 6',                mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'Quick paperwork refresh for the renewal.',               body: "Some of your ID documents expired since your last lease — please re-upload current copies.",                                                                                                    timing: 'Takes ~3 min' },
   // Cheques/PDC step — the customer reviews + confirms the renewal cheques and
   // the RP confirms collection BEFORE signature is unlocked (matches the RP
   // renewal pipeline / Operations kanban and the new-lease payment step).
-  renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step 2 of 5',                mode: 'renewal', currentIndex: 1,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
-  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 3 of 5',             mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
-  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 4 of 5',             mode: 'renewal', currentIndex: 3,  tone: 'waiting',   headline: 'Your rental provider is renewing Ejari.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
-  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 5 of 5 — done',      mode: 'renewal', currentIndex: 4,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
+  renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step 3 of 6',                mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
+  renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 4 of 6',             mode: 'renewal', currentIndex: 3,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
+  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is renewing Ejari.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
+  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
   rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
   terminated:                    { label: 'Tenancy terminated',            sub: 'Contract closed',                 mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                                body: 'Final settlements processed; security deposit return pending move-out inspection.',                                                                                                             timing: null },
@@ -351,6 +354,7 @@ const STEPS_NEW: Step[] = [
 // gate (only fires when KYC has actually expired), so it isn't a default step.
 const STEPS_RENEWAL: Step[] = [
   { key: 'terms_offered',   label: 'Terms offered',      short: 'Terms',    icon: 'envelope' },
+  { key: 'documents',       label: 'Renewal documents',  short: 'Docs',     icon: 'document' },
   { key: 'cheques',         label: 'Cheques / PDC',      short: 'Cheques',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen'      },
   { key: 'ejari',           label: 'Ejari renewal',      short: 'Ejari',    icon: 'stamp'    },
@@ -489,8 +493,11 @@ function deriveStateKey(r: Resolved): StateKey {
       // Renewal setup order MATCHES the RP renewal pipeline (Operations kanban):
       //   Terms → Documents (expired KYC) → Cheques/PDC → Signatures → Ejari → Active.
       // 1. Expired KYC: re-upload the expired docs; the RP must accept them before
-      //    cheques unlock. (Blank expiry counts as expired → still required.)
-      if ((rc.expiredKycDocKeys?.length ?? 0) > 0 && !rc.renewalDocsAcceptedAt) return 'renewal_documents';
+      //    cheques unlock. Gate on the DURABLE renewalDocsRequiredAt (snapshotted at
+      //    accept-time) — the live expiredKycDocKeys empties the instant the customer
+      //    re-uploads, which would otherwise skip the RP-review step. Stay here until
+      //    the RP has accepted (renewalDocsAcceptedAt).
+      if (rc.renewalDocsRequiredAt && !rc.renewalDocsAcceptedAt) return 'renewal_documents';
       // 2. Cheques/PDC BEFORE signing: the customer uploads + submits, the RP
       //    confirms collection (pdcConfirmed) before signature unlocks.
       if (!rc.pdcConfirmed) return 'renewal_cheques';
@@ -2555,6 +2562,22 @@ function RenewalDocumentsAction({
 
   const allDocs: DocReq[] = [...requiredDocs, ...occupantDocs];
 
+  // Renewal KYC re-verification: re-upload ONLY the expired / blank-expiry KYC docs
+  // the backend flagged (EID / passport / visa / trade licence). Once every flagged
+  // base has a fresh valid copy, expiredKycDocKeys empties and the customer waits for
+  // the RP to review + accept (renewalDocsAcceptedAt) before cheques unlock.
+  const BASE_DOC: Record<string, DocReq> = {
+    emirates_id:   { key: 'emirates_id',   label: 'Emirates ID',          category: 'identity', required: true, hint: 'Fresh photo/scan of your current Emirates ID (both sides)' },
+    passport:      { key: 'passport',      label: 'Passport',             category: 'identity', required: true, hint: 'Bio-data page of your valid passport' },
+    visa:          { key: 'uae_visa',      label: 'UAE Visa / Residency', category: 'identity', required: true, hint: 'Your current UAE residence visa page' },
+    trade_license: { key: 'trade_license', label: 'Trade License',        category: 'license',  required: true, hint: 'Current valid UAE trade licence' },
+  };
+  const expiredBases = resolved.renewalContract?.expiredKycDocKeys ?? [];
+  const docsAccepted = !!resolved.renewalContract?.renewalDocsAcceptedAt;
+  const reUploadDocs: DocReq[] = expiredBases.map(b => BASE_DOC[b]).filter(Boolean) as DocReq[];
+  // Every flagged doc has a fresh valid copy but the RP hasn't accepted yet.
+  const awaitingRpReview = reUploadDocs.length === 0 && !docsAccepted;
+
   function DocRow({ req }: { req: DocReq }) {
     const rec = resolved.myDocs.find(d => d.documentKey === req.key);
     const isRejected = rec?.status === 'rejected';
@@ -2562,6 +2585,12 @@ function RenewalDocumentsAction({
     const onFile     = !!rec && rec.status !== 'rejected' && rec.status !== 'missing';
     const isUploading = docUploading === req.key;
     const needsExpiry = docNeedsExpiry(req.key);
+    // In the renewal re-verification context, every listed doc is still flagged as
+    // expired / undated (it's in expiredKycDocKeys) — surface THAT, not the stale
+    // "Approved" record status the customer had from their last lease.
+    const startMs = resolved.renewalContract?.startDate ? Date.parse(resolved.renewalContract.startDate) : NaN;
+    const expMs = rec?.expiryDate ? Date.parse(rec.expiryDate) : NaN;
+    const isExpiredForRenewal = !isRejected && (!Number.isFinite(expMs) || (Number.isFinite(startMs) && expMs < startMs));
     const [expiry, setExpiry] = useState(toDateInput(rec?.expiryDate));
     const [savingExpiry, setSavingExpiry] = useState(false);
     const [staged, setStaged] = useState<File | null>(null);
@@ -2577,22 +2606,26 @@ function RenewalDocumentsAction({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <label style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
-        background: isRejected ? 'var(--brick-soft)' : onFile ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
-        border: `1px solid ${isRejected ? 'var(--brick)' : onFile ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
+        background: (isRejected || isExpiredForRenewal) ? 'var(--saffron-soft, #fff7ed)' : onFile ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
+        border: `1px solid ${(isRejected || isExpiredForRenewal) ? 'var(--saffron, #f59e0b)' : onFile ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
         cursor: isUploading ? 'progress' : 'pointer',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
-          <p style={{ fontSize: 11, color: isRejected ? 'var(--brick)' : 'var(--mute)', fontWeight: isRejected ? 600 : 400, margin: '2px 0 0' }}>
+          <p style={{ fontSize: 11, color: (isRejected || isExpiredForRenewal) ? 'var(--saffron-deep, #b45309)' : 'var(--mute)', fontWeight: (isRejected || isExpiredForRenewal) ? 600 : 400, margin: '2px 0 0' }}>
             {isRejected
               ? <>Rejected — re-upload required{rec?.notes && <span style={{ fontWeight: 400, color: 'var(--ink-2)' }}> · {rec.notes}</span>}</>
+              : isExpiredForRenewal
+                ? (Number.isFinite(expMs)
+                    ? 'Expired — upload a current copy, or correct the expiry date below'
+                    : 'No expiry on file — upload a current copy and set its expiry below')
               : isApproved ? 'Approved ✓'
               : onFile ? (rec!.displayName ?? 'Uploaded · awaiting review')
               : (req.hint ?? 'Tap to upload')}
           </p>
         </div>
         {isUploading ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
-          : isRejected ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--brick)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><UploadCloud size={16} />Re-upload</span>
+          : (isRejected || isExpiredForRenewal) ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--saffron-deep, #b45309)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><UploadCloud size={16} />Replace</span>
           : onFile ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><CheckCircle2 size={16} />Replace</span>
           : <UploadCloud size={16} style={{ color: 'var(--mute)', flexShrink: 0 }} />}
         <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
@@ -2622,36 +2655,54 @@ function RenewalDocumentsAction({
     );
   }
 
+  // Fresh copies uploaded, RP now reviewing → waiting panel (no Continue button:
+  // the RP's acceptance advances the flow, not the customer).
+  if (awaitingRpReview) {
+    return (
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ background: 'rgba(46,159,130,0.08)', border: '1px solid rgba(46,159,130,0.35)', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} />
+            <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Documents submitted for review</p>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0 }}>
+            Your rental provider is reviewing your refreshed documents. Once they accept, you&apos;ll move on to prepare your cheques. No further action needed.
+          </p>
+        </div>
+        <WaitingBadge />
+        <SecondaryBtn href="/dashboard/customer/documents">
+          <Info size={14} /> Manage all KYC documents
+        </SecondaryBtn>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {uploadError && <ErrorBox msg={uploadError} />}
       {prefError && <ErrorBox msg={prefError} />}
 
-      {/* All documents — tenant + occupants in one flat list */}
+      {/* Only the expired / undated KYC docs the RP flagged for this renewal. */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px', display: 'grid', gap: 8 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px' }}>
-          {renewal ? 'Renewal documents' : 'Required documents'}
+        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 2px' }}>
+          Documents to refresh
           <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--mute)', textTransform: 'none', letterSpacing: 0 }}>
-            {allDocs.filter(d => resolved.myDocs.some(u => u.documentKey === d.key && u.status !== 'rejected' && u.status !== 'missing')).length}/{allDocs.length} uploaded
+            {reUploadDocs.length} {reUploadDocs.length === 1 ? 'document needs' : 'documents need'} a current copy
           </span>
         </p>
-        {allDocs.length === 0
-          ? <p style={{ fontSize: 13, color: 'var(--mute)', margin: 0 }}>No documents required for this unit type.</p>
-          : allDocs.map(req => <DocRow key={req.key} req={req} />)
+        <p style={{ fontSize: 12, color: 'var(--mute)', margin: '0 0 4px' }}>
+          These KYC documents expired (or have no expiry on file) since your last lease. Upload current copies with their expiry date to continue.
+        </p>
+        {reUploadDocs.length === 0
+          ? <p style={{ fontSize: 13, color: 'var(--mute)', margin: 0 }}>No documents need refreshing.</p>
+          : reUploadDocs.map(req => <DocRow key={req.key} req={req} />)
         }
       </div>
 
-      {/* Submit */}
       <div style={{ display: 'grid', gap: 8 }}>
-        {!docsOk && (
-          <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Info size={13} /> Upload all required documents to continue
-          </p>
-        )}
-        <PrimaryBtn onClick={handleSubmit} disabled={!docsOk || prefSaving}>
-          {prefSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          {prefSaving ? 'Saving…' : 'Continue to payment plan'}
-        </PrimaryBtn>
+        <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Info size={13} /> Your rental provider will review and accept these before you prepare cheques.
+        </p>
         <SecondaryBtn href="/dashboard/customer/documents">
           <Info size={14} /> Manage all KYC documents
         </SecondaryBtn>
