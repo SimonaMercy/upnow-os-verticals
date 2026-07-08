@@ -19,6 +19,7 @@ import {
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 import { ManagerPerformanceCharts, LeaseActivityCharts } from '@/components/upnow/ReportCharts';
+import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
 type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
 
@@ -1287,6 +1288,21 @@ export function ReportDetailView({
     );
   }
 
+  // Manager Performance: a row opens a FULL-PAGE member profile, not a modal.
+  if (slug === 'manager-performance' && drill && data) {
+    return (
+      <div className="p-6 print:p-0">
+        <MemberActivityView
+          member={drill as unknown as MemberRow}
+          daily={((data as Record<string, unknown>).daily ?? []) as Array<Record<string, string | number>>}
+          dailyPages={((data as Record<string, unknown>).dailyPages ?? []) as Array<Record<string, string | number>>}
+          contractsBase={contractsBase}
+          onBack={() => setDrill(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 print:p-0">
       {/* Sticky header — hidden on print */}
@@ -1897,7 +1913,7 @@ export function ReportDetailView({
       )}
 
       {/* Drill-down modal — lists the child items of the clicked row */}
-      {def.drilldown && drill && (() => {
+      {def.drilldown && drill && slug !== 'manager-performance' && (() => {
         const dd = def.drilldown;
         const allItems = (drill[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
         // Kind chips: click "Deleted: 5" territory — filter the play-by-play by type.
