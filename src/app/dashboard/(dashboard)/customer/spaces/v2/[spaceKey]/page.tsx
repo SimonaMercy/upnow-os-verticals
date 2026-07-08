@@ -2564,9 +2564,14 @@ function RenewalDocumentsAction({
     const needsExpiry = docNeedsExpiry(req.key);
     const [expiry, setExpiry] = useState(toDateInput(rec?.expiryDate));
     const [savingExpiry, setSavingExpiry] = useState(false);
+    const [staged, setStaged] = useState<File | null>(null);
     const onExpiryChange = async (v: string) => {
       setExpiry(v);
       if (rec?.id != null) { setSavingExpiry(true); try { await saveDocExpiry(rec.id, v); } finally { setSavingExpiry(false); } }
+    };
+    const onPick = (f: File) => {
+      if (!needsExpiry || expiry) { handleUpload(req, f, needsExpiry ? (expiry || null) : undefined); return; }
+      setStaged(f);
     };
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2592,13 +2597,27 @@ function RenewalDocumentsAction({
           : <UploadCloud size={16} style={{ color: 'var(--mute)', flexShrink: 0 }} />}
         <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
           disabled={isUploading}
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(req, f, needsExpiry ? (expiry || null) : undefined); }} />
+          onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); }} />
       </label>
-        {needsExpiry && (
+        {needsExpiry && staged ? (
+          <div style={{ marginLeft: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', border: '1px solid var(--saffron, #f59e0b)', display: 'grid', gap: 8 }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>“{staged.name}” selected — enter the document&rsquo;s expiry date to finish uploading.</p>
+            <DocExpiryField value={expiry} onChange={setExpiry} className="" />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" disabled={!expiry || isUploading}
+                onClick={() => { handleUpload(req, staged, expiry || null); setStaged(null); }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: expiry ? 'var(--jade-deep, #16a34a)' : 'var(--mute)', border: 'none', borderRadius: 8, padding: '7px 12px', cursor: expiry ? 'pointer' : 'not-allowed', opacity: isUploading ? 0.6 : 1 }}>
+                {isUploading ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Upload document
+              </button>
+              <button type="button" onClick={() => setStaged(null)}
+                style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', background: 'none', border: 'none', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        ) : needsExpiry ? (
           <div style={{ paddingLeft: 12 }}>
             <DocExpiryField value={expiry} onChange={onExpiryChange} saving={savingExpiry} className="" />
           </div>
-        )}
+        ) : null}
       </div>
     );
   }
