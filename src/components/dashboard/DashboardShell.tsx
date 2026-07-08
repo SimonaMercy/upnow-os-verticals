@@ -485,7 +485,7 @@ function CustomerAvatarMenu() {
    DashboardShell — main export
 ───────────────────────────────────────────── */
 export function DashboardShell({ children }: { children: ReactNode }) {
-  const { user, loading, isAuthenticated, refresh } = useAuth();
+  const { user, loading, isAuthenticated, refresh, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -598,12 +598,34 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           }}
         >
           {/* Mobile hamburger */}
-          <button
-            className="lg:hidden text-[var(--color-neutral-700)] hover:text-[var(--color-neutral-900)]"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu size={22} />
-          </button>
+          {!hideSidebar && (
+            <button
+              className="lg:hidden text-[var(--color-neutral-700)] hover:text-[var(--color-neutral-900)]"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu size={22} />
+            </button>
+          )}
+
+          {/* Chromeless mode (onboarding): the sidebar carries the brand, so
+              the header takes it over — logo left, identity + exit right. */}
+          {hideSidebar && (
+            <span className="flex items-center gap-2">
+              <span
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold text-white"
+                style={{ background: 'var(--color-primary)' }}
+              >
+                U
+              </span>
+              <span className="text-[15px] font-bold" style={{ color: 'var(--color-neutral-900)' }}>UpNow</span>
+              <span
+                className="ml-1 hidden rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider sm:inline"
+                style={{ background: 'var(--color-base-200)', color: 'var(--color-neutral-500)' }}
+              >
+                Provider setup
+              </span>
+            </span>
+          )}
 
           {/* Desktop collapse/expand toggle */}
           {!hideSidebar && (
@@ -620,6 +642,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </button>
           )}
 
+          {hideSidebar ? (
+            <div className="flex items-center gap-3">
+              <span className="hidden text-xs sm:block" style={{ color: 'var(--color-neutral-400)' }}>{user.email}</span>
+              <button
+                type="button"
+                onClick={signOut}
+                className="text-sm font-semibold underline underline-offset-2"
+                style={{ color: 'var(--color-neutral-500)' }}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
           <div className="flex items-center gap-3">
             {/* KYC warning badge — only for roles that actually undergo KYC.
                 Managers & technicians are invited sub-accounts and never do KYC. */}
@@ -641,6 +676,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             {/* Customer-only avatar dropdown with the full personal nav list */}
             {role === 'customer' && <CustomerAvatarMenu />}
           </div>
+          )}
         </header>
         )}
 
