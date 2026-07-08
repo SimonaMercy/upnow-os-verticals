@@ -45,10 +45,12 @@ export interface MemberRow {
   lastActiveAt: string | null;
 }
 
+interface PageVisit { page: string; label: string; count: number; lastAt: string }
 interface FeedPage {
   items: MemberActivityItem[];
   counts: { all: number; created: number; updated: number; deleted: number; other: number };
   nextOffset: number | null;
+  pages?: PageVisit[];
 }
 
 const KIND_STYLE: Record<string, string> = {
@@ -99,6 +101,7 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
   const [items, setItems] = useState<MemberActivityItem[]>([]);
   const [counts, setCounts] = useState<FeedPage['counts'] | null>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [pages, setPages] = useState<PageVisit[]>([]);
   const [feedLoading, setFeedLoading] = useState(false);
 
   const fetchPage = async (offset: number, selectedKind: string | null, replace: boolean) => {
@@ -114,6 +117,7 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
       setItems(prev => replace ? page.items : [...prev, ...page.items]);
       setCounts(page.counts);
       setNextOffset(page.nextOffset);
+      if (page.pages) setPages(page.pages);
     } finally {
       setFeedLoading(false);
     }
@@ -233,6 +237,27 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
           </p>
         </div>
       </div>
+
+      {/* Pages viewed — the presence detail behind the "Pages viewed" count */}
+      {pages.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] mb-3 overflow-hidden print:break-inside-avoid">
+          <div className="px-5 py-2.5 bg-[#fafaf8] border-b border-[#f0ede8] flex items-center justify-between">
+            <p className="text-xs font-bold text-[#1a1916]">Pages viewed</p>
+            <p className="text-[11px] text-[#9b9890]">{pages.length} distinct page{pages.length === 1 ? '' : 's'} · {member.pagesViewed} visits</p>
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              {pages.map((p, i) => (
+                <tr key={i} className="border-t border-[#f7f5f1] first:border-t-0 hover:bg-[#fafaf8]">
+                  <td className="pl-5 pr-3 py-2.5 text-[#1a1916] font-medium">{p.label}</td>
+                  <td className="px-3 py-2.5 text-[#6b6860] whitespace-nowrap text-right w-24">{p.count} visit{p.count === 1 ? '' : 's'}</td>
+                  <td className="pl-3 pr-5 py-2.5 text-[#9b9890] whitespace-nowrap text-right">last {p.lastAt.split(',')[1]?.trim() ?? p.lastAt}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 mb-3 print:hidden">

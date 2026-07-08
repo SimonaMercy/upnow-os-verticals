@@ -705,13 +705,13 @@ const YEAR_END = `${CURRENT_YEAR}-12-31`;
 const DAILY_DEFAULT_SLUGS = new Set<ReportSlug>(['manager-performance']);
 const todayRange = () => { const t = isoLocal(new Date()); return { from: t, to: t }; };
 
+// Ordered coarsest-recent → widest: Today, Weekly, Monthly, 3 Months, Yearly.
 const RANGE_PRESETS: { label: string; range: () => { from: string; to: string } }[] = [
-  { label: 'Today',      range: todayRange },
-  { label: 'This year',  range: () => ({ from: YEAR_START, to: YEAR_END }) },
-  { label: 'This month', range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: isoLocal(n) }; } },
-  { label: '3 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 3); return { from: isoLocal(f), to: isoLocal(n) }; } },
-  { label: '6 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 6); return { from: isoLocal(f), to: isoLocal(n) }; } },
-  { label: 'All',        range: () => ({ from: '', to: '' }) },
+  { label: 'Today',    range: todayRange },
+  { label: 'Weekly',   range: () => { const n = new Date(); const f = new Date(n); f.setDate(f.getDate() - 6); return { from: isoLocal(f), to: isoLocal(n) }; } },
+  { label: 'Monthly',  range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: isoLocal(n) }; } },
+  { label: '3 Months', range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 3); return { from: isoLocal(f), to: isoLocal(n) }; } },
+  { label: 'Yearly',   range: () => ({ from: YEAR_START, to: YEAR_END }) },
 ];
 
 function fmtAed(fils: number | null | undefined): string {
