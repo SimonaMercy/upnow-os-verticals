@@ -290,7 +290,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'manager-performance': {
     title: 'Manager Performance Report',
-    description: 'What each manager actually delivered — one row per assigned manager, counting REAL things worked, not clicks: distinct leads attended (and how many they converted), distinct contracts and renewals they progressed, documents processed, and days active — plus presence: dashboard pages and reports they opened (tracked from 8 Jul 2026). Contract signatures are the landlord\u2019s record and stay out of this scorecard. System-generated entries (receipt numbering etc.) are excluded. Click a row for the person\u2019s play-by-play. Attribution began 7 Jul 2026. Use the date range to scope a period.',
+    description: 'What each manager actually delivered — one row per assigned manager, counting REAL things worked, not clicks: distinct leads attended (and how many they converted), distinct contracts and renewals they progressed, documents processed, and days active — plus the shape of the work (created / updated / deleted actions) and presence: dashboard pages and reports they opened (tracked from 8 Jul 2026). Contract signatures are the landlord\u2019s record and stay out of this scorecard. System-generated entries (receipt numbering etc.) are excluded. Click a row for the person\u2019s play-by-play. Attribution began 7 Jul 2026. Use the date range to scope a period.',
     endpoint: '/api/reports/manager-performance',
     controlKey: 'dateRange',
     columns: [
@@ -303,6 +303,9 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'contractsWorked', label: 'Contracts worked', align: 'right', type: 'number', keep: true },
       { key: 'renewalsWorked', label: 'Renewals', align: 'right', type: 'number', keep: true },
       { key: 'documentsWorked', label: 'Documents', align: 'right', type: 'number', keep: true },
+      { key: 'created', label: 'Created', align: 'right', type: 'number', keep: true },
+      { key: 'updated', label: 'Updated', align: 'right', type: 'number', keep: true },
+      { key: 'deleted', label: 'Deleted', align: 'right', type: 'number', keep: true },
       { key: 'pagesViewed', label: 'Pages viewed', align: 'right', type: 'number', keep: true },
       { key: 'reportsViewed', label: 'Reports viewed', align: 'right', type: 'number', keep: true },
       { key: 'activeDays', label: 'Days active', align: 'right', type: 'number', keep: true },
@@ -322,6 +325,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       contractIdKey: 'contractId',
       columns: [
         { key: 'at', label: 'When' },
+        { key: 'kind', label: 'Kind', type: 'stage' },
         { key: 'action', label: 'Action' },
         { key: 'detail', label: 'On' },
         { key: 'ip', label: 'IP' },
