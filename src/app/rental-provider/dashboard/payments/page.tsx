@@ -6,35 +6,41 @@ import Link from 'next/link';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
 
 /** Portfolio-wide Payments ledger (SCRUM-577 / 579). Lists every payment row across
- *  the RP's contracts, grouped into four top-level CATEGORIES — Rental Income,
- *  Security Deposit, Management Fee (Ejari / Admin / Commission) and Others — with a
- *  per-category subtotal and a per-fee breakdown inside Management Fee. The category
+ *  the RP's contracts, grouped into top-level CATEGORIES — Rental Income,
+ *  Security Deposit, Government Fees (VAT / Ejari), Management Fee (Admin / Commission)
+ *  and Others — with a per-category subtotal and a per-type breakdown inside the
+ *  multi-type categories (Government Fees / Management Fee). The category
  *  breakdown doubles as the top-level filter (click a summary card). Security-deposit
  *  rows keep their held/returned status, settlement and detail drawer; others are
  *  read-only. */
 
 // ─── Categories (top level) ───────────────────────────────────────────────
-type CategoryKey = 'rental_income' | 'security_deposit' | 'management_fee' | 'others';
+type CategoryKey = 'rental_income' | 'security_deposit' | 'govt_fee' | 'management_fee' | 'others';
 
-const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'management_fee', 'others'];
+const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'govt_fee', 'management_fee', 'others'];
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   rental_income:    'Rental Income',
   security_deposit: 'Security Deposit',
+  govt_fee:         'Government Fees',
   management_fee:   'Management Fee',
   others:           'Others',
 };
 const CATEGORY_SUB: Record<CategoryKey, string> = {
   rental_income:    'rent collected',
   security_deposit: 'deposits',
-  management_fee:   'ejari · admin · commission',
+  govt_fee:         'VAT · Ejari',
+  management_fee:   'admin · commission',
   others:           'maintenance · service · other',
 };
+// Government charges (collected for the FTA / DLD, not provider income).
+const GOVT_TYPES = ['vat', 'ejari_fee'];
 // Payment types that roll up into the Management Fee category, in display order.
-const MANAGEMENT_TYPES = ['ejari_fee', 'admin_fee', 'commission'];
+const MANAGEMENT_TYPES = ['admin_fee', 'commission'];
 
 function categoryOf(t: string): CategoryKey {
   if (t === 'rental_income') return 'rental_income';
   if (t === 'security_deposit') return 'security_deposit';
+  if (GOVT_TYPES.includes(t)) return 'govt_fee';
   if (MANAGEMENT_TYPES.includes(t)) return 'management_fee';
   return 'others';
 }
@@ -43,6 +49,7 @@ function categoryOf(t: string): CategoryKey {
 const TYPE_LABELS: Record<string, string> = {
   rental_income:    'Rental Income',
   security_deposit: 'Security Deposit',
+  vat:              'VAT',
   ejari_fee:        'Ejari',
   admin_fee:        'Admin',
   commission:       'Commission',
@@ -235,11 +242,10 @@ export default function PaymentsPage() {
   // Per-category totals (over `scoped`, so the cards always show every category's
   // amount regardless of which one is currently selected).
   const catTotals = useMemo(() => {
-    const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, others: 0 };
+    const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, govt_fee: 0, management_fee: 0, others: 0 };
     for (const d of scoped) t[categoryOf(d.paymentType)] += d.amount;
     return t;
   }, [scoped]);
-  const grandTotal   = useMemo(() => scoped.reduce((s, d) => s + d.amount, 0), [scoped]);
   const depositsHeld = useMemo(
     () => scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held').reduce((s, d) => s + d.amount, 0),
     [scoped],
@@ -267,10 +273,10 @@ export default function PaymentsPage() {
   const detail = detailId !== null ? rows.find(d => d.id === detailId) ?? null : null;
 
   // Top-level category cards (the first is the "all / total" reset).
-  const cards: { key: 'all' | CategoryKey; label: string; value: number; sub: string }[] = [
-    { key: 'all',              label: 'Total Payments',                    value: grandTotal,             sub: `${scoped.length} records` },
+  const cards: { key: CategoryKey; label: string; value: number; sub: string }[] = [
     { key: 'rental_income',    label: CATEGORY_LABELS.rental_income,       value: catTotals.rental_income, sub: CATEGORY_SUB.rental_income },
     { key: 'security_deposit', label: CATEGORY_LABELS.security_deposit,    value: catTotals.security_deposit, sub: `held ${fmtAed(depositsHeld)}` },
+    { key: 'govt_fee',         label: CATEGORY_LABELS.govt_fee,            value: catTotals.govt_fee,      sub: CATEGORY_SUB.govt_fee },
     { key: 'management_fee',   label: CATEGORY_LABELS.management_fee,      value: catTotals.management_fee, sub: CATEGORY_SUB.management_fee },
     { key: 'others',           label: CATEGORY_LABELS.others,              value: catTotals.others,        sub: CATEGORY_SUB.others },
   ];
@@ -303,9 +309,9 @@ export default function PaymentsPage() {
       {/* Category cards = the top-level filter. Click to narrow the ledger. */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
         {cards.map(c => {
-          const active = filterCategory === c.key || (c.key === 'all' && filterCategory === 'all');
+          const active = filterCategory === c.key;
           return (
-            <button key={c.key} type="button" onClick={() => setFilterCategory(c.key === 'all' ? 'all' : c.key)}
+            <button key={c.key} type="button" onClick={() => setFilterCategory(active ? 'all' : c.key)}
               className={`text-left bg-white rounded-2xl p-5 shadow-sm border transition-all cursor-pointer hover:border-[#2e9f82] ${active ? 'border-[#2e9f82] ring-1 ring-[#2e9f82]' : 'border-[#f0ede8]'}`}>
               <div className="text-xs text-[#6b6860] font-medium">{c.label}</div>
               <div className="font-bold text-xl text-[#1a1916] mt-1 truncate">{fmtAed(c.value)}</div>
@@ -425,9 +431,11 @@ function CategoryBlock({
   vat: number;
   onRowClick: (id: string) => void;
 }) {
-  const multiType = category === 'management_fee' || category === 'others';
+  const multiType = category === 'management_fee' || category === 'govt_fee' || category === 'others';
   // Distinct types present in this category, in a stable order.
-  const typeOrder = category === 'management_fee' ? MANAGEMENT_TYPES : [...new Set(rows.map(r => r.paymentType))];
+  const typeOrder = category === 'management_fee' ? MANAGEMENT_TYPES
+    : category === 'govt_fee' ? GOVT_TYPES
+    : [...new Set(rows.map(r => r.paymentType))];
   const byType = typeOrder
     .map(t => ({ type: t, rows: rows.filter(r => r.paymentType === t) }))
     .filter(g => g.rows.length > 0);
