@@ -700,7 +700,13 @@ const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_START = `${CURRENT_YEAR}-01-01`;
 const YEAR_END = `${CURRENT_YEAR}-12-31`;
+// Reports that default to a single day (today) rather than the whole year — a
+// daily activity view (e.g. Manager Performance).
+const DAILY_DEFAULT_SLUGS = new Set<ReportSlug>(['manager-performance']);
+const todayRange = () => { const t = isoLocal(new Date()); return { from: t, to: t }; };
+
 const RANGE_PRESETS: { label: string; range: () => { from: string; to: string } }[] = [
+  { label: 'Today',      range: todayRange },
   { label: 'This year',  range: () => ({ from: YEAR_START, to: YEAR_END }) },
   { label: 'This month', range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: isoLocal(n) }; } },
   { label: '3 months',   range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 3); return { from: isoLocal(f), to: isoLocal(n) }; } },
@@ -859,8 +865,8 @@ export function ReportDetailView({
   // Default every date-range report to the hub-wide year chosen on the Reports
   // landing page (persisted in localStorage); an explicit URL param still wins.
   // "All years" → an empty range (no from/to), i.e. all-time.
-  const [from, setFrom] = useState<string>(() => sp?.get('from') ?? yearToRange(getReportsYear()).from);
-  const [to, setTo]     = useState<string>(() => sp?.get('to') ?? yearToRange(getReportsYear()).to);
+  const [from, setFrom] = useState<string>(() => sp?.get('from') ?? (DAILY_DEFAULT_SLUGS.has(slug) ? todayRange().from : yearToRange(getReportsYear()).from));
+  const [to, setTo]     = useState<string>(() => sp?.get('to') ?? (DAILY_DEFAULT_SLUGS.has(slug) ? todayRange().to : yearToRange(getReportsYear()).to));
   // Matrix (rent-roll) year selector — defaults to the hub year (current if "All").
   const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || yearForMatrix(getReportsYear()));
   // Tenant scope — show active customers only (default) or include ended tenants.
@@ -896,7 +902,8 @@ export function ReportDetailView({
   useEffect(() => {
     if (periodPinnedRef.current || !def) return;
     if (def.controlKey === 'dateRange' || def.controlKey === 'yearRange') {
-      const r = yearToRange(hubYear);
+      // Daily-default reports stay on today regardless of the hub year.
+      const r = DAILY_DEFAULT_SLUGS.has(slug) ? todayRange() : yearToRange(hubYear);
       setFrom(r.from); setTo(r.to);
     } else if (def.controlKey === 'year') {
       setYear(yearForMatrix(hubYear));
