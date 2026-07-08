@@ -11,7 +11,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { GripVertical, X, Pencil, Printer, RotateCcw, Check, Loader2, FolderPlus, ArrowLeft } from 'lucide-react';
+import { GripVertical, X, Pencil, Printer, RotateCcw, Check, Loader2, FolderPlus, ArrowLeft, FileSpreadsheet } from 'lucide-react';
 
 const GOVT_EJARI_FEE = 172.5;
 
@@ -21,6 +21,11 @@ interface PaymentRow {
   amount: number;
   description: string | null;
   building?: string | null;
+  depositRef?: string | null;
+  contractRef?: string | null;
+  unit?: string | null;
+  tenant?: string | null;
+  status?: string | null;
   transactionDate: string | null;
   recordedDate: string | null;
   vatAmount: number | null;
@@ -64,6 +69,7 @@ const DEFAULT_ASSIGN: Record<string, string> = {
   security_deposit: 'deposits',
   maintenance_fee: 'others', service_charge: 'others', refund: 'others', other: 'others',
 };
+const OWNERSHIP_LABEL: Record<string, string> = { direct: 'Own Property', sub: 'Sub-lease', management: 'Property Management' };
 
 const fmtAed = (v: number) => {
   const fractional = Math.round(v) !== v;
@@ -205,6 +211,88 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
   };
   const reset = () => { setCategories(DEFAULT_CATEGORIES); setAssign(DEFAULT_ASSIGN); };
 
+  // ── Detailed Excel export (one sheet per category + a Summary sheet) ──
+  const [exporting, setExporting] = useState(false);
+  // Flatten rows into category-tagged transaction lines — same year/ownership
+  // filter, Ejari split and per-description 'other' breakdown as the on-screen view.
+  const exportEntries = () => {
+    const out: Array<{ cat: string; item: string; row: PaymentRow; amount: number; desc: string }> = [];
+    for (const d of rows) {
+      if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
+      const yearScoped = d.paymentType !== 'security_deposit';
+      if (yearScoped && year !== 'all' && rowYear(d) !== Number(year)) continue;
+      const amt = Number(d.amount) || 0;
+      const push = (itemKey: string, amount: number, desc: string) => {
+        if (!amount) return;
+        out.push({ cat: catOf(itemKey), item: itemLabel(itemKey), row: d, amount, desc });
+      };
+      if (d.paymentType === 'ejari_fee') {
+        push('ejari_dld', Math.min(GOVT_EJARI_FEE, amt), 'Ejari · DLD registration');
+        push('ejari_service', Math.max(0, amt - GOVT_EJARI_FEE), 'Ejari · service (handling)');
+      } else if (d.paymentType === 'other') {
+        const desc = (d.description ?? '').trim() || 'Other';
+        push(`${OTHER_PREFIX}${desc}`, amt, desc);
+      } else {
+        push(d.paymentType, amt, d.description ?? itemLabel(d.paymentType));
+      }
+    }
+    return out;
+  };
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const entries = exportEntries();
+      const money = '#,##0.00';
+      const yr = year === 'all' ? 'all-years' : year;
+      const own = ownership === 'all' ? 'All properties' : OWNERSHIP_LABEL[ownership];
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'UpNow';
+
+      const sum = wb.addWorksheet('Summary');
+      const t = sum.addRow(['Payment Grouping']); t.font = { bold: true, size: 14 };
+      sum.addRow([`Year: ${yr}`, `Ownership: ${own}`]);
+      sum.addRow([]);
+      const sh = sum.addRow(['Category', 'Total (AED)']); sh.font = { bold: true };
+      for (const c of categories) { const r = sum.addRow([c.name, catTotal(c.id)]); r.getCell(2).numFmt = money; }
+      const tr = sum.addRow(['TOTAL', grandTotal]); tr.font = { bold: true }; tr.getCell(2).numFmt = money;
+      sum.getColumn(1).width = 30; sum.getColumn(2).width = 18;
+
+      const used = new Set<string>();
+      const sheetName = (name: string) => {
+        const base = (name.replace(/[\\/?*[\]:]/g, ' ').trim() || 'Category').slice(0, 28);
+        let n = base, i = 2; while (used.has(n.toLowerCase())) n = `${base.slice(0, 26)} ${i++}`;
+        used.add(n.toLowerCase()); return n;
+      };
+      const HEAD = ['Item', 'Description', 'Amount (AED)', 'Ref', 'Contract', 'Building', 'Unit', 'Customer', 'Date', 'Status'];
+      const WIDTHS = [26, 26, 15, 16, 12, 22, 10, 26, 12, 12];
+      for (const c of categories) {
+        const es = entries.filter(e => e.cat === c.id);
+        if (!es.length) continue;
+        const ws = wb.addWorksheet(sheetName(c.name));
+        const hr = ws.addRow(HEAD); hr.font = { bold: true };
+        for (const e of es) {
+          const d = e.row;
+          const r = ws.addRow([e.item, e.desc, e.amount, d.depositRef ?? '', d.contractRef ?? '', d.building ?? '', d.unit ?? '', d.tenant ?? '', d.transactionDate ?? d.recordedDate ?? '', d.status ?? '']);
+          r.getCell(3).numFmt = money;
+        }
+        const tot = ws.addRow(['', 'Total', es.reduce((s, e) => s + e.amount, 0)]);
+        tot.font = { bold: true }; tot.getCell(3).numFmt = money;
+        WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      }
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `payment-grouping-${yr}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const header = (
     <div className="mb-5">
       <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
@@ -246,8 +334,12 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
             <RotateCcw size={13} /> Reset
           </button>
           <button type="button" onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] cursor-pointer">
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f7f6f2] cursor-pointer">
             <Printer size={13} /> Print
+          </button>
+          <button type="button" onClick={exportExcel} disabled={exporting}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">
+            {exporting ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />} Excel (detailed)
           </button>
         </div>
       </div>
