@@ -11,6 +11,8 @@ import type { ReactNode } from 'react';
  * `?rp=` it sets is read by each page to scope its data + permission gate.
  * Putting it here (once) avoids the previous state where only some pages had it.
  */
+import { PageViewTracker } from '@/components/upnow/PageViewTracker';
+
 export default function ManagerLayout({ children }: { children: ReactNode }) {
   return (
     <ManagerPermissionsProvider>
@@ -19,6 +21,7 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
         <span className="mgr-scopebar__lbl">Acting for</span>
         <LandlordSwitcher />
       </div>
+      <PageViewTracker portal="manager" />
       {children}
       <style>{`
         .mgr-scopebar {

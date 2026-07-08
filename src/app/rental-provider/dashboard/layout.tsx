@@ -8,9 +8,12 @@ import { DashboardShell } from '@/components/dashboard/DashboardShell';
 import { RpOnboardingGate } from '@/components/dashboard/RpOnboardingGate';
 import { ReactNode } from 'react';
 
+import { PageViewTracker } from '@/components/upnow/PageViewTracker';
+
 export default function RentalProviderDashboardLayout({ children }: { children: ReactNode }) {
   return (
     <DashboardShell>
+      <PageViewTracker portal="rp" />
       <RpOnboardingGate>{children}</RpOnboardingGate>
     </DashboardShell>
   );
