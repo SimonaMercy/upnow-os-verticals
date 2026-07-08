@@ -35,7 +35,7 @@ const ITEM_LABELS: Record<string, string> = {
   ejari_service:   'Ejari · service (handling)',
   admin_fee:       'Admin fee',
   commission:      'Commission',
-  security_deposit:'Security Deposit',
+  security_deposit:'Security Deposit (held)',
   maintenance_fee: 'Maintenance',
   service_charge:  'Service Charge',
   refund:          'Refund',
@@ -116,7 +116,11 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     const t: Record<string, number> = {};
     const add = (k: string, v: number) => { if (v) t[k] = (t[k] ?? 0) + v; };
     for (const d of rows) {
-      if (year !== 'all' && rowYear(d) !== Number(year)) continue;
+      // Security deposits are a standing HELD balance (they carry no payment
+      // date), so they're shown at their full held total in every year view
+      // rather than being dropped by the year filter.
+      const yearScoped = d.paymentType !== 'security_deposit';
+      if (yearScoped && year !== 'all' && rowYear(d) !== Number(year)) continue;
       const amt = Number(d.amount) || 0;
       if (d.paymentType === 'ejari_fee') {
         add('ejari_dld', Math.min(GOVT_EJARI_FEE, amt));
