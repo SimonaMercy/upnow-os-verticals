@@ -16,6 +16,7 @@ import {
 } from '@react-pdf/renderer';
 import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
 import { isDubaiContract } from '@/lib/ejariFill';
+import { effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 import { useFilledEjari } from './useFilledEjari';
 import { useReactPdfDoc } from './useReactPdfDoc';
 import EjariCanvas from './EjariCanvas';
@@ -290,13 +291,12 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
     : data.landlord.phone;
   // Company tenants are named by their company; individuals by their person name.
   const tenantName = data.tenant.companyName || data.tenant.name || '';
-  // Usage comes from the property's space category (residential/commercial/
-  // industrial); fall back to matching the unit type string if it's absent.
-  const sc = (data.property.spaceCategory || '').toLowerCase();
-  const ut = (data.unit.type || '').toLowerCase();
-  const kind = sc.includes('commercial') || ut.includes('commercial') ? 'commercial'
-    : sc.includes('industrial') || ut.includes('industrial') ? 'industrial'
-    : 'residential';
+  // Usage = the unit's EFFECTIVE category (the same fee/VAT chokepoint). A
+  // mixed-use building resolves PER UNIT from the unit type, so a `retail_shop`
+  // correctly reads Commercial — the old `type.includes('commercial')` string
+  // test missed real commercial types (retail_shop / office_* / warehouse …) and
+  // wrongly defaulted them to Residential.
+  const kind = effectiveSpaceCategory(data.unit.type, data.property.spaceCategory);
   const dewa = data.unit.dewaPremiseNumber || data.property.premisesNumber || '';
   // Emirate-aware jurisdiction (Dubai/Ejari default; Abu Dhabi/Tawtheeq; others municipal).
   const j = jurisdictionForEmirate(data.property.emirate);

@@ -15,6 +15,7 @@ import { PDFDocument, rgb, type PDFFont } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { jurisdictionForEmirate } from '@/lib/tenancyJurisdiction';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
+import { effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 
 /** Dubai is the only emirate whose official artwork (DLD logos) we have. */
 export function isDubaiContract(data: EjariContractData): boolean {
@@ -133,11 +134,10 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
   const clauses = [...(data.customClauses || []), ...(data.notes ? [data.notes] : [])].filter(Boolean).slice(0, 5);
   clauses.forEach((c, i) => put(`additional_term_${i + 1}`, c));
 
-  // Property Usage radio
-  const sc = (prop.spaceCategory || '').toLowerCase(), ut = (unit.type || '').toLowerCase();
-  const kind = sc.includes('commercial') || ut.includes('commercial') ? 'commercial'
-    : sc.includes('industrial') || ut.includes('industrial') ? 'industrial' : 'residential';
-  pages[0].drawCircle({ x: USAGE_X[kind], y: 347, size: 3.5, color: rgb(0.1, 0.23, 0.43) });
+  // Property Usage radio — effective category (mixed-use resolves PER UNIT from
+  // the unit type, so a retail_shop reads Commercial, not Residential).
+  const kind = effectiveSpaceCategory(unit.type, prop.spaceCategory);
+  if (USAGE_X[kind] != null) pages[0].drawCircle({ x: USAGE_X[kind], y: 347, size: 3.5, color: rgb(0.1, 0.23, 0.43) });
 
   // Signatures (real image if present, else typed-name handwriting, else blank box)
   const tSig = (data.signatures || []).find(s => s.role === 'tenant');
