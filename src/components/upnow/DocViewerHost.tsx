@@ -9,8 +9,8 @@
  * are disabled here too. There is deliberately NO download / "open in new tab"
  * control — customer documents are viewable only inside the portal.
  */
-import { useEffect } from 'react';
-import { X, FileText, Files } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, FileText, Files, RotateCw } from 'lucide-react';
 import { useDocViewerState, closeDocViewer, type DocViewerDoc } from '@/lib/docViewer';
 import { SecureDocCanvas } from './SecureDocCanvas';
 
@@ -23,6 +23,10 @@ const isImage = (d: DocViewerDoc) =>
 
 export function DocViewerHost() {
   const state = useDocViewerState();
+  // Clockwise viewing rotation for sideways scans. Reset each time a new document
+  // opens (keyed on the docs array identity).
+  const [rotation, setRotation] = useState(0);
+  useEffect(() => { setRotation(0); }, [state?.docs]);
 
   useEffect(() => {
     if (!state) return;
@@ -50,7 +54,18 @@ export function DocViewerHost() {
             {multi ? <Files size={16} className="text-[#2e9f82] shrink-0" /> : <FileText size={16} className="text-[#2e9f82] shrink-0" />}
             <span className="truncate">{heading}</span>
           </h3>
-          <button type="button" onClick={closeDocViewer} aria-label="Close" className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer shrink-0"><X size={18} /></button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setRotation((r) => (r + 90) % 360)}
+              aria-label="Rotate document"
+              title="Rotate 90°"
+              className="flex items-center gap-1 text-xs font-medium text-[#6b6860] hover:text-[#1a1916] cursor-pointer px-2 py-1 rounded-md hover:bg-[#f4f3ef]"
+            >
+              <RotateCw size={16} /> Rotate
+            </button>
+            <button type="button" onClick={closeDocViewer} aria-label="Close" className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+          </div>
         </div>
         <div
           className="overflow-y-auto px-5 py-4 space-y-4 bg-[#f4f3ef] select-none"
@@ -70,6 +85,7 @@ export function DocViewerHost() {
                   isImage={isImage(d)}
                   caption={cap}
                   watermark={watermark}
+                  rotation={rotation}
                 />
               </figure>
             );

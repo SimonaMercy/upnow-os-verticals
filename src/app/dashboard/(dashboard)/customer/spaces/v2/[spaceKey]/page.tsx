@@ -2594,12 +2594,23 @@ function RenewalDocumentsAction({
     const [expiry, setExpiry] = useState(toDateInput(rec?.expiryDate));
     const [savingExpiry, setSavingExpiry] = useState(false);
     const [staged, setStaged] = useState<File | null>(null);
+    // Native <input type="date"> only fires React's onChange on a COMPLETE valid
+    // date (and, in some browsers, typed dates commit on blur, not per-keystroke) —
+    // so a typed date can leave the controlled `expiry` state empty and the Upload
+    // button disabled while a picked date works. Read the live DOM value via this
+    // ref at click time so typing is honoured too.
+    const stagedDateRef = useRef<HTMLInputElement>(null);
     const onExpiryChange = async (v: string) => {
       setExpiry(v);
       if (rec?.id != null) { setSavingExpiry(true); try { await saveDocExpiry(rec.id, v); } finally { setSavingExpiry(false); } }
     };
     const onPick = (f: File) => {
-      if (!needsExpiry || expiry) { handleUpload(req, f, needsExpiry ? (expiry || null) : undefined); return; }
+      // For a KYC doc that carries an expiry, ALWAYS ask for a fresh expiry on the
+      // replacement copy — the on-file date is the expired one, so reusing it would
+      // silently re-upload an already-expired document (the "replace does nothing"
+      // bug). Clearing it forces the customer to enter the new document's expiry.
+      if (!needsExpiry) { handleUpload(req, f, undefined); return; }
+      setExpiry('');
       setStaged(f);
     };
     return (
@@ -2634,12 +2645,31 @@ function RenewalDocumentsAction({
       </label>
         {needsExpiry && staged ? (
           <div style={{ marginLeft: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', border: '1px solid var(--saffron, #f59e0b)', display: 'grid', gap: 8 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>“{staged.name}” selected — enter the document&rsquo;s expiry date to finish uploading.</p>
-            <DocExpiryField value={expiry} onChange={setExpiry} className="" />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" disabled={!expiry || isUploading}
-                onClick={() => { handleUpload(req, staged, expiry || null); setStaged(null); }}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: expiry ? 'var(--jade-deep, #16a34a)' : 'var(--mute)', border: 'none', borderRadius: 8, padding: '7px 12px', cursor: expiry ? 'pointer' : 'not-allowed', opacity: isUploading ? 0.6 : 1 }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>“{staged.name}” selected — enter the document&rsquo;s expiry date, then press Upload.</p>
+            <div style={{ display: 'grid', gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Calendar size={12} style={{ color: 'var(--jade-deep)' }} /> Expiry date
+              </label>
+              <input
+                ref={stagedDateRef}
+                type="date"
+                defaultValue={expiry}
+                autoFocus
+                onChange={e => setExpiry(e.target.value)}
+                onInput={e => setExpiry((e.target as HTMLInputElement).value)}
+                style={{ fontSize: 13, border: '1px solid var(--mist-strong)', borderRadius: 8, padding: '6px 10px', color: 'var(--ink)', width: 'fit-content' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button type="button" disabled={isUploading}
+                onClick={() => {
+                  // Read the live DOM value so a TYPED date works even if onChange
+                  // never fired; fall back to the controlled state (picked date).
+                  const v = (stagedDateRef.current?.value || expiry || '').trim();
+                  if (!v) { stagedDateRef.current?.focus(); return; }
+                  handleUpload(req, staged, v); setStaged(null);
+                }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: 'var(--jade-deep, #16a34a)', border: 'none', borderRadius: 8, padding: '7px 12px', cursor: isUploading ? 'default' : 'pointer', opacity: isUploading ? 0.6 : 1 }}>
                 {isUploading ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Upload document
               </button>
               <button type="button" onClick={() => setStaged(null)}
@@ -2670,9 +2700,6 @@ function RenewalDocumentsAction({
           </p>
         </div>
         <WaitingBadge />
-        <SecondaryBtn href="/dashboard/customer/documents">
-          <Info size={14} /> Manage all KYC documents
-        </SecondaryBtn>
       </div>
     );
   }
@@ -2703,9 +2730,6 @@ function RenewalDocumentsAction({
         <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
           <Info size={13} /> Your rental provider will review and accept these before you prepare cheques.
         </p>
-        <SecondaryBtn href="/dashboard/customer/documents">
-          <Info size={14} /> Manage all KYC documents
-        </SecondaryBtn>
       </div>
     </div>
   );

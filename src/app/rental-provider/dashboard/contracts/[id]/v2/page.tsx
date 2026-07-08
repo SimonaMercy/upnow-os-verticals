@@ -699,6 +699,10 @@ interface StepHandlers {
   /** Accept the customer's re-uploaded renewal KYC documents → PATCH
    *  /contracts/:id/renewal/accept-docs. Unlocks the Cheques step (Documents → Cheques). */
   onAcceptDocs: () => Promise<void>;
+  /** Approve a single KYC document → POST /documents/:id/verify (same as leads / new-lease). */
+  onApproveDoc: (docId: number) => void;
+  /** Reject a single KYC document → POST /documents/:id/reject (same as leads / new-lease). */
+  onRejectDoc: (docId: number) => void;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
   onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string }) => Promise<void>;
@@ -828,20 +832,27 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
         })}
       </div>
       {err && <p className="note" style={{ color: 'var(--brick)' }}>{err}</p>}
-      <div className="chklist">
-        <ChkRow on={false} label="Post-dated cheques collected" hint="mark once every cheque is in hand" onToggle={() => {}}
-          actionLabel={canEdit ? (confirming ? 'Marking…' : 'Mark collected') : undefined}
-          onAction={canEdit ? () => { setConfirming(true); void h.onConfirmPdc().finally(() => setConfirming(false)); } : undefined} />
-      </div>
+      {canEdit && (
+        <button
+          type="button"
+          className="btn btn-jade btn-block"
+          disabled={confirming}
+          onClick={() => { setConfirming(true); setErr(null); void h.onConfirmPdc().catch(e => setErr(e instanceof Error ? e.message : 'Failed to mark collected')).finally(() => setConfirming(false)); }}
+        >
+          <Check size={15} /> {confirming ? 'Marking…' : 'Mark as Collected'}
+        </button>
+      )}
+      <p className="note" style={{ margin: 0 }}>Mark once every cheque above is in hand — this unlocks the signature step.</p>
     </div>
   );
 }
 
-/** Renewal Documents step body (RP side). The customer re-uploads the KYC docs that
- *  expired since the last lease; the RP reviews each fresh copy (with its new expiry)
- *  and ACCEPTS them, which stamps renewal_docs_accepted_at and unlocks the Cheques
- *  step. The "Accept" action stays locked until every flagged base has a fresh valid
- *  copy (expiredKycDocKeys empty). */
+/** Renewal Documents step body (RP side). Reuses the SAME per-document
+ *  View / Approve / Reject pattern as the lead + new-lease KYC review (backed by
+ *  POST /documents/:id/verify and /reject) so the RP's experience is consistent
+ *  across flows. The customer re-uploads the KYC docs that expired since the last
+ *  lease; once every flagged doc has a fresh (non-expired, non-rejected) copy, the
+ *  RP presses "Accept documents & unlock cheques" to advance the renewal. */
 function RenewalDocReview({ h }: { h: StepHandlers }) {
   const canEdit = h.perms.renewals || h.perms.agreements;
   const remaining = h.contract.expiredKycDocKeys ?? [];
@@ -856,65 +867,91 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
     if (s.includes('trade_license') || s.includes('licen')) return 'trade_license';
     return null;
   };
-  // Every KYC base that was flagged for this renewal = the ones still remaining plus
-  // the ones the customer has already refreshed (no longer in `remaining`). Show the
-  // freshest uploaded copy per base for the RP to view before accepting.
+  // Collect ALL docs per flagged KYC base — Emirates ID is two files (front + back),
+  // so View must open both, not just one side. `freshestByBase` is the representative
+  // used for the status/expiry line (prefer latest future expiry, else id).
   const kycDocs = (h.contract.documents ?? []).filter(d => baseOf(d.documentKey ?? ''));
+  const docsByBase = new Map<string, ContractDoc[]>();
   const freshestByBase = new Map<string, ContractDoc>();
   for (const d of kycDocs) {
     const b = baseOf(d.documentKey ?? '')!;
+    (docsByBase.get(b) ?? docsByBase.set(b, []).get(b)!).push(d);
     const prev = freshestByBase.get(b);
-    // Prefer the one with the latest (future) expiry; fall back to highest id.
     if (!prev) { freshestByBase.set(b, d); continue; }
     const de = d.expiryDate ? Date.parse(d.expiryDate) : 0;
     const pe = prev.expiryDate ? Date.parse(prev.expiryDate) : 0;
     if (de > pe || (de === pe && d.id > prev.id)) freshestByBase.set(b, d);
   }
+  // Show every KYC doc on file so the RP can see/verify them all. Which ones are
+  // FLAGGED for re-upload (`remaining`) is scoped to the tenancy type by the backend
+  // (commercial → trade licence, residential → personal IDs), so a doc that isn't
+  // flagged simply shows as already "Approved / on file" rather than "Pending".
   const bases = Array.from(new Set([...remaining, ...Array.from(freshestByBase.keys())]));
 
   const [accepting, setAccepting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const allRefreshed = remaining.length === 0;
 
+  const accept = async () => {
+    setAccepting(true); setErr(null);
+    try { await h.onAcceptDocs(); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to accept'); }
+    finally { setAccepting(false); }
+  };
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ display: 'grid', gap: 6 }}>
+      {/* Same View / Approve / Reject row pattern as the lead + new-lease KYC review. */}
+      <div className="doclist">
         {bases.map(b => {
           const doc = freshestByBase.get(b);
+          const allDocs = docsByBase.get(b) ?? [];
+          const multi = allDocs.length > 1;
           const stillMissing = remaining.includes(b);
+          const lbl = LABELS[b] ?? b;
+          const ok = !!doc && ['processed', 'complete'].includes(doc.status ?? '');
+          const rejected = !!doc && doc.status === 'rejected';
+          const stt = stillMissing ? 'pending' : ok ? 'approved' : rejected ? 'rejected' : 'pending';
           return (
-            <div key={b} style={{ border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+            <div key={b} className={'docitem ' + stt}>
+              <FileText size={14} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{LABELS[b] ?? b}</div>
-                <div className="note">
-                  {stillMissing
-                    ? 'Awaiting a fresh copy from the customer'
-                    : doc?.expiryDate ? `Valid · expires ${fmtDate(doc.expiryDate)}` : 'On file'}
+                <div className="dn">{lbl}</div>
+                <div className="ds">
+                  {stillMissing ? 'Awaiting a fresh copy from the customer'
+                    : ok ? (doc!.expiryDate ? `Approved · expires ${fmtDate(doc!.expiryDate)}` : 'Approved')
+                    : rejected ? 'Rejected — re-upload requested'
+                    : doc!.expiryDate ? `Pending review · expires ${fmtDate(doc!.expiryDate)}` : 'Pending review'}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                {stillMissing
-                  ? <span className="cstat bounced">Pending</span>
-                  : <span className="cstat cleared">Valid</span>}
+              <div className="dacts">
                 {doc && (
-                  <button type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName ?? (LABELS[b] ?? b) })}>
-                    <ExternalLink size={12} /> View
+                  <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer(allDocs.map(d => ({ fileUrl: d.fileUrl, caption: d.displayName ?? lbl })), lbl)}>
+                    <ExternalLink size={12} /> {multi ? `View ${allDocs.length}` : 'View'}
                   </button>
                 )}
+                {canEdit && doc && !stillMissing && !ok && (
+                  <button type="button" className="mini-btn ok cursor-pointer" onClick={() => h.onApproveDoc(doc.id)}><Check size={12} /> Approve</button>
+                )}
+                {canEdit && doc && !stillMissing && !rejected && (
+                  <button type="button" className="mini-btn no cursor-pointer" onClick={() => h.onRejectDoc(doc.id)}><X size={12} /> Reject</button>
+                )}
+                {stillMissing && <span className="cstat bounced">Pending</span>}
               </div>
             </div>
           );
         })}
       </div>
       {err && <p className="note" style={{ color: 'var(--brick)' }}>{err}</p>}
-      {!allRefreshed && (
-        <p className="note">Waiting for {h.contract.tenant.name || 'the customer'} to re-upload the remaining document{remaining.length === 1 ? '' : 's'} before you can accept.</p>
+      {allRefreshed ? (
+        canEdit && (
+          <button type="button" className="btn btn-jade btn-block" disabled={accepting} onClick={() => void accept()}>
+            <Check size={15} /> {accepting ? 'Accepting…' : 'Accept documents & unlock cheques'}
+          </button>
+        )
+      ) : (
+        <p className="note">Waiting for {h.contract.tenant.name || 'the customer'} to re-upload the remaining document{remaining.length === 1 ? '' : 's'}. You can accept once every copy is refreshed.</p>
       )}
-      <div className="chklist">
-        <ChkRow on={false} label="Refreshed KYC documents reviewed" hint="accept once every copy looks good" onToggle={() => {}}
-          actionLabel={canEdit && allRefreshed ? (accepting ? 'Accepting…' : 'Accept documents') : undefined}
-          onAction={canEdit && allRefreshed ? () => { setAccepting(true); setErr(null); void h.onAcceptDocs().catch(e => setErr(e instanceof Error ? e.message : 'Failed to accept')).finally(() => setAccepting(false)); } : undefined} />
-      </div>
     </div>
   );
 }
@@ -3123,7 +3160,11 @@ function DetailsDrawer({
               }
               const multi = docs.length > 1;
               const doc = docs[0];
-              const ok  = ['approved', 'processed', 'complete'].includes(doc.status);
+              // Payment Advice = the customer's uploaded cheque copies. They are
+              // cleared in the Cheques/PDC step (Mark as Collected), NOT doc-reviewed,
+              // so they never sit in a "Pending review" state — always "On file".
+              const noReview = s.key === 'payment_advice';
+              const ok  = noReview || ['approved', 'processed', 'complete'].includes(doc.status);
               const stt = ok ? 'approved' : doc.status === 'rejected' ? 'rejected' : 'pending';
               const lbl = multi
                 ? `${docs.length} files · on file`
@@ -5241,7 +5282,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onAcceptDocs, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onAcceptDocs, onApproveDoc, onRejectDoc, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,
@@ -5389,11 +5430,17 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // rather than only inside the workflow stepper.
   const canLandlordSign = contract.status === 'issued' && !derived.landlordSigned && !isSuperseded && !isDeclinedRenewal;
 
-  // KYC docs = customer-owned documents in contract.documents.
+  // KYC docs = customer-owned IDENTITY documents in contract.documents.
+  // Exclude operational customer uploads — payment advice (cheque copies) and
+  // receipts/payment proofs are cleared in the Cheques step, not doc-reviewed, so
+  // they must never show up here in a "Pending review" state with Approve/Reject.
   // On a RENEWAL, valid documents are already on file, so we only surface the
   // ones that are EXPIRED (they're the only profile docs that need re-collecting).
   // New contracts show the full set.
-  const allKycDocs = (contract.documents ?? []).filter(d => d.ownerType === 'customer' || d.ownerType === 'tenant');
+  const NON_KYC_DOC_BASES = ['payment_advice', 'pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques', 'renewal_payment_proof', 'payment_proof', 'receipt', 'payment_receipt'];
+  const docBase = (k: string | null | undefined) => (k ?? '').toLowerCase().replace(/_\d{10,}$/, '');
+  const allKycDocs = (contract.documents ?? []).filter(d =>
+    (d.ownerType === 'customer' || d.ownerType === 'tenant') && !NON_KYC_DOC_BASES.includes(docBase(d.documentKey)));
   const kycDocs = contract.contractType === 'renewal'
     ? allKycDocs.filter(d => d.expiryDate && new Date(d.expiryDate) < new Date())
     : allKycDocs;

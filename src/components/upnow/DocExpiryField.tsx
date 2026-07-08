@@ -10,12 +10,13 @@
  */
 import { CalendarClock, Loader2 } from 'lucide-react';
 
-export function DocExpiryField({ value, onChange, saving, disabled, className }: {
+export function DocExpiryField({ value, onChange, saving, disabled, className, autoFocus }: {
   value: string;
   onChange: (v: string) => void;
   saving?: boolean;
   disabled?: boolean;
   className?: string;
+  autoFocus?: boolean;
 }) {
   return (
     <div className={className ?? 'mt-2'}>
@@ -27,6 +28,7 @@ export function DocExpiryField({ value, onChange, saving, disabled, className }:
           type="date"
           value={value}
           disabled={disabled}
+          autoFocus={autoFocus}
           onChange={e => onChange(e.target.value)}
           className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30 disabled:opacity-50"
         />

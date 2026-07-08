@@ -71,12 +71,17 @@ export function SecureDocCanvas({
   isImage,
   caption,
   watermark,
+  rotation = 0,
 }: {
   fileUrl: string;
   isImage: boolean;
   caption: string | null;
   watermark: string;
+  /** Clockwise viewing rotation in degrees (0/90/180/270) — for sideways scans. */
+  rotation?: number;
 }) {
+  // Normalise to 0/90/180/270.
+  const rot = (((Math.round(rotation / 90) * 90) % 360) + 360) % 360;
   const hostRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>('loading');
 
@@ -119,12 +124,23 @@ export function SecureDocCanvas({
       const natW = img.naturalWidth || MAX_W;
       const natH = img.naturalHeight || MAX_W;
       // Down to display width; never upscale past the source.
-      const scale = Math.min(1, targetW / natW);
+      // Scale against the on-screen (post-rotation) width so a rotated portrait
+      // scan still fills the viewer without upscaling past the source.
+      const swap = rot === 90 || rot === 270;
+      const displayNatW = swap ? natH : natW;
+      const scale = Math.min(1, targetW / displayNatW);
       const w = Math.round(natW * scale);
       const h = Math.round(natH * scale);
-      const ctx = addCanvas(w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      drawWatermark(ctx, w, h, watermark);
+      const canvasW = swap ? h : w;
+      const canvasH = swap ? w : h;
+      const ctx = addCanvas(canvasW, canvasH);
+      ctx.save();
+      ctx.translate(canvasW / 2, canvasH / 2);
+      ctx.rotate((rot * Math.PI) / 180);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.restore();
+      // Watermark on the final (upright) canvas so it stays readable/traceable.
+      drawWatermark(ctx, canvasW, canvasH, watermark);
       if (!cancelled) setStatus('ready');
     }
 
@@ -139,15 +155,19 @@ export function SecureDocCanvas({
         if (cancelled) return;
         const page = await pdf.getPage(n);
         const base = page.getViewport({ scale: 1 });
+        // On-screen dims after rotation (90/270 swap width & height).
+        const swap = rot === 90 || rot === 270;
+        const dispW = swap ? base.height : base.width;
+        const dispH = swap ? base.width : base.height;
         // Render at display width, clamped under iOS's per-canvas limits so a
         // tall/large page never comes back blank on a phone.
         const scale = Math.min(
-          targetW / base.width,
-          MAX_SIDE / base.width,
-          MAX_SIDE / base.height,
-          Math.sqrt(MAX_AREA / (base.width * base.height)),
+          targetW / dispW,
+          MAX_SIDE / dispW,
+          MAX_SIDE / dispH,
+          Math.sqrt(MAX_AREA / (dispW * dispH)),
         );
-        const vp = page.getViewport({ scale });
+        const vp = page.getViewport({ scale, rotation: rot });
         const ctx = addCanvas(Math.ceil(vp.width), Math.ceil(vp.height), n > 1);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         if (cancelled) return;
@@ -166,7 +186,7 @@ export function SecureDocCanvas({
     return () => {
       cancelled = true;
     };
-  }, [fileUrl, isImage, watermark]);
+  }, [fileUrl, isImage, watermark, rot]);
 
   return (
     <div>
