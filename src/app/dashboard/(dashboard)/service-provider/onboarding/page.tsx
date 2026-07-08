@@ -29,7 +29,6 @@ import {
   MapPin,
   UserCheck,
   Users,
-  ShieldCheck,
   Clock,
   Info,
   PhoneCall,
@@ -62,10 +61,10 @@ const STEPS = [
   },
   {
     id: 1,
-    label: "Business basics",
+    label: "Business & documents",
     subtitle: "Tell us about your business",
     icon: Building2,
-    description: "Your trading name, legal entity type, and the name of the owner or authorised signatory.",
+    description: "Your trading name, legal entity type, owner — and your company documents, each with its expiry date.",
   },
   {
     id: 2,
@@ -94,13 +93,6 @@ const STEPS = [
     subtitle: "Personal information",
     icon: UserCheck,
     description: "Your Emirates ID, nationality, and date of birth. This helps us verify your identity for KYC.",
-  },
-  {
-    id: 6,
-    label: "Documents",
-    subtitle: "Upload your KYC files",
-    icon: ShieldCheck,
-    description: "Required for identity verification before you can receive service bookings.",
   },
 ] as const;
 
@@ -583,6 +575,12 @@ function PhoneStep({ onDone }: { onDone: () => void }) {
 function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  // After the basics save, the SAME step asks for the entity's documents
+  // (per-doc expiry captured by KycDocumentsPanel). Returning users with
+  // confirmed basics land straight on the documents half.
+  const [docsMode, setDocsMode] = useState(false);
+  const [savedEntityType, setSavedEntityType] = useState<string | null>(null);
+  const [savedSummary, setSavedSummary] = useState<{ businessName: string; ownerName: string } | null>(null);
 
   const {
     register,
@@ -610,6 +608,11 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
           businessName: profile.businessName ?? "",
           ownerName: profile.ownerName ?? "",
         });
+        if (profile.accountTypeConfirmedAt && profile.businessName) {
+          setSavedEntityType(profile.entityType ?? "company");
+          setSavedSummary({ businessName: profile.businessName ?? "", ownerName: profile.ownerName ?? "" });
+          setDocsMode(true);
+        }
       })
       .catch(() => {})
       .finally(() => setInitialLoaded(true));
@@ -623,7 +626,9 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
         businessName: vals.businessName,
         ownerName: vals.ownerName,
       });
-      onDone();
+      setSavedEntityType(vals.entityType);
+      setSavedSummary({ businessName: vals.businessName, ownerName: vals.ownerName });
+      setDocsMode(true);
     } catch (e: unknown) {
       setServerError(e instanceof Error ? e.message : "Something went wrong");
     }
@@ -642,6 +647,58 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
         >
           Loading&hellip;
         </span>
+      </div>
+    );
+  }
+
+  if (docsMode) {
+    return (
+      <div className="space-y-6">
+        {/* saved basics summary — one step, two halves */}
+        <div
+          className="flex flex-wrap items-center gap-3 rounded-2xl border px-5 py-4"
+          style={{ borderColor: "var(--color-base-200)", background: "color-mix(in srgb, var(--color-primary) 4%, white)" }}
+        >
+          <Check className="h-4 w-4 flex-shrink-0" style={{ color: "var(--color-primary)" }} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>
+              {savedSummary?.businessName}
+              <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize" style={{ background: "var(--color-base-200)", color: "var(--color-neutral-600)" }}>
+                {savedEntityType === "individual" ? "Solo trader" : "Company"}
+              </span>
+            </p>
+            <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{savedSummary?.ownerName}</p>
+          </div>
+          <button type="button" onClick={() => setDocsMode(false)} className="text-sm font-semibold underline underline-offset-2" style={{ color: "var(--color-primary)" }}>
+            Edit
+          </button>
+        </div>
+
+        <div>
+          <h3 className="text-base font-semibold" style={{ color: "var(--color-neutral-900)" }}>
+            {savedEntityType === "individual" ? "Your documents" : "Company documents"}
+          </h3>
+          <p className="mt-1 text-sm" style={{ color: "var(--color-neutral-500)" }}>
+            Photograph or upload each one — and set its expiry date so we can remind you before it lapses.
+          </p>
+        </div>
+
+        <KycDocumentsPanel
+          key={savedEntityType ?? "company"}
+          profileApiPath="/profiles/service-provider/me"
+          ownerType="service_provider"
+          onAllRequiredUploaded={onDone}
+          continueLabel="Continue"
+        />
+
+        <button
+          type="button"
+          onClick={onDone}
+          className="text-sm underline underline-offset-2"
+          style={{ color: "var(--color-neutral-400)" }}
+        >
+          Skip documents for now &mdash; I&apos;ll add them later
+        </button>
       </div>
     );
   }
@@ -1564,17 +1621,6 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
 
 // ─── Step 6 · Documents ───────────────────────────────────────────────────────
 
-function DocumentsStep({ onDone }: { onDone: () => void }) {
-  return (
-    <KycDocumentsPanel
-      profileApiPath="/profiles/service-provider/me"
-      ownerType="service_provider"
-      onAllRequiredUploaded={onDone}
-      continueLabel="Go to my dashboard"
-    />
-  );
-}
-
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ServiceProviderOnboardingPage() {
@@ -1614,14 +1660,7 @@ export default function ServiceProviderOnboardingPage() {
         // Step 5 — owner details (optional step, skip if no data but also don't block)
         // We consider it done if at least one field is filled
         if (p?.emiratesIdNumber || p?.nationality || p?.dateOfBirth) done.add(5);
-        // Step 6 — documents: every required doc uploaded, or already approved
-        const checklist = data.checklist ?? [];
-        const requiredMissing = checklist.filter((c) => c.required && !c.uploaded).length;
-        if ((checklist.length > 0 && requiredMissing === 0)) done.add(6);
-        try {
-          const kyc = await apiGet<{ isCompliant?: boolean }>("/profiles/service-provider/me/kyc-status");
-          if (kyc?.isCompliant) done.add(6);
-        } catch { /* tolerated */ }
+
       } catch {
         // profile not created yet — steps 1–4 stay incomplete
       }
@@ -1839,7 +1878,6 @@ export default function ServiceProviderOnboardingPage() {
                 {step === 3 && <ServiceAreaStep onDone={() => advance(3)} />}
                 {step === 4 && <StrengthStep onDone={() => advance(4)} />}
                 {step === 5 && <OwnerDetailsStep onDone={() => advance(5)} />}
-                {step === 6 && <DocumentsStep onDone={() => advance(6)} />}
               </div>
 
               {/* Skip — available only on optional steps (owner details) or before final docs */}
