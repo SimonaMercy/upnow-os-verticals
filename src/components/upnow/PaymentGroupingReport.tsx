@@ -20,6 +20,7 @@ interface PaymentRow {
   paymentType: string;
   amount: number;
   description: string | null;
+  building?: string | null;
   transactionDate: string | null;
   recordedDate: string | null;
   vatAmount: number | null;
@@ -82,6 +83,10 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [year, setYear] = useState<string>('all');
+  // Ownership segregation (properties.leasing_type): all / direct (Owned) /
+  // sub (Sub-lease) / management (Managed). Resolved per row via its building.
+  const [ownership, setOwnership] = useState<'all' | 'direct' | 'sub' | 'management'>('all');
+  const [buildingLeasing, setBuildingLeasing] = useState<Record<string, string>>({});
 
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [assign, setAssign] = useState<Record<string, string>>(DEFAULT_ASSIGN);
@@ -98,6 +103,15 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       .then((d: PaymentRow[]) => { setRows(Array.isArray(d) ? d : []); })
       .catch(e => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
+    // Building → leasing model, so payments can be segregated by ownership.
+    fetch('/api/properties', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : []))
+      .then((ps: Array<{ buildingName?: string | null; leasingType?: string | null }>) => {
+        const m: Record<string, string> = {};
+        for (const p of ps ?? []) if (p.buildingName) m[p.buildingName] = p.leasingType ?? 'direct';
+        setBuildingLeasing(m);
+      })
+      .catch(() => { /* ownership filter simply stays inert */ });
   }, []);
 
   const years = useMemo(() => {
@@ -105,10 +119,13 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     for (const d of rows) { const y = rowYear(d); if (y) s.add(y); }
     return [...s].sort((a, b) => b - a);
   }, [rows]);
-  // Default to the most recent year with data once loaded.
+  // Default to 2026 when it has data, otherwise the most recent year.
   const didSetYear = useRef(false);
   useEffect(() => {
-    if (!didSetYear.current && years.length) { setYear(String(years[0])); didSetYear.current = true; }
+    if (!didSetYear.current && years.length) {
+      setYear(String(years.includes(2026) ? 2026 : years[0]));
+      didSetYear.current = true;
+    }
   }, [years]);
 
   // Per-item totals for the selected year (Ejari split into DLD + service).
@@ -116,6 +133,8 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     const t: Record<string, number> = {};
     const add = (k: string, v: number) => { if (v) t[k] = (t[k] ?? 0) + v; };
     for (const d of rows) {
+      // Ownership segregation — keep only the selected leasing model.
+      if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
       // Security deposits are a standing HELD balance (they carry no payment
       // date), so they're shown at their full held total in every year view
       // rather than being dropped by the year filter.
@@ -133,7 +152,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       }
     }
     return t;
-  }, [rows, year]);
+  }, [rows, year, ownership, buildingLeasing]);
 
   // Items present in the data, each resolved to a category (unknown → 'others'
   // or the first category if 'others' was deleted).
@@ -208,6 +227,16 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
             className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82]">
             <option value="all">All years</option>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-[#6b6860]">Ownership</span>
+          <select value={ownership} onChange={e => setOwnership(e.target.value as typeof ownership)}
+            className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82]">
+            <option value="all">All properties</option>
+            <option value="direct">Own Property</option>
+            <option value="sub">Sub-lease</option>
+            <option value="management">Property Management</option>
           </select>
         </div>
         <div className="ml-auto flex items-center gap-2">
