@@ -19,7 +19,7 @@ import { openDocViewer } from '@/lib/docViewer';
 import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/DocumentReaderModal';
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
-import { getOccupantDocs, deriveOccupantCount, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
+import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
 
 type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
@@ -368,7 +368,7 @@ export default function CustomerDetailPage() {
     return out;
   })();
   const openHistoryReader = () => setReader({ title: 'Lease documents', summary: `${otherDocsCount} document${otherDocsCount !== 1 ? 's' : ''} across all leases`, slots: historySlots });
-  const slotDoc = (d?: Doc): UploadSlot['existing'] => d ? { id: d.id, documentKey: d.documentKey, fileUrl: d.fileUrl, mimeType: d.mimeType } : null;
+  const slotDoc = (d?: Doc): UploadSlot['existing'] => d ? { id: d.id, documentKey: d.documentKey, fileUrl: d.fileUrl, mimeType: d.mimeType, expiryDate: d.expiryDate } : null;
   // Upload slots for a requirement — Emirates ID is two-sided (Front + Back),
   // everything else is a single slot.
   const slotsFor = (req: typeof KYC_REQS[number], docs: Doc[]): UploadSlot[] => {
@@ -749,8 +749,10 @@ export default function CustomerDetailPage() {
             const pending = hasAnyFile && docs[0].status === 'pending';
             const twoSided = req.key === 'emirates_id';
             const busy = directBusy === req.key;
-            // Emirates ID opens the Front/Back slot popup; everything else picks a file directly.
-            const onUpload = twoSided
+            // Emirates ID (two-sided) and any doc that carries an expiry — trade
+            // license, passport, visa — open the slot popup so the RP can record
+            // the expiry date. Non-expiring docs (MOA) still pick a file directly.
+            const onUpload = twoSided || docNeedsExpiry(req.key)
               ? () => setUploadDoc({ title: req.label, slots: slotsFor(req, docs) })
               : () => pickDirect(slotsFor(req, docs)[0]);
             return (
@@ -909,7 +911,12 @@ export default function CustomerDetailPage() {
                   const existing = findOccupantDoc(req.key);
                   const uploaded = !!existing;
                   const busy = directBusy === req.key;
-                  const onUpload = () => pickDirect({ label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) });
+                  const occSlot: UploadSlot = { label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) };
+                  // Occupant identity docs (EID / passport / visa) carry an expiry —
+                  // open the popup to capture it; anything else picks a file directly.
+                  const onUpload = docNeedsExpiry(req.key)
+                    ? () => setUploadDoc({ title: req.label, slots: [occSlot] })
+                    : () => pickDirect(occSlot);
                   return (
                     <div key={req.key} className="flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-[#fafdfb]">
                       <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>

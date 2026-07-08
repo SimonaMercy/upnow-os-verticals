@@ -13,10 +13,13 @@ export async function putKycSlot(opts: {
   file: File;
   existingDocId?: number | null;   // when set, replace this document's file
   existingKey?: string | null;     // the existing doc's key (keeps the same s3 folder on replace)
+  expiryDate?: string | null;      // ISO date (yyyy-mm-dd) for docs that expire — EID, passport, visa, licences. Omit to leave untouched.
 }): Promise<{ id: number; documentKey: string; fileUrl: string; mimeType: string }> {
-  const { ownerType, ownerId, canonicalKey, category, displayName, file, existingDocId, existingKey } = opts;
+  const { ownerType, ownerId, canonicalKey, category, displayName, file, existingDocId, existingKey, expiryDate } = opts;
   if (file.size > 15 * 1024 * 1024) throw new Error('File must be under 15 MB.');
   const documentKey = existingDocId ? (existingKey ?? canonicalKey) : canonicalKey;
+  // Only touch expiry when the caller explicitly passes it (undefined = leave as-is).
+  const expiryPatch = expiryDate !== undefined ? { expiryDate: expiryDate || null } : {};
 
   const { uploadUrl, fileUrl, fileKey } = await fetch('/api/documents/upload-url', {
     method: 'POST', credentials: 'include',
@@ -36,12 +39,12 @@ export async function putKycSlot(opts: {
     ? await fetch(`/api/documents/${existingDocId}`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3' }),
+        body: JSON.stringify({ fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3', ...expiryPatch }),
       })
     : await fetch('/api/documents', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerType, ownerId, documentKey, category, displayName, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3' }),
+        body: JSON.stringify({ ownerType, ownerId, documentKey, category, displayName, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3', ...expiryPatch }),
       });
   if (!res.ok) {
     const b = await res.json().catch(() => ({}));

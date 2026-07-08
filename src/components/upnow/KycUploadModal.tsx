@@ -6,16 +6,20 @@
  * in place when it already holds a file, otherwise creates a new document.
  */
 import { useRef, useState } from 'react';
-import { X, Upload, Loader2, Check, ExternalLink, FileText } from 'lucide-react';
+import { X, Upload, Loader2, Check, ExternalLink, FileText, CalendarClock } from 'lucide-react';
 import { putKycSlot } from '@/lib/kycSlotUpload';
+import { docNeedsExpiry } from '@/lib/docRequirements';
 import { openDocViewer } from '@/lib/docViewer';
 
 export type UploadSlot = {
   label: string;                 // "Front side", "Back side", or the doc name
   canonicalKey: string;          // key used when creating a fresh document
   category: string;
-  existing?: { id: number; documentKey: string; fileUrl: string | null; mimeType?: string | null } | null;
+  existing?: { id: number; documentKey: string; fileUrl: string | null; mimeType?: string | null; expiryDate?: string | null } | null;
 };
+
+// yyyy-mm-dd for a native date input, tolerant of full ISO timestamps.
+const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
 
 const isImage = (mime?: string | null, url?: string | null) =>
   (mime ?? '').startsWith('image/') || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(url ?? '');
@@ -35,6 +39,45 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
   const fileRef = useRef<HTMLInputElement>(null);
   const pending = useRef<UploadSlot | null>(null);
 
+  // This requirement carries an expiry (identity / licence doc). The date is a
+  // property of the document, so a two-sided Emirates ID shares ONE expiry across
+  // both sides. Prefilled from whichever side already has one on record.
+  const needsExpiry = slots.some(s => docNeedsExpiry(s.canonicalKey));
+  const [expiry, setExpiry] = useState<string>(toDateInput(slots.find(s => s.existing?.expiryDate)?.existing?.expiryDate));
+  const [expirySaving, setExpirySaving] = useState(false);
+  const [expiryErr, setExpiryErr] = useState<string | null>(null);
+
+  // Persist an edited expiry onto every document already on file for this
+  // requirement (a fresh upload carries the date atomically via putKycSlot).
+  const persistExpiry = async (dateStr: string, ids: number[]) => {
+    if (!ids.length) return;
+    setExpirySaving(true); setExpiryErr(null);
+    try {
+      const results = await Promise.all(ids.map(id => fetch(`/api/documents/${id}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiryDate: dateStr || null }),
+      })));
+      if (results.some(r => !r.ok)) throw new Error('Could not save the expiry date.');
+      setLocalSlots(prev => prev.map(s => s.existing?.id != null
+        ? { ...s, existing: { ...s.existing, expiryDate: dateStr || null } }
+        : s));
+      onChanged();
+    } catch (err) {
+      setExpiryErr(err instanceof Error ? err.message : 'Could not save the expiry date.');
+    } finally {
+      setExpirySaving(false);
+    }
+  };
+
+  const onExpiryChange = (v: string) => {
+    setExpiry(v);
+    setExpiryErr(null);
+    // Save now against any existing docs; slots still empty pick it up on upload.
+    const ids = localSlots.map(s => s.existing?.id).filter((id): id is number => id != null);
+    if (ids.length) void persistExpiry(v, ids);
+  };
+
   const pick = (slot: UploadSlot) => { pending.current = slot; fileRef.current?.click(); };
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -47,9 +90,11 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
       const saved = await putKycSlot({
         ownerType: 'customer', ownerId, canonicalKey: slot.canonicalKey, category: slot.category,
         displayName: slot.label, file, existingDocId: slot.existing?.id ?? null, existingKey: slot.existing?.documentKey ?? null,
+        // Attach the entered expiry atomically on create/replace (undefined = don't touch).
+        expiryDate: needsExpiry ? (expiry || null) : undefined,
       });
       setLocalSlots(prev => prev.map(s => s.canonicalKey === slot.canonicalKey
-        ? { ...s, existing: { id: saved.id, documentKey: saved.documentKey, fileUrl: saved.fileUrl, mimeType: saved.mimeType } }
+        ? { ...s, existing: { id: saved.id, documentKey: saved.documentKey, fileUrl: saved.fileUrl, mimeType: saved.mimeType, expiryDate: needsExpiry ? (expiry || null) : s.existing?.expiryDate ?? null } }
         : s));
       onChanged();
     } catch (err) {
@@ -69,6 +114,27 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
           <button type="button" onClick={onClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
         </div>
         <div className="px-5 py-4 space-y-3">
+          {needsExpiry && (
+            <div className="border border-[#e8e6e0] rounded-xl p-3.5">
+              <label className="text-sm font-medium text-[#1a1916] flex items-center gap-2">
+                <CalendarClock size={14} className="text-[#2e9f82]" /> Expiry date
+                <span className="font-normal text-[#9b9890]">· from the document</span>
+              </label>
+              <p className="text-[11px] text-[#9b9890] mt-0.5">
+                Enter the date this document expires{localSlots.length > 1 ? ' (applies to both sides)' : ''}. Set it before uploading, or edit it here anytime.
+              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="date"
+                  value={expiry}
+                  onChange={e => onExpiryChange(e.target.value)}
+                  className="flex-1 text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
+                />
+                {expirySaving && <Loader2 size={15} className="animate-spin text-[#9b9890]" />}
+              </div>
+              {expiryErr && <div className="text-xs text-[#b91c1c] mt-1">{expiryErr}</div>}
+            </div>
+          )}
           {localSlots.map(slot => {
             const has = !!slot.existing?.fileUrl;
             const uploading = busy === slot.canonicalKey;

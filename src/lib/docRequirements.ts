@@ -27,6 +27,23 @@ export const KYC_DOCS: DocReq[] = [
 
 export const KYC_DOC_KEYS = new Set(KYC_DOCS.map(d => d.key));
 
+/**
+ * Base document keys whose physical document carries an expiry date the RP
+ * should record on upload (identity + licensing docs). Matched on the base key
+ * so any suffixed variant resolves — `emirates_id_front`, `occupant_2_passport`,
+ * a "Replace" upload's `_<timestamp>` suffix, etc. Mirrors the EXPIRY_DOC_KEYS
+ * config on the contract v2 upload modal so both paths agree on what expires.
+ */
+export const EXPIRY_DOC_BASES = [
+  'emirates_id', 'passport', 'visa', 'trade_license', 'business_license', 'tax_registration',
+];
+
+/** Whether uploading this document key should prompt the RP for an expiry date. */
+export function docNeedsExpiry(documentKey: string | null | undefined): boolean {
+  const k = (documentKey ?? '').toLowerCase();
+  return EXPIRY_DOC_BASES.some(base => k.includes(base));
+}
+
 /** Emirates ID is satisfied by both sides (front + back), or a legacy combined file. */
 export function emiratesIdSatisfied(keys: Set<string>): boolean {
   return (keys.has('emirates_id_front') && keys.has('emirates_id_back')) || keys.has('emirates_id');
