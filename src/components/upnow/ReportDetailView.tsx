@@ -14,7 +14,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Search, Download, Printer, Loader2, FileSpreadsheet,
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
-  Building2, Check, ChevronDown,
+  Building2, Check, ChevronDown, Info,
 } from 'lucide-react';
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
@@ -36,6 +36,8 @@ interface DrilldownSpec {
 
 interface ReportDef {
   title: string;
+  /** One plain-language line under the title. When absent, only the ⓘ shows. */
+  tagline?: string;
   description: string;
   endpoint: string;
   columns: Column[];
@@ -88,6 +90,30 @@ interface TotalSpec {
   type?: 'aed' | 'number' | 'rate';
   /** Show this tile even when zero — for totals whose 0 IS the signal (e.g. arrears). */
   keep?: boolean;
+}
+
+/** ⓘ — explanations live behind this, keeping pages executive-clean. */
+function InfoTip({ text, align = 'left' }: { text: string; align?: 'left' | 'right' }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex print:hidden">
+      <button
+        type="button"
+        aria-label="About this"
+        onClick={() => setOpen(o => !o)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className="text-[#9b9890] hover:text-[#2e9f82] transition-colors align-middle">
+        <Info size={15} />
+      </button>
+      {open && (
+        <span
+          className={`absolute z-40 top-full mt-2 ${align === 'right' ? 'right-0' : 'left-0'} w-80 max-w-[80vw] bg-white border border-[#e3e0d9] rounded-xl shadow-xl p-3.5 text-xs leading-relaxed text-[#4a4742] whitespace-normal`}
+          style={{ boxShadow: '0 12px 32px rgba(20,18,15,.16)' }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
 }
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
@@ -290,7 +316,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'manager-performance': {
     title: 'Manager Performance Report',
-    description: 'What each manager actually delivered — one row per assigned manager, counting REAL things worked, not clicks: distinct leads attended (and how many they converted), distinct contracts and renewals they progressed, documents processed, and days active — plus the shape of the work (created / updated / deleted actions) and presence: dashboard pages and reports they opened (tracked from 8 Jul 2026). Contract signatures are the landlord\u2019s record and stay out of this scorecard. System-generated entries (receipt numbering etc.) are excluded. Click a row for the person\u2019s play-by-play. Attribution began 7 Jul 2026. Use the date range to scope a period.',
+    tagline: 'Who did what — your team\u2019s work and presence at a glance.',
+    description: 'Each row is one of your managers. The numbers count real things they worked on — leads they handled (and converted), leases and renewals they progressed, documents they processed — not clicks. Created / Updated / Deleted shows the type of work; Pages and Reports show how present they were in the system; automatic system entries are excluded. Click any row to see that person\u2019s day-by-day actions. Detailed tracking started 7 July 2026, so older periods show less.',
     endpoint: '/api/reports/manager-performance',
     controlKey: 'dateRange',
     columns: [
@@ -335,7 +362,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'lease-activity': {
     title: 'Lease Status Summary',
-    description: 'The month-by-month operations matrix — for each month of the selected year: leases due for renewal, new and renewal contracts commencing, security deposits recorded, renewal notices issued, tenant and landlord signatures executed, Ejari registered vs pending (for that month\u2019s commencements), move-outs, and the average days from offer to the tenant\u2019s signature. Everything is derived live from the contract records, so history fills itself in — no manual compiling. Pick the year above.',
+    tagline: 'Your leasing year, month by month \u2014 renewals due, contracts signed, Ejari, move-outs.',
+    description: 'For each month of the selected year: how many leases came up for renewal, how many new and renewal contracts started, deposits received, renewal notices sent, tenant and landlord signatures, Ejari registered vs still pending, move-outs, and the average days it took tenants to sign. All figures come straight from your contract records \u2014 nothing is compiled by hand \u2014 and past months fill in automatically.',
     endpoint: '/api/reports/lease-activity',
     controlKey: 'year',
     columns: [
@@ -1269,8 +1297,11 @@ export function ReportDetailView({
               <ArrowLeft size={12} /> All Reports
             </Link>
           )}
-          <h1 className="text-2xl font-bold text-[#1a1916]">{def.title}</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">{def.description}</p>
+          <h1 className="text-2xl font-bold text-[#1a1916] flex items-center gap-2">
+            {def.title}
+            <InfoTip text={def.description} />
+          </h1>
+          {def.tagline && <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">{def.tagline}</p>}
         </div>
         <div className="flex items-center gap-2">
           <button

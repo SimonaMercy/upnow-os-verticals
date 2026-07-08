@@ -15,6 +15,8 @@
  * stacked with contracts (they're subsets — stacking would double-count).
  */
 
+import { useState } from 'react';
+import { Info } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -25,11 +27,33 @@ const [JADE, BLUE, AMBER, PURPLE] = PALETTE;
 const GRID = '#f0ede8';
 const TICK = { fontSize: 11, fill: '#9b9890' } as const;
 
+/** Chart card — the explanation lives behind the ⓘ so the page stays clean. */
 function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-      <p className="text-sm font-bold text-[#1a1916]">{title}</p>
-      {hint && <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">{hint}</p>}
+      <div className="flex items-center gap-1.5 mb-2">
+        <p className="text-sm font-bold text-[#1a1916]">{title}</p>
+        {hint && (
+          <span className="relative inline-flex print:hidden">
+            <button
+              type="button"
+              aria-label={`About ${title}`}
+              onClick={() => setOpen(o => !o)}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              className="text-[#9b9890] hover:text-[#2e9f82] transition-colors">
+              <Info size={13} />
+            </button>
+            {open && (
+              <span
+                className="absolute z-40 top-full mt-2 left-0 w-72 max-w-[75vw] bg-white border border-[#e3e0d9] rounded-xl p-3 text-xs leading-relaxed text-[#4a4742] whitespace-normal"
+                style={{ boxShadow: '0 12px 32px rgba(20,18,15,.16)' }}>
+                {hint}
+              </span>
+            )}
+          </span>
+        )}
+      </div>
       {children}
     </div>
   );
@@ -95,7 +119,7 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages }: {
   return (
     <div className="grid lg:grid-cols-2 gap-3 mb-6">
       {active.length > 0 && (
-        <Card title="Output by team member" hint="Distinct leads, contracts and documents worked in the period — system entries excluded.">
+        <Card title="Output by team member" hint="How much each person delivered: the leads, leases and documents they worked on in this period. Automatic system entries are not counted.">
           <ResponsiveContainer width="100%" height={Math.max(150, 50 + active.length * 46)}>
             <BarChart data={active} layout="vertical" margin={{ top: 4, right: 16, bottom: 0, left: 8 }} barSize={18}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
@@ -111,7 +135,7 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages }: {
         </Card>
       )}
       {verbs.length > 0 && (
-        <Card title="Shape of the work" hint="Create / update / delete actions per person in the period.">
+        <Card title="Shape of the work" hint="The type of work: how much each person created (green), edited (blue) or removed (orange).">
           <ResponsiveContainer width="100%" height={Math.max(150, 50 + verbs.length * 46)}>
             <BarChart data={verbs} layout="vertical" margin={{ top: 4, right: 16, bottom: 0, left: 8 }} barSize={18}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
@@ -127,14 +151,14 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages }: {
         </Card>
       )}
       {actionsHaveData && (
-        <Card title="Daily activity" hint="Actions per person per day (last 30 days of the period).">
+        <Card title="Daily activity" hint="Work rhythm: how many actions each person took per day over the last 30 days. Hover a day for the exact split.">
           <ResponsiveContainer width="100%" height={210}>
             {memberLines(daily)}
           </ResponsiveContainer>
         </Card>
       )}
       {pagesHaveData && (
-        <Card title="Daily presence" hint="Dashboard pages opened per person per day (tracked from 8 Jul 2026).">
+        <Card title="Daily presence" hint="Time in the system: how many pages each person opened per day. Tracking began 8 July 2026.">
           <ResponsiveContainer width="100%" height={210}>
             {memberLines(dailyPages!)}
           </ResponsiveContainer>
@@ -161,7 +185,7 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
   if (!any) return null;
   return (
     <div className="grid lg:grid-cols-2 gap-3 mb-6">
-      <Card title="Renewal workload vs delivered" hint="Leases coming due each month vs renewal and new contracts commencing.">
+      <Card title="Renewal workload vs delivered" hint="Workload vs delivery: leases coming due each month (blue) against renewals signed (green) and new contracts (purple).">
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -18 }} barSize={7} barGap={2}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
@@ -175,7 +199,7 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
           </BarChart>
         </ResponsiveContainer>
       </Card>
-      <Card title="Ejari on the month's contracts" hint="Of the leases commencing each month — Ejari registered vs still pending.">
+      <Card title="Ejari on the month's contracts" hint="Compliance at a glance: of the leases starting each month, how many are Ejari-registered (green) vs still pending (orange).">
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -18 }} barSize={14}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
