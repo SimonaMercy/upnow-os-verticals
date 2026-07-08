@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Briefcase, Loader2, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Briefcase, Loader2, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { apiGet, apiPatch, apiDelete } from '@/lib/api';
 
 interface SpService {
@@ -69,14 +69,6 @@ export default function SpMyServicesPage() {
   const toggle = (s: SpService) =>
     run(s.id, () => apiPatch(`/service-provider/services/${s.id}`, { isAvailable: !s.isAvailable }));
 
-  const editPrice = (s: SpService) => {
-    const input = window.prompt(`New price for "${s.name}" (whole AED):`, s.basePrice != null ? String(s.basePrice) : '');
-    if (input == null) return;
-    const price = Number(input);
-    if (Number.isNaN(price) || price < 0) { setError('Enter a valid price in AED.'); return; }
-    void run(s.id, () => apiPatch(`/service-provider/services/${s.id}`, { basePrice: price }));
-  };
-
   const remove = (s: SpService) => {
     if (!window.confirm(`Remove "${s.name}" from your services?`)) return;
     void run(s.id, () => apiDelete(`/service-provider/services/${s.id}`));
@@ -88,7 +80,8 @@ export default function SpMyServicesPage() {
         <div>
           <h1 className="text-xl font-semibold" style={{ color: 'var(--color-neutral-900)' }}>My Services</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--color-neutral-500)' }}>
-            The services you offer, adopted from the UpNow catalog with your own pricing and availability.
+            The services you offer, adopted from the UpNow catalog. Prices are set by UpNow —
+            you control which services you offer and their availability.
             New listings are reviewed by UpNow before going live.
           </p>
         </div>
@@ -118,8 +111,8 @@ export default function SpMyServicesPage() {
           </div>
           <h2 className="text-base font-semibold mb-1.5" style={{ color: 'var(--color-neutral-900)' }}>No services yet</h2>
           <p className="text-sm max-w-md mx-auto" style={{ color: 'var(--color-neutral-500)' }}>
-            Pick the services you offer from the UpNow catalog, set your price,
-            and submit them for review. Approved services appear to customers and
+            Pick the services you offer from the UpNow catalog and submit them
+            for review. Prices are set by UpNow. Approved services appear to customers and
             start receiving bookings.
           </p>
           <Link
@@ -149,17 +142,14 @@ export default function SpMyServicesPage() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => !isQuote && editPrice(s)}
-                  disabled={isQuote || rowBusy}
-                  title={isQuote ? 'Priced per job via quotes' : 'Edit price'}
+                {/* Price is platform-set by UpNow — display only */}
+                <span
+                  title={isQuote ? 'Priced per job via quotes' : 'Price set by UpNow'}
                   className="inline-flex items-center gap-1.5 text-sm font-semibold whitespace-nowrap"
-                  style={{ color: 'var(--color-neutral-900)', cursor: isQuote ? 'default' : 'pointer' }}
+                  style={{ color: 'var(--color-neutral-900)' }}
                 >
                   {priceLabel(s)}
-                  {!isQuote && <Pencil size={12} style={{ color: 'var(--color-neutral-400)' }} />}
-                </button>
+                </span>
 
                 <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full capitalize" style={{ backgroundColor: tone.bg, color: tone.fg }}>
                   {tone.label}
