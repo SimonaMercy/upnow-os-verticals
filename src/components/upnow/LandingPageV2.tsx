@@ -11,6 +11,7 @@ import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { HowItWorks } from '@/components/upnow/HowItWorks';
 import { TrustSignals } from '@/components/upnow/TrustSignals';
+import { CustomerRenewalBanner } from '@/components/upnow/CustomerRenewalBanner';
 import { Footer } from '@/components/upnow/Footer';
 import { SignupChoice } from '@/components/upnow/SignupChoice';
 
@@ -562,6 +563,9 @@ function LandingNav({
           </button>
         </div>
       </header>
+
+      {/* Sticky "your renewal needs action" bar — logged-in customers only */}
+      <CustomerRenewalBanner />
 
       {/* Mobile drawer */}
       {drawerOpen && (
