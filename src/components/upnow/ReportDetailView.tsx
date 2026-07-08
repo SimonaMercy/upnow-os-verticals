@@ -348,19 +348,13 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     ],
     // Click a team member → their chronological activity feed (most recent
     // first, capped at 200 in the period). Contract items link to the lease.
+    // Row click opens the full-page member profile, which loads its feed from
+    // the paginated /manager-activity-feed endpoint (nothing embedded here).
     drilldown: {
       childKey: 'activity',
       titleKey: 'name',
       countLabel: 'recent actions',
-      filterKey: 'kind',
-      contractIdKey: 'contractId',
-      columns: [
-        { key: 'at', label: 'When' },
-        { key: 'kind', label: 'Kind', type: 'stage' },
-        { key: 'action', label: 'Action' },
-        { key: 'detail', label: 'On' },
-        { key: 'ip', label: 'IP' },
-      ],
+      columns: [],
     },
   },
 
@@ -1297,6 +1291,9 @@ export function ReportDetailView({
           daily={((data as Record<string, unknown>).daily ?? []) as Array<Record<string, string | number>>}
           dailyPages={((data as Record<string, unknown>).dailyPages ?? []) as Array<Record<string, string | number>>}
           contractsBase={contractsBase}
+          feedEndpoint={`${endpointBase}/manager-activity-feed`}
+          from={from || null}
+          to={to || null}
           onBack={() => setDrill(null)}
         />
       </div>
@@ -1868,7 +1865,9 @@ export function ReportDetailView({
               <tbody>
                 {sorted.map((row, i) => {
                   const items = def.drilldown ? (row[def.drilldown.childKey] as unknown[] | undefined) : undefined;
-                  const canDrill = !!def.drilldown && Array.isArray(items) && items.length > 0;
+                  const canDrill = slug === 'manager-performance'
+                    ? true // full-page profile fetches its own paginated feed
+                    : !!def.drilldown && Array.isArray(items) && items.length > 0;
                   return (
                     <tr
                       key={i}

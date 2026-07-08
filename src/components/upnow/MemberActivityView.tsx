@@ -6,7 +6,7 @@
  * tiles → personal timeline → the play-by-play, filterable by kind and
  * searchable, grouped by day. Explanations live behind ⓘ.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer, Search, ExternalLink, Info } from 'lucide-react';
 import {
@@ -43,7 +43,12 @@ export interface MemberRow {
   reportsViewed: number;
   activeDays: number;
   lastActiveAt: string | null;
-  activity: MemberActivityItem[];
+}
+
+interface FeedPage {
+  items: MemberActivityItem[];
+  counts: { all: number; created: number; updated: number; deleted: number; other: number };
+  nextOffset: number | null;
 }
 
 const KIND_STYLE: Record<string, string> = {
@@ -76,15 +81,48 @@ function Tile({ label, value, hint }: { label: string; value: string | number; h
   );
 }
 
-export function MemberActivityView({ member, daily, dailyPages, contractsBase, onBack }: {
+export function MemberActivityView({ member, daily, dailyPages, contractsBase, feedEndpoint, from, to, onBack }: {
   member: MemberRow;
   daily: Array<Record<string, string | number>>;
   dailyPages: Array<Record<string, string | number>>;
   contractsBase: string;
+  /** Base of the paginated feed endpoint (portal-specific). */
+  feedEndpoint: string;
+  from: string | null;
+  to: string | null;
   onBack: () => void;
 }) {
   const [kind, setKind] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  // Paginated feed — the report carries counts only; pages load on demand so
+  // the payload stays small however large the activity trail grows.
+  const [items, setItems] = useState<MemberActivityItem[]>([]);
+  const [counts, setCounts] = useState<FeedPage['counts'] | null>(null);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [feedLoading, setFeedLoading] = useState(false);
+
+  const fetchPage = async (offset: number, selectedKind: string | null, replace: boolean) => {
+    setFeedLoading(true);
+    try {
+      const qs = new URLSearchParams({ userId: String(member.userId), offset: String(offset), limit: '50' });
+      if (from) qs.set('from', from);
+      if (to) qs.set('to', to);
+      if (selectedKind) qs.set('kind', selectedKind);
+      const res = await fetch(`${feedEndpoint}?${qs}`, { credentials: 'include' });
+      if (!res.ok) return;
+      const page = await res.json() as FeedPage;
+      setItems(prev => replace ? page.items : [...prev, ...page.items]);
+      setCounts(page.counts);
+      setNextOffset(page.nextOffset);
+    } finally {
+      setFeedLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchPage(0, kind, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member.userId, kind, from, to]);
 
   // Personal timeline: this member's actions + pages per day on one axis
   // (both are events/day). Colors: work = jade, presence = blue.
@@ -96,17 +134,17 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, o
   const hasSeries = series.some(s => s.Actions > 0 || s.Pages > 0);
 
   const kinds = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const it of member.activity) counts.set(it.kind, (counts.get(it.kind) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [member.activity]);
+    if (!counts) return [] as Array<[string, number]>;
+    return (['updated', 'created', 'deleted', 'other'] as const)
+      .map(k => [k, counts[k]] as [string, number])
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1]);
+  }, [counts]);
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return member.activity.filter(it =>
-      (!kind || it.kind === kind)
-      && (!needle || `${it.action} ${it.detail}`.toLowerCase().includes(needle)));
-  }, [member.activity, kind, search]);
+    return items.filter(it => !needle || `${it.action} ${it.detail}`.toLowerCase().includes(needle));
+  }, [items, search]);
 
   // Group by day — "7 Jul 2026, 14:32" → "7 Jul 2026"
   const byDay = useMemo(() => {
@@ -202,12 +240,12 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, o
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search their actions…"
+            placeholder="Search loaded actions…"
             className="pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm w-64 focus:outline-none focus:border-[#2e9f82]" />
         </div>
         <button onClick={() => setKind(null)}
           className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!kind ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
-          All · {member.activity.length}
+          All · {counts?.all ?? '…'}
         </button>
         {kinds.map(([k, n]) => (
           <button key={k} onClick={() => setKind(kind === k ? null : k)}
@@ -220,7 +258,7 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, o
       {/* Day-grouped feed */}
       {byDay.length === 0 ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center text-sm text-[#9b9890]">
-          Nothing matches.
+          {feedLoading ? 'Loading…' : 'Nothing matches.'}
         </div>
       ) : byDay.map(g => (
         <div key={g.day} className="bg-white rounded-2xl border border-[#e8e6e0] mb-3 overflow-hidden print:break-inside-avoid">
@@ -252,6 +290,16 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, o
           </table>
         </div>
       ))}
+      {nextOffset != null && (
+        <div className="text-center mb-6 print:hidden">
+          <button
+            onClick={() => void fetchPage(nextOffset, kind, false)}
+            disabled={feedLoading}
+            className="px-4 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] bg-white text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] disabled:opacity-50">
+            {feedLoading ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
