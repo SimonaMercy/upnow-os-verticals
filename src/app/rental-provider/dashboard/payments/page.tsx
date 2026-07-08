@@ -136,7 +136,14 @@ interface DepositProof {
 }
 
 function fmtAed(v: number) {
-  return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(v);
+  // Whole amounts stay clean (AED 20,000); fractional amounts keep 2 dp so the
+  // government/management Ejari split (172.50 / 77.50) isn't rounded away.
+  const fractional = Math.round(v) !== v;
+  return new Intl.NumberFormat('en-AE', {
+    style: 'currency', currency: 'AED',
+    minimumFractionDigits: fractional ? 2 : 0,
+    maximumFractionDigits: fractional ? 2 : 0,
+  }).format(v);
 }
 
 function fmtDate(d: string | null) {
