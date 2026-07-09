@@ -14,6 +14,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -35,13 +36,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
-import { Schibsted_Grotesk } from "next/font/google";
-import { SpJobReady } from "@/components/upnow/SpJobReady";
-
-// One journey, one place: after the 7 registration steps the SAME page flows
-// into the "Get job-ready" phase (design part B) — no second URL.
-const grotesk = Schibsted_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { KycDocumentsPanel } from "@/components/dashboard/KycDocumentsPanel";
@@ -116,6 +111,12 @@ const businessSchema = z.object({
   entityType: z.enum(["individual", "company"]),
   businessName: z.string().min(2, "Business name must be at least 2 characters").max(150),
   ownerName: z.string().min(2, "Owner name must be at least 2 characters").max(150),
+  tradeLicenseNumber: z.string().max(60).optional(),
+  vatTrn: z
+    .string()
+    .max(20)
+    .optional()
+    .refine((v) => !v || /^\d{15}$/.test(v.trim()), "VAT TRN is a 15-digit number"),
 });
 type BusinessValues = z.infer<typeof businessSchema>;
 
@@ -154,6 +155,10 @@ interface SpProfile {
   dateOfBirth: string | null;
   nationality: string | null;
   emiratesIdNumber: string | null;
+  tradeLicenseNumber?: string | null;
+  vatTrn?: string | null;
+  complianceStatus?: string | null;
+  complianceNotes?: string | null;
   teamSizeBand?: string | null;
   fleetSizeBand?: string | null;
   opsContactName?: string | null;
@@ -247,12 +252,10 @@ function Stepper({
   current,
   completed,
   onStepClick,
-  jobReady,
 }: {
   current: number;
   completed: Set<number>;
   onStepClick: (id: number) => void;
-  jobReady?: { active: boolean; unlocked: boolean; done: number; onClick: () => void };
 }) {
   // A step is reachable if it is completed (can re-edit) or is the current step
   // or comes right after the last completed step. Future-incomplete steps are locked.
@@ -356,44 +359,6 @@ function Stepper({
           </p>
         </div>
       </div>
-    
-      {/* Full-journey stage: the operational profile lives on this SAME page. */}
-      {jobReady && (
-        <button
-          type="button"
-          disabled={!jobReady.unlocked}
-          onClick={() => jobReady.unlocked && jobReady.onClick()}
-          className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-colors text-left w-full"
-          style={{
-            background: jobReady.active
-              ? "color-mix(in srgb, var(--color-primary) 8%, white)"
-              : "transparent",
-            cursor: jobReady.unlocked ? "pointer" : "default",
-            opacity: jobReady.unlocked ? 1 : 0.45,
-          }}
-        >
-          <div
-            className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
-            style={{
-              background: jobReady.done === 5
-                ? "var(--color-success, #22c55e)"
-                : jobReady.active
-                  ? "var(--color-primary)"
-                  : "var(--color-base-200)",
-            }}
-          >
-            <Check className="w-5 h-5" style={{ color: jobReady.active || jobReady.done === 5 ? "#fff" : "var(--color-neutral-400)" }} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold leading-tight" style={{ color: jobReady.active ? "var(--color-primary)" : "var(--color-neutral-700)" }}>
-              Get job-ready{jobReady.done > 0 && ` · ${jobReady.done}/5`}
-            </p>
-            <p className="text-xs leading-tight mt-0.5 truncate" style={{ color: "var(--color-neutral-400)" }}>
-              Coverage · team · vehicles · hours · rules
-            </p>
-          </div>
-        </button>
-      )}
       </nav>
   );
 }
@@ -608,6 +573,8 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
           entityType: (profile.entityType as "individual" | "company") ?? "company",
           businessName: profile.businessName ?? "",
           ownerName: profile.ownerName ?? "",
+          tradeLicenseNumber: profile.tradeLicenseNumber ?? "",
+          vatTrn: profile.vatTrn ?? "",
         });
         if (profile.accountTypeConfirmedAt && profile.businessName) {
           setSavedEntityType(profile.entityType ?? "company");
@@ -626,6 +593,8 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
         entityType: vals.entityType,
         businessName: vals.businessName,
         ownerName: vals.ownerName,
+        tradeLicenseNumber: vals.tradeLicenseNumber?.trim() || undefined,
+        vatTrn: vals.vatTrn?.trim() || undefined,
       });
       setSavedEntityType(vals.entityType);
       setSavedSummary({ businessName: vals.businessName, ownerName: vals.ownerName });
@@ -850,6 +819,25 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
         error={errors.ownerName?.message}
       />
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Input
+          label="Trade licence number"
+          placeholder="e.g. CN-1234567"
+          {...register("tradeLicenseNumber")}
+          error={errors.tradeLicenseNumber?.message}
+        />
+        <Input
+          label="VAT registration (TRN)"
+          placeholder="15-digit TRN (if VAT-registered)"
+          inputMode="numeric"
+          {...register("vatTrn")}
+          error={errors.vatTrn?.message}
+        />
+      </div>
+      <p className="-mt-3 text-xs" style={{ color: "var(--color-neutral-400)" }}>
+        The number printed on your trade licence, and your VAT TRN if registered. You&apos;ll upload the licence document in the next step.
+      </p>
+
       {serverError && <ErrorBanner message={serverError} />}
 
       <Button
@@ -871,14 +859,35 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
 
 // ─── Step 2 · Service categories ──────────────────────────────────────────────
 
+interface SpCatalogTemplate {
+  id: number;
+  name: string;
+  serviceCategoryId: number | null;
+  adoptedServiceId: number | null;
+}
+interface SpCatalogCategory {
+  id: number;
+  code: string;
+  // Raw ServiceCategoryEntity field — this endpoint doesn't rename it to
+  // `name` the way /catalog/public does.
+  nameEn: string;
+}
+
 function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [entityType, setEntityType] = useState<string>("company");
   // Live taxonomy from the admin-configured catalog (active categories only);
-  // the hardcoded list is only the fallback if the public endpoint is down.
+  // the hardcoded list is only the fallback if the endpoint is down.
   const [categoryOptions, setCategoryOptions] =
-    useState<{ value: string; label: string; services?: string[] }[]>(SERVICE_CATEGORIES);
+    useState<{ value: string; label: string }[]>(SERVICE_CATEGORIES);
+  // Sub-services (platform templates) per category + which ones this SP has
+  // already adopted — picking one calls the SAME adopt/remove endpoints as
+  // "My Services", so a category counts "complete" here iff it has a real
+  // listing, not just a marked checkbox.
+  const [templatesByCategory, setTemplatesByCategory] =
+    useState<Record<string, SpCatalogTemplate[]>>({});
+  const [savingTemplateIds, setSavingTemplateIds] = useState<Set<number>>(new Set());
 
   const {
     handleSubmit,
@@ -899,24 +908,57 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       .catch(() => {})
       .finally(() => setInitialLoaded(true));
 
-    fetch("/api/catalog/public")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { categories?: { code: string; name: string; services?: { name: string }[] }[] }) => {
-        if (d.categories?.length) {
-          setCategoryOptions(d.categories.map((c) => ({
-            value: c.code,
-            label: c.name,
-            services: c.services?.map((s) => s.name),
-          })));
+    apiGet<{ categories?: SpCatalogCategory[]; templates?: SpCatalogTemplate[] }>("/service-provider/catalog")
+      .then((d) => {
+        if (!d.categories?.length) return;
+        setCategoryOptions(d.categories.map((c) => ({ value: c.code, label: c.nameEn })));
+        const byCategory: Record<string, SpCatalogTemplate[]> = {};
+        for (const cat of d.categories) {
+          byCategory[cat.code] = (d.templates ?? []).filter((t) => t.serviceCategoryId === cat.id);
         }
+        setTemplatesByCategory(byCategory);
       })
-      .catch(() => {}); // keep the static fallback
+      .catch(() => {}); // keep the static fallback, no sub-services shown
   }, [reset]);
 
   // Eligibility (CEO, Jul 8): individuals may register and select any category;
   // the licence/permit check happens at document review (GATE 1) before
   // listings go live — the notice below sets that expectation.
   const isIndividual = entityType === "individual";
+
+  const toggleTemplate = async (categoryCode: string, tpl: SpCatalogTemplate) => {
+    setSavingTemplateIds((prev) => new Set(prev).add(tpl.id));
+    setServerError(null);
+    try {
+      if (tpl.adoptedServiceId) {
+        await apiDelete(`/service-provider/services/${tpl.adoptedServiceId}`);
+        setTemplatesByCategory((prev) => ({
+          ...prev,
+          [categoryCode]: prev[categoryCode].map((t) =>
+            t.id === tpl.id ? { ...t, adoptedServiceId: null } : t,
+          ),
+        }));
+      } else {
+        const created = await apiPost<{ id: number }>("/service-provider/services", {
+          templateId: tpl.id,
+        });
+        setTemplatesByCategory((prev) => ({
+          ...prev,
+          [categoryCode]: prev[categoryCode].map((t) =>
+            t.id === tpl.id ? { ...t, adoptedServiceId: created.id } : t,
+          ),
+        }));
+      }
+    } catch (e: unknown) {
+      setServerError(e instanceof Error ? e.message : "Couldn't save that service — try again.");
+    } finally {
+      setSavingTemplateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tpl.id);
+        return next;
+      });
+    }
+  };
 
   const onSubmit = async (vals: CategoriesValues) => {
     setServerError(null);
@@ -968,6 +1010,10 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
           </div>
         </div>
       )}
+      <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
+        Pick a category, then choose exactly which services under it you offer —
+        each category is marked complete once at least one service is picked.
+      </p>
       <Controller
         control={control}
         name="serviceCategories"
@@ -975,17 +1021,12 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {categoryOptions.map((cat) => {
               const selected = field.value.includes(cat.value);
+              const templates = templatesByCategory[cat.value] ?? [];
+              const adoptedCount = templates.filter((t) => t.adoptedServiceId).length;
               return (
-                <button
+                <div
                   key={cat.value}
-                  type="button"
-                  onClick={() => {
-                    const next = selected
-                      ? field.value.filter((v) => v !== cat.value)
-                      : [...field.value, cat.value];
-                    field.onChange(next);
-                  }}
-                  className="flex items-start gap-3 rounded-2xl border-2 px-4 py-3 text-left transition-all"
+                  className="rounded-2xl border-2 overflow-hidden transition-all"
                   style={{
                     borderColor: selected
                       ? "var(--color-primary)"
@@ -995,38 +1036,116 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                       : "white",
                   }}
                 >
-                  <div
-                    className="w-5 h-5 mt-0.5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-all"
-                    style={{
-                      borderColor: selected
-                        ? "var(--color-primary)"
-                        : "var(--color-base-200)",
-                      background: selected ? "var(--color-primary)" : "white",
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = selected
+                        ? field.value.filter((v) => v !== cat.value)
+                        : [...field.value, cat.value];
+                      field.onChange(next);
+                      // Deselecting the category drops any not-yet-approved
+                      // adoptions in it too, so the two never drift apart.
+                      if (selected) {
+                        templates
+                          .filter((t) => t.adoptedServiceId)
+                          .forEach((t) => toggleTemplate(cat.value, t));
+                      }
                     }}
+                    className="flex w-full items-start gap-3 px-4 py-3 text-left"
                   >
-                    {selected && <Check className="w-3 h-3" style={{ color: "#fff" }} />}
-                  </div>
-                  <span className="min-w-0">
-                    <span
-                      className="block text-sm font-medium"
+                    <div
+                      className="w-5 h-5 mt-0.5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-all"
                       style={{
-                        color: selected
+                        borderColor: selected
                           ? "var(--color-primary)"
-                          : "var(--color-neutral-800)",
+                          : "var(--color-base-200)",
+                        background: selected ? "var(--color-primary)" : "white",
                       }}
                     >
-                      {cat.label}
-                    </span>
-                    {!!cat.services?.length && (
-                      <span
-                        className="block text-xs mt-0.5 leading-snug"
-                        style={{ color: "var(--color-neutral-400)" }}
-                      >
-                        {cat.services.join(" · ")}
+                      {selected && <Check className="w-3 h-3" style={{ color: "#fff" }} />}
+                    </div>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <span
+                          className="text-sm font-medium"
+                          style={{
+                            color: selected
+                              ? "var(--color-primary)"
+                              : "var(--color-neutral-800)",
+                          }}
+                        >
+                          {cat.label}
+                        </span>
+                        {selected && templates.length > 0 && (
+                          adoptedCount > 0 ? (
+                            <span
+                              className="flex items-center gap-1 text-[11px] font-semibold flex-shrink-0"
+                              style={{ color: "var(--color-primary)" }}
+                            >
+                              <Check className="w-3 h-3" /> {adoptedCount} selected
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-medium flex-shrink-0" style={{ color: "#B45309" }}>
+                              Pick your services
+                            </span>
+                          )
+                        )}
                       </span>
-                    )}
-                  </span>
-                </button>
+                    </span>
+                  </button>
+
+                  {selected && templates.length > 0 && (
+                    <div
+                      className="px-4 pb-3 pt-1 space-y-1.5"
+                      style={{ borderTop: "1px solid var(--color-base-100)" }}
+                    >
+                      <p className="text-[11px] pt-2" style={{ color: "var(--color-neutral-400)" }}>
+                        Which {cat.label.toLowerCase()} services do you offer?
+                      </p>
+                      {templates.map((tpl) => {
+                        const adopted = !!tpl.adoptedServiceId;
+                        const saving = savingTemplateIds.has(tpl.id);
+                        return (
+                          <button
+                            key={tpl.id}
+                            type="button"
+                            disabled={saving}
+                            onClick={() => toggleTemplate(cat.value, tpl)}
+                            className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors"
+                            style={{
+                              background: adopted
+                                ? "color-mix(in srgb, var(--color-primary) 8%, white)"
+                                : "transparent",
+                            }}
+                          >
+                            <div
+                              className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border-2"
+                              style={{
+                                borderColor: adopted ? "var(--color-primary)" : "var(--color-base-200)",
+                                background: adopted ? "var(--color-primary)" : "white",
+                              }}
+                            >
+                              {saving ? (
+                                <Loader2
+                                  className="w-2.5 h-2.5 animate-spin"
+                                  style={{ color: adopted ? "#fff" : "var(--color-neutral-400)" }}
+                                />
+                              ) : (
+                                adopted && <Check className="w-2.5 h-2.5" style={{ color: "#fff" }} />
+                              )}
+                            </div>
+                            <span
+                              className="text-[13px]"
+                              style={{ color: adopted ? "var(--color-primary)" : "var(--color-neutral-700)" }}
+                            >
+                              {tpl.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -1638,13 +1757,23 @@ export default function ServiceProviderOnboardingPage() {
   const router = useRouter();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
-  const [phase, setPhase] = useState<"wizard" | "jobready">("wizard");
-  // Tell the shell to bring the sidebar back once registration is done.
+  // "submitted" = the RP-style "under review" terminal screen. Get Job-Ready
+  // no longer lives on this page — it moved to Settings (matches how RP
+  // keeps Team/Rules in Settings, separate from the KYC wizard).
+  const [phase, setPhase] = useState<"wizard" | "submitted">("wizard");
+  // Chromeless for the whole route, including the "submitted" screen —
+  // matches RP's onboarding, which hides the sidebar unconditionally here.
+  // Sidebar comes back on unmount (i.e. once they navigate elsewhere).
   useEffect(() => {
-    publishSpOnboardingReady(phase === "jobready");
+    publishSpOnboardingReady(false);
     return () => publishSpOnboardingReady(true);
-  }, [phase]);
-  const [jrDone, setJrDone] = useState(0);
+  }, []);
+  const [complianceStatus, setComplianceStatus] = useState<string | null>(null);
+  const [complianceNotes, setComplianceNotes] = useState<string | null>(null);
+  // Admin sent the application back (action_required / expired): the SP is
+  // rolled back into the wizard to fix the flagged gaps. advance()/skip walk
+  // every step sequentially (all are already "complete") up to re-submit.
+  const [reviewMode, setReviewMode] = useState(false);
   const [completed, setCompleted] = useState<Set<number>>(new Set());
   const [initializing, setInitializing] = useState(true);
   const initializedRef = useRef(false);
@@ -1666,6 +1795,7 @@ export default function ServiceProviderOnboardingPage() {
           checklist?: Array<{ required?: boolean; uploaded?: boolean }>;
         }>("/profiles/service-provider/me");
         const p = data.profile;
+        if (p?.complianceNotes) setComplianceNotes(p.complianceNotes);
         if (p?.accountTypeConfirmedAt && p?.businessName) done.add(1);
         // Step 2 — at least one service category selected
         if (p?.serviceCategories && p.serviceCategories.length > 0) done.add(2);
@@ -1682,13 +1812,28 @@ export default function ServiceProviderOnboardingPage() {
       }
 
       setCompleted(done);
-      apiGet<{ cards: Record<string, { complete: boolean }> }>("/service-provider/job-ready")
-        .then((jr) => setJrDone(Object.values(jr.cards).filter((c) => c.complete).length))
-        .catch(() => {});
+      let kycStatus: string | null = null;
+      try {
+        const kyc = await apiGet<{ complianceStatus: string | null }>("/profiles/service-provider/me/kyc-status");
+        kycStatus = kyc.complianceStatus;
+        setComplianceStatus(kyc.complianceStatus);
+      } catch {
+        // no profile yet — wizard starts fresh below
+      }
       const firstIncomplete = STEPS.find((s) => !done.has(s.id));
+      if (kycStatus === "action_required" || kycStatus === "expired") {
+        // Application sent back by the reviewer → straight into the wizard
+        // (steps prefilled) so the SP fixes the gaps and re-submits. Step 0
+        // is phone verification, which never needs redoing.
+        setReviewMode(true);
+        setStep(firstIncomplete ? firstIncomplete.id : 1);
+        setInitializing(false);
+        return;
+      }
       if (!firstIncomplete) {
-        // Registration done → same page flows into the operational phase.
-        setPhase("jobready");
+        // Registration done → show the under-review screen (Job-Ready setup
+        // now lives in Settings, reached separately once approved).
+        setPhase("submitted");
         setInitializing(false);
         return;
       }
@@ -1700,45 +1845,145 @@ export default function ServiceProviderOnboardingPage() {
   const advance = (fromStep: number) => {
     const newCompleted = new Set([...completed, fromStep]);
     setCompleted(newCompleted);
+    if (reviewMode) {
+      // Rejected-application walk-through: every step is already "complete",
+      // so go strictly to the NEXT step (not the first incomplete one) until
+      // the final save re-submits the application.
+      const next = STEPS.find((s) => s.id > fromStep);
+      if (next) {
+        setStep(next.id);
+        return;
+      }
+      // Final step saved: the backend has moved the profile back to
+      // pending_review — refresh the banner state and show "under review".
+      apiGet<{ complianceStatus: string | null }>("/profiles/service-provider/me/kyc-status")
+        .then((kyc) => { setComplianceStatus(kyc.complianceStatus); setComplianceNotes(null); })
+        .catch(() => {});
+      setReviewMode(false);
+      setPhase("submitted");
+      return;
+    }
     // If the user came back to re-edit an already-completed step, return them to
     // the first step that still needs attention rather than the very next one.
     const firstIncomplete = STEPS.find((s) => !newCompleted.has(s.id));
     if (firstIncomplete) {
       setStep(firstIncomplete.id);
     } else {
-      setPhase("jobready");
+      // Re-submission after an edit: the backend moves an action_required /
+      // expired profile back to pending_review, so refresh the banner state.
+      apiGet<{ complianceStatus: string | null }>("/profiles/service-provider/me/kyc-status")
+        .then((kyc) => { setComplianceStatus(kyc.complianceStatus); setComplianceNotes(null); })
+        .catch(() => {});
+      setPhase("submitted");
     }
   };
 
   const currentStep = STEPS[step];
 
-  const stepperJobReady = {
-    active: phase === "jobready",
-    unlocked: completed.size === STEPS.length || phase === "jobready",
-    done: jrDone,
-    onClick: () => setPhase("jobready"),
-  };
+  if (!initializing && phase === "submitted") {
+    const compliant = complianceStatus === "compliant";
+    const stages = [
+      { key: "submitted", label: "Application submitted", sub: "We've received your details and documents.", done: true, current: false },
+      { key: "review", label: "Under compliance review", sub: "Our team is verifying your licence and documents.", done: compliant, current: !compliant },
+      { key: "approved", label: "Approved — ready to configure operations", sub: "Set your coverage, team and hours in Settings to start receiving bookings.", done: false, current: compliant },
+    ];
 
-  if (!initializing && phase === "jobready") {
     return (
-      <div className={grotesk.className} style={{ background: "#F7F8F6", minHeight: "100%", color: "#182420" }}>
-        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-          <div className="grid items-start gap-6 lg:grid-cols-[300px_1fr]">
-            <aside
-              className="hidden rounded-3xl p-4 lg:block"
-              style={{ background: "#fff", border: "1px solid #EEF0EC" }}
-            >
-              <Stepper
-                current={-1}
-                completed={completed}
-                onStepClick={(id) => { setPhase("wizard"); setStep(id); }}
-                jobReady={stepperJobReady}
-              />
-            </aside>
-            <main>
-              <SpJobReady />
-            </main>
+      <div className="min-h-screen" style={{ background: "var(--color-base-100, #f9f8f6)" }}>
+        <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 text-center">
+          <div
+            className="mx-auto flex h-20 w-20 items-center justify-center rounded-full"
+            style={{ background: "color-mix(in srgb, var(--color-primary) 12%, white)" }}
+          >
+            <Check className="w-9 h-9" strokeWidth={3} style={{ color: "var(--color-primary)" }} />
           </div>
+          <h1 className="mt-6 text-2xl font-bold" style={{ color: "var(--color-neutral-900)" }}>
+            {compliant ? "You're approved!" : (
+              <>Thank you. Your profile is{" "}
+                <span className="italic" style={{ color: "var(--color-primary)" }}>under review</span>
+              </>
+            )}
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--color-neutral-500)" }}>
+            {compliant
+              ? "Your licence and documents are verified. Finish setting up coverage, team and hours in Settings to start receiving bookings."
+              : "We appreciate you taking the time to complete your account setup. Our compliance team typically responds within 48 hours. You'll receive an email the moment a decision is made."}
+          </p>
+
+          <div
+            className="mt-6 text-left rounded-2xl p-5"
+            style={{ background: "#fff", border: "1px solid var(--color-base-200)" }}
+          >
+            {stages.map((st, i) => (
+              <div key={st.key} className="flex gap-3.5 relative" style={{ paddingBottom: i < stages.length - 1 ? 18 : 0 }}>
+                {i < stages.length - 1 && (
+                  <span className="absolute" style={{ left: 13, top: 30, bottom: 0, width: 2, background: st.done ? "var(--color-primary)" : "var(--color-base-200)" }} />
+                )}
+                <span
+                  className="flex-shrink-0 flex items-center justify-center rounded-full"
+                  style={{
+                    width: 28,
+                    height: 28,
+                    background: st.done ? "var(--color-primary)" : st.current ? "color-mix(in srgb, var(--color-primary) 14%, white)" : "var(--color-base-100)",
+                    color: st.done ? "#fff" : st.current ? "var(--color-primary)" : "var(--color-neutral-400)",
+                    border: st.current ? "2px solid var(--color-primary)" : undefined,
+                  }}
+                >
+                  {st.done ? <Check size={14} strokeWidth={3} /> : <span className="text-[11px] font-bold">{i + 1}</span>}
+                </span>
+                <div>
+                  <p className="text-[13px] font-bold" style={{ color: st.done || st.current ? "var(--color-neutral-900)" : "var(--color-neutral-400)" }}>{st.label}</p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--color-neutral-500)" }}>{st.sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {complianceStatus && !["compliant", "pending_review"].includes(complianceStatus) && (
+            <div
+              className="mt-4 rounded-xl px-4 py-3.5 text-left"
+              style={{ background: "#fef2f2", border: "1px solid #fecaca" }}
+            >
+              <div className="flex items-center gap-2" style={{ color: "#b91c1c" }}>
+                <AlertCircle size={15} className="flex-shrink-0" />
+                <span className="text-sm font-semibold">
+                  Action required — please update and re-submit
+                </span>
+              </div>
+              {complianceNotes && (
+                <p className="mt-1.5 text-xs" style={{ color: "#7f1d1d" }}>
+                  <span className="font-semibold">Reviewer note: </span>{complianceNotes}
+                </p>
+              )}
+              <p className="mt-1.5 text-xs" style={{ color: "#991b1b" }}>
+                Update your business details, re-upload any flagged{" "}
+                <Link href="/dashboard/service-provider/documents" className="underline font-semibold">documents</Link>,
+                then re-submit for review.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setReviewMode(true); setPhase("wizard"); setStep(1); }}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold text-white"
+                style={{ background: "#dc2626" }}
+              >
+                Update details &amp; re-submit <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {compliant ? (
+            <Link
+              href="/dashboard/service-provider/settings?tab=rules"
+              className="mt-6 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white"
+              style={{ background: "var(--color-primary)" }}
+            >
+              Continue to Settings <ChevronRight className="w-4 h-4" />
+            </Link>
+          ) : (
+            <p className="mt-6 text-xs" style={{ color: "var(--color-neutral-400)" }}>
+              We&apos;ll email <b style={{ color: "var(--color-neutral-700)" }}>{user?.email}</b> once your account is approved.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -1760,21 +2005,51 @@ export default function ServiceProviderOnboardingPage() {
         ) : null}
 
         <div className={initializing ? "hidden" : ""}>
+          {/* Rejected application — reviewer verdict pinned above the wizard */}
+          {reviewMode && (
+            <div
+              className="mb-6 rounded-2xl px-5 py-4"
+              style={{ background: "#fef2f2", border: "1px solid #fecaca" }}
+            >
+              <div className="flex items-center gap-2" style={{ color: "#b91c1c" }}>
+                <AlertCircle size={16} className="flex-shrink-0" />
+                <span className="text-sm font-bold">
+                  Your application was sent back — action required
+                </span>
+              </div>
+              {complianceNotes && (
+                <p className="mt-1.5 text-sm leading-relaxed" style={{ color: "#7f1d1d" }}>
+                  <span className="font-semibold">Reviewer note: </span>{complianceNotes}
+                </p>
+              )}
+              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "#991b1b" }}>
+                Go through each step below, fix what was flagged, re-upload any rejected{" "}
+                <Link href="/dashboard/service-provider/documents" className="underline font-semibold">documents</Link>,
+                and save the final step to re-submit for review.
+              </p>
+            </div>
+          )}
+
           {/* Page header */}
           <div className="mb-8">
             <h1
               className="text-3xl font-bold"
               style={{ color: "var(--color-neutral-900)" }}
             >
-              Complete your provider profile
+              {reviewMode ? "Update your provider profile" : "Complete your provider profile"}
             </h1>
             <p
               className="mt-1.5 text-base"
               style={{ color: "var(--color-neutral-500)" }}
             >
-              {completed.size} of {STEPS.length} steps complete &mdash; finish
-              setup, then our team verifies your profile within 48 hours and you
-              can start receiving bookings.
+              {reviewMode ? (
+                <>Your details are prefilled &mdash; review each step, correct what the
+                reviewer flagged, and re-submit. We&apos;ll take another look within 48 hours.</>
+              ) : (
+                <>{completed.size} of {STEPS.length} steps complete &mdash; finish
+                setup, then our team verifies your profile within 48 hours and you
+                can start receiving bookings.</>
+              )}
             </p>
           </div>
 
@@ -1791,7 +2066,6 @@ export default function ServiceProviderOnboardingPage() {
                 current={step}
                 completed={completed}
                 onStepClick={setStep}
-                jobReady={stepperJobReady}
               />
 
               <div className="mt-6 px-4">
@@ -1905,11 +2179,13 @@ export default function ServiceProviderOnboardingPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const next = STEPS.find(
-                        (s) => s.id > step && !completed.has(s.id),
-                      );
+                      // In the rejected-application walk-through every step is
+                      // "complete", so skip means "next step", not "first gap".
+                      const next = reviewMode
+                        ? STEPS.find((s) => s.id > step)
+                        : STEPS.find((s) => s.id > step && !completed.has(s.id));
                       if (next) setStep(next.id);
-                      else setPhase("jobready");
+                      else setPhase("submitted");
                     }}
                     className="text-sm underline underline-offset-2"
                     style={{ color: "var(--color-neutral-400)" }}

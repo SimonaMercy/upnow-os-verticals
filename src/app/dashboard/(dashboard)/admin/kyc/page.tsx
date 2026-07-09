@@ -2,12 +2,12 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef } from "react";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { openDocViewer } from "@/lib/docViewer";
 import {
   Building2, Wrench, Users, Clock, CheckCircle2, XCircle,
   AlertCircle, RefreshCw, ShieldCheck, FileText, Files, User,
-  CreditCard, MousePointerClick, ExternalLink, UserCheck,
+  CreditCard, MousePointerClick, ExternalLink, UserCheck, Layers,
 } from "lucide-react";
 import Link from "next/link";
 import { BackLink } from "@/components/dashboard/DashboardWidgets";
@@ -62,7 +62,35 @@ interface ServiceProvider {
   entityType?: string;
   businessName?: string;
   ownerName?: string;
+  companyName?: string;
   serviceCategory?: string;
+  serviceCategories?: string;
+  servicesOffered?: string | null;
+  scopeOfWork?: string | null;
+  certifications?: string | null;
+  emiratesServed?: string;
+  serviceZones?: string | null;
+  serviceArea?: string | null;
+  availability?: string | null;
+  emergencyResponse?: boolean;
+  isGovernment?: boolean;
+  nationality?: string;
+  gender?: string;
+  dateOfBirth?: string;
+  emiratesIdNumber?: string;
+  contactAddress?: string;
+  tradeLicenseNumber?: string;
+  vatTrn?: string;
+  teamSizeBand?: string | null;
+  fleetSizeBand?: string | null;
+  maxConcurrentJobs?: number | null;
+  minNoticeHours?: number | null;
+  opsContactName?: string | null;
+  opsContactPhone?: string | null;
+  opsContactWhatsapp?: boolean;
+  opsContactLanguages?: string[] | null;
+  accountTypeConfirmedAt?: string | null;
+  jobReadyAt?: string | null;
   complianceStatus: ComplianceStatus;
   complianceNotes?: string;
   averageRating?: number;
@@ -125,6 +153,29 @@ interface RpDetail {
   checklist: ChecklistItem[];
   uploadedDocs: UploadedDoc[];
   completionScore: number;
+}
+
+interface SpService {
+  id: number;
+  category: string;
+  name: string;
+  basePrice: number | null;
+  priceUnit: string;
+  pricingMode: string;
+  currency: string;
+  isFromPrice: boolean;
+  minCalloutCharge: number | null;
+  isEmergency: boolean;
+  listingStatus: string;
+  isAvailable: boolean;
+}
+
+interface SpDetail {
+  profile: ServiceProvider;
+  checklist: ChecklistItem[];
+  uploadedDocs: UploadedDoc[];
+  completionScore: number;
+  services?: SpService[];
 }
 
 type Tab = "rental" | "service" | "tenants" | "managers" | "technicians";
@@ -591,53 +642,743 @@ function RpContentPanel({
   );
 }
 
-// ─── RIGHT panel: SP content ──────────────────────────────────────────────────
+// A titled section card. Fields render as stacked label-over-value pairs in a
+// responsive grid — far easier to scan than stretched "label ……… value" rows,
+// and values wrap in full (IBANs, Emirates IDs) instead of truncating.
+function DetailCard({
+  icon: Icon, title, rows, children, cols = 2,
+}: {
+  icon: React.ElementType;
+  title: string;
+  rows?: { label: string; value?: React.ReactNode }[];
+  children?: React.ReactNode;
+  cols?: 1 | 2;
+}) {
+  return (
+    <section className="rounded-xl overflow-hidden h-full" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+      <div className="flex items-center gap-1.5 px-3.5 py-2.5 border-b"
+        style={{ borderColor: "var(--color-base-100)", backgroundColor: "color-mix(in srgb, var(--color-primary) 4%, white)" }}>
+        <Icon size={13} style={{ color: "var(--color-primary)" }} />
+        <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--color-neutral-600)" }}>{title}</span>
+      </div>
+      <div className="px-3.5 py-3">
+        {rows && rows.length > 0 && (
+          <dl className={`grid ${cols === 1 ? "grid-cols-1" : "grid-cols-2"} gap-x-5 gap-y-3`}>
+            {rows.map(({ label, value }) => {
+              const has = value != null && value !== "";
+              return (
+                <div key={label} className="min-w-0">
+                  <dt className="text-[10px] font-medium uppercase tracking-wide mb-0.5" style={{ color: "var(--color-neutral-400)" }}>{label}</dt>
+                  <dd className="text-[13px] font-semibold leading-snug break-words"
+                    style={{ color: has ? "var(--color-neutral-800)" : "var(--color-neutral-300)" }}>
+                    {has ? value : "—"}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        )}
+        {children && <div className={rows && rows.length > 0 ? "mt-3" : ""}>{children}</div>}
+      </div>
+    </section>
+  );
+}
 
-function SpContentPanel({ sp }: { sp: ServiceProvider }) {
+// A labelled row of pill tags (categories, emirates, languages).
+function ChipRow({ label, items, tone = "primary" }: { label: string; items: string[]; tone?: "primary" | "neutral" }) {
+  if (!items.length) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-medium uppercase tracking-wide mb-1.5" style={{ color: "var(--color-neutral-400)" }}>{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((c) => (
+          <span key={c} className="text-[11px] font-medium px-2.5 py-1 rounded-full capitalize"
+            style={tone === "primary"
+              ? { backgroundColor: "var(--color-primary-50)", color: "var(--color-primary)" }
+              : { backgroundColor: "var(--color-base-100)", color: "var(--color-neutral-600)" }}>
+            {c.replace(/_/g, " ")}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Compact "value + label" stat pill for the at-a-glance header strip.
+function StatPill({ value, label, tone = "neutral" }: { value: React.ReactNode; label: string; tone?: "neutral" | "ok" | "warn" }) {
+  const palette = tone === "ok"
+    ? { bg: "#f0fdf4", border: "#bbf7d0", val: "#15803d", lab: "#16a34a" }
+    : tone === "warn"
+    ? { bg: "#fef2f2", border: "#fecaca", val: "#b91c1c", lab: "#dc2626" }
+    : { bg: "#fff", border: "var(--color-base-200)", val: "var(--color-neutral-800)", lab: "var(--color-neutral-400)" };
+  return (
+    <span className="inline-flex items-baseline gap-1 px-2.5 py-1 rounded-lg border"
+      style={{ backgroundColor: palette.bg, borderColor: palette.border }}>
+      <span className="text-[13px] font-bold leading-none" style={{ color: palette.val }}>{value}</span>
+      <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: palette.lab }}>{label}</span>
+    </span>
+  );
+}
+
+// A labelled subsection inside a DetailCard — a divider + heading, then either a
+// label/value grid (rows) or custom content (children). Lets related-but-distinct
+// groups (owner identity, licensing, coverage) live inside one card.
+function SubGroup({
+  icon: Icon, title, rows, children,
+}: {
+  icon?: React.ElementType;
+  title: string;
+  rows?: { label: string; value?: React.ReactNode }[];
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="pt-3 border-t" style={{ borderColor: "var(--color-base-100)" }}>
+      <div className="flex items-center gap-1.5 mb-2">
+        {Icon && <Icon size={11} style={{ color: "var(--color-primary)" }} />}
+        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--color-neutral-500)" }}>{title}</span>
+      </div>
+      {rows && rows.length > 0 && (
+        <dl className="grid grid-cols-2 gap-x-5 gap-y-3">
+          {rows.map(({ label, value }) => {
+            const has = value != null && value !== "";
+            return (
+              <div key={label} className="min-w-0">
+                <dt className="text-[10px] font-medium uppercase tracking-wide mb-0.5" style={{ color: "var(--color-neutral-400)" }}>{label}</dt>
+                <dd className="text-[13px] font-semibold leading-snug break-words"
+                  style={{ color: has ? "var(--color-neutral-800)" : "var(--color-neutral-300)" }}>
+                  {has ? value : "—"}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// ─── RIGHT panel: SP content + actions ───────────────────────────────────────
+
+function SpContentPanel({
+  detail, sp, spId, loading, error, onStatusChange, onDocUpdate,
+}: {
+  detail: SpDetail | null;
+  sp: ServiceProvider;              // list-row fallback while detail loads
+  spId: number;
+  loading: boolean;
+  error: string | null;
+  onStatusChange: (id: number, status: ComplianceStatus) => void;
+  onDocUpdate: (docId: number, patch: Partial<UploadedDoc>) => void;
+}) {
+  const [acting, setActing] = useState(false);
+  const [docActing, setDocActing] = useState<number | null>(null);
+  const [notes, setNotes] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setNotes("");
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [spId]);
+
+  // Prefer the freshly-fetched detail profile; fall back to the list row so the
+  // header/badge render immediately while the detail request is in flight.
+  const profile = detail?.profile ?? sp;
+  const docs = detail?.uploadedDocs ?? [];
+
+  // Required-document checklist — drives the approval gate + "missing" card.
+  const checklist = detail?.checklist ?? [];
+  const requiredItems = checklist.filter((c) => c.required);
+  const missingRequired = requiredItems.filter((c) => !c.uploaded);
+
+  const titleize = (s?: string | null) => (s ?? "").replace(/_/g, " ");
+  const csv = (s?: string | null) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : []);
+  const categories = profile.serviceCategories ? csv(profile.serviceCategories)
+    : profile.serviceCategory ? [profile.serviceCategory] : [];
+  const emirates = csv(profile.emiratesServed);
+  const languages = Array.isArray(profile.opsContactLanguages) ? profile.opsContactLanguages : [];
+  // serviceZones is stored as a JSON string: { dubai: ["JLT","Marina"], … }
+  let zones: Record<string, string[]> = {};
+  try { zones = profile.serviceZones ? JSON.parse(profile.serviceZones) : {}; } catch { zones = {}; }
+  const zoneEntries = Object.entries(zones).filter(([, v]) => Array.isArray(v) && v.length);
+
+  // Adopted catalogue services (the "sub-categories" under each category),
+  // grouped by category so the reviewer sees exactly what was priced.
+  const services = detail?.services ?? [];
+  const servicesByCat = services.reduce<Record<string, SpService[]>>((acc, s) => {
+    (acc[s.category] ??= []).push(s); return acc;
+  }, {});
+  const priceLabel = (s: SpService) => {
+    if (s.pricingMode === "quote" || s.basePrice == null)
+      return s.minCalloutCharge != null ? `Quote · callout AED ${s.minCalloutCharge}` : "Quote after callout";
+    const unit = s.priceUnit === "per_hour" ? "/hr" : s.priceUnit === "per_unit" ? "/unit" : "";
+    return `${s.isFromPrice ? "from " : ""}${s.currency ?? "AED"} ${s.basePrice}${unit}`;
+  };
+
+  // ── Approval decision engine ────────────────────────────────────────────────
+  // Synthesised from compliance / operations / fraud review criteria: the auto-
+  // computable gates an admin needs before approving a vendor, the red flags
+  // that separate legit companies from shell registrations, and the manual
+  // document checks the panel should prompt. Everything derives from fields
+  // already on the detail payload.
+  const digitsOf = (s?: string | null) => (s ?? "").replace(/\D/g, "");
+  const MS_DAY = 86_400_000;
+  const now = Date.now();
+  const docByKey = (k: string) => docs.find((d) => d.documentKey === k);
+  const expiryDays = (d?: UploadedDoc) =>
+    d?.expiryDate ? Math.floor((new Date(d.expiryDate).getTime() - now) / MS_DAY) : null;
+
+  const expiredDocs  = docs.filter((d) => { const n = expiryDays(d); return n != null && n < 0; });
+  const expiringDocs = docs.filter((d) => { const n = expiryDays(d); return n != null && n >= 0 && n <= 30; });
+
+  const eidDigits = digitsOf(profile.emiratesIdNumber);
+  const eidValid = /^784\d{12}$/.test(eidDigits);
+  const trnDigits = digitsOf(profile.vatTrn);
+  const age = profile.dateOfBirth
+    ? Math.floor((now - new Date(profile.dateOfBirth).getTime()) / (365.25 * MS_DAY))
+    : null;
+  const emailDomain = (profile.user?.email ?? "").split("@")[1]?.toLowerCase() ?? "";
+  const DISPOSABLE_DOMAINS = ["mailinator.com", "yopmail.com", "guerrillamail.com", "temp-mail.org", "10minutemail.com", "tempmail.com", "trashmail.com", "maildrop.cc", "getnada.com", "dispostable.com", "sharklasers.com"];
+  const FREE_WEBMAIL = ["gmail.com", "hotmail.com", "yahoo.com", "outlook.com", "icloud.com", "live.com"];
+  const unpricedCats = categories.filter((c) => !(servicesByCat[c]?.length));
+
+  type CheckStatus = "pass" | "warn" | "fail";
+  const checks: { label: string; status: CheckStatus; detail: string }[] = [];
+
+  // Hands-on home services are company-only under UAE law (freelance permits
+  // don't cover them) — an individual entity can never be approved as-is.
+  checks.push(profile.entityType === "company"
+    ? { label: "Licensed company", status: "pass", detail: "Company entity — eligible for hands-on services" }
+    : { label: "Licensed company", status: "fail", detail: "Individual entity — hands-on services require a licensed company" });
+
+  checks.push(missingRequired.length === 0
+    ? { label: "Required documents", status: "pass", detail: `All ${requiredItems.length} on file` }
+    : { label: "Required documents", status: "fail", detail: `${missingRequired.length} missing: ${missingRequired.map((c) => c.displayName).join(", ")}` });
+
+  checks.push(expiredDocs.length > 0
+    ? { label: "Documents in date", status: "fail", detail: `Expired: ${expiredDocs.map((d) => titleize(d.documentKey)).join(", ")}` }
+    : expiringDocs.length > 0
+    ? { label: "Documents in date", status: "warn", detail: expiringDocs.map((d) => `${titleize(d.documentKey)} expires in ${expiryDays(d)}d`).join("; ") }
+    : { label: "Documents in date", status: "pass", detail: "No expired or imminently-expiring documents" });
+
+  checks.push(!profile.emiratesIdNumber
+    ? { label: "Signatory Emirates ID", status: "warn", detail: "No EID number on profile — read it from the document" }
+    : eidValid
+    ? { label: "Signatory Emirates ID", status: "pass", detail: profile.emiratesIdNumber }
+    : { label: "Signatory Emirates ID", status: "warn", detail: `"${profile.emiratesIdNumber}" — not a valid 15-digit 784… number` });
+
+  checks.push(profile.tradeLicenseNumber
+    ? { label: "Trade licence No.", status: "pass", detail: profile.tradeLicenseNumber }
+    : { label: "Trade licence No.", status: "warn", detail: "Not on profile — confirm from the licence document" });
+
+  checks.push(!trnDigits
+    ? { label: "VAT TRN", status: "warn", detail: "Not provided — assumed below registration threshold" }
+    : /^\d{15}$/.test(trnDigits)
+    ? { label: "VAT TRN", status: "pass", detail: profile.vatTrn as string }
+    : { label: "VAT TRN", status: "fail", detail: `"${profile.vatTrn}" — TRN must be exactly 15 digits` });
+
+  checks.push((profile.user?.phone || profile.opsContactPhone)
+    ? { label: "Contactable", status: "pass", detail: [profile.user?.phone, profile.opsContactName ? `ops: ${profile.opsContactName}` : null].filter(Boolean).join(" · ") }
+    : { label: "Contactable", status: "fail", detail: "No phone number on account or ops contact" });
+
+  checks.push(profile.user?.status === "suspended"
+    ? { label: "Account standing", status: "fail", detail: "User account is suspended — do not approve" }
+    : { label: "Account standing", status: "pass", detail: "Account active" });
+
+  // Per-document review state — every uploaded doc should be individually
+  // approved (processed) or rejected before the profile-level verdict.
+  const rejectedDocs = docs.filter((d) => String(d.status).toLowerCase() === "rejected");
+  const pendingDocs = docs.filter((d) => ["attached", "pending"].includes(String(d.status).toLowerCase()));
+  const verifiedDocs = docs.filter((d) => ["processed", "complete"].includes(String(d.status).toLowerCase()));
+  if (docs.length > 0) {
+    checks.push(rejectedDocs.length > 0
+      ? { label: "Documents reviewed", status: "fail", detail: `${rejectedDocs.length} rejected — awaiting re-upload: ${rejectedDocs.map((d) => titleize(d.documentKey)).join(", ")}` }
+      : pendingDocs.length > 0
+      ? { label: "Documents reviewed", status: "warn", detail: `${pendingDocs.length} of ${docs.length} awaiting review — approve or reject each below` }
+      : { label: "Documents reviewed", status: "pass", detail: `All ${verifiedDocs.length} uploaded documents verified` });
+  }
+
+  // Red flags — plausibility/fraud signals that don't map to a single gate.
+  const flags: string[] = [];
+  if (DISPOSABLE_DOMAINS.includes(emailDomain)) flags.push(`Disposable email domain (${emailDomain})`);
+  else if (profile.entityType === "company" && FREE_WEBMAIL.includes(emailDomain)) flags.push(`Company using free webmail (${emailDomain})`);
+  if (profile.teamSizeBand === "1-2" && (categories.length >= 3 || emirates.length >= 3))
+    flags.push(`Solo team (1-2) promising ${categories.length} categories across ${emirates.length} emirate${emirates.length === 1 ? "" : "s"}`);
+  if (profile.fleetSizeBand === "0" && emirates.length > 1) flags.push("No vehicles but multi-emirate coverage");
+  if (profile.teamSizeBand === "1-2" && services.some((s) => s.isEmergency)) flags.push("Offers 24/7 emergency services with a 1-2 person team");
+  if (unpricedCats.length > 0) flags.push(`No priced services in: ${unpricedCats.map(titleize).join(", ")}`);
+  if (age != null && age < 18) flags.push(`Signatory is under 18 (age ${age})`);
+  if ((profile.totalReviews ?? 0) > 0 && profile.complianceStatus !== "compliant") flags.push("Has reviews before approval — possible account reuse");
+
+  const gateFailures = checks.filter((c) => c.status === "fail");
+
+  // Manual eyeball prompts — what the reviewer must confirm on the documents
+  // themselves before approving; each links straight to the relevant file.
+  const manualVerify = [
+    { text: `Licence activities cover all ${categories.length} selected categories`, docKey: "trade_license" },
+    { text: `Emirates ID name & DOB match “${profile.ownerName ?? "the owner"}”`, docKey: "emirates_id" },
+    { text: "Bank / IBAN letter account holder matches the company name", docKey: "bank_statement" },
+    { text: "MOA names the signatory as owner / authorised manager", docKey: "moa" },
+  ];
+
+  async function act(status: ComplianceStatus) {
+    setActing(true);
+    try {
+      await apiPatch(`/admin/kyc/service-providers/${spId}/compliance`, {
+        complianceStatus: status,
+        ...(notes.trim() ? { complianceNotes: notes.trim() } : {}),
+      });
+      onStatusChange(spId, status);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setActing(false);
+    }
+  }
+
+  // Approve / reject a single document. Reject prompts for a reason — it's
+  // stored on the document and shown to the provider on their Documents page.
+  async function reviewDoc(docId: number, action: "verify" | "reject") {
+    let reason: string | undefined;
+    if (action === "reject") {
+      const input = window.prompt("Reason for rejecting this document (shown to the provider):", "");
+      if (input === null) return; // cancelled
+      reason = input.trim() || undefined;
+    }
+    setDocActing(docId);
+    try {
+      const updated = await apiPost<{ status?: string; notes?: string | null }>(
+        `/admin/kyc/documents/${docId}/${action}`,
+        action === "reject" ? { reason } : {},
+      );
+      onDocUpdate(docId, {
+        status: updated?.status ?? (action === "verify" ? "processed" : "rejected"),
+        notes: action === "reject" ? (reason ?? null) : null,
+      });
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDocActing(null);
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+
         <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>
-              {sp.businessName ?? sp.ownerName ?? providerName(sp, `SP #${sp.id}`)}
+              {profile.businessName ?? profile.ownerName ?? providerName(profile, `SP #${spId}`)}
             </h2>
-            <ComplianceBadge s={sp.complianceStatus} />
+            <ComplianceBadge s={profile.complianceStatus} />
             <div className="ml-auto">
-              <UserStatusToggle userId={sp.user?.id} status={sp.user?.status} />
+              <UserStatusToggle userId={profile.user?.id} status={profile.user?.status} />
             </div>
           </div>
-          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{sp.user?.email}</p>
+          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>
+            {profile.user?.email}{profile.user?.phone ? ` · ${profile.user.phone}` : ""}
+          </p>
+
+          {/* At-a-glance — quick scan of the application's shape */}
+          {!loading && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <StatPill value={categories.length} label="categories" />
+              <StatPill value={services.length} label="services" />
+              <StatPill value={emirates.length} label="emirates" />
+              {requiredItems.length > 0 && (
+                <StatPill
+                  value={`${requiredItems.length - missingRequired.length}/${requiredItems.length}`}
+                  label="docs"
+                  tone={missingRequired.length > 0 ? "warn" : "ok"}
+                />
+              )}
+              {detail && (gateFailures.length + flags.length > 0 ? (
+                <StatPill value={gateFailures.length + flags.length}
+                  label={gateFailures.length + flags.length === 1 ? "issue" : "issues"} tone="warn" />
+              ) : (
+                <StatPill value="0" label="issues" tone="ok" />
+              ))}
+            </div>
+          )}
+
+          {profile.complianceNotes && (
+            <p className="text-xs mt-2 px-2.5 py-1.5 rounded-lg"
+              style={{ backgroundColor: "#fef9eb", color: "#92400e" }}>
+              <span className="font-semibold">Note: </span>{profile.complianceNotes}
+            </p>
+          )}
         </div>
 
-        <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
-          <div className="grid grid-cols-2 gap-x-4">
-            {[
-              { label: "Entity type", value: sp.entityType?.replace(/_/g, " ") },
-              { label: "Category",    value: sp.serviceCategory?.replace(/_/g, " ") },
-              { label: "Rating",      value: sp.averageRating != null ? `${sp.averageRating.toFixed(1)} (${sp.totalReviews ?? 0})` : undefined },
-              { label: "Notes",       value: sp.complianceNotes },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex items-center justify-between py-1.5 border-b"
-                style={{ borderColor: "var(--color-base-100)" }}>
-                <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-                <span className="text-xs font-semibold"
-                  style={{ color: value ? "var(--color-neutral-800)" : "var(--color-neutral-300)" }}>
-                  {value ?? "—"}
+        {loading && (
+          <div className="flex items-center justify-center h-32 text-sm"
+            style={{ color: "var(--color-neutral-400)" }}>Loading…</div>
+        )}
+        {error && (
+          <div className="text-sm p-3 rounded-xl"
+            style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>{error}</div>
+        )}
+
+        <div className="space-y-3">
+
+          {/* Approval Checks — the decision summary: auto-computed gates, red
+              flags, and the manual document verifications, all in one card so
+              the admin can decide without hunting through the sections below. */}
+          {!loading && detail && (
+            <section className="rounded-xl overflow-hidden" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+              <div className="flex items-center gap-1.5 px-3.5 py-2.5 border-b"
+                style={{
+                  borderColor: "var(--color-base-100)",
+                  backgroundColor: gateFailures.length ? "#fef2f2" : "color-mix(in srgb, var(--color-primary) 4%, white)",
+                }}>
+                <ShieldCheck size={13} style={{ color: gateFailures.length ? "#dc2626" : "var(--color-primary)" }} />
+                <span className="text-[11px] font-bold uppercase tracking-wider"
+                  style={{ color: gateFailures.length ? "#b91c1c" : "var(--color-neutral-600)" }}>
+                  Approval Checks · {checks.filter((c) => c.status === "pass").length}/{checks.length} passing
+                  {gateFailures.length > 0 ? ` · ${gateFailures.length} blocking` : ""}
                 </span>
               </div>
-            ))}
+              <div className="px-3.5 py-3 space-y-3">
+
+                {/* Auto-computed gates */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-2">
+                  {checks.map((c) => {
+                    const Icon = c.status === "pass" ? CheckCircle2 : c.status === "warn" ? AlertCircle : XCircle;
+                    const color = c.status === "pass" ? "#16a34a" : c.status === "warn" ? "#b45309" : "#dc2626";
+                    return (
+                      <div key={c.label} className="flex items-start gap-2 min-w-0">
+                        <Icon size={13} style={{ color, marginTop: 2 }} className="shrink-0" />
+                        <p className="text-xs leading-snug min-w-0">
+                          <span className="font-semibold" style={{ color: "var(--color-neutral-800)" }}>{c.label}</span>
+                          <span style={{ color: c.status === "pass" ? "var(--color-neutral-400)" : color }}> — {c.detail}</span>
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Red flags — only when something triggers */}
+                {flags.length > 0 && (
+                  <div className="rounded-lg px-3 py-2" style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca" }}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: "#b91c1c" }}>
+                      Red flags · {flags.length}
+                    </p>
+                    <div className="space-y-1">
+                      {flags.map((f) => (
+                        <p key={f} className="text-[11px] flex items-start gap-1.5 leading-snug" style={{ color: "#991b1b" }}>
+                          <AlertCircle size={11} className="shrink-0" style={{ marginTop: 1 }} />{f}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual verifications — the reviewer's document checklist */}
+                <div className="pt-2.5 border-t" style={{ borderColor: "var(--color-base-100)" }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: "var(--color-neutral-500)" }}>
+                    Verify on the documents before approving
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-1.5">
+                    {manualVerify.map((m) => {
+                      const doc = docByKey(m.docKey);
+                      return (
+                        <div key={m.text} className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] flex items-start gap-1.5 min-w-0 leading-snug" style={{ color: "var(--color-neutral-600)" }}>
+                            <span className="shrink-0 font-bold" style={{ color: "var(--color-neutral-300)" }}>☐</span>
+                            <span>{m.text}</span>
+                          </span>
+                          {doc?.fileUrl && (
+                            <button type="button"
+                              onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: titleize(m.docKey) })}
+                              className="text-[11px] font-semibold shrink-0 cursor-pointer flex items-center gap-0.5"
+                              style={{ color: "var(--color-primary)" }}>
+                              <ExternalLink size={10} /> View
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Two-column masonry to cut vertical scroll — cards flow into two
+              balanced columns (single column on narrow screens). Reads top-to-
+              bottom down the first column, then the second. */}
+          <div className="lg:columns-2 gap-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
+
+          {/* Business basics + owner identity + licensing, all one entity card */}
+          <DetailCard icon={Building2} title="Business & Owner" rows={[
+            { label: "Entity type",       value: titleize(profile.entityType) },
+            { label: "Business name",     value: profile.businessName },
+            { label: "Owner / signatory", value: profile.ownerName },
+            { label: "Registered",        value: profile.createdAt ? new Date(profile.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : undefined },
+          ]}>
+            <div className="space-y-3">
+              <SubGroup icon={User} title="Owner Identity" rows={[
+                { label: "Emirates ID",   value: profile.emiratesIdNumber },
+                { label: "Nationality",   value: profile.nationality },
+                { label: "Date of birth", value: profile.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : undefined },
+              ]} />
+              <SubGroup icon={CreditCard} title="Licensing & Tax" rows={[
+                { label: "Trade licence No.", value: profile.tradeLicenseNumber },
+                { label: "VAT TRN",           value: profile.vatTrn },
+              ]} />
+            </div>
+          </DetailCard>
+
+          {/* Operations + coverage (where they work) in one card */}
+          <DetailCard icon={Users} title="Operations & Coverage" rows={[
+            { label: "Team size",   value: profile.teamSizeBand },
+            { label: "Fleet size",  value: profile.fleetSizeBand },
+            { label: "Min notice",  value: profile.minNoticeHours != null ? `${profile.minNoticeHours} h` : undefined },
+            { label: "Ops contact", value: profile.opsContactName },
+            { label: "Ops phone",   value: profile.opsContactPhone },
+            { label: "WhatsApp",    value: profile.opsContactWhatsapp ? "Yes" : "No" },
+            { label: "Job-ready",   value: profile.jobReadyAt ? new Date(profile.jobReadyAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : "Not yet" },
+          ]}>
+            <div className="space-y-3">
+              <ChipRow label="Languages" items={languages} tone="neutral" />
+              <SubGroup icon={ShieldCheck} title="Coverage">
+                <ChipRow label={`Emirates served (${emirates.length})`} items={emirates} tone="neutral" />
+                {emirates.length === 0 && (
+                  <p className="text-xs" style={{ color: "var(--color-neutral-300)" }}>No emirates selected.</p>
+                )}
+                {zoneEntries.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>Zones</p>
+                    {zoneEntries.map(([em, list]) => (
+                      <div key={em} className="flex gap-1.5 text-xs">
+                        <span className="capitalize font-semibold shrink-0" style={{ color: "var(--color-neutral-600)" }}>{titleize(em)}:</span>
+                        <span style={{ color: "var(--color-neutral-500)" }}>{list.join(", ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SubGroup>
+            </div>
+          </DetailCard>
+
+          {/* Step 2 — categories with their priced services listed underneath.
+              One unified grouped price-list (no separate chip row) so the
+              category headers and service names never blur together. */}
+          <DetailCard icon={Wrench} title="Services">
+            {categories.length === 0 ? (
+              <p className="text-xs" style={{ color: "var(--color-neutral-300)" }}>No categories selected.</p>
+            ) : (
+              <>
+                <div className="flex items-baseline justify-between mb-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "var(--color-neutral-400)" }}>
+                    Categories &amp; services offered
+                  </p>
+                  <span className="text-[10px] tabular-nums" style={{ color: "var(--color-neutral-400)" }}>
+                    {categories.length} categories · {services.length} services
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {categories.map((cat) => {
+                    const list = servicesByCat[cat] ?? [];
+                    return (
+                      <div key={cat}>
+                        {/* Category header bar — tinted + uppercase so it can't be
+                            confused with a service row of the same name */}
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg mb-1"
+                          style={{ backgroundColor: "var(--color-primary-50)" }}>
+                          <Layers size={11} style={{ color: "var(--color-primary)" }} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--color-primary)" }}>
+                            {titleize(cat)}
+                          </span>
+                          <span className="ml-auto text-[10px] font-medium" style={{ color: "var(--color-primary)", opacity: 0.7 }}>
+                            {list.length ? `${list.length} service${list.length === 1 ? "" : "s"}` : "none priced"}
+                          </span>
+                        </div>
+                        {list.length > 0 ? (
+                          <div className="pl-1">
+                            {list.map((s) => (
+                              <div key={s.id} className="flex items-baseline justify-between gap-3 py-1.5 border-b border-dashed last:border-b-0"
+                                style={{ borderColor: "var(--color-base-200)" }}>
+                                <span className="text-[13px] flex items-center gap-1.5 min-w-0" style={{ color: "var(--color-neutral-800)" }}>
+                                  <span className="truncate">{s.name}</span>
+                                  {s.isEmergency && <span className="text-[9px] font-semibold px-1 rounded shrink-0" style={{ backgroundColor: "#fef2f2", color: "#dc2626" }}>24/7</span>}
+                                </span>
+                                <span className="text-[13px] font-semibold shrink-0 tabular-nums" style={{ color: "var(--color-neutral-700)" }}>
+                                  {priceLabel(s)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] pl-2 py-0.5" style={{ color: "var(--color-neutral-300)" }}>
+                            No services priced in this category yet.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </DetailCard>
+
           </div>
+
+          {/* KYC documents — full-width row at the end; two-up so rows breathe */}
+          {(checklist.length > 0 || docs.length > 0) && (
+            <section className="rounded-xl overflow-hidden" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+              <div className="flex items-center gap-1.5 px-3.5 py-2.5 border-b"
+                style={{ borderColor: "var(--color-base-100)", backgroundColor: "color-mix(in srgb, var(--color-primary) 4%, white)" }}>
+                <FileText size={13} style={{ color: "var(--color-primary)" }} />
+                <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--color-neutral-600)" }}>
+                  KYC Documents{checklist.length > 0 ? ` · ${checklist.filter((c) => c.uploaded).length}/${checklist.length}` : ""}
+                </span>
+                {docs.some((d) => d.fileUrl) && (
+                  <button type="button"
+                    onClick={() => openDocViewer(
+                      docs.filter((d) => d.fileUrl).map((d) => ({ fileUrl: d.fileUrl, caption: titleize(d.documentKey) })),
+                      "KYC Documents",
+                    )}
+                    className="ml-auto flex items-center gap-0.5 text-[11px] font-semibold cursor-pointer"
+                    style={{ color: "var(--color-primary)" }}>
+                    <ExternalLink size={11} /> View all
+                  </button>
+                )}
+              </div>
+              <div className="px-3.5 py-1">
+                {(checklist.length > 0 ? checklist : docs.map((d) => ({
+                  key: d.documentKey, displayName: titleize(d.documentKey), required: false,
+                  uploaded: true, fileUrl: d.fileUrl,
+                }))).map((c) => {
+                  const doc = docs.find((d) => d.documentKey === c.key);
+                  const fileUrl = ("fileUrl" in c && c.fileUrl) || doc?.fileUrl || null;
+                  const days = expiryDays(doc);
+                  const st = String(doc?.status ?? "").toLowerCase();
+                  const isVerified = ["processed", "complete"].includes(st);
+                  const isRejected = st === "rejected";
+                  const isExpired = days != null && days < 0;
+                  // Badge reflects the review verdict, not just upload presence.
+                  const badge = !c.uploaded
+                    ? { text: "missing",        bg: "#fef2f2", color: "#dc2626" }
+                    : isRejected
+                    ? { text: "rejected",       bg: "#fef2f2", color: "#dc2626" }
+                    : isExpired
+                    ? { text: "expired",        bg: "#fef3c7", color: "#b45309" }
+                    : isVerified
+                    ? { text: "verified",       bg: "#dcfce7", color: "#15803d" }
+                    : { text: "pending review", bg: "#fef3c7", color: "#b45309" };
+                  return (
+                    <div key={c.key} className="py-2 border-b last:border-b-0" style={{ borderColor: "var(--color-base-100)" }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate" style={{ color: "var(--color-neutral-700)" }}>
+                            {c.displayName}
+                            {c.required && <span className="ml-1 text-[10px]" style={{ color: "#dc2626" }}>• required</span>}
+                          </p>
+                          {doc?.expiryDate && (
+                            <p className="text-xs font-medium"
+                              style={{ color: isExpired ? "#dc2626" : days != null && days <= 30 ? "#b45309" : "var(--color-neutral-400)" }}>
+                              {isExpired
+                                ? `Expired ${new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}`
+                                : days != null && days <= 30
+                                ? `Expires in ${days}d — ${new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}`
+                                : `Exp: ${new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}`}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: badge.bg, color: badge.color }}>
+                            {badge.text}
+                          </span>
+                          {fileUrl && (
+                            <button type="button" onClick={() => openDocViewer({ fileUrl, caption: c.displayName })}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer"
+                              style={{
+                                backgroundColor: "var(--color-primary-50)",
+                                color: "var(--color-primary)",
+                                border: "1px solid color-mix(in srgb, var(--color-primary) 25%, white)",
+                              }}
+                              title="View document">
+                              <ExternalLink size={11} /> View
+                            </button>
+                          )}
+                          {/* Per-document review verdict */}
+                          {doc && !isVerified && (
+                            <button type="button" disabled={docActing === doc.id}
+                              onClick={() => void reviewDoc(doc.id, "verify")}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                              style={{ backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}
+                              title="Approve this document">
+                              <CheckCircle2 size={11} /> Approve
+                            </button>
+                          )}
+                          {doc && !isRejected && (
+                            <button type="button" disabled={docActing === doc.id}
+                              onClick={() => void reviewDoc(doc.id, "reject")}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                              style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}
+                              title="Reject this document (provider must re-upload)">
+                              <XCircle size={11} /> Reject
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {isRejected && doc?.notes && (
+                        <p className="text-[11px] mt-1 px-2 py-1 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#991b1b" }}>
+                          <span className="font-semibold">Rejection reason: </span>{doc.notes}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       </div>
 
-      <div className="shrink-0 border-t px-4 py-3"
+      {/* Sticky action bar */}
+      <div className="shrink-0 border-t px-4 py-3 space-y-2"
         style={{ borderColor: "var(--color-base-200)", backgroundColor: "#fff" }}>
-        {/* The dedicated SP KYC review page isn't built yet — link removed so it
-            no longer 404s. SP details are shown inline above. */}
-        <div className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-semibold"
-          style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral-400)" }}>
-          <ShieldCheck size={13} /> Full KYC review — coming soon
+        <input
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Notes (optional — shown to provider on action required)"
+          className="w-full px-3 py-1.5 rounded-lg text-xs border outline-none"
+          style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-800)" }}
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              // Surface every failing gate + red flag before letting the admin
+              // approve — approving over them is allowed but must be deliberate.
+              const blockers = [
+                ...gateFailures.map((c) => `✗ ${c.label} — ${c.detail}`),
+                ...flags.map((f) => `⚑ ${f}`),
+              ];
+              if (blockers.length > 0 && !window.confirm(
+                `${gateFailures.length} failing check${gateFailures.length === 1 ? "" : "s"} and ${flags.length} red flag${flags.length === 1 ? "" : "s"}:\n\n` +
+                blockers.join("\n") +
+                `\n\nApprove (Mark Compliant) anyway?`,
+              )) return;
+              void act("compliant");
+            }}
+            disabled={acting || loading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+            style={{ backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}>
+            <CheckCircle2 size={13} /> Mark Compliant
+          </button>
+          <button onClick={() => void act("action_required")} disabled={acting || loading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+            style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}>
+            <AlertCircle size={13} /> Mark Action Required
+          </button>
+          <button onClick={() => void act("expired")} disabled={acting || loading}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+            style={{ backgroundColor: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+            <XCircle size={13} /> Mark Expired
+          </button>
         </div>
       </div>
     </div>
@@ -1027,6 +1768,10 @@ export default function AdminKycPage() {
   const [rpDetail, setRpDetail]               = useState<RpDetail | null>(null);
   const [rpDetailLoading, setRpDetailLoading] = useState(false);
   const [rpDetailError, setRpDetailError]     = useState<string | null>(null);
+  // SP detail fetched when an SP is selected — profile + checklist + docs
+  const [spDetail, setSpDetail]               = useState<SpDetail | null>(null);
+  const [spDetailLoading, setSpDetailLoading] = useState(false);
+  const [spDetailError, setSpDetailError]     = useState<string | null>(null);
   const [tenantDetail, setTenantDetail]       = useState<TenantDetail | null>(null);
   const [tenantDocsLoading, setTenantDocsLoading] = useState(false);
 
@@ -1146,6 +1891,20 @@ export default function AdminKycPage() {
     return () => controller.abort();
   }, [selectedId, tab]);
 
+  // Fetch full SP detail whenever the selected SP changes (same abort guard as RP).
+  useEffect(() => {
+    if (tab !== "service" || selectedId === null) { setSpDetail(null); return; }
+    const controller = new AbortController();
+    setSpDetail(null);
+    setSpDetailLoading(true);
+    setSpDetailError(null);
+    apiGet<SpDetail>(`/admin/kyc/service-providers/${selectedId}`, { signal: controller.signal })
+      .then((d) => { if (!controller.signal.aborted) setSpDetail(d); })
+      .catch((e) => { if (!controller.signal.aborted) setSpDetailError((e as Error).message); })
+      .finally(() => { if (!controller.signal.aborted) setSpDetailLoading(false); });
+    return () => controller.abort();
+  }, [selectedId, tab]);
+
   // Load the selected customer's uploaded documents inline (same data the
   // standalone Full KYC page uses) so everything lives inside the tab.
   useEffect(() => {
@@ -1172,6 +1931,18 @@ export default function AdminKycPage() {
   function handleStatusFilter(s: StatusFilter) { setStatusFilter(s); setSelectedId(null); }
   function handleRpStatusChange(id: number, status: ComplianceStatus) {
     setRps((prev) => prev.map((r) => r.id === id ? { ...r, complianceStatus: status } : r));
+  }
+  function handleSpStatusChange(id: number, status: ComplianceStatus) {
+    setSps((prev) => prev.map((s) => s.id === id ? { ...s, complianceStatus: status } : s));
+    setSpDetail((prev) => prev && prev.profile.id === id
+      ? { ...prev, profile: { ...prev.profile, complianceStatus: status } } : prev);
+  }
+  // Patch one document in the loaded SP detail after an approve/reject verdict
+  // so the row + "Documents reviewed" check update without a refetch.
+  function handleSpDocUpdate(docId: number, patch: Partial<UploadedDoc>) {
+    setSpDetail((prev) => prev
+      ? { ...prev, uploadedDocs: prev.uploadedDocs.map((d) => d.id === docId ? { ...d, ...patch } : d) }
+      : prev);
   }
 
   const filteredRps     = rps.filter((r)  => statusFilter === "all" || r.complianceStatus === statusFilter);
@@ -1365,7 +2136,15 @@ export default function AdminKycPage() {
                   onStatusChange={handleRpStatusChange}
                 />
               ) : selectedSp ? (
-                <SpContentPanel sp={selectedSp} />
+                <SpContentPanel
+                  detail={spDetail}
+                  sp={selectedSp}
+                  spId={selectedSp.id}
+                  loading={spDetailLoading}
+                  error={spDetailError}
+                  onStatusChange={handleSpStatusChange}
+                  onDocUpdate={handleSpDocUpdate}
+                />
               ) : selectedTenant ? (
                 <TenantContentPanel tenant={selectedTenant} detail={tenantDetail} loading={tenantDocsLoading} />
               ) : selectedManager ? (
