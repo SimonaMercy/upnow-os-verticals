@@ -696,6 +696,10 @@ interface StepHandlers {
   /** Confirm the post-dated cheques were collected → PATCH /contracts/:id/confirm-pdc.
    *  Unlocks the Signatures step on a renewal (Cheques/PDC → Signatures). */
   onConfirmPdc: () => Promise<void>;
+  /** Renewal Cheques/PDC step — RP uploads the Payment Advice on the customer's
+   *  behalf, or marks the cheques as already on file once it's attached. */
+  onUploadCheques: () => void;
+  onMarkChequesOnFile: () => Promise<void>;
   /** Accept the customer's re-uploaded renewal KYC documents → PATCH
    *  /contracts/:id/renewal/accept-docs. Unlocks the Cheques step (Documents → Cheques). */
   onAcceptDocs: () => Promise<void>;
@@ -705,7 +709,7 @@ interface StepHandlers {
   onRejectDoc: (docId: number) => void;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
-  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string }) => Promise<void>;
+  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string }) => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
@@ -784,6 +788,23 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
           Waiting for {h.contract.tenant.name || 'the customer'} to upload &amp; submit their cheques. Once they do, record each cheque here and mark them collected to unlock signing.
         </div>
         <button className="ca" style={{ justifySelf: 'start', padding: 0 }} onClick={() => h.openDrawer('payments')}>View the renewal cheque schedule</button>
+        {chequeDocs.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <span className="note" style={{ fontWeight: 600 }}>Payment Advice already on file:</span>
+            {chequeDocs.map((d, i) => (
+              <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
+                <ExternalLink size={12} /> {d.displayName ?? `Cheque ${i + 1}`}
+              </button>
+            ))}
+          </div>
+        )}
+        {canEdit && (
+          <UploadAction
+            fileLabel="Payment-Advice.pdf"
+            onUpload={h.onUploadCheques}
+            onMark={() => void h.onMarkChequesOnFile()}
+          />
+        )}
       </div>
     );
   }
@@ -1841,7 +1862,7 @@ function DetailsDrawer({
   /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / VAT / reference / description. */
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
-    description?: string | null; transactionDate?: string | null; paymentMethod?: string;
+    description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
   }) => Promise<void>;
   /** DELETE /api/contracts/:id/payments/:paymentId — remove a fee / payment line. */
   onDeletePayment: (paymentId: number) => Promise<void>;
@@ -2077,16 +2098,59 @@ function DetailsDrawer({
   // kept out of the rent schedule and rent totals.
   const feeRows = contract.fees ?? [];
   const feeGross = feeRows.reduce((s, p) => s + (p.amount || 0), 0);
+  // Custom "Other" charges are stored as payments (payment_type 'other') — per-unit
+  // taxes, service fees like "Fire Fighting". They are NOT rent, so pull them out of
+  // the rent schedule + rent totals and show them under Fees (smallest → largest,
+  // matching the receipt / payment-plan order). `rentRows` itself is left intact so
+  // the live payment-plan (currentPlanItems below) still sees every row.
+  const otherPaymentRows = rentRows
+    .filter(p => (p.paymentType ?? '') === 'other')
+    .slice()
+    .sort((a, b) => (a.amount ?? 0) - (b.amount ?? 0));
+  const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other');
+  const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
   const feeLabel = (t: string | null) =>
-    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission' : (t ?? 'Fee');
-  // ── Fees editor (admin-filled: admin / ejari / commission). Fees are never
-  //    auto-fabricated — the RP enters them here. Amount is NET (excl. VAT);
-  //    VAT is an optional separate figure; the stored gross = net + VAT. ──
+    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission'
+      : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
+      : (t ?? 'Fee');
+  // ── Fees editor (admin-filled: admin / ejari / commission + cheque charges).
+  //    Fees are never auto-fabricated — the RP enters them here. Amount is NET
+  //    (excl. VAT); VAT is an optional separate figure; stored gross = net + VAT.
+  //    The three cheque-charge types auto-fill their amount from Settings → Rules. ──
   const FEE_TYPE_OPTIONS = [
     { value: 'admin_fee', label: 'Admin fee' },
     { value: 'ejari_fee', label: 'Ejari fee' },
     { value: 'commission', label: 'Commission' },
+    { value: 'bounced_cheque_fee', label: 'Bounced cheque' },
+    { value: 'cheque_replacement_fee', label: 'Cheque replacement' },
+    { value: 'cheque_deferral_fee', label: 'Cheque deferral' },
   ];
+  // Auto-fill amounts for the cheque-charge fee types, read once from the RP's
+  // penalty settings (bounced → bouncedChequePenaltyFee, replacement →
+  // chequeHoldPenaltyFee, deferral → chequeDeferralPenaltyFee). null = unset.
+  const [chequeFees, setChequeFees] = useState<Record<string, number | null>>({});
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { profile?: Record<string, unknown> } | null) => {
+        const rp = data?.profile;   // GET returns { profile, checklist }
+        if (!alive || !rp) return;
+        const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
+        setChequeFees({
+          bounced_cheque_fee: num(rp.bouncedChequePenaltyFee),
+          cheque_replacement_fee: num(rp.chequeHoldPenaltyFee),
+          cheque_deferral_fee: num(rp.chequeDeferralPenaltyFee),
+        });
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+  /** Configured flat AED amount for a cheque-charge fee type (as a form string), or ''. */
+  const feeAutoAmount = (t: string): string => {
+    const v = chequeFees[t];
+    return v != null && v > 0 ? String(v) : '';
+  };
   const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '', paymentMethod: 'cheque', chequeNumber: '' };
   const [showAddFee, setShowAddFee] = useState(false);
   const [feeAdd, setFeeAdd] = useState(emptyFeeForm);
@@ -2143,6 +2207,7 @@ function DetailsDrawer({
         transactionDate: feeEdit.transactionDate || null,
         paymentMethod: feeEdit.paymentMethod,
         chequeNumber: feeEdit.chequeNumber.trim() || null,
+        paymentType: feeEdit.paymentType,
       });
       setFeeEditId(null);
     } catch (e) { setFeeEditErr(e instanceof Error ? e.message : 'Failed to save changes'); }
@@ -2159,8 +2224,8 @@ function DetailsDrawer({
   const countsToTotal = (p: { chequeStatus?: string | null }) =>
     !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
   // Rent VAT (commercial/industrial): amounts are GROSS; split net vs VAT for display.
-  const rentGross = rentRows.reduce((s, p) => s + (countsToTotal(p) ? (p.amount || 0) : 0), 0);
-  const rentVat   = rentRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
+  const rentGross = rentScheduleRows.reduce((s, p) => s + (countsToTotal(p) ? (p.amount || 0) : 0), 0);
+  const rentVat   = rentScheduleRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
@@ -2621,7 +2686,7 @@ function DetailsDrawer({
                           </Fragment>
                         );
                       })()}
-                      {rentRows.map((p, i) => (
+                      {rentScheduleRows.map((p, i) => (
                         <Fragment key={p.id}>
                         <tr>
                           <td>{i + 1}</td>
@@ -2723,7 +2788,7 @@ function DetailsDrawer({
                         )}
                         </Fragment>
                       ))}
-                      {rentRows.length === 0 && (
+                      {rentScheduleRows.length === 0 && (
                         <tr><td colSpan={7}><span className="note">No payments recorded yet.</span></td></tr>
                       )}
                     </tbody>
@@ -2838,6 +2903,16 @@ function DetailsDrawer({
                               <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
                                 <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
                                   <p className="subhead">Edit {feeLabel(f.paymentType).toLowerCase()}</p>
+                                  <div className="field"><label>Fee type</label>
+                                    <select className="input" value={feeEdit.paymentType}
+                                      onChange={e => {
+                                        const nt = e.target.value;
+                                        setFeeEdit(v => { const auto = feeAutoAmount(nt); return { ...v, paymentType: nt, ...(auto ? { amount: auto } : {}) }; });
+                                      }}>
+                                      {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                    {feeAutoAmount(feeEdit.paymentType) && <p className="note" style={{ marginTop: 2 }}>Amount auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeEdit.paymentType)))}). Editable.</p>}
+                                  </div>
                                   <div className="grid2">
                                     <div className="field"><label>Amount (excl. VAT, AED)</label>
                                       <input type="number" min="0" step="0.01" className="input" value={feeEdit.amount}
@@ -2884,12 +2959,105 @@ function DetailsDrawer({
                           )}
                           </Fragment>
                         ))}
-                        {feeRows.length === 0 && !showAddFee && (
+                        {/* Custom "Other" charges (payment_type 'other') — per-unit taxes
+                            and service fees, shown here under Fees rather than in the rent
+                            schedule. They are payments, so they keep the payment status +
+                            edit controls (changeStatus / startEdit). */}
+                        {otherPaymentRows.map(p => (
+                          <Fragment key={p.id}>
+                          <tr>
+                            <td>Other</td>
+                            <td>
+                              {p.description ?? '—'}
+                              {paymentRefs.receiptByPaymentId[p.id] && (
+                                <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
+                                  Receipt {paymentRefs.receiptByPaymentId[p.id]}
+                                </span>
+                              )}
+                            </td>
+                            <td className="amt">
+                              {fmtAed(p.amount)}
+                              {(p.vatAmount ?? 0) > 0 && <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>}
+                            </td>
+                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}</td>
+                            <td>{p.paymentMethod ? fmtMethod(p.paymentMethod) : '—'}</td>
+                            <td>{fmtDate(p.transactionDate)}</td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {perms.collections ? (
+                                  <select
+                                    className={'cstat ' + (p.chequeStatus ?? 'pending')}
+                                    style={{ cursor: 'pointer' }}
+                                    value={p.chequeStatus ?? 'pending'}
+                                    disabled={statusBusy === p.id}
+                                    onChange={e => void changeStatus(p.id, e.target.value)}
+                                  >
+                                    <option value="pending">Pending</option>
+                                    <option value="cleared">Cleared</option>
+                                    <option value="bounced">Bounced</option>
+                                    <option value="cancelled">Cancelled</option>
+                                  </select>
+                                ) : (
+                                  <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{p.chequeStatus ?? 'pending'}</span>
+                                )}
+                                {perms.collections && p.chequeStatus !== 'cleared' && (
+                                  <button type="button" className="mini-btn view" title="Edit amount / reference / description" onClick={() => editingId === p.id ? setEditingId(null) : startEdit(p)}>
+                                    <Pencil size={12} /> Edit
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          {editingId === p.id && (
+                            <tr>
+                              <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
+                                <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                  <p className="subhead">Correct charge details</p>
+                                  <div className="field"><label>Description</label>
+                                    <input className="input" value={editForm.description} placeholder="e.g. 5% VAT on Rent"
+                                      onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
+                                  </div>
+                                  <div className="grid2">
+                                    <div className="field"><label>Amount (AED)</label>
+                                      <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
+                                        onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                    </div>
+                                    <div className="field"><label>Due date</label>
+                                      <input type="date" className="input" value={editForm.transactionDate}
+                                        onChange={e => setEditForm(v => ({ ...v, transactionDate: e.target.value }))} />
+                                    </div>
+                                  </div>
+                                  <div className="grid2">
+                                    <div className="field"><label>Payment method</label>
+                                      <select className="input" value={editForm.paymentMethod}
+                                        onChange={e => setEditForm(v => ({ ...v, paymentMethod: e.target.value }))}>
+                                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="field"><label>Cheque / reference no.</label>
+                                      <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
+                                        onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+                                    </div>
+                                  </div>
+                                  {editErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{editErr}</p>}
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                    <button className="btn btn-jade btn-sm" disabled={editBusy} onClick={() => void saveEdit(p.id)}>
+                                      <Check size={14} /> {editBusy ? 'Saving…' : 'Save changes'}
+                                    </button>
+                                    <button className="btn btn-ghost btn-sm" disabled={editBusy} onClick={() => { setEditingId(null); setEditErr(null); }}>Cancel</button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
+                        ))}
+                        {feeRows.length === 0 && otherPaymentRows.length === 0 && !showAddFee && (
                           <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, ejari, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
                       </tbody>
-                      {feeRows.length > 0 && (
-                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross)}</td><td colSpan={4} /></tr></tfoot>
+                      {(feeRows.length > 0 || otherPaymentRows.length > 0) && (
+                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross + otherGross)}</td><td colSpan={4} /></tr></tfoot>
                       )}
                     </table>
 
@@ -2899,9 +3067,14 @@ function DetailsDrawer({
                         <p className="subhead">Add fee</p>
                         <div className="grid2">
                           <div className="field"><label>Fee type</label>
-                            <select className="input" value={feeAdd.paymentType} onChange={e => setFeeAdd(v => ({ ...v, paymentType: e.target.value }))}>
+                            <select className="input" value={feeAdd.paymentType}
+                              onChange={e => {
+                                const nt = e.target.value;
+                                setFeeAdd(v => { const auto = feeAutoAmount(nt); return { ...v, paymentType: nt, ...(auto ? { amount: auto } : {}) }; });
+                              }}>
                               {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                             </select>
+                            {feeAutoAmount(feeAdd.paymentType) && <p className="note" style={{ marginTop: 2 }}>Auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeAdd.paymentType)))}). Editable.</p>}
                           </div>
                           <div className="field"><label>Amount (excl. VAT, AED)</label>
                             <input type="number" min="0" step="0.01" className="input" value={feeAdd.amount} placeholder="e.g. 750"
@@ -4608,12 +4781,16 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // Ejari / utility upload (ported from the old page so v2 is self-contained).
   const ejariInputRef = useRef<HTMLInputElement>(null);
   const utilityInputRef = useRef<HTMLInputElement>(null);
+  // Renewal Cheques/PDC step — RP uploads the Payment Advice on the customer's
+  // behalf (paper-collected cheques, no portal submission).
+  const chequesInputRef = useRef<HTMLInputElement>(null);
   // Wind-down doc uploads (move-out report + utility close-out). One shared
   // hidden input + a "pending kind" so a single onChange routes to the right key.
   const windDownInputRef = useRef<HTMLInputElement>(null);
   const [windDownKind, setWindDownKind] = useState<'move_in' | 'move_out' | 'clearance' | 'final_bill' | null>(null);
   const [ejariUploading, setEjariUploading] = useState(false);
   const [utilityUploading, setUtilityUploading] = useState(false);
+  const [chequesUploading, setChequesUploading] = useState(false);
   const [windDownUploading, setWindDownUploading] = useState(false);
 
   const reload = useCallback(() => {
@@ -4974,6 +5151,33 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch { setLocalState({ utilityDoc: true }); }
   };
+  // Renewal Cheques/PDC step — RP either uploads the Payment Advice on the
+  // customer's behalf, or, once it's already attached, marks the cheques as
+  // already on file (paper-collected) so the wait for a portal submission is
+  // skipped and the step opens straight into the recording table.
+  const onUploadCheques = () => chequesInputRef.current?.click();
+  const onChequesFilePicked = async (file: File) => {
+    setChequesUploading(true);
+    try {
+      await uploadContractDoc(file, 'Payment Advice', 'payment_advice');
+      void reload();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Payment Advice upload failed'); }
+    finally { setChequesUploading(false); if (chequesInputRef.current) chequesInputRef.current.value = ''; }
+  };
+  const onMarkChequesOnFile = async () => {
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/cheques/mark-on-file`, { method: 'PATCH', credentials: 'include' });
+      if (!res.ok) throw new Error(`Mark cheques failed: ${res.status}`);
+      const data = await res.json().catch(() => ({ matched: true }));
+      if (data.matched === false) {
+        alert('No Payment Advice is on file for this lease yet. Please upload the cheques first.');
+        return;
+      }
+      void reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not mark the cheques as already on file.');
+    }
+  };
   // Bypass digital signing for a paper-signed / imported lease: record BOTH
   // signatures as on-file (no signature image). Mirrors the Ejari/Utility
   // "Mark as already on file" actions; the step re-renders into the
@@ -5076,7 +5280,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // PATCH /api/contracts/:id/payments/:paymentId — status, or correct amount / VAT / reference / description.
   const onUpdatePayment = async (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
-    description?: string | null; transactionDate?: string | null; paymentMethod?: string;
+    description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -5285,7 +5489,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onAcceptDocs, onApproveDoc, onRejectDoc, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onUploadCheques, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,
@@ -5963,12 +6167,15 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void onEjariFilePicked(f); }} />
       <input ref={utilityInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUtilityFilePicked(f); }} />
+      {/* Renewal Cheques/PDC picker — RP uploads the Payment Advice on the customer's behalf. */}
+      <input ref={chequesInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void onChequesFilePicked(f); }} />
       {/* Wind-down doc picker (move-out report / utility clearance / final bill) — routed by windDownKind. */}
       <input ref={windDownInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; const k = windDownKind; if (f && k) void onWindDownFilePicked(f, k); }} />
-      {(ejariUploading || utilityUploading || windDownUploading) && (
+      {(ejariUploading || utilityUploading || chequesUploading || windDownUploading) && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
-          Uploading {ejariUploading ? 'Ejari' : utilityUploading ? 'utility' : 'wind-down'} document…
+          Uploading {ejariUploading ? 'Ejari' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Advice' : 'wind-down'} document…
         </div>
       )}
 

@@ -13,6 +13,10 @@ export interface OfferPlanItem {
   dueDate: string;
   description?: string;
   type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+  /** Underlying payment_type ('rental_income' | 'admin_fee' | 'ejari_fee' |
+   *  'commission' | 'vat' | 'other' | 'security_deposit'). Threaded through so the
+   *  shared schedule sort can rank rows by category (see lib/paymentPlan). */
+  paymentType?: string | null;
   status?: string | null;
 }
 export interface OfferPlan {

@@ -203,9 +203,18 @@ function isFee(p: ReceiptPayment): boolean {
 function isVat(p: ReceiptPayment): boolean {
   return (p.paymentType ?? '').toLowerCase() === 'vat';
 }
+/** Government / other pass-through charges printed under the receipt's Government
+ *  Fee section: VAT cheques ('vat') AND custom "Other" charges ('other' — per-unit
+ *  taxes like "20% VAT on Rent", service charges like "Fire Fighting"). These are
+ *  NOT rental income — mirrors the Payments ledger, where 'other' is its own
+ *  category, not rent. Kept out of isRental below so they never inflate rent. */
+const GOVT_TYPES = new Set(['vat', 'other']);
+function isGovernment(p: ReceiptPayment): boolean {
+  return GOVT_TYPES.has((p.paymentType ?? '').toLowerCase());
+}
 function isRental(p: ReceiptPayment): boolean {
   const t = (p.paymentType ?? '').toLowerCase();
-  return t !== 'security_deposit' && t !== 'vat' && !FEE_TYPES.has(t);
+  return t !== 'security_deposit' && !GOVT_TYPES.has(t) && !FEE_TYPES.has(t);
 }
 const FEE_LABEL: Record<string, string> = {
   admin_fee: 'Administration Fee', ejari_fee: 'Ejari Registration Fee', commission: 'Commission',
@@ -254,11 +263,15 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
       receiptNo: realNo ?? `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
-  if (isVat(sel)) {
-    // A VAT cheque (Rental VAT / Fees VAT) is entirely VAT — net 0, vat = gross.
-    return { kind: 'fee', title: 'VAT RECEIPT',
+  if (isGovernment(sel)) {
+    // A pure VAT cheque is entirely tax (net 0, vat = gross). A custom "Other"
+    // charge carries its own net + whatever VAT it was entered with (usually 0),
+    // so show its real split — never as net-0 VAT, and never as rent.
+    const govVat = isVat(sel) ? gross : vat;
+    const govNet = round2(gross - govVat);
+    return { kind: 'fee', title: 'GOVERNMENT FEE RECEIPT',
       receiptNo: realNo ?? `RCP-${contract.ref}-VAT`, date: sel.transactionDate, single: sel,
-      lines: [{ desc: sel.description || 'VAT', net: 0, vat: gross, total: gross, date: sel.transactionDate ?? null, ...meta }] };
+      lines: [{ desc: sel.description || (isVat(sel) ? 'VAT' : 'Government charge'), net: govNet, vat: govVat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
 
   const rentalIdx = rentals.findIndex(p => p.id === sel.id);
@@ -377,23 +390,33 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
  *  under the binder's "Government" section (VAT is a government charge, not rent
  *  income or a management fee). Null for legacy contracts with no vat rows. */
 function buildVatReceipt(contract: ReceiptContract): Receipt | null {
-  const vats = (contract.payments ?? []).filter(isVat);
-  if (vats.length === 0) return null;
+  // Smallest → largest, so the section reads tax/small charges up to the biggest
+  // (e.g. 5% Tax on VAT · Fire Fighting · 5% VAT on Rent · 20% VAT on Rent).
+  const govRows = (contract.payments ?? []).filter(isGovernment)
+    .slice().sort((a, b) => (a.amount || 0) - (b.amount || 0));
+  if (govRows.length === 0) return null;
   const refOf = (p: ReceiptPayment) => contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null;
-  const lines: LineItem[] = vats.map((p) => ({
-    desc: p.description || 'VAT',
-    net: 0, vat: round2(p.amount || 0), total: round2(p.amount || 0),
-    date: p.transactionDate ?? null,
-    method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
-    receiptNo: refOf(p),
-  }));
-  // One VAT cheque prints its own gapless year-wise number as the header; multiple
+  const lines: LineItem[] = govRows.map((p) => {
+    const gross = round2(p.amount || 0);
+    // Pure VAT cheque → 100% tax (net 0). Custom "Other" charge → its own net +
+    // whatever VAT it carries (usually none), so it shows as a real net charge.
+    const vat = isVat(p) ? gross : round2(p.vatAmount || 0);
+    const net = round2(gross - vat);
+    return {
+      desc: p.description || (isVat(p) ? 'VAT' : 'Government charge'),
+      net, vat, total: gross,
+      date: p.transactionDate ?? null,
+      method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
+      receiptNo: refOf(p),
+    };
+  });
+  // A single charge prints its own gapless year-wise number as the header; multiple
   // aggregate under the plan number (each line still carries its own RCP number).
-  const header = vats.length === 1 ? (refOf(vats[0]) ?? contract.paymentRefs?.planRefNo) : contract.paymentRefs?.planRefNo;
-  return { kind: 'vat', title: 'VAT RECEIPT',
+  const header = govRows.length === 1 ? (refOf(govRows[0]) ?? contract.paymentRefs?.planRefNo) : contract.paymentRefs?.planRefNo;
+  return { kind: 'vat', title: 'GOVERNMENT FEE RECEIPT',
     receiptNo: header ?? `RCP-${contract.ref}-VAT`,
-    date: vats[0]?.transactionDate ?? contract.startDate ?? null,
-    lines, scheduleCount: vats.length };
+    date: govRows[0]?.transactionDate ?? contract.startDate ?? null,
+    lines, scheduleCount: govRows.length };
 }
 
 function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
@@ -402,8 +425,8 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   // VAT cheques (new model) are their own rows — keep them OUT of the rent line and
   // show a dedicated VAT line. Legacy contracts have no vat rows; their VAT stays
   // embedded in the rent cheques' vat_amount (rolled into the rent line below).
-  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p) && !isVat(p));
-  const vatRows = payments.filter(isVat);
+  const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p) && !isGovernment(p));
+  const vatRows = payments.filter(isGovernment);
   const feeRows = (contract.fees ?? []).filter(isFee);
   const { lines: feeLines, legacyBundle, feeCount } = feeLinesOf(contract, rentRows);
   if (rentRows.length === 0 && feeLines.length === 0 && vatRows.length === 0) return null;
@@ -414,11 +437,15 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   // legacyBundle = admin+ejari folded into the rent cheques on legacy contracts;
   // 0 when real fee rows exist (those rents are already pure).
   const rentNet = Math.max(0, round2(netOf(rentRows) - legacyBundle));
-  const vatChequeTotal = round2(vatRows.reduce((s, p) => s + (p.amount || 0), 0)); // vat cheque = all VAT
+  // Government/other charges: a pure VAT cheque is 100% tax; a custom "Other" charge
+  // keeps its own net + VAT split so it isn't mislabelled as pure VAT.
+  const govNet = round2(vatRows.reduce((s, p) => s + (isVat(p) ? 0 : Math.max(0, (p.amount || 0) - (p.vatAmount || 0))), 0));
+  const govVat = round2(vatRows.reduce((s, p) => s + (isVat(p) ? (p.amount || 0) : (p.vatAmount || 0)), 0));
+  const govTotal = round2(govNet + govVat);
 
   const lines: LineItem[] = [...feeLines,
     { desc: 'Rent (full lease term)', net: rentNet, vat: rentVatEmbedded, total: round2(rentNet + rentVatEmbedded) }];
-  if (vatChequeTotal > 0) lines.push({ desc: 'VAT (rent & fees)', net: 0, vat: vatChequeTotal, total: vatChequeTotal });
+  if (govTotal > 0) lines.push({ desc: 'Government & other charges', net: govNet, vat: govVat, total: govTotal });
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT',
     receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
@@ -644,9 +671,10 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
                     ].filter(Boolean).join(' - ')}
                   </Text>
                 ) : null}
-                {l.receiptNo ? (
-                  <Text style={{ fontSize: 7, color: ACCENT_DK, fontWeight: 500, marginTop: 2 }}>Receipt {l.receiptNo}</Text>
-                ) : null}
+                {/* Per-line gapless receipt number intentionally NOT shown — the
+                    document-level reference in the header is the customer-facing
+                    receipt number; per-payment RCP refs live in the ledger for
+                    bank reconciliation. */}
               </View>
               {showVat ? <Text style={[st.td, { width: 78, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
               {showVat ? <Text style={[st.td, { width: 60, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
@@ -782,7 +810,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   const hasDeposit = !isRenewalContract(contract) && (payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
     || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0);
   const hasManagement = feeLinesOf(contract, rentals).lines.length > 0;
-  const hasVat = payments.some(isVat);
+  const hasVat = payments.some(isGovernment);
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
   return (

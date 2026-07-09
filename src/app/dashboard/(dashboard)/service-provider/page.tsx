@@ -21,15 +21,21 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { Schibsted_Grotesk } from 'next/font/google';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage, StatCard, SectionHeader, QuickAction } from '@/components/dashboard/DashboardWidgets';
 import { ProfileCompletionBanner } from '@/components/dashboard/ProfileCompletionBanner';
 import { bookingPipeline, type SpBooking, type SpPipelineTab } from '@/components/upnow/SpOperationsPipelines';
+import { SpLiveOverview } from '@/components/upnow/SpLiveOverview';
 import { apiGet } from '@/lib/api';
 import {
-  Briefcase, CalendarCheck, Star, Wallet, Plus, CheckCircle2, ShieldAlert, Lock,
+  Briefcase, CalendarCheck, Star, Wallet, Plus, CheckCircle2, Lock,
   Inbox, FileText, Wrench, Users, ChevronRight, ClipboardList,
 } from 'lucide-react';
+
+// The live dashboard (SpLiveOverview) replicates design 2a to the token —
+// same font-scoping pattern as the onboarding page.
+const grotesk = Schibsted_Grotesk({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'] });
 
 /* ── Server shapes (defensive) ─────────────────────────────────────────────── */
 interface SpProfile {
@@ -37,8 +43,8 @@ interface SpProfile {
   ownerName?: string | null;
   entityType?: string | null;
   complianceStatus?: string | null;
-  serviceCategories?: string | null;   // CSV
-  emiratesServed?: string | null;      // CSV
+  serviceCategories?: string[] | string | null;
+  emiratesServed?: string[] | string | null;
 }
 interface KycStatus {
   hasProfile: boolean;
@@ -87,31 +93,8 @@ function KycStatusBanner({ kycStatus }: { kycStatus: string }) {
       </div>
     );
   }
-  if (kycStatus === 'rejected') {
-    return (
-      <div
-        className="rounded-2xl px-5 py-4 mb-6 flex items-center justify-between gap-4"
-        style={{ background: 'color-mix(in srgb, var(--color-error) 8%, white)', border: '1px solid color-mix(in srgb, var(--color-error) 20%, white)' }}
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <ShieldAlert className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--color-error)' }} />
-          <div className="min-w-0">
-            <p className="text-sm font-semibold leading-tight" style={{ color: 'var(--color-error)' }}>Action required</p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-600)' }}>
-              One or more documents were rejected. Please re-upload and resubmit for review.
-            </p>
-          </div>
-        </div>
-        <a
-          href="/dashboard/service-provider/documents"
-          className="flex-shrink-0 rounded-xl px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ background: 'var(--color-error)' }}
-        >
-          Re-upload documents
-        </a>
-      </div>
-    );
-  }
+  // 'rejected' has no banner: SpOnboardingGate rolls any non-approved SP back
+  // into the onboarding wizard before this page can render.
   return null;
 }
 
@@ -211,7 +194,10 @@ export default function ServiceProviderOverview() {
   useEffect(() => {
     // Live today: profile, kyc-status, team, invitations.
     // Tolerant (land in SP Sprints 1–3): services, bookings.
-    apiGet<SpProfile>('/profiles/service-provider/me').then(setProfile).catch(() => {});
+    // The endpoint wraps the profile: { profile, checklist }.
+    apiGet<{ profile?: SpProfile }>('/profiles/service-provider/me')
+      .then(d => setProfile(d.profile ?? (d as SpProfile)))
+      .catch(() => {});
     apiGet<KycStatus>('/profiles/service-provider/me/kyc-status').then(setKyc).catch(() => {});
     apiGet<unknown>('/team/technicians').then(d => setTechCount(asArray(d).length)).catch(() => {});
     apiGet<unknown>('/invitations?status=pending').then(d => setPendingInvites(asArray(d).length)).catch(() => {});
@@ -238,7 +224,11 @@ export default function ServiceProviderOverview() {
 
   // Go-live journey (GATE 1 + listings), each step server-state-driven.
   const steps: JourneyStep[] = useMemo(() => {
-    const profileDone = Boolean(profile?.businessName && profile?.serviceCategories && profile?.emiratesServed);
+    const profileDone = Boolean(
+      profile?.businessName &&
+      (profile?.serviceCategories?.length ?? 0) > 0 &&
+      (profile?.emiratesServed?.length ?? 0) > 0,
+    );
     const docsTotal = kyc?.totalRequired ?? 0;
     const docsUploaded = kyc?.totalUploaded ?? 0;
     const docsDone = docsTotal > 0 && (kyc?.requiredDocumentsMissing ?? 1) === 0;
@@ -247,13 +237,13 @@ export default function ServiceProviderOverview() {
     return [
       { key: 'profile',    label: 'Business profile', done: profileDone, href: '/dashboard/service-provider/onboarding',
         sub: profileDone ? (profile?.businessName ?? 'Complete') : 'Finish the setup wizard' },
-      { key: 'documents',  label: 'KYC documents',    done: docsDone, href: '/dashboard/service-provider/documents',
+      { key: 'documents',  label: 'KYC documents',    done: docsDone, href: '/dashboard/service-provider/settings?tab=profile',
         sub: docsTotal ? `${Math.min(docsUploaded, docsTotal)}/${docsTotal} uploaded` : 'Trade licence, Emirates ID…' },
-      { key: 'compliance', label: 'UpNow approval',   done: compliant, href: '/dashboard/service-provider/documents',
+      { key: 'compliance', label: 'UpNow approval',   done: compliant, href: '/dashboard/service-provider/settings?tab=profile',
         sub: compliant ? 'Approved' : compliance },
       { key: 'services',   label: 'List your services', done: services.length > 0, href: '/dashboard/service-provider/services',
         sub: services.length ? `${services.length} listed` : 'Pick from the catalog' },
-      { key: 'jobready',   label: 'Get job-ready',    done: Boolean(jobReady?.jobReady), href: '/dashboard/service-provider/onboarding',
+      { key: 'jobready',   label: 'Get job-ready',    done: Boolean(jobReady?.jobReady), href: '/dashboard/service-provider/settings?tab=rules',
         sub: jobReady?.jobReady ? 'Receiving jobs' :
           !compliant ? 'Unlocks after approval' :
           jobReady ? `${Object.values(jobReady.cards).filter(c => c.complete).length}/5 cards` : 'Coverage, team, vehicles…' },
@@ -261,6 +251,19 @@ export default function ServiceProviderOverview() {
   }, [profile, kyc, services, jobReady]);
 
   const live = steps.every(s => s.done);
+
+  // Once fully job-ready, the onboarding-flavored Overview retires in favor
+  // of the live operational dashboard (design 2a) — see SpLiveOverview's
+  // doc comment for what's real vs. honest-empty pending backend work.
+  if (live) {
+    return (
+      <div className={grotesk.className} style={{ background: '#F5F7F4', minHeight: '100%', color: '#182420' }}>
+        <div className="max-w-7xl mx-auto px-5 py-6">
+          <SpLiveOverview businessName={profile?.businessName ?? name} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <DashboardPage
@@ -279,12 +282,12 @@ export default function ServiceProviderOverview() {
       {user?.kycStatus && <KycStatusBanner kycStatus={user.kycStatus} />}
       <ProfileCompletionBanner />
 
-      {/* Go-live journey — hidden once fully live */}
-      {!live && <JourneyStrip steps={steps} />}
+      {/* Go-live journey */}
+      <JourneyStrip steps={steps} />
 
       {/* Post-approval nudge — approved but not yet job-ready */}
       {Boolean(kyc?.isCompliant) && jobReady && !jobReady.jobReady && (
-        <Link href="/dashboard/service-provider/onboarding"
+        <Link href="/dashboard/service-provider/settings?tab=rules"
           className="mb-6 flex items-center gap-4 rounded-2xl p-4 transition-shadow hover:shadow-md"
           style={{ background: '#EAF5EE', border: '1px solid #CBE5D6' }}>
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-extrabold text-white" style={{ background: '#08603D' }}>
@@ -331,11 +334,11 @@ export default function ServiceProviderOverview() {
           description={services.length ? `${services.length} listed · ${publishedServices} live` : 'Pick services from the catalog'}
         />
         <QuickAction
-          label="Team" href="/dashboard/service-provider/team" icon={Users}
+          label="Team" href="/dashboard/service-provider/settings?tab=team" icon={Users}
           description={`${techCount} technician${techCount === 1 ? '' : 's'}${pendingInvites ? ` · ${pendingInvites} pending` : ''}`}
         />
         <QuickAction
-          label="Documents & KYC" href="/dashboard/service-provider/documents" icon={FileText}
+          label="Documents & KYC" href="/dashboard/service-provider/settings?tab=profile" icon={FileText}
           description={kyc?.totalRequired ? `${Math.min(kyc.totalUploaded ?? 0, kyc.totalRequired)}/${kyc.totalRequired} uploaded` : 'Compliance documents'}
         />
         <QuickAction

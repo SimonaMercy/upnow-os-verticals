@@ -33,7 +33,7 @@ export default function ServiceProviderJobsPage() {
             <p className="mx-auto mt-1.5 max-w-sm text-sm leading-relaxed" style={{ color: '#55645B' }}>
               {left} card{left === 1 ? '' : 's'} left in Get job-ready. Finish them and bookings in your areas start arriving here.
             </p>
-            <Link href="/dashboard/service-provider/onboarding"
+            <Link href="/dashboard/service-provider/settings?tab=rules"
               className="mt-6 inline-block rounded-xl px-6 py-3 text-sm font-bold text-white" style={{ background: '#0B7A4E' }}>
               Get job-ready{left !== null && ` · ${5 - left}/5`} →
             </Link>

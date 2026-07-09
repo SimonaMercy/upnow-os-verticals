@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  LayoutDashboard, CircleCheckBig, Home, Search, Building2, FileText,
+  LayoutDashboard, Home, Search, Building2, FileText,
   CalendarCheck, Wrench, Users, Star, Wallet, BookOpen,
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
@@ -94,18 +94,18 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings },
   ],
   service_provider: [
+    // Onboarding, Team and Documents intentionally have no nav entries:
+    // onboarding is where the gate sends unapproved accounts, Team lives in
+    // Settings → Team, Documents in Settings → Profile.
     { label: 'Overview',         href: '/dashboard/service-provider',            icon: LayoutDashboard },
-    { label: 'Get started',      href: '/dashboard/service-provider/onboarding', icon: CircleCheckBig },
     { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList },
     { label: 'Jobs',             href: '/dashboard/service-provider/jobs',       icon: CalendarCheck },
     { label: 'My Services',      href: '/dashboard/service-provider/services',   icon: Briefcase },
-    { label: 'Team',             href: '/dashboard/service-provider/team',       icon: Users },
     { label: 'Reviews',          href: '/dashboard/service-provider/reviews',    icon: Star },
     { divider: true },
     { section: 'More' },
-    { label: 'Documents',        href: '/dashboard/service-provider/documents',  icon: FileText },
     { label: 'Earnings',         href: '/dashboard/service-provider/earnings',   icon: Wallet, soon: true },
-    { label: 'Settings',         href: '/dashboard/service-provider/settings',   icon: Settings, soon: true },
+    { label: 'Settings',         href: '/dashboard/service-provider/settings',   icon: Settings },
   ],
   manager: [
     { label: 'Overview',         href: '/dashboard/manager',            icon: LayoutDashboard },

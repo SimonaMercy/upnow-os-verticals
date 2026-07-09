@@ -513,6 +513,7 @@ const EMIRATES_LIST = ['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','F
 type PenaltyRuleKey =
   | 'bouncedChequePenalty'
   | 'chequeHoldPenalty'
+  | 'chequeDeferralPenalty'
   | 'lateRenewalPenalty'
   | 'earlyTerminationPenalty'
   | 'lateMoveoutPenalty'
@@ -524,7 +525,8 @@ type PenaltyRuleCfg = { key: PenaltyRuleKey; title: string; description: string;
 
 const PENALTY_RULES: PenaltyRuleCfg[] = [
   { key: 'bouncedChequePenalty', title: 'Bounced Cheque Penalty', description: 'Charge for each bounced rent cheque. Auto-added as an editable deduction at move-out settlement.', pctLabel: '% of cheque' },
-  { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-added as an editable deduction at move-out settlement.' },
+  { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-fills the "Cheque replacement" fee on a contract; also an editable deduction at move-out settlement.' },
+  { key: 'chequeDeferralPenalty', title: 'Cheque Deferral', description: 'Charge to defer a cheque’s due date. Auto-fills the "Cheque deferral" fee when the RP adds it on a contract.' },
   { key: 'lateRenewalPenalty', title: 'Late Renewal', description: 'Charge when the tenant renews after the renewal window.' },
   { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early.' },
   { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant moves out after the lease end date.' },
@@ -688,6 +690,7 @@ export default function SettingsPage() {
   const [penalties, setPenalties] = useState<Record<PenaltyRuleKey, PenaltyState>>({
     bouncedChequePenalty:       { ...EMPTY_PENALTY },
     chequeHoldPenalty:          { ...EMPTY_PENALTY },
+    chequeDeferralPenalty:      { ...EMPTY_PENALTY },
     lateRenewalPenalty:         { ...EMPTY_PENALTY },
     earlyTerminationPenalty:    { ...EMPTY_PENALTY },
     lateMoveoutPenalty:         { ...EMPTY_PENALTY },
@@ -792,6 +795,7 @@ export default function SettingsPage() {
         setPenalties({
           bouncedChequePenalty:       seedPenalty('bouncedChequePenalty'),
           chequeHoldPenalty:          seedPenalty('chequeHoldPenalty'),
+          chequeDeferralPenalty:      seedPenalty('chequeDeferralPenalty'),
           lateRenewalPenalty:         seedPenalty('lateRenewalPenalty'),
           earlyTerminationPenalty:    seedPenalty('earlyTerminationPenalty'),
           lateMoveoutPenalty:         seedPenalty('lateMoveoutPenalty'),

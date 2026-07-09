@@ -714,7 +714,11 @@ export function KycDocumentsPanel({
                       </button>
                     </div>
                   </div>
-                  {renderExpiryArea(item)}
+                  {/* Compact rows only surface the expiry UI while it's actually
+                      needed: a staged file waiting for its date. A doc already
+                      on file keeps its stored expiry silently (expiry warnings
+                      surface elsewhere); editing it lives on the full page. */}
+                  {stagedByKey[item.key] && renderExpiryArea(item)}
                   {uploadErrors[item.key] && (
                     <p className="text-xs mt-1 flex items-center gap-1" style={{ color: "var(--color-error)" }} role="alert">
                       <AlertCircle className="w-3 h-3 flex-shrink-0" />

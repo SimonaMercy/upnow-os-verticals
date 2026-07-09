@@ -17,10 +17,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
-  AlarmClock, AlertTriangle, Camera, Check, ChevronDown, ChevronLeft,
-  ChevronRight, Clock, FileText, Info, Loader2, MapPin, MessageCircle, Plus,
+  AlarmClock, AlertTriangle, Camera, Check, ChevronDown,
+  Clock, FileText, Info, Loader2, MapPin, MessageCircle, Plus,
   Route, Search, Shield, Trash2, Truck, Users, X,
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '@/lib/api';
@@ -35,6 +34,7 @@ interface JobReadyStatus {
     team: {
       complete: boolean; adoptedCategories: string[]; coveredCategories: string[];
       missingCategories: string[]; activeTechnicians: number; leadCapable: number;
+      uncoveredServices: { id: number; name: string; category: string }[];
     };
     fleet: {
       complete: boolean; vehicles: number; derivedMaxConcurrentJobs: number;
@@ -47,7 +47,7 @@ interface JobReadyStatus {
     };
   };
 }
-interface CoverageOption { communityId: number; nameEn: string; nameAr: string | null; selected: boolean }
+interface CoverageOption { communityId: number; nameEn: string; nameAr: string | null; emirate?: string; selected: boolean }
 interface Tech { id: number; name: string; status: string; isLeadCapable: boolean; photoUrl: string | null; skills: string[]; serviceSkillIds: number[] }
 interface SpService { id: number; name: string; category: string }
 interface Vehicle { id: number; vehicleType: string; label: string | null; categories: string[] | null; isActive: boolean }
@@ -60,7 +60,7 @@ const CAT_LABELS: Record<string, string> = {
   pest_control: 'Pest control', car_vehicle: 'Car & vehicle',
   landscaping_outdoor: 'Landscaping', commercial_services: 'Commercial',
 };
-const catLabel = (c: string) => CAT_LABELS[c] ?? c.replace(/_/g, ' ');
+export const catLabel = (c: string) => CAT_LABELS[c] ?? c.replace(/_/g, ' ');
 
 /* Community grouping for the coverage picker (display-only; matching is
    server-side via polygons). Unlisted names fall into "Outer Dubai". */
@@ -73,8 +73,77 @@ const COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
   { label: 'East & Airport', names: ['Al Nahda', 'Al Qusais', 'Al Twar', 'Muhaisnah', 'Al Rashidiya', 'Mirdif', 'Al Warqaa', 'Al Mizhar', 'Al Khawaneej', 'Nad Al Hammar', 'International City', 'Al Warsan', 'Dubai Silicon Oasis (DSO)', 'Academic City', 'Liwan'] },
   { label: 'Outer Dubai', names: ['Jebel Ali', 'Dubai South (DWC)', 'Dubai Investment Park (DIP)', 'Dubailand', 'The Villa'] },
 ];
-const groupOf = (name: string) =>
-  COMMUNITY_GROUPS.find((g) => g.names.includes(name))?.label ?? 'Outer Dubai';
+
+/* Abu Dhabi divisions — names match communities.name_en (migr 0133). */
+const AUH_COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'City Centre & Corniche', names: ['Al Markaziyah (Downtown)', 'Corniche Area', 'Al Khalidiyah', 'Al Bateen', 'Al Zaab', 'Al Gurm', 'Madinat Zayed', 'Al Zahiyah (Tourist Club Area)', 'Al Manhal', 'Al Karamah', 'Al Rowdah', 'Al Nahyan', 'Al Dhafrah', 'Al Aman', 'Al Mushrif', 'Hadbat Al Zaafran'] },
+  { label: 'Reem & Maryah Islands', names: ['Al Reem Island', 'Al Maryah Island', 'Makers District', 'Reem Hills'] },
+  { label: 'Saadiyat Island', names: ['Saadiyat Island', 'Louvre Abu Dhabi District', 'Mamsha Al Saadiyat', 'Grove at Saadiyat', 'Hidd Al Saadiyat', 'Saadiyat Lagoons', 'Saadiyat Reserve'] },
+  { label: 'Yas & North Islands', names: ['Yas Island', 'Yas Acres', 'Yas Golf Collection', 'Noya on Yas Island', 'Lea at Yas Island', 'Mayan on Yas Island', 'The Sustainable City – Yas Island', 'Al Fahid Island', 'Al Jubail Island', 'Jubail Island', 'Samaliyah Island', 'Nurai Island', 'Hudayriyat Island'] },
+  { label: 'Maqtaa & Grand Mosque', names: ['Al Maqtaa', 'Between Two Bridges (Bain Al Jessrain)', 'Bloom Gardens', 'Capital Centre'] },
+  { label: 'Khalifa City & Al Raha', names: ['Khalifa City', 'Masdar City', 'Al Raha Beach', 'Al Raha Gardens', 'Al Raha Lofts', 'Al Reef'] },
+  { label: 'Mussafah & Mainland South', names: ['Mussafah', 'ICAD (Industrial City of Abu Dhabi)', 'Mohammed Bin Zayed City (MBZ City)', 'Shakhbout City', 'Baniyas', 'Bloom Living', 'Al Wathba', 'Al Shamkha', 'Al Reeman'] },
+  { label: 'KIZAD & North', names: ['Kizad', 'Al Ghadeer'] },
+];
+
+/* Sharjah divisions — names match communities.name_en (migr 0134). */
+const SHJ_COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'City Centre & Corniche', names: ['Rolla', 'Al Gharb', 'Al Shuwaihean', 'Al Mareija', 'Al Jubail', 'Al Layyah', 'Al Sharq', 'Al Gulaya', 'Al Qasimia', 'Al Yarmook', 'Al Mahatta', 'Abu Shagara', 'Al Manakh', 'Al Ghafia', 'Al Fisht'] },
+  { label: 'Al Majaz & Al Khan', names: ['Al Majaz', 'Al Khan', 'Al Taawun', 'Al Nud', 'Al Nahda (Sharjah)'] },
+  { label: 'Central Residential', names: ['Al Falaj', 'Al Goaz', 'Al Khezamia', 'Bu Tina', 'Al Nasserya', 'Al Qadisiya', 'Halwan', 'Bukhamseen', 'Al Ramla', 'Al Ramtha', 'Al Hazana', 'Al Jazzat', 'Al Azra', 'Al Darari', 'Wasit'] },
+  { label: 'New Sharjah & University City', names: ['Muwaileh', 'University City', 'Al Qarayen', 'Al Nouf', 'Al Zahia', 'Aljada', 'Al Rahmaniya', 'Nasma Residences', 'Sharjah Sustainable City', 'Al Suyoh', 'Al Tai', 'Tilal City'] },
+  { label: 'Industrial & North', names: ['Al Sajaa Industrial', 'Sajaa', 'Al Hamriyah', 'Hamriyah Free Zone'] },
+];
+
+/* Ajman divisions (migr 0134). */
+const AJM_COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'Ajman City & Corniche', names: ['Ajman Corniche', 'Al Bustan', 'Al Rumaila', 'Al Owan', 'Al Rashidiya (Ajman)', 'Al Nuaimiya', 'Musheiref'] },
+  { label: 'Central Ajman', names: ['Al Rawda', 'Al Mowaihat', 'Al Hamidiya', 'Al Zahra', 'Al Jurf', 'Al Muntazi Park Area', 'Ajman Industrial Area', 'Al Helio'] },
+  { label: 'Emirates Road & South', names: ['Ajman Uptown', 'Al Amerah', 'Al Ittihad Village', 'Al Tallah', 'Al Yasmeen', 'Al Zahya', 'City of Arabia', 'Emirates City', 'Garden City'] },
+  { label: 'Manama & Masfout', names: ['Al Manama', 'Masfout'] },
+];
+
+/* Umm Al Quwain divisions (migr 0134). */
+const UAQ_COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'UAQ City', names: ['Old Town (UAQ)', 'Al Raas (UAQ)', 'Al Khor', 'Al Maidan', 'Al Haditha', 'Al Raudah', 'Al Surra', 'Al Aahad', 'Al Salamah', 'Al Humrah', 'Umm Al Quwain Free Trade Zone'] },
+  { label: 'Coast & Marina', names: ['Um Al Quwain Marina', 'White Bay', 'Barracuda Beach Resort Area', 'Dreamland Area'] },
+  { label: 'Falaj Al Mualla', names: ['Falaj Al Mualla'] },
+];
+
+/* Ras Al Khaimah divisions (migr 0134). */
+const RAK_COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'RAK City & Nakheel', names: ['Al Nakheel', 'Al Hudaibah', 'Al Mairid', 'Al Mamourah', 'Dafan Al Nakheel', 'Julphar', 'Al Karama (RAK)', 'Al Qurm', 'Ras Al Khaimah City Centre', 'Khuzam'] },
+  { label: 'Al Dhait & Inland', names: ['Al Dhait', 'Al Dhait North', 'Al Dhait South', 'Al Turfa', 'Al Seer', 'Seih Al Uraibi', 'Yasmin Village', 'Al Kharran', 'Digdaga'] },
+  { label: 'Mina Al Arab & Coast', names: ['Mina Al Arab', 'Hayat Island', 'Bay Village', 'Cove by RAK Properties'] },
+  { label: 'Al Hamra & Marjan', names: ['Al Hamra Village', 'Al Hamra Mall Area', 'Al Jazeera Al Hamra', 'Al Marjan Island', 'Waldorf Astoria Residences'] },
+  { label: 'North & Mountains', names: ['Al Rams', 'Ghalilah', "Sha'am", 'Wadi Shah', 'Jebel Jais area'] },
+];
+
+/* Fujairah divisions (migr 0134). */
+const FUJ_COMMUNITY_GROUPS: Array<{ label: string; names: string[] }> = [
+  { label: 'Fujairah City', names: ['Fujairah City Centre', 'Al Faseel', 'Al Gurfa', 'Merashid', 'Zubarah', 'Sakamkam', 'Fujairah Free Zone', 'Rugaylat', 'Al Hail (Fujairah)', 'Al Hayl Industrial'] },
+  { label: 'East Coast North', names: ['Al Aqah', 'Al Bidyah', 'Dadna', 'Sharm', 'Mirbah', 'Qidfa'] },
+  { label: 'Masafi & Inland', names: ['Masafi', 'Al Tawyeen'] },
+];
+
+/* Per-city division sets — keys match emirates.name_en from the coverage API.
+   A city without one renders as a single flat group named after the city. */
+const CITY_GROUPS: Record<string, Array<{ label: string; names: string[] }>> = {
+  Dubai: COMMUNITY_GROUPS,
+  'Abu Dhabi': AUH_COMMUNITY_GROUPS,
+  Sharjah: SHJ_COMMUNITY_GROUPS,
+  Ajman: AJM_COMMUNITY_GROUPS,
+  'Umm Al Quwain': UAQ_COMMUNITY_GROUPS,
+  'Ras Al Khaimah': RAK_COMMUNITY_GROUPS,
+  Fujairah: FUJ_COMMUNITY_GROUPS,
+};
+
+const groupOf = (o: { nameEn: string; emirate?: string }) => {
+  const city = o.emirate ?? 'Dubai';
+  const divisions = CITY_GROUPS[city];
+  if (!divisions) return city;
+  return divisions.find((g) => g.names.includes(o.nameEn))?.label ?? `Outer ${city}`;
+};
 
 /* ── Design tokens (from the .dc.html, screens 1m–1v) ────────────────────── */
 
@@ -94,19 +163,6 @@ const RED = '#B42318';
 const card = (extra?: React.CSSProperties): React.CSSProperties => ({
   background: '#fff', border: CARD_BORDER, borderRadius: 14, ...extra,
 });
-
-function StatusPill({ state }: { state: 'done' | 'progress' | 'todo' }) {
-  const s = state === 'done'
-    ? { background: TINT_GREEN, color: GREEN, label: '✓ Done' }
-    : state === 'progress'
-      ? { background: TINT_AMBER, color: AMBER_TEXT, label: 'In progress' }
-      : { background: TINT_GREY, color: MUTE, label: 'To do' };
-  return (
-    <span className="shrink-0 rounded-full px-[11px] py-1 text-[11px] font-bold" style={{ background: s.background, color: s.color }}>
-      {s.label}
-    </span>
-  );
-}
 
 function ProgressRing({ done, total, size = 64, dark = false }: { done: number; total: number; size?: number; dark?: boolean }) {
   const r = size * 26 / 64;
@@ -156,17 +212,15 @@ function RevokeWarning({ body, keepLabel, proceedLabel, onKeep, onProceed }: {
   );
 }
 
-function CardHeader({ title, sub, onBack, right }: { title: string; sub: string; onBack: () => void; right?: React.ReactNode }) {
+// onBack is accepted (cards still pass their reset callback) but no arrow is
+// rendered — sections live under always-visible sub-tabs, so there is no
+// "list" to go back to.
+function CardHeader({ title, sub, right }: { title: string; sub: string; onBack?: () => void; right?: React.ReactNode }) {
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
-      <div className="flex items-start gap-3">
-        <button onClick={onBack} aria-label="Back" className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-white" style={{ border: INNER_BORDER }}>
-          <ChevronLeft size={17} style={{ color: INK }} />
-        </button>
-        <div>
-          <h2 className="text-[19px] font-bold tracking-tight" style={{ color: INK }}>{title}</h2>
-          <p className="text-[13px]" style={{ color: MUTE }}>{sub}</p>
-        </div>
+      <div>
+        <h2 className="text-[19px] font-bold tracking-tight" style={{ color: INK }}>{title}</h2>
+        <p className="text-[13px]" style={{ color: MUTE }}>{sub}</p>
       </div>
       {right}
     </div>
@@ -175,13 +229,33 @@ function CardHeader({ title, sub, onBack, right }: { title: string; sub: string;
 
 /* ── Main component ──────────────────────────────────────────────────────── */
 
-type View = 'list' | 'coverage' | 'team' | 'vehicles' | 'hours' | 'rules';
+// Team is NOT a Rules section — skills live with the roster in Settings →
+// Team (SpTeamSkills below) so "Team" exists in exactly one place.
+type View = 'coverage' | 'vehicles' | 'hours' | 'rules';
+
+const CARD_TABS: { key: View; label: string; icon: typeof MapPin }[] = [
+  { key: 'coverage', label: 'Coverage', icon: MapPin },
+  { key: 'vehicles', label: 'Vehicles', icon: Truck },
+  { key: 'hours', label: 'Hours', icon: Clock },
+  { key: 'rules', label: 'Job rules', icon: FileText },
+];
+
+/** Per-section completion state driving the sub-tab pills. */
+const cardStates = (s: JobReadyStatus): Record<View, 'done' | 'progress' | 'todo'> => ({
+  coverage: s.cards.coverage.complete ? 'done' : 'todo',
+  vehicles: s.cards.fleet.complete ? 'done' : s.cards.fleet.vehicles > 0 ? 'progress' : 'todo',
+  hours: s.cards.hours.complete ? 'done' : 'todo',
+  rules: s.cards.rules.complete ? 'done' : 'todo',
+});
 
 export function SpJobReady() {
   const router = useRouter();
   const [status, setStatus] = useState<JobReadyStatus | null>(null);
-  const [view, setView] = useState<View>('list');
-  const [expanded, setExpanded] = useState<View | null>(null);
+  // Every section is a directly-open sub-tab — no list/expand indirection.
+  const [view, setView] = useState<View>('coverage');
+  // Bumped to remount the active card: "Cancel" resets edits and a completed
+  // save re-reads fresh server state.
+  const [remount, setRemount] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const prevReady = useRef<boolean | null>(null);
@@ -194,9 +268,28 @@ export function SpJobReady() {
 
   useEffect(() => {
     apiGet<JobReadyStatus>('/service-provider/job-ready')
-      .then((s) => { prevReady.current = s.jobReady; setStatus(s); })
+      .then((s) => {
+        prevReady.current = s.jobReady;
+        setStatus(s);
+        // Land on the ?card= deep link when given, else the first unfinished
+        // section so a new SP configures in order.
+        const param = new URLSearchParams(window.location.search).get('card');
+        if (param && CARD_TABS.some((t) => t.key === param)) { setView(param as View); return; }
+        const st = cardStates(s);
+        const firstTodo = CARD_TABS.find((t) => st[t.key] !== 'done');
+        if (firstTodo) setView(firstTodo.key);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
   }, []);
+
+  const selectCard = (k: View) => {
+    setView(k);
+    setRemount((r) => r + 1);
+    // Keep the active section in the URL (?card=) — refresh-safe + deep-linkable.
+    const url = new URL(window.location.href);
+    url.searchParams.set('card', k);
+    window.history.replaceState(null, '', url.toString());
+  };
 
   if (error) return <div className="rounded-[14px] bg-white p-6 text-sm" style={{ border: CARD_BORDER, color: RED }}>{error}</div>;
   if (!status) {
@@ -216,62 +309,16 @@ export function SpJobReady() {
 
   if (flipped) return <FlipCelebration status={status} onDashboard={() => router.push('/dashboard/service-provider')} onSettings={() => setFlipped(false)} />;
 
-  const common = { status, absorb, back: () => setView('list') };
-  if (view === 'coverage') return <CoverageCard {...common} />;
-  if (view === 'team') return <TeamCard {...common} />;
-  if (view === 'vehicles') return <VehiclesCard {...common} />;
-  if (view === 'hours') return <HoursCard {...common} />;
-  if (view === 'rules') return <RulesCard {...common} />;
+  const states = cardStates(status);
+  const common = { status, absorb, back: () => setRemount((r) => r + 1) };
 
-  /* ── the shell (design 1m/1n) ── */
-  interface Row {
-    key: View; icon: React.ReactNode; title: string; sub: string;
-    state: 'done' | 'progress' | 'todo';
-    chips: Array<{ label: string; kind: 'grey' | 'missing' }>;
-    hint: string; openLabel: string;
-  }
-  const rows: Row[] = [
-    { key: 'coverage', icon: <MapPin size={18} />, title: '① Where you work',
-      sub: c.coverage.complete ? `Coverage · ${c.coverage.zoneCount} areas` : 'Pick the Dubai areas your team serves',
-      state: c.coverage.complete ? 'done' : 'todo',
-      chips: [{ label: `${c.coverage.zoneCount} areas selected`, kind: 'grey' }],
-      hint: 'Wider area = more jobs. A booking must fall inside one of your areas to reach you.',
-      openLabel: 'Open coverage card' },
-    { key: 'team', icon: <Users size={18} />, title: '② Your team',
-      sub: c.team.complete ? `${c.team.activeTechnicians} technician${c.team.activeTechnicians === 1 ? '' : 's'} · ${c.team.leadCapable} lead-capable`
-        : 'Give each technician skills — jobs go to skilled, free crews',
-      state: c.team.complete ? 'done' : (c.team.activeTechnicians > 0 ? 'progress' : 'todo'),
-      chips: [
-        { label: `${c.team.activeTechnicians} technician${c.team.activeTechnicians === 1 ? '' : 's'}`, kind: 'grey' },
-        { label: `${c.team.leadCapable} lead-capable`, kind: 'grey' },
-        ...c.team.missingCategories.map((m) => ({ label: `Missing: ${catLabel(m)}`, kind: 'missing' as const })),
-      ],
-      hint: 'Each category you offer needs at least one lead-capable technician with that skill.',
-      openLabel: 'Open team card' },
-    { key: 'vehicles', icon: <Truck size={18} />, title: '③ Your vehicles',
-      sub: c.fleet.complete ? `${c.fleet.vehicles} vehicle${c.fleet.vehicles === 1 ? '' : 's'} · ${c.fleet.effectiveMaxConcurrentJobs} crew${c.fleet.effectiveMaxConcurrentJobs === 1 ? '' : 's'} on the road at once`
-        : c.fleet.vehicles > 0 ? 'Add a lead technician to activate your crews' : 'Vehicles + lead techs = how many jobs at once',
-      state: c.fleet.complete ? 'done' : (c.fleet.vehicles > 0 ? 'progress' : 'todo'),
-      chips: [
-        { label: `${c.fleet.vehicles} vehicle${c.fleet.vehicles === 1 ? '' : 's'}`, kind: 'grey' },
-        { label: `${c.fleet.effectiveMaxConcurrentJobs} crew${c.fleet.effectiveMaxConcurrentJobs === 1 ? '' : 's'} at once`, kind: 'grey' },
-      ],
-      hint: "We'll never book you for more than your crew count at the same time.",
-      openLabel: 'Open vehicles card' },
-    { key: 'hours', icon: <Clock size={18} />, title: '④ When you work',
-      sub: c.hours.complete ? `${c.hours.daysConfigured} days a week` : 'Set your working week and days off',
-      state: c.hours.complete ? 'done' : 'todo',
-      chips: [{ label: c.hours.complete ? `${c.hours.daysConfigured} days configured` : 'Not set yet', kind: 'grey' }],
-      hint: 'Only promise hours you can serve — declared time off is never penalized.',
-      openLabel: 'Open hours card' },
-    { key: 'rules', icon: <FileText size={18} />, title: '⑤ Job rules',
-      sub: c.rules.complete ? `Accepted · min notice ${c.rules.minNoticeHours === 0 ? 'same-day' : `${c.rules.minNoticeHours}h`}`
-        : 'The handshake: response times, travel buffer, emergency passes',
-      state: c.rules.complete ? 'done' : 'todo',
-      chips: [{ label: c.rules.complete ? 'Accepted' : '2-minute read, one tap', kind: 'grey' }],
-      hint: 'Fair both ways: offers expire after 2 hours, travel time is padded, 3 emergency passes a month.',
-      openLabel: 'Open job rules' },
-  ];
+  // One-line context per section, shown under the sub-tabs.
+  const hints: Record<View, string> = {
+    coverage: 'Wider area = more jobs. A booking must fall inside one of your areas to reach you.',
+    vehicles: "We'll never book you for more than your crew count at the same time.",
+    hours: 'Only promise hours you can serve — declared time off is never penalized.',
+    rules: 'Fair both ways: offers expire after 2 hours, travel time is padded, 3 emergency passes a month.',
+  };
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -282,8 +329,8 @@ export function SpJobReady() {
           <h1 className="text-[20px] font-bold tracking-tight">{status.jobReady ? 'You’re job-ready ✓' : 'Get job-ready'}</h1>
           <p className="mt-0.5 text-[13.5px] leading-snug" style={{ color: status.jobReady ? 'rgba(255,255,255,.85)' : MUTE }}>
             {status.jobReady
-              ? 'Bookings in your areas reach you. These five cards are now your settings — change anything, anytime.'
-              : `${doneCount} of 5 done — bookings unlock automatically when the last card completes. Any order, ~10 minutes total.`}
+              ? 'Bookings in your areas reach you. These five sections are now your settings — change anything, anytime.'
+              : `${doneCount} of 5 done — bookings unlock automatically when the last section completes. Any order, ~10 minutes total.`}
           </p>
         </div>
         {!status.jobReady && leftLabels.length > 0 && (
@@ -294,67 +341,40 @@ export function SpJobReady() {
         )}
       </div>
 
-      {/* card rows — inline expansion on desktop (1m), direct open on mobile (1n) */}
-      <div className="mt-4 flex flex-col gap-2.5">
-        {rows.map((r) => {
-          const isOpen = expanded === r.key;
-          const tile = r.state === 'done'
-            ? { background: TINT_GREEN, color: GREEN }
-            : r.state === 'progress' ? { background: TINT_AMBER, color: '#C77D0A' } : { background: TINT_GREY, color: MUTE };
+      {/* Section sub-tabs — every editor one click away, open directly below
+          (replaces the old collapsed rows + "Open card" indirection). Same
+          construction as the RP/SP settings tab bars so tab bars read as one
+          system across both portals. */}
+      <div className="mt-4 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm border border-[#e8e6e0]">
+        {CARD_TABS.map(({ key, label, icon: Icon }) => {
+          const active = view === key;
+          const st = states[key];
           return (
-            <div key={r.key} className="overflow-hidden"
-              style={isOpen
-                ? { ...card(), border: '1.5px solid #C9D4CC', boxShadow: '0 4px 14px -8px rgba(20,40,30,.15)' }
-                : card({ border: r.state === 'progress' ? '1.5px solid #EBD9B4' : CARD_BORDER })}>
-              <button
-                onClick={() => {
-                  // mobile: straight into the card; desktop: expand inline first
-                  if (typeof window !== 'undefined' && window.innerWidth < 640) { setView(r.key); return; }
-                  setExpanded(isOpen ? null : r.key);
-                }}
-                className="flex w-full items-center gap-3.5 px-5 py-[15px] text-left">
-                <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[11px]" style={tile}>{r.icon}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[14.5px] font-bold" style={{ color: INK }}>{r.title}</span>
-                  <span className="block truncate text-[12.5px]" style={{ color: r.state === 'progress' && !isOpen ? AMBER_TEXT : MUTE }}>{r.sub}</span>
-                </span>
-                <StatusPill state={r.state} />
-                {isOpen
-                  ? <ChevronDown size={16} className="shrink-0" style={{ color: FAINT }} />
-                  : <ChevronRight size={16} className="shrink-0" style={{ color: FAINT }} />}
-              </button>
-              {isOpen && (
-                <div className="border-t px-5 py-4" style={{ borderColor: '#EEF0EC', background: '#FBFCFA' }}>
-                  <div className="flex flex-wrap items-center gap-3.5">
-                    <div className="flex flex-wrap gap-1.5">
-                      {r.chips.map((chip) => (
-                        <span key={chip.label} className="rounded-full px-3 py-1.5 text-[12px] font-semibold"
-                          style={chip.kind === 'missing'
-                            ? { background: '#FDF1EF', color: RED, border: '1px solid #F4CFC9', fontWeight: 700 }
-                            : { background: TINT_GREY, color: INK }}>
-                          {chip.label}
-                        </span>
-                      ))}
-                    </div>
-                    <button onClick={() => setView(r.key)}
-                      className="ml-auto flex h-[38px] items-center rounded-[10px] px-5 text-[13px] font-semibold text-white"
-                      style={{ background: INK }}>
-                      {r.openLabel}
-                    </button>
-                  </div>
-                  <p className="mt-2.5 flex items-center gap-1.5 text-[12.5px]" style={{ color: MUTE }}>
-                    <Info size={13} style={{ color: FAINT }} /> {r.hint}
-                  </p>
-                </div>
-              )}
-            </div>
+            <button key={key} onClick={() => selectCard(key)}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                active ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+              }`}>
+              <Icon size={14} /> {label}
+              {st === 'done'
+                ? <Check size={13} strokeWidth={3} className={active ? 'text-white' : 'text-[#2e9f82]'} />
+                : <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ background: st === 'progress' ? '#C77D0A' : active ? 'rgba(255,255,255,.6)' : '#C7CFC8' }} />}
+            </button>
           );
         })}
       </div>
-
-      <p className="mt-5 text-center text-[12px]" style={{ color: FAINT }}>
-        Bookings unlock automatically the moment all five are done — no review, no waiting.
+      <p className="mb-4 mt-2 flex items-center gap-1.5 text-[12.5px]" style={{ color: MUTE }}>
+        <Info size={13} className="shrink-0" style={{ color: FAINT }} /> {hints[view]}
       </p>
+
+      {/* Active section — the editor itself, open and ready. Remount key makes
+          Cancel reset edits and a save re-read fresh state. */}
+      <div key={remount}>
+        {view === 'coverage' && <CoverageCard {...common} />}
+        {view === 'vehicles' && <VehiclesCard {...common} />}
+        {view === 'hours' && <HoursCard {...common} />}
+        {view === 'rules' && <RulesCard {...common} />}
+      </div>
     </div>
   );
 }
@@ -395,10 +415,15 @@ function FlipCelebration({ status, onDashboard, onSettings }: { status: JobReady
 
 interface CardProps { status: JobReadyStatus; absorb: (s: JobReadyStatus) => void; back: () => void }
 
+const cityOf = (o: CoverageOption) => o.emirate ?? 'Dubai';
+
 function CoverageCard({ status, absorb, back }: CardProps) {
   const [options, setOptions] = useState<CoverageOption[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [query, setQuery] = useState('');
+  // Active city tab — every emirate the SP serves gets its own top-level tab
+  // so a second city (e.g. Abu Dhabi) is never buried under Dubai's groups.
+  const [city, setCity] = useState<string>('Dubai');
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -407,23 +432,37 @@ function CoverageCard({ status, absorb, back }: CardProps) {
     apiGet<CoverageOption[]>('/service-provider/coverage/options').then((rows) => {
       setOptions(rows);
       setSelected(new Set(rows.filter((r) => r.selected).map((r) => r.communityId)));
-      const withSel = new Set(rows.filter((r) => r.selected).map((r) => groupOf(r.nameEn)));
-      setOpenGroups(withSel.size ? withSel : new Set([COMMUNITY_GROUPS[0].label]));
+      // Land on the first city that has a selection, else the first served city.
+      // All division dropdowns start CLOSED — the "n of m" header counts show
+      // where selections live; expanding is one click.
+      const cityList = [...new Set(rows.map(cityOf))];
+      setCity(cityList.find((c) => rows.some((r) => r.selected && cityOf(r) === c)) ?? cityList[0] ?? 'Dubai');
     });
   }, []);
+
+  const cities = useMemo(() => {
+    if (!options) return [];
+    return [...new Set(options.map(cityOf))];
+  }, [options]);
 
   const groups = useMemo(() => {
     if (!options) return [];
     const q = query.trim().toLowerCase();
-    const filtered = q ? options.filter((o) => o.nameEn.toLowerCase().includes(q)) : options;
+    // Searching looks across every served city; browsing shows the active city.
+    const pool = q
+      ? options.filter((o) => o.nameEn.toLowerCase().includes(q))
+      : options.filter((o) => cityOf(o) === city);
     const byGroup = new Map<string, CoverageOption[]>();
-    for (const o of filtered) {
-      const g = groupOf(o.nameEn);
+    for (const o of pool) {
+      const g = groupOf(o);
       byGroup.set(g, [...(byGroup.get(g) ?? []), o]);
     }
-    const order = [...COMMUNITY_GROUPS.map((g) => g.label), 'Outer Dubai'];
+    // Order: each served city's divisions (then its Outer bucket), cities in
+    // server order; a city without curated divisions is its own single group.
+    const order = [...new Set(options.map(cityOf))].flatMap((c) =>
+      CITY_GROUPS[c] ? [...CITY_GROUPS[c].map((g) => g.label), `Outer ${c}`] : [c]);
     return [...new Set(order)].filter((g) => byGroup.has(g)).map((g) => ({ label: g, items: byGroup.get(g)! }));
-  }, [options, query]);
+  }, [options, query, city]);
 
   const save = async (ids: number[]) => {
     setSaving(true);
@@ -442,17 +481,51 @@ function CoverageCard({ status, absorb, back }: CardProps) {
     <div className="mx-auto max-w-2xl pb-24">
       <CardHeader title="Where you work" sub="Wider area = more jobs. Change anytime." onBack={back} />
 
+      {/* City tabs — one per served emirate, with that city's selected count */}
+      {cities.length > 1 && (
+        <div className="mb-3 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm border border-[#e8e6e0]">
+          {cities.map((c) => {
+            const cityOpts = options.filter((o) => cityOf(o) === c);
+            const selInCity = cityOpts.filter((o) => selected.has(o.communityId)).length;
+            const active = c === city && !query.trim();
+            return (
+              <button key={c}
+                onClick={() => {
+                  setCity(c); setQuery('');
+                  setOpenGroups(new Set()); // divisions start closed
+                }}
+                className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                  active ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+                }`}>
+                {c}
+                <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
+                  active ? 'bg-white/20 text-white' : selInCity ? 'bg-[#2e9f82]/10 text-[#2e9f82]' : 'bg-[#f4f3ef] text-[#9b9890]'
+                }`}>
+                  {selInCity}/{cityOpts.length}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="relative mb-3">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: FAINT }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search communities…"
+        <input value={query} onChange={(e) => setQuery(e.target.value)}
+          placeholder={cities.length > 1 ? 'Search all communities…' : 'Search communities…'}
           className="w-full rounded-[12px] bg-white py-3 pl-10 pr-4 text-sm outline-none"
           style={{ border: INNER_BORDER, color: INK }} />
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button onClick={() => setSelected(new Set(options.map((o) => o.communityId)))}
+        <button
+          onClick={() => setSelected((s) => {
+            const n = new Set(s);
+            options.filter((o) => cityOf(o) === city).forEach((o) => n.add(o.communityId));
+            return n;
+          })}
           className="rounded-full bg-white px-3.5 py-1.5 text-[13px] font-semibold" style={{ border: '1px solid #D7DCD7', color: INK }}>
-          Select all Dubai
+          Select all {city}
         </button>
         <span className="rounded-full px-3.5 py-1.5 text-[13px] font-bold text-white" style={{ background: INK }}>
           {selected.size} areas
@@ -475,7 +548,8 @@ function CoverageCard({ status, absorb, back }: CardProps) {
       <div className="space-y-2.5">
         {groups.map((g) => {
           const selCount = g.items.filter((i) => selected.has(i.communityId)).length;
-          const open = openGroups.has(g.label) || Boolean(query.trim());
+          // A city with a single group (e.g. Abu Dhabi) renders open directly.
+          const open = openGroups.has(g.label) || Boolean(query.trim()) || groups.length === 1;
           const allOn = g.items.every((i) => selected.has(i.communityId));
           return (
             <div key={g.label} className="overflow-hidden" style={card({ background: selCount ? '#F6FAF7' : '#fff' })}>
@@ -532,7 +606,7 @@ function CoverageCard({ status, absorb, back }: CardProps) {
 
 /* ── Card ② · Your team (1p) ─────────────────────────────────────────────── */
 
-function TeamCard({ status, absorb, back }: CardProps) {
+function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { hideGapChips?: boolean }) {
   const [techs, setTechs] = useState<Tech[] | null>(null);
   const [services, setServices] = useState<SpService[]>([]);
   const t = status.cards.team;
@@ -569,13 +643,14 @@ function TeamCard({ status, absorb, back }: CardProps) {
 
       <div className="mb-4 rounded-[14px] border p-4" style={{ background: '#FEF9EC', borderColor: '#F2E3B8' }}>
         <p className="text-[13px] leading-relaxed" style={{ color: '#7C5A10' }}>
-          Each category you offer needs <b>at least one lead-capable technician</b> with that skill.
+          Each service you list needs <b>at least one lead-capable technician</b>{' '}skilled in that exact service —
+          a technician skilled in Regular Cleaning doesn&apos;t cover Deep Cleaning unless they&apos;re picked for both.
         </p>
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.activeTechnicians} technician{t.activeTechnicians === 1 ? '' : 's'}</span>
           <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.leadCapable} lead-capable</span>
-          {t.missingCategories.map((m) => (
-            <span key={m} className="rounded-full px-3 py-1 text-[12px] font-bold" style={{ background: '#FDF1EF', color: RED, border: '1px solid #F4CFC9' }}>Missing: {catLabel(m)}</span>
+          {!hideGapChips && t.uncoveredServices.map((s) => (
+            <span key={s.id} className="rounded-full px-3 py-1 text-[12px] font-bold" style={{ background: '#FDF1EF', color: RED, border: '1px solid #F4CFC9' }}>No tech for: {s.name}</span>
           ))}
         </div>
       </div>
@@ -660,12 +735,37 @@ function TeamCard({ status, absorb, back }: CardProps) {
       <p className="mt-3 text-[12.5px]" style={{ color: FAINT }}>
         Lead techs are sent as the responsible person on a job — your lead count sets how many jobs run at once.
       </p>
+    </div>
+  );
+}
 
-      <Link href="/dashboard/service-provider/team"
-        className="mt-4 flex items-center justify-center gap-2 rounded-[14px] border border-dashed bg-white py-3.5 text-sm font-bold"
-        style={{ borderColor: GREEN, color: GREEN }}>
-        <Plus size={16} /> Invite technicians — opens your roster
-      </Link>
+/**
+ * Standalone skills editor for Settings → Team: the job-ready Team card,
+ * self-managing its status so it can live NEXT TO the roster (SpTeamPanel)
+ * instead of duplicating "Team" as a Rules section.
+ */
+export function SpTeamSkills() {
+  const [status, setStatus] = useState<JobReadyStatus | null>(null);
+  const [remount, setRemount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<JobReadyStatus>('/service-provider/job-ready')
+      .then(setStatus)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
+  }, []);
+
+  if (error) return <div className="rounded-[14px] bg-white p-6 text-sm" style={{ border: CARD_BORDER, color: RED }}>{error}</div>;
+  if (!status) {
+    return (
+      <div className="space-y-2.5">
+        {[...Array(3)].map((_, i) => <div key={i} className="h-[70px] animate-pulse rounded-[14px] bg-white" style={{ border: CARD_BORDER }} />)}
+      </div>
+    );
+  }
+  return (
+    <div key={remount}>
+      <TeamCard status={status} absorb={setStatus} back={() => setRemount((r) => r + 1)} hideGapChips />
     </div>
   );
 }
@@ -738,7 +838,7 @@ function VehiclesCard({ status, absorb, back }: CardProps) {
           We&apos;ll <b>never</b> book you for more than {f.effectiveMaxConcurrentJobs} job{f.effectiveMaxConcurrentJobs === 1 ? '' : 's'} at the same time.
         </p>
         <div className="mt-2.5 flex items-center justify-between text-[12.5px]">
-          <span style={{ color: 'rgba(255,255,255,.75)' }}>More leads in card ② = more crews</span>
+          <span style={{ color: 'rgba(255,255,255,.75)' }}>More lead techs (Team tab) = more crews</span>
           {editingLimit ? (
             <span className="flex items-center gap-2">
               <input type="number" min={1} max={200} value={limitValue} onChange={(e) => setLimitValue(e.target.value)}
