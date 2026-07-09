@@ -126,9 +126,12 @@ function rowStatusConfig(row: SpaceRow): { label: string; bg: string; text: stri
   const c = row.contract;
 
   if (c) {
-    // A live renewal offer on the active lease is a call-to-action — surface it
-    // ahead of the plain "Active Tenancy" label so the customer acts on it.
-    if (c.status === 'active' && c.renewalAccepted === 'pending')
+    // A live renewal offer is a call-to-action — surface it ahead of the plain
+    // status label so the customer acts on it. This applies both while the lease
+    // is still active AND once it has expired with the renewal still pending
+    // (the old term ended before the tenant accepted); otherwise the space would
+    // wrongly read "Lease Ended" and hide the offer.
+    if ((c.status === 'active' || c.status === 'expired') && c.renewalAccepted === 'pending')
       return { label: 'Renewal Offered', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
     if (c.status === 'active') return { label: 'Active Tenancy', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false };
     if (c.status === 'issued' && !c.tenantSignedAt) return { label: 'Sign Contract', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
@@ -247,6 +250,13 @@ export default function MySpacesPage() {
   // customer always sees their leases (including contracts created outside the
   // viewing/lead pipeline, e.g. imported data). One row per unit, primary pick.
   const TERMINAL_CONTRACT = new Set(['expired', 'terminated', 'cancelled', 'rejected', 'superseded']);
+  // A lease that has naturally EXPIRED but carries a live renewal offer
+  // (renewalAccepted='pending') is NOT past — the customer still has to accept
+  // the renewal. This happens whenever the old term ends before the tenant
+  // signs the renewal (proposed for 1 Jul, old lease ended 30 Jun). Keep it in
+  // the active section so the "Renewal Offered" CTA stays visible.
+  const hasLiveRenewalOffer = (c: TenantContract) =>
+    c.renewalAccepted === 'pending' && c.status === 'expired';
   const contractOnly = Array.from(
     new Set(contracts.map(c => c.unit?.id).filter((x): x is number => x != null)),
   )
@@ -254,9 +264,9 @@ export default function MySpacesPage() {
     .map(uid => pickPrimaryContract(contracts, uid))
     .filter((c): c is TenantContract => !!c);
   const activeContractRows: SpaceRow[] = contractOnly
-    .filter(c => !TERMINAL_CONTRACT.has(c.status))
+    .filter(c => !TERMINAL_CONTRACT.has(c.status) || hasLiveRenewalOffer(c))
     .map(c => ({ kind: 'contract' as const, key: `c-${c.id}`, contract: c }));
-  const pastContractRows = contractOnly.filter(c => TERMINAL_CONTRACT.has(c.status));
+  const pastContractRows = contractOnly.filter(c => TERMINAL_CONTRACT.has(c.status) && !hasLiveRenewalOffer(c));
 
   const activeRows: SpaceRow[] = [
     ...activeGroups.map(g => ({
@@ -276,7 +286,12 @@ export default function MySpacesPage() {
 
   const activeCount    = activeRows.filter(r => r.contract?.status === 'active').length;
   const renewingCount  = activeRows.filter(r => r.contract?.renewalAccepted === 'pending').length;
-  const inProgressCount = activeRows.filter(r => !r.contract || r.contract.status !== 'active').length;
+  // In-progress = still working toward a lease; exclude active tenancies AND
+  // rows already counted under "renewing" so an expired-with-pending-renewal
+  // space isn't tallied twice.
+  const inProgressCount = activeRows.filter(r =>
+    !r.contract || (r.contract.status !== 'active' && r.contract.renewalAccepted !== 'pending'),
+  ).length;
   const firstName = (user?.name ?? '').trim().split(/\s+/)[0] || 'there';
 
   const chips = [
