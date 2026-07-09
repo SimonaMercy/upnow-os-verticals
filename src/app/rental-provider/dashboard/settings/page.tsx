@@ -596,9 +596,27 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
   );
 }
 
+const MAIN_TABS: MainTab[] = ['general', 'fee_rules', 'team', 'notifications'];
+
 export default function SettingsPage() {
   const { user, refresh } = useAuth();
   const [mainTab, setMainTab] = useState<MainTab>('general');
+
+  // Persist the active tab in the URL (?tab=) so it survives a page refresh and
+  // stays shareable. Restore from the query param on mount (default: general).
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t && (MAIN_TABS as string[]).includes(t)) setMainTab(t as MainTab);
+  }, []);
+
+  // Switch tab + reflect it in the URL (replaceState — no history spam / no back-
+  // button tab cycling; a refresh lands back on the same tab).
+  const selectTab = (t: MainTab) => {
+    setMainTab(t);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', t);
+    window.history.replaceState(null, '', url.toString());
+  };
 
   // ── Business profile state ──────────────────────────────────
   const [profileLoading, setProfileLoading] = useState(true);
@@ -1196,7 +1214,7 @@ export default function SettingsPage() {
       {/* Top-level tabs */}
       <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-[#e8e6e0] mb-6 w-fit">
         <button
-          onClick={() => setMainTab('general')}
+          onClick={() => selectTab('general')}
           className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
             mainTab === 'general' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
           }`}
@@ -1204,7 +1222,7 @@ export default function SettingsPage() {
           <User size={14} /> Profile
         </button>
         <button
-          onClick={() => setMainTab('fee_rules')}
+          onClick={() => selectTab('fee_rules')}
           className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
             mainTab === 'fee_rules' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
           }`}
@@ -1212,7 +1230,7 @@ export default function SettingsPage() {
           <Percent size={14} /> Rules
         </button>
         <button
-          onClick={() => setMainTab('team')}
+          onClick={() => selectTab('team')}
           className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
             mainTab === 'team' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
           }`}
@@ -1220,7 +1238,7 @@ export default function SettingsPage() {
           <Users size={14} /> Team
         </button>
         <button
-          onClick={() => setMainTab('notifications')}
+          onClick={() => selectTab('notifications')}
           className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
             mainTab === 'notifications' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
           }`}

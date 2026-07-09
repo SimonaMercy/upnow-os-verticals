@@ -20,6 +20,8 @@ const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available).map((r) => ({ 
 interface ManagerPermissions {
   id: number;
   managerUserId: number;
+  /** Per-landlord activation — false = deactivated for this landlord. */
+  isActive: boolean;
   // Properties & listings
   canListProperties:    boolean;
   canEditProperties:    boolean;
@@ -59,6 +61,10 @@ interface ManagerMember {
   id: number;
   userId: number;
   status: string;
+  /** Per-landlord activation. A deactivated manager keeps every permission flag
+   *  but is blocked from acting for this landlord until re-activated. */
+  active?: boolean;
+  jobTitle?: string | null;
   createdAt: string;
   user: { id: number; name: string; email: string; phone: string | null };
 }
@@ -578,8 +584,25 @@ function PermissionsPanel({
   const updateMutation = useMutation({
     mutationFn: (dto: Partial<ManagerPermissions>) =>
       apiPatch(`/managers/${manager.userId}/permissions`, dto),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['manager-perms', manager.userId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['manager-perms', manager.userId] });
+      // Activation lives on the permission record — refresh the team list chip.
+      qc.invalidateQueries({ queryKey: ['rp-team'] });
+    },
   });
+
+  // ── Editable identity/details (name / email / phone / job title) ──
+  const [details, setDetails] = useState({
+    name: manager.user.name ?? '',
+    email: manager.user.email ?? '',
+    phone: manager.user.phone ?? '',
+    jobTitle: manager.jobTitle ?? '',
+  });
+  const detailsMutation = useMutation({
+    mutationFn: (dto: typeof details) => apiPatch(`/managers/${manager.userId}/details`, dto),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rp-team'] }),
+  });
+  const active = perms?.isActive !== false;
 
   if (isLoading || !perms) {
     return (
@@ -604,7 +627,7 @@ function PermissionsPanel({
         <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: 'var(--color-base-200)' }}>
           <div>
             <p className="font-semibold text-sm">{manager.user.name}</p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>Edit permissions</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>Edit details & permissions</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--color-neutral-400)' }}>
             <X className="w-5 h-5" />
@@ -612,6 +635,109 @@ function PermissionsPanel({
         </div>
 
         <div className="p-5 space-y-6 flex-1">
+          {/* ── Manager details (identity + job title) ── */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--color-neutral-400)' }}>
+              Manager details
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-medium mb-1" style={{ color: 'var(--color-neutral-600)' }}>Full name</label>
+                <input
+                  value={details.name}
+                  onChange={(e) => setDetails((d) => ({ ...d, name: e.target.value }))}
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ border: '1px solid var(--color-base-200)', background: 'var(--color-base-100)' }}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: 'var(--color-neutral-600)' }}>Email (login)</label>
+                  <input
+                    type="email"
+                    value={details.email}
+                    onChange={(e) => setDetails((d) => ({ ...d, email: e.target.value }))}
+                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-base-200)', background: 'var(--color-base-100)' }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium mb-1" style={{ color: 'var(--color-neutral-600)' }}>Phone</label>
+                  <input
+                    value={details.phone}
+                    onChange={(e) => setDetails((d) => ({ ...d, phone: e.target.value }))}
+                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-base-200)', background: 'var(--color-base-100)' }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium mb-1" style={{ color: 'var(--color-neutral-600)' }}>Job title</label>
+                <input
+                  value={details.jobTitle}
+                  onChange={(e) => setDetails((d) => ({ ...d, jobTitle: e.target.value }))}
+                  placeholder="e.g. Leasing Manager"
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ border: '1px solid var(--color-base-200)', background: 'var(--color-base-100)' }}
+                />
+              </div>
+              {detailsMutation.error && (
+                <p className="text-xs" style={{ color: 'var(--color-error)' }}>{(detailsMutation.error as Error).message}</p>
+              )}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => detailsMutation.mutate(details)}
+                  disabled={detailsMutation.isPending}
+                  className="px-3.5 py-2 rounded-xl text-sm font-semibold text-white"
+                  style={{ background: 'var(--color-primary)', opacity: detailsMutation.isPending ? 0.7 : 1 }}
+                >
+                  {detailsMutation.isPending ? 'Saving…' : 'Save details'}
+                </button>
+                {detailsMutation.isSuccess && !detailsMutation.isPending && (
+                  <span className="text-xs font-medium" style={{ color: 'var(--color-primary)' }}>✓ Saved</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Activation (landlord can deactivate anytime; reversible) ── */}
+          <div
+            className="rounded-xl p-4 flex items-center justify-between gap-3"
+            style={{
+              border: '1px solid var(--color-base-200)',
+              background: active ? 'var(--color-base-100)' : 'color-mix(in srgb, var(--color-error) 6%, white)',
+            }}
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: active ? 'var(--color-neutral-700)' : 'var(--color-error)' }}>
+                {active ? 'Active' : 'Deactivated'}
+              </p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
+                {active
+                  ? 'This manager can act on your account. Deactivate to block access — permissions are kept and you can re-activate anytime.'
+                  : 'Access is blocked. Permissions are preserved — re-activate to restore access.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => updateMutation.mutate({ isActive: !active })}
+              disabled={updateMutation.isPending}
+              className="px-3.5 py-2 rounded-xl text-sm font-semibold shrink-0"
+              style={
+                active
+                  ? { border: '1px solid var(--color-error)', color: 'var(--color-error)', background: 'transparent' }
+                  : { background: 'var(--color-primary)', color: 'white' }
+              }
+            >
+              {active ? 'Deactivate' : 'Activate'}
+            </button>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--color-neutral-400)' }}>
+              Permissions
+            </p>
           <RolePresets
             onApply={(keys) =>
               updateMutation.mutate(
@@ -631,7 +757,7 @@ function PermissionsPanel({
             }
           />
           {perms.canViewReports && (
-            <div>
+            <div className="mt-5">
               <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--color-neutral-400)' }}>
                 Reports access
               </p>
@@ -641,6 +767,7 @@ function PermissionsPanel({
               />
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
@@ -653,6 +780,7 @@ function StatusChip({ status }: { status: string }) {
   const styles: Record<string, { bg: string; text: string }> = {
     active:    { bg: 'color-mix(in srgb, var(--color-primary) 12%, white)', text: 'var(--color-primary)' },
     pending:   { bg: 'color-mix(in srgb, #d97706 12%, white)', text: '#d97706' },
+    inactive:  { bg: 'color-mix(in srgb, var(--color-error) 12%, white)', text: 'var(--color-error)' },
     expired:   { bg: 'color-mix(in srgb, var(--color-neutral-400) 15%, white)', text: 'var(--color-neutral-500)' },
     cancelled: { bg: 'color-mix(in srgb, var(--color-error) 12%, white)', text: 'var(--color-error)' },
   };
@@ -743,7 +871,7 @@ export function TeamPanel() {
                 key={mgr.id}
                 onClick={() => setSelectedManager(mgr)}
                 className="w-full flex items-center gap-4 px-5 py-4 text-left bg-white rounded-2xl transition-shadow hover:shadow-md"
-                style={{ boxShadow: 'var(--shadow-sm)' }}
+                style={{ boxShadow: 'var(--shadow-sm)', opacity: mgr.active === false ? 0.6 : 1 }}
               >
                 <div
                   className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
@@ -752,7 +880,12 @@ export function TeamPanel() {
                   {mgr.user.name.slice(0, 1).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{mgr.user.name}</p>
+                  <p className="text-sm font-semibold truncate">
+                    {mgr.user.name}
+                    {mgr.jobTitle && (
+                      <span className="ml-2 font-normal text-xs" style={{ color: 'var(--color-neutral-400)' }}>{mgr.jobTitle}</span>
+                    )}
+                  </p>
                   <div className="flex items-center gap-3 mt-0.5">
                     <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
                       <Mail className="w-3 h-3" />{mgr.user.email}
