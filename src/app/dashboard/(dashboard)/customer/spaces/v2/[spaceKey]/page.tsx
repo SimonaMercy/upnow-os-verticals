@@ -5027,9 +5027,20 @@ export default function CustomerSpaceV2Page() {
       const byRecency = (a: ApiContract, b: ApiContract) =>
         (b.startDate ?? '').localeCompare(a.startDate ?? '') || (b.id - a.id);
       const tip = allForUnit.slice().sort(byRecency)[0] ?? null;
+      // Today (Asia/Dubai) — to compare against the term start.
+      const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+      const tipStartIso = (tip?.startDate ?? '').slice(0, 10);
+      // A tip is "not yet the current tenancy" when it's still being processed
+      // (issued/pending renewal child) OR when it was activated BEFORE its term
+      // starts — the double-active glitch where a renewal's Ejari was registered
+      // early, so a future-dated lease is wrongly `active`. In BOTH cases the
+      // in-force lease is the parent and the tip is the renewal, so the customer
+      // sees their current lease + the renewal, never next year's lease as "live".
+      const tipNotYetCurrent = !!tip && !!tip.parentContractId &&
+        (tip.status !== 'active' || (!!tipStartIso && tipStartIso > todayIso));
       let contract: ApiContract | null;
       let renewalContract: ApiContract | null;
-      if (tip && tip.parentContractId && tip.status !== 'active') {
+      if (tip && tipNotYetCurrent) {
         contract = allForUnit.find(c => c.id === tip.parentContractId) ?? tip;
         renewalContract = tip;
       } else {
@@ -5087,9 +5098,14 @@ export default function CustomerSpaceV2Page() {
 
   // Dual-view trigger: original lease is still active AND a renewal child is mid-flight
   // (not yet activated, not rejected). In that case render the design's "Old + New" stack.
+  // A renewal that was activated BEFORE its term starts (double-active glitch) still
+  // counts as "mid-flight" here — it belongs stacked under the current lease, not
+  // rendered as its own live tenancy.
   const c = resolved.contract;
   const rc = resolved.renewalContract;
-  const isDualView = !!(c && c.status === 'active' && rc && rc.status !== 'active' && rc.status !== 'terminated');
+  const todayIsoView = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+  const rcNotYetLive = !!rc && (rc.status !== 'active' || (rc.startDate ?? '').slice(0, 10) > todayIsoView);
+  const isDualView = !!(c && c.status === 'active' && rc && rc.status !== 'terminated' && rcNotYetLive);
 
   if (isDualView) {
     return (
