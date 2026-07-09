@@ -19,6 +19,7 @@ import {
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
 import { ManagerPerformanceCharts, LeaseActivityCharts } from '@/components/upnow/ReportCharts';
+import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
 type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
@@ -696,23 +697,12 @@ const TENANT_SCOPED = new Set<ReportSlug>([
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-// Current calendar year — the default period for every date-range report.
+// Current calendar year — used by the year dropdown (yearRange reports).
 const CURRENT_YEAR = new Date().getFullYear();
-const YEAR_START = `${CURRENT_YEAR}-01-01`;
-const YEAR_END = `${CURRENT_YEAR}-12-31`;
 // Reports that default to a single day (today) rather than the whole year — a
 // daily activity view (e.g. Manager Performance).
 const DAILY_DEFAULT_SLUGS = new Set<ReportSlug>(['manager-performance']);
 const todayRange = () => { const t = isoLocal(new Date()); return { from: t, to: t }; };
-
-// Ordered coarsest-recent → widest: Today, Weekly, Monthly, 3 Months, Yearly.
-const RANGE_PRESETS: { label: string; range: () => { from: string; to: string } }[] = [
-  { label: 'Today',    range: todayRange },
-  { label: 'Weekly',   range: () => { const n = new Date(); const f = new Date(n); f.setDate(f.getDate() - 6); return { from: isoLocal(f), to: isoLocal(n) }; } },
-  { label: 'Monthly',  range: () => { const n = new Date(); return { from: isoLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: isoLocal(n) }; } },
-  { label: '3 Months', range: () => { const n = new Date(); const f = new Date(n); f.setMonth(f.getMonth() - 3); return { from: isoLocal(f), to: isoLocal(n) }; } },
-  { label: 'Yearly',   range: () => ({ from: YEAR_START, to: YEAR_END }) },
-];
 
 function fmtAed(fils: number | null | undefined): string {
   const n = Number(fils ?? 0);
@@ -1393,24 +1383,14 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Date-range control (day / month / 3-6 mo / year / custom) */}
+      {/* Date-range control — single picker with preset shortcuts + two-month
+          calendar (shared across every date-range report). */}
       {def.controlKey === 'dateRange' && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>Period:</span>
-          {RANGE_PRESETS.map(p => {
-            const r = p.range();
-            const active = from === r.from && to === r.to;
-            return (
-              <button key={p.label} onClick={() => { setFrom(r.from); setTo(r.to); }}
-                className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${active ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
-                {p.label}
-              </button>
-            );
-          })}
-          <span className="text-xs text-[#9b9890] ml-1">Custom:</span>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
-          <span className="text-xs text-[#9b9890]">→</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-xs border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
+          <DateRangePicker from={from} to={to}
+            placeholder="All time"
+            onChange={(f, t) => { setFrom(f); setTo(t); }} />
         </div>
       )}
 

@@ -48,6 +48,11 @@ const TYPE_ORDER: Partial<Record<CategoryKey, string[]>> = {
   management_fee: ['ejari_fee', 'admin_fee', 'commission'],
 };
 
+// Ownership segregation by the property's leasing model (properties.leasing_type),
+// mirroring the Payment Grouping report — direct = Own Property, sub = Sub-lease,
+// management = Property Management. Resolved per row via its building name.
+const OWNERSHIP_LABEL: Record<string, string> = { direct: 'Own Property', sub: 'Sub-lease', management: 'Property Management' };
+
 function categoryOf(t: string): CategoryKey {
   if (t === 'rental_income') return 'rental_income';
   if (t === 'security_deposit') return 'security_deposit';
@@ -198,6 +203,8 @@ export default function PaymentsPage() {
   const [filterCategory, setFilterCategory] = useState<'all' | CategoryKey>('all');
   const [filterStatus, setFilterStatus]     = useState('all');
   const [filterBuilding, setFilterBuilding] = useState('all');
+  const [filterOwnership, setFilterOwnership] = useState<'all' | 'direct' | 'sub' | 'management'>('all');
+  const [buildingLeasing, setBuildingLeasing] = useState<Record<string, string>>({});
   const [filterYear, setFilterYear]         = useState('all');
   const [detailId, setDetailId] = useState<string | null>(null);
 
@@ -215,6 +222,19 @@ export default function PaymentsPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  // Building → leasing model, so payments can be segregated by ownership
+  // (same source as the Payment Grouping report).
+  useEffect(() => {
+    fetch('/api/properties', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : []))
+      .then((ps: Array<{ buildingName?: string | null; leasingType?: string | null }>) => {
+        const m: Record<string, string> = {};
+        for (const p of ps ?? []) if (p.buildingName) m[p.buildingName] = p.leasingType ?? 'direct';
+        setBuildingLeasing(m);
+      })
+      .catch(() => { /* ownership filter simply stays inert */ });
+  }, []);
 
   // Lazy-load the full deposit detail bundle (docs, move-in/out, settlement) for
   // the popup — only security-deposit rows open it.
@@ -239,6 +259,7 @@ export default function PaymentsPage() {
   const scoped = useMemo(() => yearScoped.filter(d => {
     if (filterStatus !== 'all' && d.status !== filterStatus) return false;
     if (filterBuilding !== 'all' && d.building !== filterBuilding) return false;
+    if (filterOwnership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== filterOwnership) return false;
     if (search) {
       const q = search.toLowerCase();
       if (
@@ -250,7 +271,7 @@ export default function PaymentsPage() {
       ) return false;
     }
     return true;
-  }), [yearScoped, filterStatus, filterBuilding, search]);
+  }), [yearScoped, filterStatus, filterBuilding, filterOwnership, buildingLeasing, search]);
 
   // Split every payment into its category bucket. Ejari is DIVIDED: AED 172.5
   // (capped at the amount) goes to Government Fees as the DLD registration, the
@@ -301,8 +322,8 @@ export default function PaymentsPage() {
   );
   const shownCount = useMemo(() => groups.reduce((s, g) => s + g.rows.length, 0), [groups]);
 
-  const hasFilters = filterCategory !== 'all' || filterStatus !== 'all' || filterBuilding !== 'all' || search !== '';
-  const clearFilters = () => { setFilterCategory('all'); setFilterStatus('all'); setFilterBuilding('all'); setSearch(''); };
+  const hasFilters = filterCategory !== 'all' || filterStatus !== 'all' || filterBuilding !== 'all' || filterOwnership !== 'all' || search !== '';
+  const clearFilters = () => { setFilterCategory('all'); setFilterStatus('all'); setFilterBuilding('all'); setFilterOwnership('all'); setSearch(''); };
 
   const detail = detailId !== null ? rows.find(d => d.id === detailId) ?? null : null;
 
@@ -377,6 +398,14 @@ export default function PaymentsPage() {
             {buildings.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         )}
+        <select value={filterOwnership} onChange={e => setFilterOwnership(e.target.value as typeof filterOwnership)}
+          aria-label="Filter payments by property ownership"
+          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
+          <option value="all">All Properties</option>
+          <option value="direct">{OWNERSHIP_LABEL.direct}</option>
+          <option value="sub">{OWNERSHIP_LABEL.sub}</option>
+          <option value="management">{OWNERSHIP_LABEL.management}</option>
+        </select>
         {hasFilters && (
           <button onClick={clearFilters}
             className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">

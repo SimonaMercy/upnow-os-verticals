@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { GripVertical, X, Pencil, Printer, RotateCcw, Check, Loader2, FolderPlus, ArrowLeft, FileSpreadsheet } from 'lucide-react';
+import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 
 const GOVT_EJARI_FEE = 172.5;
 
@@ -108,16 +109,45 @@ const yearsOf = (d: PaymentRow): number[] => {
   const s = d.recordedDate ?? d.transactionDate;
   return s ? [Number(s.slice(0, 4))] : [];
 };
+/** A row is in the [from, to] window (either bound optional, 'YYYY-MM-DD') if its
+ *  lease TERM overlaps it — the same priority as yearMatch (lease term → from/to
+ *  year span → transaction/recorded date). Bounds are inclusive. */
+const dateInRange = (d: PaymentRow, from: string, to: string): boolean => {
+  const lo = from || null;
+  const hi = to || null;
+  const overlaps = (sStr: string | null | undefined, eStr: string | null | undefined): boolean => {
+    const s = sStr ? sStr.slice(0, 10) : null;
+    const e = eStr ? eStr.slice(0, 10) : null;
+    if (lo && e && e < lo) return false;
+    if (hi && s && s > hi) return false;
+    return true;
+  };
+  if (d.startDate || d.endDate) return overlaps(d.startDate, d.endDate);
+  if (d.fromYear != null || d.toYear != null) {
+    const l = d.fromYear ?? d.toYear!;
+    const h = d.toYear ?? d.fromYear!;
+    return overlaps(`${Math.min(l, h)}-01-01`, `${Math.max(l, h)}-12-31`);
+  }
+  const t = d.transactionDate ?? d.recordedDate;
+  return t ? overlaps(t, t) : false;
+};
 
 export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/reports' }: { backHref?: string }) {
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [year, setYear] = useState<string>('all');
+  // Custom date window (either bound optional). When set it takes precedence over
+  // the Year dropdown — so Year and the From/To range never fight each other.
+  const [from, setFrom] = useState<string>('');
+  const [to, setTo] = useState<string>('');
+  const dateActive = from !== '' || to !== '';
   // Ownership segregation (properties.leasing_type): all / direct (Owned) /
   // sub (Sub-lease) / management (Managed). Resolved per row via its building.
   const [ownership, setOwnership] = useState<'all' | 'direct' | 'sub' | 'management'>('all');
   const [buildingLeasing, setBuildingLeasing] = useState<Record<string, string>>({});
+  // Specific-property filter (by building name) — independent of the lease-type filter.
+  const [building, setBuilding] = useState<string>('all');
 
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [assign, setAssign] = useState<Record<string, string>>(DEFAULT_ASSIGN);
@@ -159,14 +189,35 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     }
   }, [years]);
 
+  // Building list for the property picker — narrowed to the selected lease type
+  // so you never pick a property that the lease-type filter would hide.
+  const buildings = useMemo(() => {
+    const s = new Set<string>();
+    for (const d of rows) {
+      const b = (d.building ?? '').trim();
+      if (!b || b === '—') continue;
+      if (ownership !== 'all' && (buildingLeasing[b] ?? 'direct') !== ownership) continue;
+      s.add(b);
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [rows, ownership, buildingLeasing]);
+  // If the chosen property is no longer in scope (lease type changed), drop it.
+  useEffect(() => {
+    if (building !== 'all' && !buildings.includes(building)) setBuilding('all');
+  }, [buildings, building]);
+
   // Per-item totals for the selected year (Ejari split into DLD + service).
   const itemTotals = useMemo(() => {
     const t: Record<string, number> = {};
     const add = (k: string, v: number) => { if (v) t[k] = (t[k] ?? 0) + v; };
     for (const d of rows) {
-      // Ownership segregation — keep only the selected leasing model.
+      // Lease-type segregation — keep only the selected leasing model.
       if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
-      if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      // Specific-property filter.
+      if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
+      // Date window takes precedence over the Year dropdown when set.
+      if (dateActive) { if (!dateInRange(d, from, to)) continue; }
+      else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
       const amt = Number(d.amount) || 0;
       if (d.paymentType === 'ejari_fee') {
         add('ejari_dld', Math.min(GOVT_EJARI_FEE, amt));
@@ -179,7 +230,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       }
     }
     return t;
-  }, [rows, year, ownership, buildingLeasing]);
+  }, [rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
 
   // Items present in the data, each resolved to a category (unknown → 'others'
   // or the first category if 'others' was deleted).
@@ -240,7 +291,9 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     const out: Array<{ cat: string; item: string; row: PaymentRow; amount: number; desc: string }> = [];
     for (const d of rows) {
       if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
-      if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
+      if (dateActive) { if (!dateInRange(d, from, to)) continue; }
+      else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
       const amt = Number(d.amount) || 0;
       const push = (itemKey: string, amount: number, desc: string) => {
         if (!amount) return;
@@ -264,14 +317,14 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       const ExcelJS = (await import('exceljs')).default;
       const entries = exportEntries();
       const money = '#,##0.00';
-      const yr = year === 'all' ? 'all-years' : year;
-      const own = ownership === 'all' ? 'All properties' : OWNERSHIP_LABEL[ownership];
+      const own = ownership === 'all' ? 'All lease types' : OWNERSHIP_LABEL[ownership];
+      const prop = building === 'all' ? 'All properties' : building;
       const wb = new ExcelJS.Workbook();
       wb.creator = 'UpNow';
 
       const sum = wb.addWorksheet('Summary');
       const t = sum.addRow(['Payment Grouping']); t.font = { bold: true, size: 14 };
-      sum.addRow([`Year: ${yr}`, `Ownership: ${own}`]);
+      sum.addRow([`Period: ${periodLabel}`, `Lease type: ${own}`, `Property: ${prop}`]);
       sum.addRow([]);
       const sh = sum.addRow(['Category', 'Total (AED)']); sh.font = { bold: true };
       for (const c of categories) { const r = sum.addRow([c.name, catTotal(c.id)]); r.getCell(2).numFmt = money; }
@@ -305,7 +358,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `payment-grouping-${yr}.xlsx`;
+      a.download = `payment-grouping-${periodSlug}.xlsx`;
       a.click();
       URL.revokeObjectURL(a.href);
     } finally {
@@ -313,11 +366,19 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     }
   };
 
+  // Human + filename-safe label for the active period (date window or year).
+  const periodLabel = dateActive
+    ? `${from || 'start'} → ${to || 'today'}`
+    : (year === 'all' ? 'All years' : year);
+  const periodSlug = dateActive
+    ? `${from || 'start'}_to_${to || 'today'}`
+    : (year === 'all' ? 'all-years' : year);
+
   const header = (
     <div className="mb-5">
       <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
       <h1 className="text-2xl font-bold text-[#1a1916]">Payment Grouping</h1>
-      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Ejari splits into its DLD government portion and service handling. Totals recompute for the selected year. Session-only; use Print to export.</p>
+      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Ejari splits into its DLD government portion and service handling. Totals recompute for the chosen year or custom date range. Session-only; use Print to export.</p>
     </div>
   );
 
@@ -331,20 +392,35 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       <div className="flex flex-wrap items-center gap-3 mb-5 print:hidden">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-[#6b6860]">Year</span>
-          <select value={year} onChange={e => setYear(e.target.value)}
+          {/* Choosing a year clears any custom date window (they're exclusive). */}
+          <select value={dateActive ? 'all' : year} onChange={e => { setYear(e.target.value); setFrom(''); setTo(''); }}
             className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82]">
             <option value="all">All years</option>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#6b6860]">Ownership</span>
+          <span className="text-xs font-semibold text-[#6b6860]">Date</span>
+          {/* Setting a range overrides the Year filter. */}
+          <DateRangePicker from={from} to={to}
+            onChange={(f, t) => { setFrom(f); setTo(t); if (f || t) setYear('all'); }} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-[#6b6860]">Lease Type</span>
           <select value={ownership} onChange={e => setOwnership(e.target.value as typeof ownership)}
             className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82]">
-            <option value="all">All properties</option>
+            <option value="all">All lease types</option>
             <option value="direct">Own Property</option>
             <option value="sub">Sub-lease</option>
             <option value="management">Property Management</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-[#6b6860]">Property</span>
+          <select value={building} onChange={e => setBuilding(e.target.value)}
+            className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82] max-w-[220px]">
+            <option value="all">All properties</option>
+            {buildings.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -367,7 +443,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       {/* Grand total banner */}
       <div className="mb-5 rounded-2xl bg-white border border-[#eeece6] px-5 py-4 flex items-baseline justify-between shadow-sm">
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Total {year === 'all' ? '(all years)' : year}</p>
+          <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Total · {periodLabel}</p>
           <p className="text-2xl font-bold text-[#1a1916] mt-0.5">{fmtAed(grandTotal)}</p>
         </div>
         <p className="text-xs text-[#9b9890]">{items.length} payment type{items.length !== 1 ? 's' : ''} across {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}</p>
