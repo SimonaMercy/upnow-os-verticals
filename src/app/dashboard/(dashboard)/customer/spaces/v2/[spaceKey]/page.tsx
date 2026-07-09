@@ -2587,10 +2587,12 @@ function RenewalDocumentsAction({
     const needsExpiry = docNeedsExpiry(req.key);
     // In the renewal re-verification context, every listed doc is still flagged as
     // expired / undated (it's in expiredKycDocKeys) — surface THAT, not the stale
-    // "Approved" record status the customer had from their last lease.
-    const startMs = resolved.renewalContract?.startDate ? Date.parse(resolved.renewalContract.startDate) : NaN;
+    // "Approved" record status the customer had from their last lease. Checked
+    // against today, not the renewal's start date — a doc that's still valid
+    // today shouldn't read as "Expired" just because it lapses before the new
+    // lease term ends.
     const expMs = rec?.expiryDate ? Date.parse(rec.expiryDate) : NaN;
-    const isExpiredForRenewal = !isRejected && (!Number.isFinite(expMs) || (Number.isFinite(startMs) && expMs < startMs));
+    const isExpiredForRenewal = !isRejected && (!Number.isFinite(expMs) || expMs < Date.now());
     const [expiry, setExpiry] = useState(toDateInput(rec?.expiryDate));
     const [savingExpiry, setSavingExpiry] = useState(false);
     const [staged, setStaged] = useState<File | null>(null);
