@@ -115,6 +115,14 @@ function pickPrimaryContract(contracts: TenantContract[], unitId: number | null 
   if (tip && tip.parentContractId && tip.status !== 'active') {
     return onUnit.find(c => c.id === tip.parentContractId) ?? tip;
   }
+  // Double-active glitch: a renewal that was activated BEFORE its term starts
+  // (e.g. Ejari registered early) is not the current tenancy — surface the
+  // still-running parent lease so the card reads the in-force lease, not next
+  // year's premature one.
+  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+  if (tip && tip.parentContractId && tip.status === 'active' && (tip.startDate ?? '').slice(0, 10) > todayIso) {
+    return onUnit.find(c => c.id === tip.parentContractId) ?? tip;
+  }
   return tip;
 }
 
