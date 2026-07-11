@@ -16,6 +16,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, Building2, Home, Users as UsersIcon, FileText, Mail, Phone,
   ShieldCheck, ShieldAlert, BadgeCheck, Clock, ChevronRight,
+  Wrench, Truck, MapPin, Star, UserCog, CheckCircle2, Zap, CalendarClock,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -108,6 +109,41 @@ interface UserDetail {
     actionsByKey: Record<string, number>;
     recentActions: { actionKey: string; entityType: string; entityId: number; createdAt: string }[];
   };
+  sp?: null | {
+    profile: null | {
+      serviceProviderId: number; businessName: string | null; companyName: string | null;
+      ownerName: string | null; entityType: string | null; isGovernment: boolean;
+      tradeLicenseNumber: string | null; vatTrn: string | null;
+      emiratesServed: string[]; serviceCategories: string[];
+      emergencyResponse: boolean; opsContactName: string | null; opsContactPhone: string | null;
+    };
+    readiness: null | {
+      complianceStatus: string; compliancePausedAt: string | null; complianceNotes: string | null;
+      jobReadyAt: string | null; jobReady: boolean; jobRulesAcceptedAt: string | null;
+      maxConcurrentJobs: number | null; minNoticeHours: number | null;
+      teamSizeBand: string | null; fleetSizeBand: string | null;
+    };
+    summary: {
+      services: number; servicesApproved: number; technicians: number; leadTechnicians: number;
+      vehicles: number; activeVehicles: number; coverageZones: number; emiratesServed: number;
+      bookings: number; completedBookings: number; avgRating: number; totalReviews: number;
+    };
+    insights: null | {
+      catalog: { byStatus: Record<string, number>; total: number; available: number };
+      serviceMix: Record<string, number>;
+      bookings: { byStatus: Record<string, { count: number; amount: number }>; total: number; completed: number; revenue: number; cancelled: number };
+      reviews: { avgRating: number; totalReviews: number; distribution: Record<string, number> };
+      availability: { daysCovered: number; shifts: number };
+    };
+    catalog: { id: number; name: string; category: string; pricingMode: string; basePrice: number | null; priceUnit: string; minCalloutCharge: number | null; listingStatus: string; isAvailable: boolean; isEmergency: boolean }[];
+    technicians: { id: number; userId: number | null; name: string; email: string | null; specialization: string | null; status: string | null; isLeadCapable: boolean; complianceStatus: string | null; photoUrl: string | null }[];
+    vehicles: { id: number; vehicleType: string; label: string | null; isActive: boolean }[];
+    coverageZones: { id: number; nameEn: string; nameAr: string | null; isActive: boolean }[];
+    workingHours: { weekday: number; opensAt: string; closesAt: string }[];
+    bookings: { id: number; status: string; scheduledAt: string; serviceName: string | null; totalAmount: number | null; customerName: string }[];
+    reviews: { id: number; rating: number; title: string | null; body: string | null; createdAt: string; reviewerName: string }[];
+    documents: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null }[];
+  };
 }
 
 const aed = (n: number | null | undefined) =>
@@ -123,6 +159,17 @@ const statusColor: Record<string, { bg: string; color: string }> = {
   pending_verification: { bg: '#fef9eb', color: 'var(--color-gold)' },
   suspended: { bg: '#fef2f2', color: 'var(--color-error)' },
   banned: { bg: '#fef2f2', color: 'var(--color-error)' },
+  // SP catalogue / compliance / booking statuses
+  approved: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
+  compliant: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
+  completed: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
+  pending: { bg: '#fef9eb', color: 'var(--color-gold)' },
+  pending_review: { bg: '#fef9eb', color: 'var(--color-gold)' },
+  action_required: { bg: '#fef2f2', color: 'var(--color-error)' },
+  rejected: { bg: '#fef2f2', color: 'var(--color-error)' },
+  expired: { bg: '#fef2f2', color: 'var(--color-error)' },
+  cancelled: { bg: '#fef2f2', color: 'var(--color-error)' },
+  paused: { bg: 'var(--color-base-100)', color: 'var(--color-neutral-600)' },
 };
 
 const ROW = 'rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-3';
@@ -694,6 +741,319 @@ function StaffView({ s, role }: { s: NonNullable<UserDetail['staff']>; role: str
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Service-provider view — SP-side breakdown for the admin audit
+───────────────────────────────────────────────────────────── */
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const listingStatusColor: Record<string, string> = { approved: CHART.teal, pending: CHART.amber, rejected: CHART.red };
+const PRICE_UNIT_SUFFIX: Record<string, string> = {
+  fixed: '', per_hour: '/hr', per_unit: '/unit', per_area: '/m²',
+  per_size_package: '', per_period: '/period', quote_after_callout: '',
+};
+const spComplianceTier: Record<string, { label: string; bg: string; fg: string; accent: string }> = {
+  compliant: { label: 'Compliant', bg: 'var(--color-primary-50)', fg: 'var(--color-primary)', accent: 'var(--color-primary)' },
+  pending_review: { label: 'Pending review', bg: '#eff6ff', fg: '#1e40af', accent: '#2563eb' },
+  action_required: { label: 'Action required', bg: '#fef2f2', fg: '#dc2626', accent: '#dc2626' },
+  expired: { label: 'Expired', bg: '#fef2f2', fg: '#dc2626', accent: '#dc2626' },
+  paused: { label: 'Paused', bg: 'var(--color-base-100)', fg: 'var(--color-neutral-600)', accent: 'var(--color-neutral-400)' },
+};
+
+/** Formats a catalogue item's price for display: "Quote" or "AED X/unit". */
+function svcPrice(c: NonNullable<UserDetail['sp']>['catalog'][number]): string {
+  if (c.pricingMode === 'quote' || c.priceUnit === 'quote_after_callout') return 'Quote after callout';
+  if (c.basePrice == null) return '—';
+  return `${aed(c.basePrice)}${PRICE_UNIT_SUFFIX[c.priceUnit] ?? ''}`;
+}
+
+/** Readiness & compliance — surfaced first, mirrors the manager RiskPanel weight. */
+function ReadinessPanel({ r }: { r: NonNullable<NonNullable<UserDetail['sp']>['readiness']> }) {
+  const t = spComplianceTier[r.complianceStatus] ?? spComplianceTier.pending_review;
+  return (
+    <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: 'var(--shadow-sm)', borderLeft: `3px solid ${r.jobReady ? 'var(--color-primary)' : t.accent}` }}>
+      <div className="flex items-center gap-2 flex-wrap mb-2">
+        {r.jobReady ? <CheckCircle2 size={16} style={{ color: 'var(--color-primary)' }} /> : <ShieldAlert size={16} style={{ color: t.accent }} />}
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Readiness &amp; compliance</h3>
+        <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: t.bg, color: t.fg }}>{t.label}</span>
+        <span className="text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={r.jobReady ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' } : { backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}>
+          {r.jobReady ? <><CheckCircle2 size={11} /> Job-ready</> : <><Clock size={11} /> Not job-ready</>}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 text-sm">
+        <ProfileBit label="Job-ready since" value={r.jobReadyAt ? fmtDate(r.jobReadyAt) : 'Not yet'} />
+        <ProfileBit label="Rules accepted" value={r.jobRulesAcceptedAt ? fmtDate(r.jobRulesAcceptedAt) : 'No'} />
+        <ProfileBit label="Max concurrent jobs" value={r.maxConcurrentJobs != null ? String(r.maxConcurrentJobs) : 'Auto'} />
+        <ProfileBit label="Min notice" value={r.minNoticeHours != null ? `${r.minNoticeHours}h` : '—'} />
+        {r.teamSizeBand && <ProfileBit label="Team band" value={r.teamSizeBand} />}
+        {r.fleetSizeBand && <ProfileBit label="Fleet band" value={r.fleetSizeBand} />}
+        {r.compliancePausedAt && <ProfileBit label="Paused at" value={fmtDate(r.compliancePausedAt)} />}
+      </div>
+      {r.complianceNotes && (
+        <p className="text-xs mt-2 pt-2" style={{ color: 'var(--color-neutral-500)', borderTop: '1px solid var(--color-base-200)' }}>{r.complianceNotes}</p>
+      )}
+    </div>
+  );
+}
+
+function SpView({ sp }: { sp: NonNullable<UserDetail['sp']> }) {
+  const { profile: p, readiness, summary: s, insights: ins } = sp;
+  const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1];
+
+  const catalogData = ins ? [
+    { name: 'Approved', value: ins.catalog.byStatus.approved ?? 0, fill: CHART.teal },
+    { name: 'Pending', value: ins.catalog.byStatus.pending ?? 0, fill: CHART.amber },
+    { name: 'Rejected', value: ins.catalog.byStatus.rejected ?? 0, fill: CHART.red },
+  ] : [];
+  const serviceMixData = ins ? Object.entries(ins.serviceMix).sort(byCount).map(([k, v]) => ({ name: titleCase(k), value: v, fill: CHART.blue })) : [];
+  const ratingData = ins ? [5, 4, 3, 2, 1].map((star) => ({
+    name: `${star}★`,
+    value: ins.reviews.distribution[String(star)] ?? 0,
+    fill: star >= 4 ? CHART.teal : star === 3 ? CHART.amber : CHART.red,
+  })) : [];
+
+  // Catalogue grouped by service category — segregated list rather than a flat
+  // mix. Each group keeps insertion order (backend already sorts by category, name).
+  type SpCatalogItem = NonNullable<UserDetail['sp']>['catalog'][number];
+  const catGroups: { category: string; items: SpCatalogItem[]; approved: number; available: number }[] =
+    Object.values(
+      sp.catalog.reduce((acc, c) => {
+        const g = (acc[c.category] ??= { category: c.category, items: [], approved: 0, available: 0 });
+        g.items.push(c);
+        if (c.listingStatus === 'approved') g.approved++;
+        if (c.isAvailable) g.available++;
+        return acc;
+      }, {} as Record<string, { category: string; items: SpCatalogItem[]; approved: number; available: number }>),
+    ).sort((a, b) => b.items.length - a.items.length);
+
+  return (
+    <>
+      {/* Profile line */}
+      {p && (
+        <div className="bg-white rounded-2xl p-4 mb-4 flex flex-wrap gap-x-8 gap-y-2 text-sm items-center" style={{ boxShadow: 'var(--shadow-sm)' }}>
+          {(p.businessName || p.companyName) && <ProfileBit label="Business" value={p.businessName || p.companyName || '—'} />}
+          {p.ownerName && <ProfileBit label="Owner" value={p.ownerName} />}
+          <ProfileBit label="Type" value={titleCase(p.entityType)} />
+          {p.tradeLicenseNumber && <ProfileBit label="Trade License" value={p.tradeLicenseNumber} />}
+          {p.vatTrn && <ProfileBit label="VAT TRN" value={p.vatTrn} />}
+          {p.emiratesServed.length > 0 && <ProfileBit label="Emirates" value={p.emiratesServed.map(titleCase).join(', ')} />}
+          {p.emergencyResponse && <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}><Zap size={11} /> Emergency response</span>}
+          {p.isGovernment && <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#eff6ff', color: '#1e40af' }}>Government</span>}
+        </div>
+      )}
+
+      {/* Readiness & compliance — surfaced first */}
+      {readiness && <ReadinessPanel r={readiness} />}
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+        <KpiCard label="Services listed" value={`${s.servicesApproved}/${s.services}`} sub="approved / total" accent="var(--color-primary)" />
+        <KpiCard label="Field team" value={s.technicians} sub={`${s.leadTechnicians} lead-capable`} />
+        <KpiCard label="Fleet" value={s.activeVehicles} sub={`of ${s.vehicles} vehicle${s.vehicles === 1 ? '' : 's'}`} />
+        <KpiCard label="Coverage" value={s.coverageZones} sub={`${s.emiratesServed} emirate${s.emiratesServed === 1 ? '' : 's'} · zones`} />
+        <KpiCard label="Rating" value={s.avgRating ? s.avgRating.toFixed(1) : '—'} sub={`${s.totalReviews} review${s.totalReviews === 1 ? '' : 's'}`} accent={s.avgRating >= 4 ? 'var(--color-primary)' : s.avgRating > 0 && s.avgRating < 3 ? 'var(--color-error)' : undefined} />
+        <KpiCard label="Jobs completed" value={s.completedBookings} sub={`${s.bookings} booking${s.bookings === 1 ? '' : 's'} total`} />
+      </div>
+
+      {/* Charts — SP at a glance */}
+      {ins && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <ChartCard title="Catalogue moderation" sub={`${ins.catalog.total} services · ${ins.catalog.available} available`}>
+            <Donut data={catalogData} center={`${ins.catalog.total}`} label="services" />
+            <Legend items={catalogData} />
+          </ChartCard>
+          <ChartCard title="Service mix" sub="listings by category">
+            {serviceMixData.length ? <CountBars data={serviceMixData} /> : <p className="text-sm py-12 text-center" style={{ color: 'var(--color-neutral-400)' }}>No services listed yet.</p>}
+          </ChartCard>
+          <ChartCard title="Rating distribution" sub={`${ins.reviews.totalReviews} reviews`}>
+            {ins.reviews.totalReviews > 0 ? <CountBars data={ratingData} /> : <p className="text-sm py-12 text-center" style={{ color: 'var(--color-neutral-400)' }}>No reviews yet.</p>}
+          </ChartCard>
+        </div>
+      )}
+
+      {/* Detail panels */}
+      {ins && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          <MiniPanel title="Catalogue & operations">
+            <KV label="Services available" value={`${ins.catalog.available}/${ins.catalog.total}`} dot="var(--color-primary)" />
+            <KV label="Approved" value={ins.catalog.byStatus.approved ?? 0} dot={CHART.teal} />
+            <KV label="Pending review" value={ins.catalog.byStatus.pending ?? 0} dot={CHART.amber} />
+            <KV label="Rejected" value={ins.catalog.byStatus.rejected ?? 0} dot={CHART.red} />
+            <Divider />
+            <Caption>Booking track-record</Caption>
+            <KV label="Completed" value={ins.bookings.completed} />
+            <KV label="Revenue (completed)" value={aed(ins.bookings.revenue)} />
+            <KV label="Cancelled" value={ins.bookings.cancelled} />
+            {ins.bookings.total === 0 && <p className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>No bookings dispatched to this provider yet.</p>}
+          </MiniPanel>
+
+          <MiniPanel title="Coverage & availability">
+            <Caption>Emirates served</Caption>
+            {p && p.emiratesServed.length > 0
+              ? <p className="text-sm" style={{ color: 'var(--color-neutral-800)' }}>{p.emiratesServed.map(titleCase).join(', ')}</p>
+              : <p className="text-sm" style={{ color: 'var(--color-neutral-400)' }}>No emirates set.</p>}
+            <KV label="Coverage zones" value={s.coverageZones} />
+            <Divider />
+            <Caption>Service categories</Caption>
+            {p && p.serviceCategories.length > 0
+              ? <div className="flex flex-wrap gap-1.5">{p.serviceCategories.map((c) => <span key={c} className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{titleCase(c)}</span>)}</div>
+              : <p className="text-sm" style={{ color: 'var(--color-neutral-400)' }}>None set.</p>}
+            <Divider />
+            <KV label="Weekly availability" value={`${ins.availability.daysCovered}/7 days · ${ins.availability.shifts} shift${ins.availability.shifts === 1 ? '' : 's'}`} />
+          </MiniPanel>
+        </div>
+      )}
+
+      {/* Breakdown — two per row, each scrolls internally */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Service catalogue — segregated by category, services nested per group */}
+        <Section title="Service catalogue" count={sp.catalog.length}>
+          {catGroups.map((g) => (
+            <div key={g.category} className="mb-3">
+              {/* Category header */}
+              <div className="flex items-center gap-2 px-1 mb-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-500)' }}>{titleCase(g.category)}</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>{g.items.length}</span>
+                <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>{g.approved} approved · {g.available} available</span>
+              </div>
+              {/* Services in this category */}
+              <div className="space-y-1">
+                {g.items.map((c) => (
+                  <div key={c.id} className="flex items-center gap-2.5 px-3 py-2 rounded-xl" style={ROW_STYLE}>
+                    <Wrench size={14} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                        {c.name}
+                        {c.isEmergency && <Zap size={11} className="inline ml-1" style={{ color: '#c2410c' }} />}
+                      </p>
+                      <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{svcPrice(c)}</p>
+                    </div>
+                    {!c.isAvailable && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Hidden</span>}
+                    <Pill value={c.listingStatus} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </Section>
+
+        {/* Field team — technicians */}
+        <Section title="Field team" count={sp.technicians.length}>
+          {sp.technicians.map((t) => (
+            <div key={t.id} className={`${ROW} ${t.userId ? 'cursor-pointer transition-colors hover:brightness-95' : ''}`} style={ROW_STYLE} onClick={t.userId ? () => { window.location.href = `/dashboard/admin/users/${t.userId}`; } : undefined}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ backgroundColor: 'var(--color-base-100)' }}>
+                {t.photoUrl ? <img src={t.photoUrl} alt="" className="w-full h-full object-cover" /> : <UserCog size={14} style={{ color: 'var(--color-neutral-500)' }} />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                  {t.name}
+                  {t.isLeadCapable && <MiniBadge label="LEAD" />}
+                </p>
+                <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{t.specialization || t.email || '—'}</p>
+              </div>
+              {t.complianceStatus && <Pill value={t.complianceStatus} />}
+            </div>
+          ))}
+        </Section>
+
+        {/* Fleet */}
+        <Section title="Fleet" count={sp.vehicles.length}>
+          {sp.vehicles.map((v) => (
+            <div key={v.id} className={ROW} style={ROW_STYLE}>
+              <Truck size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{v.label || titleCase(v.vehicleType)}</p>
+                <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{titleCase(v.vehicleType)}</p>
+              </div>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={v.isActive ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' } : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>{v.isActive ? 'Active' : 'Inactive'}</span>
+            </div>
+          ))}
+        </Section>
+
+        {/* Coverage zones */}
+        <Section title="Coverage zones" count={sp.coverageZones.length}>
+          {sp.coverageZones.map((z) => (
+            <div key={z.id} className={ROW} style={ROW_STYLE}>
+              <MapPin size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{z.nameEn}</p>
+                {z.nameAr && <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }} dir="rtl">{z.nameAr}</p>}
+              </div>
+              {!z.isActive && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Inactive</span>}
+            </div>
+          ))}
+        </Section>
+
+        {/* Working hours */}
+        <Section title="Working hours" count={sp.workingHours.length}>
+          {sp.workingHours.map((h, i) => (
+            <div key={i} className={ROW} style={ROW_STYLE}>
+              <CalendarClock size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              <span className="font-semibold text-sm flex-1" style={{ color: 'var(--color-neutral-900)' }}>{WEEKDAYS[h.weekday] ?? `Day ${h.weekday}`}</span>
+              <span className="text-sm" style={{ color: 'var(--color-neutral-600)' }}>{(h.opensAt || '').slice(0, 5)} – {(h.closesAt || '').slice(0, 5)}</span>
+            </div>
+          ))}
+        </Section>
+
+        {/* Reviews */}
+        <Section title="Reviews" count={sp.reviews.length}>
+          {sp.reviews.map((rv) => (
+            <div key={rv.id} className={ROW} style={ROW_STYLE}>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-0.5 flex-shrink-0" style={{ color: 'var(--color-gold)' }}>
+                    {Array.from({ length: 5 }).map((_, i) => <Star key={i} size={11} fill={i < rv.rating ? 'currentColor' : 'none'} style={{ color: i < rv.rating ? 'var(--color-gold)' : 'var(--color-neutral-300)' }} />)}
+                  </span>
+                  <span className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{rv.title || rv.reviewerName}</span>
+                </div>
+                {rv.body && <p className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--color-neutral-500)' }}>{rv.body}</p>}
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>{rv.reviewerName} · {fmtDate(rv.createdAt)}</p>
+              </div>
+            </div>
+          ))}
+        </Section>
+
+        {/* Bookings */}
+        <Section title="Bookings" count={sp.bookings.length}>
+          {sp.bookings.map((b) => (
+            <div key={b.id} className={ROW} style={ROW_STYLE}>
+              <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{b.serviceName || 'Service booking'}</p>
+                <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{b.customerName} · {fmtDate(b.scheduledAt)}{b.totalAmount != null ? ` · ${aed(b.totalAmount)}` : ''}</p>
+              </div>
+              <Pill value={b.status} />
+            </div>
+          ))}
+        </Section>
+
+        {/* SP-owned documents */}
+        <Section title="Documents" count={sp.documents.length}>
+          {sp.documents.length === 0 ? (
+            <p className="text-sm py-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents on file for this service provider.</p>
+          ) : sp.documents.map((d) => {
+            const label = d.displayName || titleCase((d.documentKey || '').replace(/_/g, ' '));
+            const hasFile = !!d.fileUrl;
+            return (
+              <div key={d.id} className={ROW} style={ROW_STYLE}>
+                <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{label}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}</p>
+                </div>
+                {hasFile ? (
+                  <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
+                ) : (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Requested</span>
+                )}
+              </div>
+            );
+          })}
+        </Section>
+      </div>
+    </>
+  );
+}
+
 export default function AdminUserDetailPage() {
   useAuth();
   const params = useParams<{ id: string }>();
@@ -722,6 +1082,7 @@ export default function AdminUserDetailPage() {
   const M = data?.manager;
   const C = data?.customer;
   const S = data?.staff;
+  const SP = data?.sp;
 
   return (
     <DashboardPage title="User Detail" subtitle={u ? u.name : ''}>
@@ -878,8 +1239,9 @@ export default function AdminUserDetailPage() {
           {M && <ManagerView m={M} />}
           {C && <CustomerView c={C} />}
           {S && <StaffView s={S} role={u.role} />}
+          {SP && <SpView sp={SP} />}
 
-          {!L && !M && !C && !S && (
+          {!L && !M && !C && !S && !SP && (
             <p className="text-sm bg-white rounded-2xl p-4" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
               No additional breakdown for {roleLabel[u.role] ?? u.role} accounts yet.
             </p>
