@@ -7,6 +7,7 @@ import {
   CheckCircle2, XCircle, Clock, AlertCircle, EyeOff,
   ChevronLeft, ChevronRight, ChevronDown, ImageOff, MapPin, DollarSign, Info, Tag,
   MousePointerClick, FileText, ExternalLink,
+  Star, Mail, Phone, ShieldCheck, Layers, Zap, Store,
 } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
@@ -94,24 +95,69 @@ interface UnitDetail {
   };
 }
 
-interface ServiceListing {
-  id: number;
-  name: string;
-  description: string | null;
+// Full provider context for the review panel — GET /admin/kyc/service-providers/:id
+interface SpChecklistItem {
+  key: string;
+  displayName: string;
   category: string;
+  required: boolean;
+  uploaded: boolean;
+  status: string | null;
+  fileUrl: string | null;
+  expiryDate: string | null;
+}
+interface SpContextService {
+  id: number;
+  category: string;
+  name: string;
   basePrice: number | null;
   priceUnit: string | null;
-  estimatedDuration: number | null;
-  isAvailable: boolean;
+  pricingMode: string;
+  isEmergency: boolean;
   listingStatus: string;
-  imageUrl: string | null;
-  createdAt: string;
-  provider: {
+  isAvailable: boolean;
+}
+interface SpContext {
+  profile: {
     id: number;
     userId: number;
-    name: string | null;
+    businessName: string | null;
+    companyName: string | null;
+    ownerName: string | null;
+    entityType: string | null;
+    isGovernment: boolean;
+    tradeLicenseNumber: string | null;
+    vatTrn: string | null;
+    emiratesServed: string | null;
+    serviceCategories: string | null;
     complianceStatus: string;
-  } | null;
+    jobReadyAt: string | null;
+    averageRating: number | null;
+    totalReviews: number;
+    emergencyResponse: boolean;
+    opsContactName: string | null;
+    opsContactPhone: string | null;
+    createdAt: string;
+    user?: { name: string | null; email: string | null; phone: string | null } | null;
+  };
+  checklist: SpChecklistItem[];
+  completionScore: number;
+  services: SpContextService[];
+}
+
+// One row per provider in the grouped moderation queue — GET /admin/service-listing-providers
+interface SpProviderRow {
+  id: number;
+  userId: number;
+  name: string | null;
+  entityType: string | null;
+  complianceStatus: string;
+  serviceCategories: string | null;
+  jobReady: boolean;
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -294,7 +340,12 @@ function UnitCard({ u, selected, onClick }: { u: UnitListing; selected: boolean;
   );
 }
 
-function ServiceCard({ s, selected, onClick }: { s: ServiceListing; selected: boolean; onClick: () => void }) {
+// One provider per row — the grouped moderation queue. Shows who the vendor is
+// and the shape of their queue (pending / approved / rejected) at a glance.
+function ProviderCard({ p, selected, onClick }: { p: SpProviderRow; selected: boolean; onClick: () => void }) {
+  const cc = complianceCfg[p.complianceStatus] ?? complianceCfg.pending_review;
+  const cats = csvToList(p.serviceCategories);
+  const catSummary = cats.length ? cats.slice(0, 2).map(serviceCategoryLabel).join(', ') + (cats.length > 2 ? ` +${cats.length - 2}` : '') : '—';
   return (
     <button onClick={onClick}
       className="w-full text-left px-4 py-3.5 border-b transition-colors"
@@ -304,17 +355,15 @@ function ServiceCard({ s, selected, onClick }: { s: ServiceListing; selected: bo
         borderLeft: selected ? '3px solid var(--color-primary)' : '3px solid transparent',
       }}>
       <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{s.name}</span>
-        <StatusBadge s={s.listingStatus} />
+        <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.name ?? `SP #${p.id}`}</span>
+        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: cc.bg, color: cc.color }}>{cc.label}</span>
       </div>
-      <p className="text-xs truncate mb-1" style={{ color: 'var(--color-neutral-500)' }}>{s.provider?.name ?? 'Unknown provider'}</p>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: '#ecfeff', color: '#0891b2' }}>
-          {serviceCategoryLabel(s.category)}
-        </span>
-        <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-700)' }}>
-          {s.basePrice != null ? aed(s.basePrice) : '—'}
-        </span>
+      <p className="text-xs truncate mb-1.5" style={{ color: 'var(--color-neutral-500)' }}>{catSummary}</p>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{p.total} service{p.total === 1 ? '' : 's'}</span>
+        {p.pending > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fef3c7', color: '#b45309' }}>{p.pending} pending</span>}
+        {p.approved > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>{p.approved} approved</span>}
+        {p.rejected > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>{p.rejected} rejected</span>}
       </div>
     </button>
   );
@@ -545,57 +594,279 @@ function UnitDetailPanel({ row, acting, onApprove, onReject }: {
   );
 }
 
-function ServiceDetailPanel({ row, acting, onApprove, onReject }: {
-  row: ServiceListing; acting: boolean;
-  onApprove: (s: ServiceListing) => void; onReject: (s: ServiceListing) => void;
-}) {
-  const canApprove = row.listingStatus !== 'approved';
-  const canReject  = row.listingStatus !== 'rejected';
-  const price = row.basePrice != null ? `${aed(row.basePrice)}${row.priceUnit ? ` · ${row.priceUnit}` : ''}` : 'Price on request';
+// Compliance status → colour + label. Compliant is the gate for approval.
+const complianceCfg: Record<string, { bg: string; color: string; label: string }> = {
+  compliant:       { bg: '#f0fdf4', color: '#16a34a', label: 'Compliant' },
+  pending_review:  { bg: '#eff6ff', color: '#1e40af', label: 'Pending review' },
+  action_required: { bg: '#fef2f2', color: '#dc2626', label: 'Action required' },
+  expired:         { bg: '#fef2f2', color: '#dc2626', label: 'Expired' },
+  paused:          { bg: '#f5f5f4', color: '#78716c', label: 'Paused' },
+};
+const PRICE_UNIT_SUFFIX: Record<string, string> = {
+  fixed: '', per_hour: '/hr', per_unit: '/unit', per_area: '/m²', per_period: '/period', quote_after_callout: '',
+};
+function ctxSvcPrice(s: SpContextService): string {
+  if (s.pricingMode === 'quote' || s.priceUnit === 'quote_after_callout') return 'Quote';
+  if (s.basePrice == null) return '—';
+  return `${aed(s.basePrice)}${PRICE_UNIT_SUFFIX[s.priceUnit ?? ''] ?? ''}`;
+}
+function csvToList(s: string | null | undefined): string[] {
+  return (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+/** Vendor key-facts + full catalogue + compliance docs — the context an admin
+ *  needs to judge a single service listing. Fetched per selected provider. */
+/** One provider's full review surface: vendor facts, compliance docs, and every
+ *  service they offer — each approvable/rejectable inline, plus bulk actions.
+ *  Reuses GET /admin/kyc/service-providers/:id (profile + checklist + services). */
+function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; onChanged: () => void }) {
+  const [ctx, setCtx] = useState<SpContext | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [actErr, setActErr] = useState<string | null>(null);
+  // Which service ids are mid-action (or 'bulk' while a batch runs).
+  const [busy, setBusy] = useState<Set<number>>(new Set());
+  const [bulking, setBulking] = useState(false);
+
+  const load = useCallback((signal?: AbortSignal) => {
+    setLoading(true); setErr(null);
+    return apiGet<SpContext>(`/admin/kyc/service-providers/${providerId}`, { signal })
+      .then((r) => { if (!signal?.aborted) setCtx(r); })
+      .catch((e) => { if (!signal?.aborted) setErr((e as Error).message); })
+      .finally(() => { if (!signal?.aborted) setLoading(false); });
+  }, [providerId]);
+
+  useEffect(() => {
+    setCtx(null); setActErr(null); setBusy(new Set());
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [providerId, load]);
+
+  async function actOne(id: number, action: 'approve' | 'reject') {
+    setActErr(null);
+    setBusy((b) => new Set(b).add(id));
+    try {
+      await apiPatch(`/admin/service-listings/${id}/${action}`, {});
+      setCtx((prev) => prev ? { ...prev, services: prev.services.map((s) => s.id === id ? { ...s, listingStatus: action === 'approve' ? 'approved' : 'rejected' } : s) } : prev);
+      onChanged();
+    } catch (e) {
+      setActErr((e as Error).message);
+    } finally {
+      setBusy((b) => { const n = new Set(b); n.delete(id); return n; });
+    }
+  }
+
+  async function actAllPending(action: 'approve' | 'reject') {
+    if (!ctx) return;
+    const pending = ctx.services.filter((s) => s.listingStatus === 'pending');
+    if (pending.length === 0) return;
+    if (!confirm(`${action === 'approve' ? 'Approve' : 'Reject'} all ${pending.length} pending service${pending.length === 1 ? '' : 's'} for this provider?`)) return;
+    setActErr(null); setBulking(true);
+    try {
+      for (const s of pending) {
+        await apiPatch(`/admin/service-listings/${s.id}/${action}`, {});
+      }
+      await load();
+      onChanged();
+    } catch (e) {
+      setActErr((e as Error).message);
+      await load();
+    } finally {
+      setBulking(false);
+    }
+  }
+
+  if (loading && !ctx) return <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--color-neutral-400)' }}>Loading provider…</div>;
+  if (err || !ctx) return <div className="m-4 rounded-xl p-3 text-sm" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>Couldn&apos;t load provider{err ? `: ${err}` : ''}.</div>;
+
+  const p = ctx.profile;
+  const cc = complianceCfg[p.complianceStatus] ?? complianceCfg.pending_review;
+  const compliant = p.complianceStatus === 'compliant';
+  const emirates = csvToList(p.emiratesServed);
+  const categories = csvToList(p.serviceCategories);
+  const businessName = p.businessName || p.companyName || p.ownerName || p.user?.name || 'Unnamed provider';
+  const email = p.user?.email ?? null;
+  const phone = p.user?.phone ?? p.opsContactPhone ?? null;
+  const jobReady = p.jobReadyAt != null;
+  const memberSince = p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-AE', { year: 'numeric', month: 'short' }) : null;
+
+  const groups: { category: string; items: SpContextService[] }[] = Object.values(
+    ctx.services.reduce((acc, sv) => {
+      (acc[sv.category] ??= { category: sv.category, items: [] }).items.push(sv);
+      return acc;
+    }, {} as Record<string, { category: string; items: SpContextService[] }>),
+  ).sort((a, b) => b.items.length - a.items.length);
+
+  const approvedCount = ctx.services.filter((s) => s.listingStatus === 'approved').length;
+  const pendingCount = ctx.services.filter((s) => s.listingStatus === 'pending').length;
+  const rejectedCount = ctx.services.filter((s) => s.listingStatus === 'rejected').length;
+  const requiredMissing = ctx.checklist.filter((c) => c.required && !c.uploaded).length;
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-3 pb-3 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-          <div className="flex items-center gap-2 flex-wrap mb-0.5">
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{row.name}</h2>
-            <StatusBadge s={row.listingStatus} />
-            {row.provider?.userId && (
-              <Link href={`/dashboard/admin/users/${row.provider.userId}`} className="ml-auto text-xs" style={{ color: 'var(--color-primary)' }}>
-                Provider ↗
-              </Link>
-            )}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Vendor identity + key facts */}
+        <div className="rounded-xl p-3.5" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-200)' }}>
+          <div className="flex items-start gap-3 mb-3">
+            <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0" style={{ backgroundColor: 'var(--color-base-100)' }}>
+              <Store size={18} style={{ color: 'var(--color-primary)' }} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold truncate" style={{ color: 'var(--color-neutral-900)' }}>{businessName}</h3>
+                <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>SP #{p.id}</span>
+                <Link href={`/dashboard/admin/users/${p.userId}`} className="text-xs" style={{ color: 'var(--color-primary)' }}>Profile ↗</Link>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: cc.bg, color: cc.color }}>{cc.label}</span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={jobReady ? { backgroundColor: '#f0fdf4', color: '#16a34a' } : { backgroundColor: '#fef9eb', color: '#b45309' }}>
+                  {jobReady ? <><CheckCircle2 size={10} /> Job-ready</> : <><Clock size={10} /> Not job-ready</>}
+                </span>
+                {p.averageRating != null && p.totalReviews > 0 && (
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#fffbeb', color: '#b45309' }}>
+                    <Star size={10} fill="currentColor" /> {Number(p.averageRating).toFixed(1)} ({p.totalReviews})
+                  </span>
+                )}
+                {p.emergencyResponse && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}><Zap size={10} /> Emergency</span>}
+                {p.isGovernment && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#eff6ff', color: '#1e40af' }}>Government</span>}
+              </div>
+            </div>
           </div>
-          <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>
-            {row.provider?.name ?? 'Unknown provider'}{row.provider ? ` · SP #${row.provider.id}` : ''}
-          </p>
-        </div>
 
-        <div className="space-y-3">
-          {row.imageUrl && (
-            <div className="rounded-xl overflow-hidden bg-gray-100" style={{ height: 160 }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={row.imageUrl} alt={row.name} className="w-full h-full object-cover" />
+          <div className="grid grid-cols-2 gap-x-4">
+            <Field label="Owner" value={p.ownerName} />
+            <Field label="Entity" value={p.entityType?.replace(/_/g, ' ')} />
+            <Field label="Trade licence" value={p.tradeLicenseNumber} />
+            <Field label="VAT TRN" value={p.vatTrn} />
+            <Field label="KYC completion" value={`${ctx.completionScore}%`} />
+            <Field label="Member since" value={memberSince} />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
+            {email && <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-600)' }}><Mail size={12} style={{ color: 'var(--color-neutral-400)' }} /> {email}</span>}
+            {phone && <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-600)' }}><Phone size={12} style={{ color: 'var(--color-neutral-400)' }} /> {phone}</span>}
+          </div>
+          {emirates.length > 0 && (
+            <div className="flex items-start gap-1.5 mt-2">
+              <MapPin size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
+              <span className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>{emirates.map((e) => e.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())).join(', ')}</span>
             </div>
           )}
-
-          <Section icon={Wrench} title="Service">
-            <Field label="Category" value={serviceCategoryLabel(row.category)} />
-            <Field label="Price" value={price} />
-            <Field label="Duration" value={row.estimatedDuration != null ? `${row.estimatedDuration} min` : null} />
-            <Field label="Availability" value={row.isAvailable ? 'Available' : 'Unavailable'} />
-            <Field label="Provider compliance" value={row.provider?.complianceStatus?.replace(/_/g, ' ')} />
-          </Section>
-
-          {row.description && (
-            <Section icon={Info} title="Description">
-              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-neutral-700)' }}>{row.description}</p>
-            </Section>
+          {categories.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {categories.map((c) => (
+                <span key={c} className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{serviceCategoryLabel(c)}</span>
+              ))}
+            </div>
           )}
         </div>
+
+        {/* Compliance documents — the reviewer's evidence */}
+        <Section icon={ShieldCheck} title={`Compliance documents${requiredMissing > 0 ? ` · ${requiredMissing} required missing` : ' · all required present'}`}>
+          <div className="space-y-1.5">
+            {ctx.checklist.map((doc) => {
+              const ok = ['processed', 'complete', 'approved', 'attached'].includes(String(doc.status).toLowerCase());
+              return (
+                <div key={doc.key} className="flex items-center justify-between gap-2 py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate" style={{ color: 'var(--color-neutral-700)' }}>
+                      {doc.displayName}
+                      {doc.required && <span className="ml-1 text-[10px]" style={{ color: '#dc2626' }}>*</span>}
+                    </p>
+                    {doc.expiryDate && <p className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>Exp: {new Date(doc.expiryDate).toLocaleDateString('en-AE')}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {doc.uploaded ? (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: ok ? '#dcfce7' : '#fef3c7', color: ok ? '#15803d' : '#b45309' }}>{String(doc.status ?? 'uploaded').toLowerCase()}</span>
+                    ) : (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>missing</span>
+                    )}
+                    {doc.fileUrl
+                      ? <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName })} className="cursor-pointer"><ExternalLink size={12} style={{ color: 'var(--color-primary)' }} /></button>
+                      : <span className="w-3" />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+
+        {/* Services — every listing, each approvable/rejectable inline */}
+        <Section icon={Layers} title={`Services (${ctx.services.length}) · ${approvedCount} approved · ${pendingCount} pending · ${rejectedCount} rejected`}>
+          {!compliant && pendingCount > 0 && (
+            <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 mb-2 text-[11px]" style={{ backgroundColor: '#fffbeb', color: '#b45309' }}>
+              <AlertCircle size={13} /> Provider must be compliant before their listings can be approved. Complete KYC review first.
+            </div>
+          )}
+          <div className="space-y-2.5">
+            {groups.map((g) => (
+              <div key={g.category}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>{serviceCategoryLabel(g.category)}</span>
+                  <span className="text-[10px] px-1.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>{g.items.length}</span>
+                </div>
+                <div className="space-y-1">
+                  {g.items.map((sv) => {
+                    const isBusy = busy.has(sv.id) || bulking;
+                    return (
+                      <div key={sv.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
+                        <Wrench size={12} className="shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium truncate" style={{ color: 'var(--color-neutral-800)' }}>
+                            {sv.name}
+                            {sv.isEmergency && <Zap size={9} className="inline ml-1" style={{ color: '#c2410c' }} />}
+                          </p>
+                          <p className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>{ctxSvcPrice(sv)}</p>
+                        </div>
+                        <StatusBadge s={sv.listingStatus} />
+                        <div className="flex items-center gap-1 shrink-0">
+                          {sv.listingStatus !== 'approved' && (
+                            <button type="button" disabled={isBusy || !compliant} title={!compliant ? 'Provider not compliant' : 'Approve'}
+                              onClick={() => void actOne(sv.id, 'approve')}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40"
+                              style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
+                              <CheckCircle2 size={12} /> Approve
+                            </button>
+                          )}
+                          {sv.listingStatus !== 'rejected' && (
+                            <button type="button" disabled={isBusy} title="Reject"
+                              onClick={() => void actOne(sv.id, 'reject')}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40"
+                              style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
+                              <XCircle size={12} /> Reject
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {actErr && <div className="rounded-xl p-2.5 text-xs" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{actErr}</div>}
       </div>
-      <ActionBar canApprove={canApprove} canReject={canReject} acting={acting}
-        onApprove={() => onApprove(row)} onReject={() => onReject(row)} />
+
+      {/* Bulk action bar — approve / reject every pending listing at once */}
+      {pendingCount > 0 && (
+        <div className="shrink-0 border-t px-4 py-3 flex items-center gap-2" style={{ borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
+          <span className="text-xs mr-auto" style={{ color: 'var(--color-neutral-500)' }}>{pendingCount} pending listing{pendingCount === 1 ? '' : 's'}</span>
+          <button type="button" disabled={bulking || !compliant} title={!compliant ? 'Provider not compliant' : ''}
+            onClick={() => void actAllPending('approve')}
+            className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+            style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
+            <CheckCircle2 size={15} /> Approve all pending
+          </button>
+          <button type="button" disabled={bulking}
+            onClick={() => void actAllPending('reject')}
+            className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+            style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
+            <XCircle size={15} /> Reject all pending
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -634,15 +905,15 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
   const [rpLoaded, setRpLoaded]     = useState(false);
   const [rpSel, setRpSel]           = useState<number | null>(null);
 
-  // SP service listings
-  const [svcData, setSvcData]         = useState<ServiceListing[]>([]);
-  const [svcTotal, setSvcTotal]       = useState(0);
-  const [svcPage, setSvcPage]         = useState(0);
-  const [svcCategory, setSvcCategory] = useState<string[]>([]);
-  const [svcStatus, setSvcStatus]     = useState('pending');
-  const [svcLoading, setSvcLoading]   = useState(false);
-  const [svcLoaded, setSvcLoaded]     = useState(false);
-  const [svcSel, setSvcSel]           = useState<number | null>(null);
+  // SP providers (grouped: one row per provider, all their services inside)
+  const [spData, setSpData]         = useState<SpProviderRow[]>([]);
+  const [spTotal, setSpTotal]       = useState(0);
+  const [spPage, setSpPage]         = useState(0);
+  const [spCategory, setSpCategory] = useState<string[]>([]);
+  const [spStatus, setSpStatus]     = useState('pending');
+  const [spLoading, setSpLoading]   = useState(false);
+  const [spLoaded, setSpLoaded]     = useState(false);
+  const [spSel, setSpSel]           = useState<number | null>(null);
 
   const [error, setError]   = useState<string | null>(null);
   const [acting, setActing] = useState(false);
@@ -650,7 +921,7 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
   // Deep-link: seed the category filter from ?category= for Overview drill-downs.
   useEffect(() => {
     const cat = new URLSearchParams(window.location.search).get('category');
-    if (cat) { if (mode === 'sp') setSvcCategory([cat]); else setRpCategory([cat]); }
+    if (cat) { if (mode === 'sp') setSpCategory([cat]); else setRpCategory([cat]); }
   }, [mode]);
 
   const fetchRp = useCallback(async (page: number, categories: string[], status: string) => {
@@ -669,8 +940,8 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
     finally { setRpLoading(false); setRpLoaded(true); }
   }, []);
 
-  const fetchServices = useCallback(async (page: number, categories: string[], status: string) => {
-    setSvcLoading(true);
+  const fetchProviders = useCallback(async (page: number, categories: string[], status: string) => {
+    setSpLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
@@ -678,20 +949,20 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
         ...(categories.length ? { category: categories.join(',') } : {}),
         ...(status ? { status } : {}),
       });
-      const resp = await apiGet<{ data: ServiceListing[]; total: number }>(`/admin/service-listings?${params}`);
-      setSvcData(resp.data ?? []);
-      setSvcTotal(resp.total ?? 0);
+      const resp = await apiGet<{ data: SpProviderRow[]; total: number }>(`/admin/service-listing-providers?${params}`);
+      setSpData(resp.data ?? []);
+      setSpTotal(resp.total ?? 0);
     } catch (err) { setError((err as Error).message); }
-    finally { setSvcLoading(false); setSvcLoaded(true); }
+    finally { setSpLoading(false); setSpLoaded(true); }
   }, []);
 
   useEffect(() => { if (mode === 'rp') void fetchRp(rpPage, rpCategory, rpStatus); }, [mode, rpPage, rpCategory, rpStatus, fetchRp]);
-  useEffect(() => { if (mode === 'sp') void fetchServices(svcPage, svcCategory, svcStatus); }, [mode, svcPage, svcCategory, svcStatus, fetchServices]);
+  useEffect(() => { if (mode === 'sp') void fetchProviders(spPage, spCategory, spStatus); }, [mode, spPage, spCategory, spStatus, fetchProviders]);
 
   function handleRpCategory(c: string[]) { setRpCategory(c); setRpPage(0); setRpSel(null); }
   function handleRpStatus(s: string)     { setRpStatus(s); setRpPage(0); setRpSel(null); }
-  function handleSvcCategory(c: string[]) { setSvcCategory(c); setSvcPage(0); setSvcSel(null); }
-  function handleSvcStatus(s: string)     { setSvcStatus(s); setSvcPage(0); setSvcSel(null); }
+  function handleSpCategory(c: string[]) { setSpCategory(c); setSpPage(0); setSpSel(null); }
+  function handleSpStatus(s: string)     { setSpStatus(s); setSpPage(0); setSpSel(null); }
 
   async function actOnUnit(u: UnitListing, action: 'approve' | 'reject') {
     if (!u.property) return;
@@ -704,31 +975,33 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
     finally { setActing(false); }
   }
 
-  async function actOnService(s: ServiceListing, action: 'approve' | 'reject') {
-    if (!confirm(`${action === 'approve' ? 'Approve' : 'Reject'} service "${s.name}"?`)) return;
-    setActing(true);
-    try {
-      await apiPatch(`/admin/service-listings/${s.id}/${action}`, {});
-      await fetchServices(svcPage, svcCategory, svcStatus);
-    } catch (err) { setError((err as Error).message); }
-    finally { setActing(false); }
-  }
-
-  const loading = mode === 'sp' ? svcLoading : rpLoading;
-  const list = mode === 'sp' ? svcData : rpData;
-  const loaded = mode === 'sp' ? svcLoaded : rpLoaded;
-  const total = mode === 'sp' ? svcTotal : rpTotal;
-  const page = mode === 'sp' ? svcPage : rpPage;
+  const loading = mode === 'sp' ? spLoading : rpLoading;
+  const listLen = mode === 'sp' ? spData.length : rpData.length;
+  const loaded = mode === 'sp' ? spLoaded : rpLoaded;
+  const total = mode === 'sp' ? spTotal : rpTotal;
+  const page = mode === 'sp' ? spPage : rpPage;
   const selectedUnit = mode === 'rp' && rpSel != null ? rpData.find((u) => u.id === rpSel) ?? null : null;
-  const selectedSvc  = mode === 'sp' && svcSel != null ? svcData.find((s) => s.id === svcSel) ?? null : null;
-  const hasSelection = !!(selectedUnit || selectedSvc);
+  const selectedProvider = mode === 'sp' && spSel != null ? spData.find((s) => s.id === spSel) ?? null : null;
+  const hasSelection = !!(selectedUnit || selectedProvider);
   const title = mode === 'sp' ? 'Service Provider Listings' : 'Rental Provider Listings';
   const TitleIcon = mode === 'sp' ? Wrench : Building2;
 
   function refresh() {
-    if (mode === 'sp') void fetchServices(svcPage, svcCategory, svcStatus);
+    if (mode === 'sp') void fetchProviders(spPage, spCategory, spStatus);
     else void fetchRp(rpPage, rpCategory, rpStatus);
   }
+  // Silent refresh of the provider list (after an approve/reject inside the panel)
+  // so the left-list counts stay in sync without a spinner flash.
+  const refreshProviderCounts = useCallback(() => {
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE), offset: String(spPage * PAGE_SIZE),
+      ...(spCategory.length ? { category: spCategory.join(',') } : {}),
+      ...(spStatus ? { status: spStatus } : {}),
+    });
+    apiGet<{ data: SpProviderRow[]; total: number }>(`/admin/service-listing-providers?${params}`)
+      .then((resp) => { setSpData(resp.data ?? []); setSpTotal(resp.total ?? 0); })
+      .catch(() => { /* keep stale counts on transient error */ });
+  }, [spPage, spCategory, spStatus]);
 
   return (
     <div className="flex flex-col h-full" style={{ padding: '12px 20px 16px' }}>
@@ -752,13 +1025,13 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
       {/* Filters + split panel */}
       <div className="flex flex-col flex-1 min-h-0 mt-2">
         <div className="flex items-end justify-between gap-3 mb-2 flex-shrink-0">
-          <StatusTabs value={mode === 'rp' ? rpStatus : svcStatus} onChange={mode === 'rp' ? handleRpStatus : handleSvcStatus} />
+          <StatusTabs value={mode === 'rp' ? rpStatus : spStatus} onChange={mode === 'rp' ? handleRpStatus : handleSpStatus} />
           <TypesDropdown
             options={mode === 'rp'
               ? SPACE_CATEGORIES.map((c) => ({ id: c.id, label: categoryDisplayLabel(c.id) }))
               : SERVICE_CATEGORIES}
-            selected={mode === 'rp' ? rpCategory : svcCategory}
-            onChange={mode === 'rp' ? handleRpCategory : handleSvcCategory}
+            selected={mode === 'rp' ? rpCategory : spCategory}
+            onChange={mode === 'rp' ? handleRpCategory : handleSpCategory}
             labelFor={mode === 'rp' ? categoryDisplayLabel : serviceCategoryLabel}
           />
         </div>
@@ -769,27 +1042,27 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
           </div>
         )}
 
-        {!loading && loaded && !error && list.length === 0 && (
+        {!loading && loaded && !error && listLen === 0 && (
           <div className="flex flex-col items-center justify-center flex-1 gap-2" style={{ color: 'var(--color-neutral-400)' }}>
             <MousePointerClick size={28} strokeWidth={1.5} />
-            <p className="text-sm">{mode === 'sp' ? 'No service listings match these filters.' : 'No unit listings match these filters.'}</p>
+            <p className="text-sm">{mode === 'sp' ? 'No providers with listings match these filters.' : 'No unit listings match these filters.'}</p>
           </div>
         )}
 
-        {!loading && list.length > 0 && (
+        {!loading && listLen > 0 && (
           <div className="flex rounded-2xl overflow-hidden border flex-1 min-h-0"
             style={{ borderColor: 'var(--color-base-200)', boxShadow: 'var(--shadow-sm)' }}>
 
-            {/* LEFT — master list */}
+            {/* LEFT — master list (RP: units · SP: one row per provider) */}
             <div className="flex flex-col shrink-0 border-r overflow-hidden"
               style={{ width: 300, borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
               <div className="flex-1 overflow-y-auto">
                 {mode === 'rp'
                   ? rpData.map((u) => <UnitCard key={u.id} u={u} selected={rpSel === u.id} onClick={() => setRpSel(u.id)} />)
-                  : svcData.map((s) => <ServiceCard key={s.id} s={s} selected={svcSel === s.id} onClick={() => setSvcSel(s.id)} />)}
+                  : spData.map((sp) => <ProviderCard key={sp.id} p={sp} selected={spSel === sp.id} onClick={() => setSpSel(sp.id)} />)}
               </div>
               <Pagination page={page} total={total} pageSize={PAGE_SIZE}
-                onChange={(pp) => { if (mode === 'rp') { setRpPage(pp); setRpSel(null); } else { setSvcPage(pp); setSvcSel(null); } }} />
+                onChange={(pp) => { if (mode === 'rp') { setRpPage(pp); setRpSel(null); } else { setSpPage(pp); setSpSel(null); } }} />
             </div>
 
             {/* RIGHT — detail */}
@@ -797,14 +1070,13 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
               {!hasSelection ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: 'var(--color-neutral-400)' }}>
                   <MousePointerClick size={32} strokeWidth={1.5} />
-                  <p className="text-sm">Select a listing to review</p>
+                  <p className="text-sm">{mode === 'sp' ? 'Select a provider to review their listings' : 'Select a listing to review'}</p>
                 </div>
               ) : selectedUnit ? (
                 <UnitDetailPanel row={selectedUnit} acting={acting}
                   onApprove={(u) => void actOnUnit(u, 'approve')} onReject={(u) => void actOnUnit(u, 'reject')} />
-              ) : selectedSvc ? (
-                <ServiceDetailPanel row={selectedSvc} acting={acting}
-                  onApprove={(s) => void actOnService(s, 'approve')} onReject={(s) => void actOnService(s, 'reject')} />
+              ) : selectedProvider ? (
+                <ProviderReviewPanel providerId={selectedProvider.id} onChanged={refreshProviderCounts} />
               ) : null}
             </div>
           </div>
