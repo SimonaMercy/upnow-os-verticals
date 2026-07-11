@@ -103,8 +103,7 @@ export default function AdminUsersPage() {
 
   useEffect(() => { void fetchUsers(); }, [fetchUsers]);
 
-  // Deep-link support: seed filters from the URL query (?role=&status=&search=) on
-  // mount, so Overview drill-downs can land here pre-filtered.
+  // Restore filters from URL on mount
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const r = p.get('role'); const s = p.get('status'); const q = p.get('search'); const e = p.get('engagement');
@@ -113,6 +112,16 @@ export default function AdminUsersPage() {
     if (q != null) setSearch(q);
     if (e != null) setEngagementFilter(e);
   }, []);
+
+  // Sync role and engagement tabs to URL on change (replaceState for no history spam)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (roleFilter) url.searchParams.set('role', roleFilter);
+    else url.searchParams.delete('role');
+    if (roleFilter === 'customer' && engagementFilter) url.searchParams.set('engagement', engagementFilter);
+    else url.searchParams.delete('engagement');
+    window.history.replaceState(null, '', url.toString());
+  }, [roleFilter, engagementFilter]);
 
   async function updateStatus(userId: number, status: string) {
     setActionLoading(userId);
