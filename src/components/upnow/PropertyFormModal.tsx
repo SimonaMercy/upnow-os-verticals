@@ -1016,28 +1016,24 @@ function OwnerAssignmentSection({
             </div>
             <input className={INPUT} placeholder={nf.ownerType === 'company' ? 'Company name *' : 'Owner full name *'}
               value={nf.name} onChange={e => setNf(s => ({ ...s, name: e.target.value }))} />
-            <div className="grid grid-cols-2 gap-2">
-              <input className={INPUT} placeholder="Email" value={nf.email} onChange={e => setNf(s => ({ ...s, email: e.target.value }))} />
-              <input className={INPUT} placeholder="Phone" value={nf.phone} onChange={e => setNf(s => ({ ...s, phone: e.target.value }))} />
-            </div>
-            {nf.ownerType === 'individual' ? (
-              <input className={INPUT} placeholder="Emirates ID" value={nf.emiratesId} onChange={e => setNf(s => ({ ...s, emiratesId: e.target.value }))} />
-            ) : (
-              <input className={INPUT} placeholder="Trade licence no." value={nf.tradeLicence} onChange={e => setNf(s => ({ ...s, tradeLicence: e.target.value }))} />
-            )}
+            <p className="text-[11px] text-[#9b9890]">Quick-add a landlord to link now. Add full details (ID, bank, POA) later in the <b>Landlords</b> section.</p>
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={() => setShowAdd(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg text-[#6b6860] hover:bg-[#f4f3ef]">Cancel</button>
               <button type="button" onClick={createOwner} disabled={!nf.name.trim() || creating}
                 className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white disabled:opacity-50">
-                {creating ? 'Saving…' : 'Save owner'}
+                {creating ? 'Saving…' : 'Add landlord'}
               </button>
             </div>
           </div>
         ) : (
-          <button type="button" onClick={() => setShowAdd(true)}
-            className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#2e9f82] hover:underline">
-            <Plus size={14} /> Add new owner
-          </button>
+          <div className="mt-2 flex items-center gap-3">
+            <button type="button" onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#2e9f82] hover:underline">
+              <Plus size={14} /> Quick-add landlord
+            </button>
+            <a href="/rental-provider/dashboard/landlords" target="_blank" rel="noreferrer"
+              className="text-[12px] text-[#8a6d2e] hover:underline">Manage landlords ↗</a>
+          </div>
         )}
       </div>
     </div>
