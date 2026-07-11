@@ -40,7 +40,7 @@ import {
   User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
-  Trash2, Plus,
+  Trash2, Plus, UserRound,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
@@ -189,7 +189,14 @@ interface ContractDetail {
   } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null };
-  property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
+  // Property-management party: for a managed lease the landlord (above) IS the
+  // owner, and the RP is exposed here as the managing agent.
+  isManaged?: boolean;
+  landlordSignatory?: 'owner' | 'managing_agent' | null;
+  managingAgent?: { id: number | null; name: string | null; email: string | null; phone: string | null; licenseNumber?: string | null } | null;
+  chequeRecipient?: 'owner' | 'rp' | null;
+  chequePayeeName?: string | null;
+  property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; leasingType?: string | null };
   unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
   documents: ContractDoc[];
   payments: ContractPayment[];
@@ -792,7 +799,7 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <span className="note" style={{ fontWeight: 600 }}>Payment Advice already on file:</span>
             {chequeDocs.map((d, i) => (
-              <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
+              <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ id: d.id, fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
                 <ExternalLink size={12} /> {d.displayName ?? `Cheque ${i + 1}`}
               </button>
             ))}
@@ -947,7 +954,7 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
               </div>
               <div className="dacts">
                 {doc && (
-                  <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer(allDocs.map(d => ({ fileUrl: d.fileUrl, caption: d.displayName ?? lbl })), lbl)}>
+                  <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer(allDocs.map(d => ({ id: d.id, fileUrl: d.fileUrl, caption: d.displayName ?? lbl })), lbl)}>
                     <ExternalLink size={12} /> {multi ? `View ${allDocs.length}` : 'View'}
                   </button>
                 )}
@@ -2429,6 +2436,31 @@ function DetailsDrawer({
           </div>
         )}
         <div className={inline ? 'dbody-inline' : 'dbody'}>
+          {/* Managed lease — the landlord IS the property owner; the RP acts as
+              managing agent. Surfaced so the owner's name (shown as landlord
+              everywhere) isn't mistaken for the RP. */}
+          {contract.isManaged && (
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10, margin: '0 0 14px',
+              padding: '10px 12px', borderRadius: 10, border: '1px solid #efe2c6',
+              background: '#faf5e8',
+            }}>
+              <UserRound size={15} style={{ color: '#8a6d2e', marginTop: 1, flexShrink: 0 }} />
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#5c4d2a' }}>
+                <b style={{ color: '#3d3316' }}>Managed property.</b>{' '}
+                Landlord is the owner <b>{contract.landlord.name ?? '—'}</b>; you act as
+                managing agent{contract.managingAgent?.name ? ` (${contract.managingAgent.name})` : ''}.{' '}
+                {contract.landlordSignatory === 'owner'
+                  ? 'The owner signs the tenancy contract.'
+                  : 'You sign on the owner’s behalf under the management POA.'}
+                {contract.chequeRecipient && (
+                  <> Rent cheques are payable to{' '}
+                    <b>{contract.chequeRecipient === 'owner' ? (contract.chequePayeeName || 'the owner') : 'you (collected on the owner’s behalf)'}</b>.
+                    {' '}The rent is the owner’s funds; your revenue is the management fee.</>
+                )}
+              </div>
+            </div>
+          )}
           {/* Parties section removed (CEO: customer name + phone live in the
               page header; landlord details live on the settings page). */}
           {!inline && tab === 'property' && (
@@ -3353,7 +3385,7 @@ function DetailsDrawer({
                     <div className="ds">{lbl}</div>
                   </div>
                   <div className="dacts">
-                    <button type="button" onClick={() => multi ? openDocsTogether(docs) : openDocViewer({ fileUrl: doc.fileUrl, caption: s.label })} className="mini-btn view cursor-pointer"><ExternalLink size={12} /> {multi ? 'View all' : 'View'}</button>
+                    <button type="button" onClick={() => multi ? openDocsTogether(docs) : openDocViewer({ id: doc.id, fileUrl: doc.fileUrl, caption: s.label })} className="mini-btn view cursor-pointer"><ExternalLink size={12} /> {multi ? 'View all' : 'View'}</button>
                     {/* Generated tenancy artifacts get a clean, watermark-free download of the stored snapshot. */}
                     {['move_in_report', 'move_out_report', 'deposit_settlement'].includes(s.key) && (
                       <DownloadDocButton documentId={doc.id} label="PDF" className="mini-btn view" />
@@ -3433,7 +3465,7 @@ function DetailsDrawer({
                                 <div className="ds">{ok ? 'Approved' : rejected ? 'Rejected — re-upload requested' : 'Pending review'}</div>
                               </div>
                               <div className="dacts">
-                                <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: lbl })}><ExternalLink size={12} /> View</button>
+                                <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer({ id: d.id, fileUrl: d.fileUrl, caption: lbl })}><ExternalLink size={12} /> View</button>
                                 {!ok && (
                                   <>
                                     <button type="button" className="mini-btn ok cursor-pointer" onClick={() => onApproveDoc(d.id)}><Check size={12} /> Approve</button>
@@ -4532,7 +4564,7 @@ function RenewalProposeModal({
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label>Cheques payable to (optional)</label>
-              <input className="input" value={f.chequePayeeName} placeholder={contract.landlord.companyName ?? contract.landlord.name ?? ''} onChange={e => set('chequePayeeName', e.target.value)} />
+              <input className="input" value={f.chequePayeeName} placeholder={contract.chequePayeeName ?? contract.landlord.companyName ?? contract.landlord.name ?? ''} onChange={e => set('chequePayeeName', e.target.value)} />
             </div>
           </div>
           <p className="subhead mut">Fees (AED) — billed as their own cheques</p>

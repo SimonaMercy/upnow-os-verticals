@@ -331,6 +331,9 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
           <CompanyCaption />
           <Field label="Lessor's Email" ar="البريد الإلكتروني للمؤجر" value={data.landlord.email} />
           <Field label="Lessor's Phone" ar="رقم هاتف المؤجر" value={lessorPhone} />
+          {data.landlord.hasPoa && data.landlord.poaPersonName ? (
+            <Field label="Managing Agent (POA)" ar="الوكيل المُدير (وكالة)" value={data.landlord.poaPersonName} />
+          ) : null}
         </Section>
         <Section en="Tenant Information" ar="معلومات المستأجر">
           <Field label="Tenant's Name" ar="اسم المستأجر" value={tenantName} />

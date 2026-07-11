@@ -69,6 +69,7 @@ const EMPTY_PROP: PropertyFormData = {
   googlePlaceId: null,
   sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
+  landlordSignatory: null, chequeRecipient: null, ownerLinks: [],
 };
 
 /* ── unit row in the inline table ── */
