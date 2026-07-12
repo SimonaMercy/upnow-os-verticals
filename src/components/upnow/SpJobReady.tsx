@@ -606,7 +606,7 @@ function CoverageCard({ status, absorb, back }: CardProps) {
 
 /* ── Card ② · Your team (1p) ─────────────────────────────────────────────── */
 
-function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { hideGapChips?: boolean }) {
+function TeamCard({ status, absorb, back, hideGapChips, embedded }: CardProps & { hideGapChips?: boolean; embedded?: boolean }) {
   const [techs, setTechs] = useState<Tech[] | null>(null);
   const [services, setServices] = useState<SpService[]>([]);
   const t = status.cards.team;
@@ -637,23 +637,27 @@ function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { hideGapC
   if (!techs) return <CardSkeleton back={back} title="Your team" />;
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <CardHeader title="Your team" sub="Jobs go to skilled, free, lead-capable crews" onBack={back}
-        right={<span className="mt-2 hidden items-center gap-1 text-[12px] sm:flex" style={{ color: FAINT }}><Check size={12} /> Saves as you go</span>} />
+    <div className={embedded ? '' : 'mx-auto max-w-2xl'}>
+      {!embedded && (
+        <CardHeader title="Your team" sub="Jobs go to skilled, free, lead-capable crews" onBack={back}
+          right={<span className="mt-2 hidden items-center gap-1 text-[12px] sm:flex" style={{ color: FAINT }}><Check size={12} /> Saves as you go</span>} />
+      )}
 
-      <div className="mb-4 rounded-[14px] border p-4" style={{ background: '#FEF9EC', borderColor: '#F2E3B8' }}>
-        <p className="text-[13px] leading-relaxed" style={{ color: '#7C5A10' }}>
-          Each service you list needs <b>at least one lead-capable technician</b>{' '}skilled in that exact service —
-          a technician skilled in Regular Cleaning doesn&apos;t cover Deep Cleaning unless they&apos;re picked for both.
-        </p>
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.activeTechnicians} technician{t.activeTechnicians === 1 ? '' : 's'}</span>
-          <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.leadCapable} lead-capable</span>
-          {!hideGapChips && t.uncoveredServices.map((s) => (
-            <span key={s.id} className="rounded-full px-3 py-1 text-[12px] font-bold" style={{ background: '#FDF1EF', color: RED, border: '1px solid #F4CFC9' }}>No tech for: {s.name}</span>
-          ))}
+      {!embedded && (
+        <div className="mb-4 rounded-[14px] border p-4" style={{ background: '#FEF9EC', borderColor: '#F2E3B8' }}>
+          <p className="text-[13px] leading-relaxed" style={{ color: '#7C5A10' }}>
+            Each service you list needs <b>at least one lead-capable technician</b>{' '}skilled in that exact service —
+            a technician skilled in Regular Cleaning doesn&apos;t cover Deep Cleaning unless they&apos;re picked for both.
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.activeTechnicians} technician{t.activeTechnicians === 1 ? '' : 's'}</span>
+            <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.leadCapable} lead-capable</span>
+            {!hideGapChips && t.uncoveredServices.map((s) => (
+              <span key={s.id} className="rounded-full px-3 py-1 text-[12px] font-bold" style={{ background: '#FDF1EF', color: RED, border: '1px solid #F4CFC9' }}>No tech for: {s.name}</span>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="space-y-2.5">
         {techs.map((tech) => {
@@ -765,7 +769,7 @@ export function SpTeamSkills() {
   }
   return (
     <div key={remount}>
-      <TeamCard status={status} absorb={setStatus} back={() => setRemount((r) => r + 1)} hideGapChips />
+      <TeamCard status={status} absorb={setStatus} back={() => setRemount((r) => r + 1)} hideGapChips embedded />
     </div>
   );
 }

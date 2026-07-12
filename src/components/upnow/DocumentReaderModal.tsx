@@ -10,9 +10,12 @@
  * by design: documents are previewed in-portal, never downloaded.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { FileText, X, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { FileText, X, ChevronLeft, ChevronRight, Upload, Download, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { SecureDocCanvas } from './SecureDocCanvas';
-import { currentDocWatermark } from '@/lib/docViewer';
+import { currentDocWatermark, canRoleDownloadDocs } from '@/lib/docViewer';
+import { downloadStoredDoc } from '@/lib/downloadDoc';
+import { useAuth } from '@/contexts/AuthContext';
 
 export type ReaderFile = { id: string | number; name: string; url: string; mimeType?: string | null };
 /** group → optional section heading in the sidebar (e.g. a lease ref). */
@@ -39,6 +42,9 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
   const firstWithFiles = slots.find(s => s.files.length > 0)?.key ?? slots[0]?.key ?? null;
   // Computed once when the reader opens — same identity stamp as openDocViewer.
   const [watermark] = useState(() => currentDocWatermark());
+  const { user } = useAuth();
+  const canDownload = canRoleDownloadDocs(user?.role);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(initialKey ?? firstWithFiles);
   const [fileIdx, setFileIdx] = useState(0);
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1280);
@@ -80,6 +86,21 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
   }, [onClose, goSeq]);
 
   const select = (key: string) => { setActiveKey(key); setFileIdx(0); };
+
+  // The active file's `documents` table id — present only for real uploaded docs
+  // (synthetic/derived rows use string keys). Downloadable for landlord / manager
+  // / admin; the file streams cleanly (watermark-free) via /documents/:id/download.
+  const activeDocId = typeof rActive?.id === 'number' && rActive.id > 0 ? rActive.id : null;
+  const handleDownload = async (id: number) => {
+    setDownloadingId(id);
+    try {
+      await downloadStoredDoc(id);
+    } catch {
+      toast.error('Could not download the document. Please try again.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,18,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isTight ? 0 : 22, zIndex: 70 }}>
@@ -123,6 +144,18 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rActive?.name || rSlot?.label || 'Document'}</div>
                 <div style={{ fontSize: 11, color: C.greenT, fontWeight: 600 }}>{rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImage(rActive) ? 'Image' : 'PDF'}` : `${isImage(rActive) ? 'Image' : 'PDF'} · On file`) : 'Not uploaded'}</div>
               </div>
+              {canDownload && activeDocId && (
+                <button
+                  type="button"
+                  onClick={() => handleDownload(activeDocId)}
+                  disabled={downloadingId === activeDocId}
+                  title="Download this document"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto', fontSize: 12, fontWeight: 700, color: '#fff', background: C.green, border: 'none', borderRadius: 9, padding: '7px 12px', cursor: 'pointer', opacity: downloadingId === activeDocId ? 0.6 : 1 }}
+                >
+                  {downloadingId === activeDocId ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Download
+                </button>
+              )}
             </div>
 
             {/* cross-document nav */}

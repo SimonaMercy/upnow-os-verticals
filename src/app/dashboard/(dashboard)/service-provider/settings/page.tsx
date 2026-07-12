@@ -19,8 +19,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { SpJobReady, SpTeamSkills, catLabel } from '@/components/upnow/SpJobReady';
-import { SpTeamPanel } from '@/components/upnow/SpTeamPanel';
+import { SpJobReady, catLabel } from '@/components/upnow/SpJobReady';
+import { SpTeamManager } from '@/components/upnow/SpTeamManager';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { apiGet, apiPatch } from '@/lib/api';
 import {
@@ -58,10 +58,6 @@ interface ChecklistItem {
   uploaded?: boolean;
   status?: string | null;
   expiryDate?: string | null;
-}
-interface JobReadyPeek {
-  jobReady: boolean;
-  cards: { team: { uncoveredServices: { id: number; name: string; category: string }[] } };
 }
 
 const pretty = (code: string) =>
@@ -400,60 +396,12 @@ function ProfileTab() {
   );
 }
 
-/* ── Team tab — roster, coverage gaps and skills all in ONE place ─────────── */
+/* ── Team tab — unified single-page flow (design 3a): coverage meter, one
+      merged team list, per-technician skill checkboxes. See SpTeamManager. ── */
 function TeamTab() {
-  const [peek, setPeek] = useState<JobReadyPeek | null>(null);
-
-  useEffect(() => {
-    apiGet<JobReadyPeek>('/service-provider/job-ready').then(setPeek).catch(() => {});
-  }, []);
-
-  const uncovered = peek?.cards.team.uncoveredServices ?? [];
-  // Group the gaps by category — scannable, instead of a wall of chips.
-  const gapGroups = uncovered.reduce<Array<{ category: string; items: string[] }>>((acc, s) => {
-    const g = acc.find((x) => x.category === s.category);
-    if (g) g.items.push(s.name);
-    else acc.push({ category: s.category, items: [s.name] });
-    return acc;
-  }, []);
-
   return (
-    <div className="max-w-4xl space-y-6">
-      {/* Full roster management (formerly the /team page) */}
-      <SpTeamPanel />
-
-      {uncovered.length > 0 && (
-        <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
-          <div className="flex flex-wrap items-center gap-3 px-6 py-4 bg-red-50 border-b border-red-100">
-            <AlertCircle size={16} className="shrink-0 text-red-600" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-red-700">
-                {`${uncovered.length} listed service${uncovered.length === 1 ? '' : 's'} can't receive bookings yet`}
-              </p>
-              <p className="text-xs text-[#6b6860] mt-0.5">
-                No lead-capable technician holds these skills — assign them in the skills section below and dispatch resumes instantly.
-              </p>
-            </div>
-          </div>
-          <div className="divide-y divide-[#f0efeb]">
-            {gapGroups.map((g) => (
-              <div key={g.category} className="flex items-baseline gap-4 px-6 py-3">
-                <span className="w-28 shrink-0 text-xs font-semibold uppercase tracking-wide text-[#9b9890]">
-                  {catLabel(g.category)}
-                </span>
-                <p className="text-sm text-[#1a1916] leading-relaxed">
-                  {g.items.join(' · ')}
-                </p>
-                <span className="ml-auto shrink-0 text-xs text-[#9b9890]">{g.items.length}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Skills & dispatch readiness — the job-ready Team card, moved here from
-          Rules so "Team" exists in exactly one place. */}
-      <SpTeamSkills />
+    <div className="max-w-4xl">
+      <SpTeamManager />
     </div>
   );
 }

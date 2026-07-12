@@ -658,7 +658,7 @@ export default function CustomerDetailPage() {
                         {l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}{l.property.buildingName ? ` · ${l.property.buildingName}` : ''} · {l.ref} · {fmtDate(l.startDate)} → {fmtDate(l.endDate)}
                       </span>
                       {proofs.length > 0 ? proofs.map(d => (
-                        <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName || prettyKey(d.documentKey), mimeType: d.mimeType })}
+                        <button key={d.id} type="button" onClick={() => openDocViewer({ id: d.id, fileUrl: d.fileUrl, caption: d.displayName || prettyKey(d.documentKey), mimeType: d.mimeType })}
                           className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] bg-[#eef9f4] border border-[#cfe9df] rounded-full px-2 py-0.5 hover:underline cursor-pointer">
                           <FileText size={11} /> {d.displayName || prettyKey(d.documentKey)}
                         </button>
@@ -932,7 +932,7 @@ export default function CustomerDetailPage() {
                         {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                       </div>
                       {uploaded && existing!.fileUrl && (
-                        <button type="button" onClick={() => openDocViewer({ fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
+                        <button type="button" onClick={() => openDocViewer({ id: existing!.id, fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
                           className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
                           <Eye size={13} /> View
                         </button>
@@ -987,7 +987,7 @@ export default function CustomerDetailPage() {
                     {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                   </div>
                   {uploaded && existing!.fileUrl && (
-                    <button type="button" onClick={() => openDocViewer({ fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
+                    <button type="button" onClick={() => openDocViewer({ id: existing!.id, fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
                       className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
                       <Eye size={13} /> View
                     </button>
