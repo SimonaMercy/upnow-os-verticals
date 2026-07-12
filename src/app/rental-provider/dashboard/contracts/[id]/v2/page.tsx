@@ -3979,6 +3979,10 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
   const [consent, setConsent] = useState(false);
+  // Managed lease signed by the RP → you sign as MANAGING AGENT (under POA), on
+  // the owner's behalf; otherwise the landlord slot is signed as the landlord.
+  const asAgent = contract.isManaged && contract.landlordSignatory === 'managing_agent';
+  const signRole = asAgent ? 'Managing Agent' : 'Landlord';
 
   const submit = async () => {
     setBusy(true); setErr(null);
@@ -4020,8 +4024,10 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
       <div className="signas">
         <span className="sa-ic"><BadgeCheck size={20} /></span>
         <div>
-          <div className="sa-l">Signing as Landlord</div>
-          <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
+          <div className="sa-l">Signing as {signRole}</div>
+          <div className="sa-n">{asAgent
+            ? `${contract.managingAgent?.name ?? '—'} · on behalf of ${contract.landlord.name ?? 'the owner'}`
+            : (contract.landlord.companyName || contract.landlord.name || '—')}</div>
         </div>
       </div>
       <SignaturePad onChange={setSig} />
@@ -4032,7 +4038,7 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
       {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
         <button className="btn btn-jade" disabled={!canSubmit || done} onClick={submit}>
-          <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : 'Sign as Landlord'}
+          <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : `Sign as ${signRole}`}
         </button>
       </div>
     </div>
@@ -4104,6 +4110,8 @@ function SignModal({
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
   const [consent, setConsent] = useState(false);
+  const asAgent = contract.isManaged && contract.landlordSignatory === 'managing_agent';
+  const signRole = asAgent ? 'Managing Agent' : 'Landlord';
 
   const submit = async () => {
     setBusy(true); setErr(null);
@@ -4148,8 +4156,10 @@ function SignModal({
           <div className="signas">
             <span className="sa-ic"><BadgeCheck size={20} /></span>
             <div>
-              <div className="sa-l">Signing as Landlord</div>
-              <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
+              <div className="sa-l">Signing as {signRole}</div>
+              <div className="sa-n">{asAgent
+                ? `${contract.managingAgent?.name ?? '—'} · on behalf of ${contract.landlord.name ?? 'the owner'}`
+                : (contract.landlord.companyName || contract.landlord.name || '—')}</div>
             </div>
           </div>
           <SignaturePad onChange={setSig} />
@@ -4162,7 +4172,7 @@ function SignModal({
         <div className="mf">
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-jade btn-sm" disabled={!canSubmit} onClick={submit}>
-            <Pencil size={14} /> Sign as Landlord
+            <Pencil size={14} /> Sign as {signRole}
           </button>
         </div>
       </div>

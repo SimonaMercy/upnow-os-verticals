@@ -41,8 +41,8 @@ function docSlots(d: LandlordDetail): { key: string; label: string; category: st
   return slots;
 }
 interface Statement {
-  totals: { rentCollectedNet: number; rentVat: number; managementFee: number; netPayableToOwner: number };
-  lines: Array<{ contractId: number; building: string | null; unitNumber: string | null; ownershipPct: number; netPayableToOwner: number; status: string }>;
+  totals: { rentCollectedNet: number; rentVat: number; managementFee: number; netPayableToOwner: number; feeDueFromOwner: number; netSettlement: number };
+  lines: Array<{ contractId: number; building: string | null; unitNumber: string | null; ownershipPct: number; netPayableToOwner: number; feeDueFromOwner: number; status: string; chequeRecipient: 'owner' | 'rp' | null }>;
 }
 
 const fmt = (n: number) => `AED ${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -185,19 +185,30 @@ export default function LandlordDetailPage() {
           )}
         </div>
 
-        {/* Statement */}
+        {/* Statement — direction depends on who collects the rent cheques. */}
         <div className="rounded-2xl border border-[#e8e6e0] bg-white p-5">
           <h2 className="text-sm font-bold text-[#1a1916] mb-1">Owner statement</h2>
-          <p className="text-xs text-[#9b9890] mb-3">Cleared rent (net of VAT) − management fee = net payable</p>
+          <p className="text-xs text-[#9b9890] mb-3">Rent you collect → remit net to owner. Rent the owner collects → owner owes you the fee.</p>
           {!t ? (
             <p className="text-sm text-[#9b9890]">No statement data.</p>
           ) : (
             <div className="space-y-2 text-sm">
-              <Row label="Rent collected (net)" value={fmt(t.rentCollectedNet)} />
-              <Row label="Management fee" value={`− ${fmt(t.managementFee)}`} muted />
+              <Row label="Rent collected by you (net)" value={fmt(t.rentCollectedNet)} />
+              <Row label="Management fee" value={fmt(t.managementFee)} muted />
+              {t.netPayableToOwner > 0 && <Row label="Remit to owner" value={fmt(t.netPayableToOwner)} muted />}
+              {t.feeDueFromOwner > 0 && <Row label="Fee due from owner" value={fmt(t.feeDueFromOwner)} muted />}
               <div className="flex items-center justify-between pt-2 mt-2 border-t border-[#f0ede8]">
-                <span className="font-semibold text-[#1a1916]">Net payable to owner</span>
-                <span className="font-bold text-[#1a7a5a] tabular-nums">{fmt(t.netPayableToOwner)}</span>
+                {t.netSettlement >= 0 ? (
+                  <>
+                    <span className="font-semibold text-[#1a1916]">Net payable to owner</span>
+                    <span className="font-bold text-[#1a7a5a] tabular-nums">{fmt(t.netSettlement)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-[#1a1916]">Fee due from owner</span>
+                    <span className="font-bold text-[#8a6d2e] tabular-nums">{fmt(Math.abs(t.netSettlement))}</span>
+                  </>
+                )}
               </div>
             </div>
           )}
