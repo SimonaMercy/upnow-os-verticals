@@ -17,8 +17,19 @@ export interface Landlord {
   ownerType: 'individual' | 'company';
   email: string | null;
   phone: string | null;
+  contactAddress: string | null;
   emiratesId: string | null;
+  passportNumber: string | null;
+  nationality: string | null;
+  dateOfBirth: string | null;
+  gender: string | null;
   tradeLicence: string | null;
+  tradeLicenceAuthority: string | null;
+  authorizedSignatoryName: string | null;
+  hasPoa: boolean;
+  poaPersonName: string | null;
+  poaPersonPhone: string | null;
+  poaPersonEmail: string | null;
   iban: string | null;
   bankName: string | null;
   accountName: string | null;
@@ -27,7 +38,14 @@ export interface Landlord {
 }
 
 const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
-const emptyForm = { name: '', ownerType: 'individual' as 'individual' | 'company', email: '', phone: '', emiratesId: '', tradeLicence: '', iban: '', bankName: '', accountName: '', notes: '' };
+const emptyForm = {
+  name: '', ownerType: 'individual' as 'individual' | 'company',
+  email: '', phone: '', contactAddress: '',
+  emiratesId: '', passportNumber: '', nationality: '', dateOfBirth: '', gender: '',
+  tradeLicence: '', tradeLicenceAuthority: '', authorizedSignatoryName: '',
+  hasPoa: false, poaPersonName: '', poaPersonPhone: '', poaPersonEmail: '',
+  iban: '', bankName: '', accountName: '', notes: '',
+};
 
 export default function LandlordsDirectory() {
   const router = useRouter();
@@ -132,20 +150,37 @@ function LandlordFormModal({ rpQ, editing, onClose, onSaved }: {
 }) {
   const [f, setF] = useState(() => editing ? {
     name: editing.name, ownerType: editing.ownerType, email: editing.email ?? '', phone: editing.phone ?? '',
-    emiratesId: editing.emiratesId ?? '', tradeLicence: editing.tradeLicence ?? '', iban: editing.iban ?? '',
-    bankName: editing.bankName ?? '', accountName: editing.accountName ?? '', notes: editing.notes ?? '',
+    contactAddress: editing.contactAddress ?? '',
+    emiratesId: editing.emiratesId ?? '', passportNumber: editing.passportNumber ?? '',
+    nationality: editing.nationality ?? '', dateOfBirth: editing.dateOfBirth ?? '', gender: editing.gender ?? '',
+    tradeLicence: editing.tradeLicence ?? '', tradeLicenceAuthority: editing.tradeLicenceAuthority ?? '',
+    authorizedSignatoryName: editing.authorizedSignatoryName ?? '',
+    hasPoa: editing.hasPoa ?? false, poaPersonName: editing.poaPersonName ?? '',
+    poaPersonPhone: editing.poaPersonPhone ?? '', poaPersonEmail: editing.poaPersonEmail ?? '',
+    iban: editing.iban ?? '', bankName: editing.bankName ?? '', accountName: editing.accountName ?? '', notes: editing.notes ?? '',
   } : emptyForm);
   const [saving, setSaving] = useState(false);
-  const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const set = (k: keyof typeof f, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
 
   const save = async () => {
     if (!f.name.trim() || saving) return;
     setSaving(true);
+    const ind = f.ownerType === 'individual';
     const body = {
       name: f.name.trim(), ownerType: f.ownerType,
-      email: f.email || undefined, phone: f.phone || undefined,
-      emiratesId: f.ownerType === 'individual' ? (f.emiratesId || undefined) : undefined,
-      tradeLicence: f.ownerType === 'company' ? (f.tradeLicence || undefined) : undefined,
+      email: f.email || undefined, phone: f.phone || undefined, contactAddress: f.contactAddress || undefined,
+      emiratesId: ind ? (f.emiratesId || undefined) : undefined,
+      passportNumber: ind ? (f.passportNumber || undefined) : undefined,
+      nationality: ind ? (f.nationality || undefined) : undefined,
+      dateOfBirth: ind ? (f.dateOfBirth || undefined) : undefined,
+      gender: ind ? (f.gender || undefined) : undefined,
+      tradeLicence: !ind ? (f.tradeLicence || undefined) : undefined,
+      tradeLicenceAuthority: !ind ? (f.tradeLicenceAuthority || undefined) : undefined,
+      authorizedSignatoryName: !ind ? (f.authorizedSignatoryName || undefined) : undefined,
+      hasPoa: f.hasPoa,
+      poaPersonName: f.hasPoa ? (f.poaPersonName || undefined) : undefined,
+      poaPersonPhone: f.hasPoa ? (f.poaPersonPhone || undefined) : undefined,
+      poaPersonEmail: f.hasPoa ? (f.poaPersonEmail || undefined) : undefined,
       iban: f.iban || undefined, bankName: f.bankName || undefined, accountName: f.accountName || undefined,
       notes: f.notes || undefined,
     };
@@ -181,11 +216,53 @@ function LandlordFormModal({ rpQ, editing, onClose, onSaved }: {
             <Field label="Email"><input className={INPUT} value={f.email} onChange={(e) => set('email', e.target.value)} /></Field>
             <Field label="Phone"><input className={INPUT} value={f.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
           </div>
+          <Field label="Contact / notices address"><input className={INPUT} value={f.contactAddress} onChange={(e) => set('contactAddress', e.target.value)} /></Field>
+
+          {/* Identity */}
           {f.ownerType === 'individual' ? (
-            <Field label="Emirates ID"><input className={INPUT} value={f.emiratesId} onChange={(e) => set('emiratesId', e.target.value)} placeholder="784-XXXX-XXXXXXX-X" /></Field>
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Emirates ID"><input className={INPUT} value={f.emiratesId} onChange={(e) => set('emiratesId', e.target.value)} placeholder="784-XXXX-XXXXXXX-X" /></Field>
+                <Field label="Passport no."><input className={INPUT} value={f.passportNumber} onChange={(e) => set('passportNumber', e.target.value)} /></Field>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Nationality"><input className={INPUT} value={f.nationality} onChange={(e) => set('nationality', e.target.value)} /></Field>
+                <Field label="Date of birth"><input type="date" className={INPUT} value={f.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} /></Field>
+                <Field label="Gender">
+                  <select className={INPUT} value={f.gender} onChange={(e) => set('gender', e.target.value)}>
+                    <option value="">—</option><option value="male">Male</option><option value="female">Female</option>
+                  </select>
+                </Field>
+              </div>
+            </>
           ) : (
-            <Field label="Trade licence no."><input className={INPUT} value={f.tradeLicence} onChange={(e) => set('tradeLicence', e.target.value)} /></Field>
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Trade licence no."><input className={INPUT} value={f.tradeLicence} onChange={(e) => set('tradeLicence', e.target.value)} /></Field>
+                <Field label="Licensing authority"><input className={INPUT} value={f.tradeLicenceAuthority} onChange={(e) => set('tradeLicenceAuthority', e.target.value)} placeholder="e.g. Dubai DED" /></Field>
+              </div>
+              <Field label="Authorised signatory"><input className={INPUT} value={f.authorizedSignatoryName} onChange={(e) => set('authorizedSignatoryName', e.target.value)} placeholder="Person who signs for the company" /></Field>
+            </>
           )}
+
+          {/* Power of Attorney */}
+          <div className="pt-1">
+            <label className="flex items-center gap-2 text-sm text-[#3f3d39] cursor-pointer">
+              <input type="checkbox" checked={f.hasPoa} onChange={(e) => set('hasPoa', e.target.checked)} className="accent-[#2e9f82]" />
+              <span className="font-medium">A Power of Attorney authorises someone to act for this owner</span>
+            </label>
+            {f.hasPoa && (
+              <div className="mt-2 space-y-2 rounded-lg bg-[#faf9f6] p-3">
+                <Field label="POA holder / authorised signatory"><input className={INPUT} value={f.poaPersonName} onChange={(e) => set('poaPersonName', e.target.value)} /></Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="POA holder phone"><input className={INPUT} value={f.poaPersonPhone} onChange={(e) => set('poaPersonPhone', e.target.value)} /></Field>
+                  <Field label="POA holder email"><input className={INPUT} value={f.poaPersonEmail} onChange={(e) => set('poaPersonEmail', e.target.value)} /></Field>
+                </div>
+                <p className="text-[11px] text-[#9b9890]">Upload the POA deed &amp; ID in the landlord&apos;s Documents (after saving).</p>
+              </div>
+            )}
+          </div>
+
           <div className="pt-1 text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Payout bank details</div>
           <Field label="Account name"><input className={INPUT} value={f.accountName} onChange={(e) => set('accountName', e.target.value)} /></Field>
           <div className="grid grid-cols-2 gap-3">
