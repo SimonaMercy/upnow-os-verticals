@@ -1,18 +1,21 @@
 'use client';
 
 /**
- * Sticky compliance banner shown across the RP dashboard when the rental
+ * Sticky compliance banner shown across the RP (and SP) dashboard when the
  * provider is signed in but NOT yet compliant (and not paused/blocked — those
- * are hard-gated by RpOnboardingGate). Replaces the old "blindly bounce them to
- * a generic setup form" behaviour: the RP keeps read access to their dashboard
- * while a clear, status-specific banner tells them exactly what's outstanding
- * and links back to /onboarding to resolve it.
+ * are hard-gated by the respective onboarding gate). Replaces the old "blindly
+ * bounce them to a generic setup form" behaviour: the provider keeps read
+ * access to their dashboard while a clear, status-specific banner tells them
+ * exactly what's outstanding and links back to onboarding to resolve it.
+ *
+ * `onboardingPath` lets each portal point the CTA at its own onboarding route
+ * (defaults to the RP path for backwards compatibility).
  */
 
 import Link from 'next/link';
 import { AlertCircle, Clock, ArrowRight } from 'lucide-react';
 
-const ONBOARDING_PATH = '/rental-provider/dashboard/onboarding';
+const DEFAULT_ONBOARDING_PATH = '/rental-provider/dashboard/onboarding';
 
 type Variant = { bg: string; border: string; fg: string; icon: 'alert' | 'clock'; title: string; cta: string };
 
@@ -22,7 +25,15 @@ const VARIANTS: Record<string, Variant> = {
   pending_review:  { bg: '#eff6ff', border: '#bfdbfe', fg: '#1d4ed8', icon: 'clock', title: 'Verification under review', cta: 'View status' },
 };
 
-export function ComplianceBanner({ status, notes }: { status: string; notes?: string | null }) {
+export function ComplianceBanner({
+  status,
+  notes,
+  onboardingPath = DEFAULT_ONBOARDING_PATH,
+}: {
+  status: string;
+  notes?: string | null;
+  onboardingPath?: string;
+}) {
   const v = VARIANTS[status] ?? VARIANTS.pending_review;
   const Icon = v.icon === 'clock' ? Clock : AlertCircle;
   const detail = notes?.trim()
@@ -43,7 +54,7 @@ export function ComplianceBanner({ status, notes }: { status: string; notes?: st
           <span className="opacity-90">{detail}</span>
         </p>
         <Link
-          href={ONBOARDING_PATH}
+          href={onboardingPath}
           className="flex-shrink-0 inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
         >
           {v.cta} <ArrowRight size={13} />
