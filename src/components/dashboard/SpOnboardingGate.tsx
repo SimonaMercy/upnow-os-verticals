@@ -3,66 +3,124 @@
 /**
  * Service Provider onboarding gate.
  *
- * Mounted in the /dashboard/service-provider layout. Unlike the RP gate
- * (which lets submitted-but-unreviewed accounts browse with a banner), the SP
- * portal is approval-gated end to end: an SP sees NOTHING of the dashboard
- * until compliance review approves them.
- *   - compliant → full dashboard.
- *   - anything else (no profile, wizard incomplete, pending_review,
- *     action_required, expired, paused) → redirect to /onboarding, which
- *     renders the right phase itself: the setup wizard, the rejected
- *     "fix & re-submit" walk-through, or the under-review screen.
+ * Mounted in the /dashboard/service-provider layout. Mirrors the RP gate
+ * (RpOnboardingGate): rather than hard-bouncing every non-approved SP to the
+ * setup wizard, a provider who has SUBMITTED a complete application keeps
+ * read access to the whole dashboard while a sticky status banner tells them
+ * what's outstanding.
  *
- * Exempt routes:
- *   - /onboarding (no redirect loop),
- *   - /documents — rejected SPs must be able to re-upload flagged files;
- *     the reviewer-note banner and rejection emails link here.
- * Non-SP users (e.g. admins opening SP URLs) are exempt.
+ *   - no profile yet, or registration incomplete (still mid-wizard / imported
+ *     stub) → hard redirect to /onboarding (the wizard is the safe landing).
+ *   - paused (admin enforcement hold)          → hard redirect to /onboarding
+ *     (not self-fixable; the page shows a "paused" screen).
+ *   - compliant                                → full dashboard, no banner.
+ *   - submitted but pending_review / action_required / expired → dashboard
+ *     ALLOWED, with the ComplianceBanner pointing back to /onboarding.
  *
- * Like the RP gate this is a read/UX gate only — write actions are enforced
- * server-side by compliance checks on the SP endpoints.
+ * "Registration complete" mirrors the onboarding wizard's own step-completion
+ * checks (substantive steps 1–4): business basics, service categories, service
+ * area, and strength. The optional owner-details step and the phone step
+ * (a precondition already satisfied for a signed-in SP) are not required — the
+ * same fields the wizard uses to decide it can show the "under review" screen.
+ *
+ * IMPORTANT: this is a read/UX gate only. Letting non-compliant (non-paused)
+ * SPs in means WRITE actions are still enforced server-side by compliance
+ * checks on the SP endpoints.
+ *
+ * The onboarding route itself is exempt (no redirect loop), and non-SP users
+ * (e.g. admins opening SP URLs) are exempt too.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/lib/api';
+import { ComplianceBanner } from './ComplianceBanner';
 
 const ONBOARDING_PATH = '/dashboard/service-provider/onboarding';
-const EXEMPT_PATHS = [ONBOARDING_PATH, '/dashboard/service-provider/documents'];
+
+// States that must finish a flow before the SP can use any dashboard route.
+const HARD_BLOCKED = new Set(['paused']);
+
+interface ProfilePeek {
+  profile?: {
+    accountTypeConfirmedAt: string | null;
+    businessName?: string | null;
+    serviceCategories?: string[] | null;
+    emiratesServed?: string[] | null;
+    teamSizeBand?: string | null;
+    fleetSizeBand?: string | null;
+    opsContactName?: string | null;
+    complianceStatus?: string | null;
+    complianceNotes?: string | null;
+  };
+}
+
+/** Mirror of the onboarding wizard's completion check (substantive steps 1–4). */
+function isRegistrationComplete(p: ProfilePeek['profile']): boolean {
+  if (!p) return false;
+  return (
+    !!p.accountTypeConfirmedAt &&
+    !!p.businessName &&
+    !!p.serviceCategories?.length &&
+    !!p.emiratesServed?.length &&
+    !!p.teamSizeBand &&
+    !!p.fleetSizeBand &&
+    !!p.opsContactName
+  );
+}
 
 export function SpOnboardingGate({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const pathname = usePathname() ?? '';
   const router = useRouter();
-  // The approved verdict is remembered per path; navigating to another gated
-  // path re-checks (fresh loader) so a mid-session verdict change is caught.
-  const [approvedFor, setApprovedFor] = useState<string | null>(null);
+  const [checked, setChecked] = useState(false);
+  const [allowed, setAllowed] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string | null>(null);
 
-  const exempt =
-    !user || user.role !== 'service_provider' || EXEMPT_PATHS.some((p) => pathname.startsWith(p));
+  // Skip the gate for the onboarding page itself, and for non-SP users (e.g.
+  // admins opening SP URLs) — handled by an early render below, so the effect
+  // never needs a synchronous setState for this case.
+  const exempt = !user || user.role !== 'service_provider' || pathname === ONBOARDING_PATH;
 
   useEffect(() => {
     if (exempt) return;
     let cancelled = false;
-    apiGet<{ isCompliant: boolean }>('/profiles/service-provider/me/kyc-status')
-      .then((kyc) => {
+    apiGet<ProfilePeek>('/profiles/service-provider/me')
+      .then((res) => {
         if (cancelled) return;
-        if (kyc.isCompliant) setApprovedFor(pathname);
-        else router.replace(ONBOARDING_PATH);
+        const p = res?.profile;
+        const st = p?.complianceStatus ?? null;
+        // Hard-block the cases that must complete a flow first: no/partial
+        // registration (still mid-wizard or an imported stub), or admin-paused.
+        if (!isRegistrationComplete(p) || (st && HARD_BLOCKED.has(st))) {
+          router.replace(ONBOARDING_PATH);
+          return;
+        }
+        // compliant + pending_review / action_required / expired all get in; the
+        // banner (below) nudges the non-compliant ones to finish verification.
+        setStatus(st);
+        setNotes(p?.complianceNotes ?? null);
+        setAllowed(true);
       })
       .catch(() => {
         // No profile yet (or transient error) — the wizard is the safe landing.
         if (!cancelled) router.replace(ONBOARDING_PATH);
-      });
+      })
+      .finally(() => { if (!cancelled) setChecked(true); });
+
     return () => { cancelled = true; };
   }, [exempt, pathname, router]);
 
-  if (exempt || approvedFor === pathname) return <>{children}</>;
+  if (exempt) return <>{children}</>;
+  if (!checked || !allowed) return null;
+
+  const showBanner = !!status && status !== 'compliant';
   return (
-    <div className="flex items-center justify-center py-24">
-      <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-    </div>
+    <>
+      {showBanner && <ComplianceBanner status={status} notes={notes} onboardingPath={ONBOARDING_PATH} />}
+      {children}
+    </>
   );
 }
