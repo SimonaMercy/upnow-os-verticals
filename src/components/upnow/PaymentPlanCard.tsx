@@ -1,49 +1,64 @@
 'use client';
 
 /**
- * PaymentPlanCard — the contract's CURRENT payment plan (rent, one-off fees,
- * security deposit + the cheque/instalment schedule) as an inline card. The
+ * PaymentPlanCard — the contract's CURRENT payment plan as an on-screen card,
+ * rendered as the FOUR segregated groups (Security Deposit · Rental Income ·
+ * Management Fee · Third Party) so it matches the Payment Plan PDF exactly. The
  * SINGLE source of truth for the on-screen plan, shared by:
  *   • the documents binder (ContractDocsBinder → the "View all" + landlord portal)
  *   • the contract detail / Operations view (ContractV2View → "Payment Plan" popup)
- * so the two never drift. A clean, watermark-free "Download PDF" (PaymentPlanPdf)
- * is offered inline. Money is in fils.
+ * A clean, watermark-free "Download PDF" (PaymentPlanPdf) is offered inline.
+ *
+ * Grouping (incl. the Ejari 172.50 split and per-section due dates) comes from
+ * lib/segregatedPlan.buildSegregatedPlan — the same builder the PDF uses.
  */
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
-import { comparePaymentSchedule } from '@/lib/paymentPlan';
 import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
-import ds from './ContractDocsBinder.module.css';
+import { buildSegregatedPlan, paymentRefLabel, SEG_COLORS, type SegPaymentInput } from '@/lib/segregatedPlan';
 
-const aed = (fils: number) => `AED ${Math.round((fils ?? 0) / 100).toLocaleString('en-AE')}`;
+const aed = (v: number) => (Number.isFinite(v) ? v : 0).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
-const cardCss: React.CSSProperties = { border: '1px solid #e3e0d9', borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: '#fff' };
-const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontWeight: 700, color: '#1a1916', background: '#faf9f7', borderBottom: '1px solid #efece6' };
+/** Fallback rows for the segregated view when the caller can't supply the raw
+ *  payment rows (e.g. the Operations popup only has the OfferPlan). Amounts/dates
+ *  are exact; cheque numbers aren't available from the OfferPlan (shown as "—"). */
+function rowsFromOfferItems(plan: OfferPlan): SegPaymentInput[] {
+  return (plan.items ?? []).map(it => ({
+    paymentType: it.paymentType ?? null,
+    description: it.description ?? null,
+    amount: (it.amountFils ?? 0) / 100,
+    vatAmount: (it.vatFils ?? 0) / 100,
+    chequeNumber: null,
+    transactionDate: it.dueDate ?? null,
+    chequeStatus: it.status ?? null,
+  }));
+}
 
-const PLAN_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
-  cleared:   { label: 'Cleared',   bg: '#e6f5ee', fg: '#1f6f54' },
-  bounced:   { label: 'Bounced',   bg: '#fdece7', fg: '#9a3520' },
-  cancelled: { label: 'Cancelled', bg: '#f0ede8', fg: '#6b6860' },
-};
-const planStatus = (s?: string | null) => PLAN_STATUS[(s ?? '').toLowerCase()] ?? { label: 'Pending', bg: '#fff7ed', fg: '#c2410c' };
+const cardCss: React.CSSProperties = { border: '1px solid #e7e2d9', borderRadius: 14, overflow: 'hidden', marginBottom: 16, background: '#fff', color: '#1c1b17' };
 
-function PlanMeta({ label, value, align = 'left' }: { label: string; value?: string | null; align?: 'left' | 'right' }) {
+/** 3-column meta grid so Tenant/Unit align in col 1, Building in col 2, and
+ *  Contract period/Community align in col 3 (no more scattered flex items). */
+const metaGrid = (marginTop: number): React.CSSProperties => ({ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px 20px', marginTop });
+
+function Meta({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
-    <div style={align === 'right' ? { marginLeft: 'auto', textAlign: 'right' } : undefined}>
-      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1a1916' }}>{value}</div>
+    <div>
+      <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 650, color: '#1c1b17' }}>{value}</div>
     </div>
   );
 }
 
 export interface PaymentPlanCardProps {
   plan: OfferPlan;
+  /** Raw payment/fee rows for the segregated view (carries cheque numbers). Falls
+   *  back to deriving from `plan.items` when omitted. */
+  rows?: SegPaymentInput[];
   refLabel?: string | null;
-  /** Gapless RP plan reference (PP-<rp>-<year>-<nnnnn>) for bank reconciliation.
-   *  Distinct from refLabel (the CID- display label). */
+  /** Gapless RP plan reference (PP-<rp>-<year>-<nnnnn>) for bank reconciliation. */
   planRefNo?: string | null;
-  /** 'renewal' → "Renewal" badge; anything else → "New Lease". */
+  /** 'renewal' → "Renewal" pill; anything else → "New Lease". */
   contractType?: string | null;
   tenantName?: string | null;
   landlordName?: string | null;
@@ -54,103 +69,100 @@ export interface PaymentPlanCardProps {
   periodEnd?: string | null;
 }
 
-export function PaymentPlanCard({ plan, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: PaymentPlanCardProps) {
-  const typeBadge = contractType == null ? null
-    : contractType === 'renewal'
-      ? { label: 'Renewal', bg: '#eaf2fb', fg: '#1e5fae' }
-      : { label: 'New Lease', bg: '#e6f5ee', fg: '#1f6f54' };
-  // Display sequence (RP spec): Security deposit → Rent (cheques, net) → Rent VAT
-  // → Fees VAT → Ejari → Admin → Commission → additional per-unit charges. All
-  // base amounts are NET; VAT is shown as its own lines (rent VAT and fee VAT kept
-  // SEPARATE). Same components as before, so the Total still reconciles.
-  const feeVatFils = (plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0)
-    + (plan.customFees ?? []).reduce((s, f) => s + (f.vatFils ?? 0), 0);
-  const lines: { label: string; fils: number }[] = [];
-  if (plan.securityDepositFils > 0) lines.push({ label: 'Security deposit', fils: plan.securityDepositFils });
-  lines.push({ label: 'Rent (cheques)', fils: plan.rentFils });
-  if ((plan.rentVatFils ?? 0) > 0) lines.push({ label: 'Rent VAT', fils: plan.rentVatFils ?? 0 });
-  if (feeVatFils > 0) lines.push({ label: 'Fees VAT', fils: feeVatFils });
-  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils });
-  if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils });
-  if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils });
-  (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils }));
-  // Grouped by category (deposit → rent cheques → Ejari → Admin → Commission →
-  // custom), chronological within each — mirrors the summary sequence above.
-  const items = [...(plan.items ?? [])].sort(comparePaymentSchedule);
+export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: PaymentPlanCardProps) {
+  const dlRows = rows ?? rowsFromOfferItems(plan);
+  const seg = buildSegregatedPlan(dlRows);
+  const isRenewal = (contractType ?? '').toLowerCase() === 'renewal';
+  const pill = contractType == null ? null
+    : isRenewal ? { label: 'Renewal', bg: '#eaf2fb', fg: '#1e5fae' }
+    : { label: 'New Lease', bg: '#e6f5ee', fg: '#1f6f54' };
+
   return (
     <div style={cardCss}>
-      <div style={{ ...capCss, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div>
-          <div>Payment plan</div>
-          <div style={{ fontSize: 11, fontWeight: 500, color: '#6b6860', marginTop: 2 }}>current rent, fees &amp; deposit</div>
+      {/* Header */}
+      <div style={{ padding: '16px 16px 14px', borderBottom: '1px solid #efece6' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.01em', color: '#1a5a4a' }}>Payment Summary</div>
+          {pill && <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: pill.bg, color: pill.fg, whiteSpace: 'nowrap' }}>{pill.label}</span>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {planRefNo && (
-            <span title="Payment plan reference — for bank reconciliation" style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 6, background: '#eef4f2', color: '#1a5a4a', border: '1px solid #cfe3dc', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', whiteSpace: 'nowrap' }}>{planRefNo}</span>
-          )}
-          {typeBadge && (
-            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: typeBadge.bg, color: typeBadge.fg, whiteSpace: 'nowrap' }}>{typeBadge.label}</span>
-          )}
+        <div style={{ fontSize: 12, color: '#6b6860', marginTop: 3 }}>
+          {refLabel ? `Contract ${refLabel}` : 'Payment plan'}
+          {planRefNo && <> · Plan ref <span style={{ fontWeight: 700, color: '#1a5a4a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{planRefNo}</span></>}
         </div>
-      </div>
-      <PaymentPlanDownloadLink plan={plan} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
-      {(tenantName || landlordName || unitNumber || buildingName || community || periodStart) && (
-        <div style={{ padding: '11px 14px 2px', display: 'grid', gap: 10 }}>
-          {(tenantName || landlordName) && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'flex-start' }}>
-              <PlanMeta label="Tenant" value={tenantName} />
-              <PlanMeta label="Landlord" align="right" value={landlordName} />
-            </div>
-          )}
-          {(unitNumber || buildingName || community || periodStart) && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'flex-start' }}>
-              <PlanMeta label="Unit" value={unitNumber} />
-              <PlanMeta label="Building" value={buildingName} />
-              <PlanMeta label="Community" value={community} />
-              <PlanMeta label="Contract period" align="right" value={periodStart ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : null} />
-            </div>
-          )}
-        </div>
-      )}
-      <div style={{ padding: '12px 14px', display: 'grid', gap: 5 }}>
-        {lines.map((l, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#334155' }}><span>{l.label}</span><span style={{ fontWeight: 600 }}>{aed(l.fils)}</span></div>
-        ))}
-        <div style={{ borderTop: '2px solid #c5e8df', margin: '4px 0' }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 800, color: '#15803d' }}><span>Total</span><span>{aed(plan.totalAmountFils)}</span></div>
-      </div>
-      {items.length > 0 && (
-        <div style={{ borderTop: '1px solid #efece6', padding: '10px 14px 12px' }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', margin: '2px 0 8px' }}>Schedule · {plan.installmentCount} installment{plan.installmentCount === 1 ? '' : 's'}</div>
-          {/* Grid (not a <table>): a row per installment on desktop, a two-line
-              card per installment on mobile — see ContractDocsBinder.module.css. */}
-          <div className={ds.sched}>
-            <div className={`${ds.schedRow} ${ds.schedHead}`}>
-              <span className={ds.cNum}>#</span>
-              <span className={ds.cDesc}>Description</span>
-              <span className={ds.cDue}>Due date</span>
-              <span className={ds.cStatus}>Status</span>
-              <span className={ds.cAmt}>Amount</span>
-            </div>
-            {items.map((it, i) => {
-              const st = planStatus(it.status);
-              return (
-                <div key={it.index ?? i} className={ds.schedRow} style={{ background: i % 2 ? '#faf9f6' : '#fff' }}>
-                  <span className={ds.cNum}><span className={ds.schedBadge}>{i + 1}</span></span>
-                  <span className={ds.cDesc} style={{ color: '#1a1916' }}>{it.description ?? `Payment ${i + 1}`}</span>
-                  <span className={ds.cDue} style={{ color: '#6b6860' }}>{fmtD(it.dueDate)}</span>
-                  <span className={ds.cStatus}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.fg, whiteSpace: 'nowrap' }}>{st.label}</span></span>
-                  <span className={ds.cAmt} style={{ fontWeight: 700, color: '#1a1916' }}>{aed(it.amountFils)}</span>
-                </div>
-              );
-            })}
-            <div className={ds.schedTotal}>
-              <span>Schedule total</span>
-              <span className={ds.schedTotalAmt}>{aed(items.reduce((s, it) => s + (it.amountFils ?? 0), 0))}</span>
-            </div>
+        {landlordName && (
+          <div style={{ marginTop: 12, paddingBottom: 10, borderBottom: '1px solid #f0ece4' }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>Landlord</div>
+            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-.01em', color: '#1c1b17' }}>{landlordName}</div>
           </div>
+        )}
+        {(tenantName || periodStart) && (
+          <div style={metaGrid(12)}>
+            {tenantName && <div style={{ gridColumn: 1 }}><Meta label="Tenant" value={tenantName} /></div>}
+            {periodStart && <div style={{ gridColumn: 3 }}><Meta label="Contract period" value={`${fmtD(periodStart)} – ${fmtD(periodEnd)}`} /></div>}
+          </div>
+        )}
+        {(unitNumber || buildingName || community) && (
+          <div style={metaGrid(10)}>
+            {unitNumber && <div style={{ gridColumn: 1 }}><Meta label="Unit" value={unitNumber} /></div>}
+            {buildingName && <div style={{ gridColumn: 2 }}><Meta label="Building" value={buildingName} /></div>}
+            {community && <div style={{ gridColumn: 3 }}><Meta label="Community" value={community} /></div>}
+          </div>
+        )}
+      </div>
+
+      <PaymentPlanDownloadLink rows={dlRows} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
+
+      {/* Segregated sections */}
+      <div style={{ padding: '6px 14px 14px' }}>
+        {seg.groups.map(g => {
+          const c = SEG_COLORS[g.key];
+          return (
+            <div key={g.key} style={{ marginTop: 10, border: '1px solid #e7e2d9', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 12px', borderLeft: `3px solid ${c.accent}`, background: c.tint }}>
+                <span style={{ fontSize: 13.5, fontWeight: 750, letterSpacing: '-.01em' }}>{g.title}</span>
+                {g.key === 'rental' && g.lines.length > 1 && <span style={{ fontSize: 10.5, fontWeight: 600, color: '#9b9890' }}>{g.lines.length} cheques</span>}
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 380 }}>
+                  <thead>
+                    <tr>
+                      <th style={thCss(34)}>Item</th>
+                      <th style={thCss(30)}>Payment Ref</th>
+                      <th style={thCss(20)}>Due date</th>
+                      <th style={{ ...thCss(16), textAlign: 'right' }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.lines.map((l, i) => (
+                      <tr key={i}>
+                        <td style={{ ...tdCss, fontWeight: 600 }}>{l.item}</td>
+                        <td style={{ ...tdCss, color: '#6b6860', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>{paymentRefLabel(l.chequeNo, l.method)}</td>
+                        <td style={{ ...tdCss, color: '#6b6860' }}>{fmtD(l.dueDate)}</td>
+                        <td style={{ ...tdCss, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{aed(l.amount)}</td>
+                      </tr>
+                    ))}
+                    {g.lines.length > 1 && (
+                      <tr>
+                        <td colSpan={3} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Total</td>
+                        <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, textAlign: 'right', fontWeight: 800, color: c.accent, fontVariantNumeric: 'tabular-nums' }}>{aed(g.total)}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
+          <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>AED {aed(seg.grandTotal)}</span>
         </div>
-      )}
+      </div>
     </div>
   );
 }
+
+function thCss(width: number): React.CSSProperties {
+  return { width: `${width}%`, fontSize: 9, letterSpacing: '.05em', textTransform: 'uppercase', color: '#9b9890', fontWeight: 700, textAlign: 'left', padding: '7px 10px 5px', borderBottom: '1px solid #f0ece4', whiteSpace: 'nowrap' };
+}
+const tdCss: React.CSSProperties = { padding: '6px 10px', fontSize: 12, borderBottom: '1px solid #f4f1ea', verticalAlign: 'middle' };

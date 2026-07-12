@@ -269,7 +269,7 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     // so show its real split — never as net-0 VAT, and never as rent.
     const govVat = isVat(sel) ? gross : vat;
     const govNet = round2(gross - govVat);
-    return { kind: 'fee', title: 'GOVERNMENT FEE RECEIPT',
+    return { kind: 'fee', title: 'THIRD PARTY RECEIPT',
       receiptNo: realNo ?? `RCP-${contract.ref}-VAT`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || (isVat(sel) ? 'VAT' : 'Government charge'), net: govNet, vat: govVat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
@@ -302,7 +302,7 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
  *  folded into the FIRST rent cheque on legacy contracts, so the Rent receipt can
  *  strip it (and the combined receipt can net it out of rent). Commission is NEVER
  *  synthesised from a residual — it only appears from a real commission fee row. */
-function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { lines: LineItem[]; legacyBundle: number; feeCount: number } {
+function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { lines: LineItem[]; legacyBundle: number; feeCount: number; ejariLine: LineItem | null } {
   const feeRows = (contract.fees ?? []).filter(isFee);
   // Real fee rows store the GROSS amount + their own vatAmount, so each fee shows
   // net / VAT / gross (stripping VAT to net would undercount the printed total).
@@ -341,11 +341,17 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
     ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null, date: row.transactionDate ?? null,
         receiptNo: contract.paymentRefs?.receiptByPaymentId?.[row.id] ?? null }
     : { method: contractMethod, reference: null, receiptNo: null };
+  // Management Fee receipt = Admin + Commission only. Ejari is shown IN FULL on the
+  // Third Party receipt (buildVatReceipt), so it is returned separately here — never
+  // added to the Management lines.
+  const ejariGross = round2(ejariNet + ejariVat);
   const lines: LineItem[] = [];
-  if (adminNet + adminVat > 0)           lines.push({ desc: 'Administration Fee',     net: adminNet,      vat: adminVat,      total: round2(adminNet + adminVat), ...feeMeta(adminRow) });
-  if (ejariNet + ejariVat > 0)           lines.push({ desc: 'Ejari Registration Fee', net: ejariNet,      vat: ejariVat,      total: round2(ejariNet + ejariVat), ...feeMeta(ejariRow) });
-  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Commission',             net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat), ...feeMeta(commRow) });
-  return { lines, legacyBundle, feeCount: feeRows.length };
+  if (adminNet + adminVat > 0) lines.push({ desc: 'Administration Fee', net: adminNet, vat: adminVat, total: round2(adminNet + adminVat), ...feeMeta(adminRow) });
+  if (commissionNet + commissionVat > 0) lines.push({ desc: 'Commission', net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat), ...feeMeta(commRow) });
+  const ejariLine: LineItem | null = ejariGross > 0
+    ? { desc: 'Ejari Registration Fee', net: ejariNet, vat: ejariVat, total: ejariGross, ...feeMeta(ejariRow) }
+    : null;
+  return { lines, legacyBundle, feeCount: feeRows.length, ejariLine };
 }
 
 /** RENTAL INCOME receipt — every rent instalment as its own line (net / VAT /
@@ -394,29 +400,34 @@ function buildVatReceipt(contract: ReceiptContract): Receipt | null {
   // (e.g. 5% Tax on VAT · Fire Fighting · 5% VAT on Rent · 20% VAT on Rent).
   const govRows = (contract.payments ?? []).filter(isGovernment)
     .slice().sort((a, b) => (a.amount || 0) - (b.amount || 0));
-  if (govRows.length === 0) return null;
+  // Ejari is shown IN FULL on this Third Party receipt (not split), ALWAYS on top.
+  const rentRows = (contract.payments ?? []).filter(isRental);
+  const { ejariLine } = feeLinesOf(contract, rentRows);
+  if (govRows.length === 0 && !ejariLine) return null;
   const refOf = (p: ReceiptPayment) => contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null;
-  const lines: LineItem[] = govRows.map((p) => {
+  const lines: LineItem[] = [];
+  if (ejariLine) lines.push(ejariLine);
+  for (const p of govRows) {
     const gross = round2(p.amount || 0);
     // Pure VAT cheque → 100% tax (net 0). Custom "Other" charge → its own net +
     // whatever VAT it carries (usually none), so it shows as a real net charge.
     const vat = isVat(p) ? gross : round2(p.vatAmount || 0);
     const net = round2(gross - vat);
-    return {
+    lines.push({
       desc: p.description || (isVat(p) ? 'VAT' : 'Government charge'),
       net, vat, total: gross,
       date: p.transactionDate ?? null,
       method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
       receiptNo: refOf(p),
-    };
-  });
+    });
+  }
   // A single charge prints its own gapless year-wise number as the header; multiple
   // aggregate under the plan number (each line still carries its own RCP number).
-  const header = govRows.length === 1 ? (refOf(govRows[0]) ?? contract.paymentRefs?.planRefNo) : contract.paymentRefs?.planRefNo;
-  return { kind: 'vat', title: 'GOVERNMENT FEE RECEIPT',
-    receiptNo: header ?? `RCP-${contract.ref}-VAT`,
-    date: govRows[0]?.transactionDate ?? contract.startDate ?? null,
-    lines, scheduleCount: govRows.length };
+  const header = lines.length === 1 && govRows.length === 1 ? (refOf(govRows[0]) ?? contract.paymentRefs?.planRefNo) : contract.paymentRefs?.planRefNo;
+  return { kind: 'vat', title: 'THIRD PARTY RECEIPT',
+    receiptNo: header ?? `RCP-${contract.ref}-TP`,
+    date: ejariLine?.date ?? govRows[0]?.transactionDate ?? contract.startDate ?? null,
+    lines, scheduleCount: lines.length };
 }
 
 function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPayment[]): Receipt | null {
@@ -428,7 +439,7 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p) && !isGovernment(p));
   const vatRows = payments.filter(isGovernment);
   const feeRows = (contract.fees ?? []).filter(isFee);
-  const { lines: feeLines, legacyBundle, feeCount } = feeLinesOf(contract, rentRows);
+  const { lines: feeLines, legacyBundle, feeCount, ejariLine } = feeLinesOf(contract, rentRows);
   if (rentRows.length === 0 && feeLines.length === 0 && vatRows.length === 0) return null;
 
   const netOf = (rows: ReceiptPayment[]) =>
@@ -438,9 +449,11 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   // 0 when real fee rows exist (those rents are already pure).
   const rentNet = Math.max(0, round2(netOf(rentRows) - legacyBundle));
   // Government/other charges: a pure VAT cheque is 100% tax; a custom "Other" charge
-  // keeps its own net + VAT split so it isn't mislabelled as pure VAT.
-  const govNet = round2(vatRows.reduce((s, p) => s + (isVat(p) ? 0 : Math.max(0, (p.amount || 0) - (p.vatAmount || 0))), 0));
-  const govVat = round2(vatRows.reduce((s, p) => s + (isVat(p) ? (p.amount || 0) : (p.vatAmount || 0)), 0));
+  // keeps its own net + VAT split so it isn't mislabelled as pure VAT. Ejari is a
+  // Third Party charge now — fold its FULL amount in here (feeLinesOf keeps it off
+  // the Management lines and returns it as ejariLine).
+  const govNet = round2(vatRows.reduce((s, p) => s + (isVat(p) ? 0 : Math.max(0, (p.amount || 0) - (p.vatAmount || 0))), 0) + (ejariLine?.net ?? 0));
+  const govVat = round2(vatRows.reduce((s, p) => s + (isVat(p) ? (p.amount || 0) : (p.vatAmount || 0)), 0) + (ejariLine?.vat ?? 0));
   const govTotal = round2(govNet + govVat);
 
   const lines: LineItem[] = [...feeLines,
@@ -736,8 +749,9 @@ function EmptyDoc({ kind }: { kind: Props['kind'] }) {
 }
 
 export function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: Props) {
-  // Default / kind="all" → ONE document holding the three segmented receipts as
-  // separate pages. A specific kind / pid → that single page only.
+  // Default / kind="all" → ONE document holding the segmented receipts as separate
+  // pages (Rental Income · Security Deposit · Management Fee · Third Party). A
+  // specific kind / pid → that single page only.
   if (isCombined(kind, selectedId)) {
     const receipts = buildAllReceipts(contract);
     if (receipts.length === 0) return <EmptyDoc kind={kind} />;
@@ -810,7 +824,11 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   const hasDeposit = !isRenewalContract(contract) && (payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
     || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0);
   const hasManagement = feeLinesOf(contract, rentals).lines.length > 0;
-  const hasVat = payments.some(isGovernment);
+  // Third Party page appears for VAT/"other" rows OR the Ejari government split
+  // (buildVatReceipt) — so gate the tab/subtitle on both, else it's hidden for a
+  // contract whose only Third Party line is the Ejari 172.50 (e.g. residential).
+  const hasEjariGov = (contract.fees ?? []).some(f => (f.paymentType ?? '').toLowerCase() === 'ejari_fee' && (f.amount || 0) > 0);
+  const hasVat = payments.some(isGovernment) || hasEjariGov;
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
   return (
@@ -822,7 +840,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
           </p>
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
             {combined
-              ? [isRenewalContract(contract) ? 'Rental income' : 'Rental income · security deposit', 'management fee', hasVat ? 'government fee' : null].filter(Boolean).join(' · ') + ' — one file'
+              ? [isRenewalContract(contract) ? 'Rental income' : 'Rental income · security deposit', 'management fee', hasVat ? 'third party' : null].filter(Boolean).join(' · ') + ' — one file'
               : 'System-generated payment receipt'}
           </p>
         </div>
@@ -832,7 +850,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
             {hasRental && <a href="?kind=rental" style={tab(!combined && receipt?.kind === 'rental')}>Rental Income</a>}
             {hasDeposit && <a href="?kind=deposit" style={tab(!combined && receipt?.kind === 'deposit')}>Security Deposit</a>}
             {hasManagement && <a href="?kind=management" style={tab(!combined && receipt?.kind === 'management')}>Management Fee</a>}
-            {hasVat && <a href="?kind=vat" style={tab(!combined && receipt?.kind === 'vat')}>Government Fee</a>}
+            {hasVat && <a href="?kind=vat" style={tab(!combined && receipt?.kind === 'vat')}>Third Party</a>}
           </span>
           <button onClick={() => window.history.back()} style={CLOSE_BTN}>✕ Close</button>
           {downloadUrl

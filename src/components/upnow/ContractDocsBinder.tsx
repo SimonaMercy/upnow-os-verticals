@@ -27,6 +27,7 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergePart } from '@/components/upnow/DownloadDocsPopup';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
+import { segRowsFromContract } from '@/lib/segregatedPlan';
 import ds from './ContractDocsBinder.module.css';
 
 // Generated tenancy artifacts (NOT uploaded KYC/ID) are the counterparty's own
@@ -284,6 +285,9 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   };
   const isRenewal = contractType === 'renewal';
   const currentPlan = buildCurrentPlan(planContract, planPayments);
+  // Raw rows for the segregated Payment Plan PDF (Security Deposit · Rental Income ·
+  // Management Fee · Third Party) — shared by the download and the on-screen card.
+  const planRows = segRowsFromContract(planContract, planPayments);
   const hasPlan = currentPlan.rentFils > 0 || currentPlan.items.length > 0;
   const showReceipts = receipt != null;
   const hasReceiptData = planPayments.length > 0 || (planContract.fees?.length ?? 0) > 0;
@@ -361,7 +365,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         make: async () => {
           const [{ pdf }, { PaymentPlanDoc }] = await Promise.all([import('@react-pdf/renderer'), import('@/components/upnow/PaymentPlanPdf')]);
           return reactPdfBytes(await pdf(
-            <PaymentPlanDoc plan={currentPlan} refLabel={refLabel} planRefNo={planRefNo} meta={{
+            <PaymentPlanDoc rows={planRows} refLabel={refLabel} planRefNo={planRefNo} meta={{
               contractType, tenantName: tenant.companyName || tenant.name,
               landlordName: ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name,
               unitNumber: ejari.unit?.number, buildingName: ejari.property?.buildingName,
@@ -458,7 +462,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           <QuickNav title="Rental documents · in order" items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} refLabel={refLabel} planRefNo={planRefNo} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} rows={planRows} refLabel={refLabel} planRefNo={planRefNo} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receiptWithRefs as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;

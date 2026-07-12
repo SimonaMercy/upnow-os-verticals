@@ -13,6 +13,7 @@ import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
 import type { PlanViewerContract } from '@/components/upnow/PaymentPlanPdf';
+import { fetchPaymentRefs } from '@/lib/paymentRefs';
 
 function FullScreenLoader() {
   return (
@@ -37,7 +38,13 @@ export default function PaymentPlanPrintPage() {
     if (!params?.id) return;
     fetch(`/api/contracts/${params.id}`, { credentials: 'include' })
       .then(r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
-      .then(setContract).catch(e => setError(e.message));
+      .then(async (c: PlanViewerContract) => {
+        // The plan reference (PP-<rp>-<year>-<nnnnn>) lives on the payment-refs
+        // endpoint, not the contract — fold it in for the header.
+        const refs = await fetchPaymentRefs(params.id).catch(() => null);
+        setContract(refs?.planRefNo ? { ...c, planRefNo: refs.planRefNo } : c);
+      })
+      .catch(e => setError(e.message));
   }, [params?.id]);
 
   if (error) return <div style={{ padding: 40, color: '#c00' }}>Failed to load contract: {error}</div>;

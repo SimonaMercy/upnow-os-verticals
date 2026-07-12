@@ -19,6 +19,10 @@ export interface PlanPayment {
   description?: string | null;
   paymentType?: string | null;
   chequeStatus?: string | null;
+  /** Cheque number / bank-transfer reference — surfaced as the "Payment Ref" on the
+   *  segregated Payment Plan. Not needed for the legacy fils-based OfferPlan. */
+  chequeNumber?: string | null;
+  paymentMethod?: string | null;
 }
 
 export interface PlanContract {

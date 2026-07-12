@@ -47,6 +47,7 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
+import { segRowsFromContract } from '@/lib/segregatedPlan';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
@@ -1415,6 +1416,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
         <>
           <PaymentPlanCard
             plan={proposedPlan}
+            rows={segRowsFromContract(h.contract, h.contract.payments ?? [])}
             refLabel={h.contract.ref}
             contractType={h.contract.contractType}
             tenantName={h.contract.tenant.companyName || h.contract.tenant.name}
@@ -2253,17 +2255,19 @@ function DetailsDrawer({
     ...rentRows.map(p => ({
       amountFils: toFils(p.amount), vatFils: toFils(p.vatAmount ?? 0),
       dueDate: p.transactionDate ?? '', description: p.description ?? 'Rent',
-      type: 'installment' as const,
+      // Carry the real paymentType so the segregated PaymentPlanCard groups this
+      // correctly (Rental Income) instead of falling through to Third Party.
+      type: 'installment' as const, paymentType: p.paymentType ?? 'rental_income',
     })),
     ...feeRows.map(f => ({
       amountFils: toFils(f.amount), vatFils: toFils(f.vatAmount ?? 0),
       dueDate: f.transactionDate ?? '', description: f.description || feeLabel(f.paymentType),
-      type: 'fee' as const,
+      type: 'fee' as const, paymentType: f.paymentType ?? null,
     })),
     ...(depositForPlan > 0 ? [{
       amountFils: toFils(depositForPlan), vatFils: 0,
       dueDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? '',
-      description: 'Security deposit', type: 'security_deposit' as const,
+      description: 'Security deposit', type: 'security_deposit' as const, paymentType: 'security_deposit',
     }] : []),
   ].map((it, i) => ({ ...it, index: i + 1 }));
   // Headline rent = the contract's agreed current rent (annualRent is NET), so it
@@ -3264,7 +3268,7 @@ function DetailsDrawer({
             // included as a page inside the one combined Receipts document below.
             const showGovtVat = payments.some(p => (p.paymentType ?? '').toLowerCase() === 'vat');
             const binderSeq: BinderSlot[] = [
-              { kind: 'link', key: 'offer',          label: 'Payment Plan', sub: 'Current payment plan', href: null },
+              { kind: 'link', key: 'offer',          label: 'Payment Summary', sub: 'Current payment summary', href: null },
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
               // One file → all receipts inside (Rental Income · Security Deposit · Management Fee · Government fee).
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: [isRenewal ? 'Rental income' : 'Rental income, security deposit', 'management fee', showGovtVat ? 'Government fee' : null].filter(Boolean).join(', '), href: receiptsReady ? receiptBase : null },
@@ -3530,6 +3534,7 @@ function DetailsDrawer({
                       style={{ position: 'absolute', top: 8, right: 8, zIndex: 1, width: 28, height: 28, display: 'grid', placeItems: 'center', background: '#fff', border: '1px solid #e3e0d9', borderRadius: 999, cursor: 'pointer', color: '#6b6860' }}>✕</button>
                     <PaymentPlanCard
                       plan={currentPlan}
+                      rows={segRowsFromContract(contract, payments)}
                       refLabel={contract.ref}
                       planRefNo={paymentRefs.planRefNo}
                       contractType={contract.contractType}
