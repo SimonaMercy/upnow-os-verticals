@@ -108,6 +108,67 @@ export function segRowsFromContract(contract: RawContract, payments: RawPayment[
   return rows;
 }
 
+// ── Adapters from the OTHER plan models → SegPaymentInput[] (all money in fils on
+//    those models; ×/100 here). These keep the four-group segregation CENTRALISED:
+//    every surface (contract, proposal, lead, renewal, creation) maps into the same
+//    builder, so the on-screen view and the PDF never drift. ──
+
+/** OfferPlan (the fils-based current-plan bridge, lib/currentPlan) → rows. Amounts &
+ *  dates are exact; cheque numbers aren't on the OfferPlan (shown as "—"). */
+export function segRowsFromOfferPlan(plan: {
+  items?: Array<{ amountFils?: number | null; vatFils?: number | null; dueDate?: string | null; description?: string | null; paymentType?: string | null; status?: string | null }> | null;
+}): SegPaymentInput[] {
+  return (plan.items ?? []).map(it => ({
+    paymentType: it.paymentType ?? null,
+    description: it.description ?? null,
+    amount: (it.amountFils ?? 0) / 100,
+    vatAmount: (it.vatFils ?? 0) / 100,
+    chequeNumber: null,
+    transactionDate: it.dueDate ?? null,
+    chequeStatus: it.status ?? null,
+  }));
+}
+
+/** Aggregate plan shape shared by the customer `ApiPaymentPlan` (spaces) and the
+ *  lead `PaymentPlan`/`costPreview` — category totals in fils + a rent schedule.
+ *  De-bundled into clean segregation rows: rent split across its instalments (fees
+ *  are shown as their own lines, never folded into the first cheque). */
+export interface AggregatePlanInput {
+  rentFils?: number | null;
+  rentVatFils?: number | null;
+  securityDepositFils?: number | null;
+  adminFeeFils?: number | null; adminFeeVatFils?: number | null;
+  ejariFils?: number | null; ejariVatFils?: number | null;
+  commissionFils?: number | null; commissionVatFils?: number | null;
+  installmentCount?: number | null;
+  customFees?: Array<{ label: string; netFils: number; vatFils: number }> | null;
+  /** Rent schedule — used only for the instalment due dates. */
+  items?: Array<{ dueDate?: string | null; type?: string | null }> | null;
+}
+
+export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput[] {
+  const rows: SegPaymentInput[] = [];
+  const rentGross = (p.rentFils ?? 0) + (p.rentVatFils ?? 0);
+  // Instalment due dates from the rent rows of the schedule (exclude deposit/fee rows).
+  const rentDates = (p.items ?? [])
+    .filter(it => { const t = (it.type ?? '').toLowerCase(); return t !== 'security_deposit' && t !== 'fee'; })
+    .map(it => it.dueDate ?? null);
+  const n = Math.max(1, p.installmentCount ?? rentDates.length ?? 1);
+  if (rentGross > 0) {
+    const per = round2(rentGross / n / 100);
+    for (let i = 0; i < n; i++) rows.push({ paymentType: 'rental_income', description: n > 1 ? `Instalment ${i + 1} of ${n}` : 'Rent', amount: per, transactionDate: rentDates[i] ?? null, chequeNumber: null });
+  }
+  if ((p.securityDepositFils ?? 0) > 0) rows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: (p.securityDepositFils ?? 0) / 100, chequeNumber: null });
+  const admin = (p.adminFeeFils ?? 0) + (p.adminFeeVatFils ?? 0);
+  if (admin > 0) rows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: admin / 100, chequeNumber: null });
+  const comm = (p.commissionFils ?? 0) + (p.commissionVatFils ?? 0);
+  if (comm > 0) rows.push({ paymentType: 'commission', description: 'Commission', amount: comm / 100, chequeNumber: null });
+  const ejari = (p.ejariFils ?? 0) + (p.ejariVatFils ?? 0);
+  if (ejari > 0) rows.push({ paymentType: 'ejari_fee', description: 'Ejari Fee', amount: ejari / 100, chequeNumber: null });
+  for (const f of (p.customFees ?? [])) rows.push({ paymentType: 'other', description: f.label, amount: (f.netFils + f.vatFils) / 100, chequeNumber: null });
+  return rows;
+}
+
 const RENTAL_TYPES = new Set(['rental_income', 'rent']);
 const typeOf = (p: SegPaymentInput) => (p.paymentType ?? '').toLowerCase();
 const isDeposit = (p: SegPaymentInput) => typeOf(p) === 'security_deposit';
