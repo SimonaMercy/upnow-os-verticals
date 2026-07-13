@@ -1042,7 +1042,7 @@ export default function NewContractPage() {
                       {/* One-off fees — editable (prefilled from the unit/lead suggestion).
                           Lead-driven plans are final, so they show read-only there. */}
                       {planFromLead ? (
-                        ([['Admin Fee', adminFee], ['Ejari Fee', ejariFee], ['Commission', commission]] as [string, number][]).map(([label, val]) => (
+                        ([['Admin Fee', adminFee], ['Contract Registration Fee', ejariFee], ['Commission', commission]] as [string, number][]).map(([label, val]) => (
                           <div key={label} className="flex justify-between items-center px-4 py-2.5">
                             <span className="text-xs text-[#6b6860]">{label}</span>
                             <span className="text-xs font-semibold text-[#1a1916]">
@@ -1053,7 +1053,7 @@ export default function NewContractPage() {
                       ) : (
                         ([
                           ['Admin Fee', 'adminFee'],
-                          ['Ejari Fee', 'ejariFee'],
+                          ['Contract Registration Fee', 'ejariFee'],
                           ['Commission', 'commission'],
                         ] as [string, 'adminFee' | 'ejariFee' | 'commission'][]).map(([label, key]) => (
                           <div key={label} className="flex justify-between items-center gap-3 px-4 py-2">

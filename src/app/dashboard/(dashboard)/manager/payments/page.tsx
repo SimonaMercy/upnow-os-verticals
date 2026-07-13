@@ -28,7 +28,7 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
 const CATEGORY_SUB: Record<CategoryKey, string> = {
   rental_income:    'rent collected',
   security_deposit: 'deposits',
-  management_fee:   'ejari · admin · commission',
+  management_fee:   'Contract Registration · admin · commission',
   others:           'maintenance · service · other',
 };
 const MANAGEMENT_TYPES = ['ejari_fee', 'admin_fee', 'commission'];
@@ -43,7 +43,7 @@ function categoryOf(t: string): CategoryKey {
 const TYPE_LABELS: Record<string, string> = {
   rental_income:    'Rental Income',
   security_deposit: 'Security Deposit',
-  ejari_fee:        'Ejari',
+  ejari_fee:        'Contract Registration',
   admin_fee:        'Admin',
   commission:       'Commission',
   maintenance_fee:  'Maintenance',

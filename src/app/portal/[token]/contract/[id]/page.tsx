@@ -12,7 +12,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
-import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
@@ -359,7 +359,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
         : asInspector ? `/contracts/${contractId}/inspection/counter-sign`
         : `/contracts/${contractId}/inspection/sign`;
       const body = kind === 'contract'
-        ? { signatureImage, signatoryName: name.trim(), consent: agreed, clientMeta: collectClientMeta() }
+        ? { signatureImage, signatoryName: name.trim(), consent: agreed, clientMeta: collectClientMeta(), geo: await collectGeo() }
         : asInspector
           ? { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage, signatoryName: name.trim() }
           : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage };
@@ -429,7 +429,7 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       // consent: the binder's ContractSignBar gates signing behind its
       // review-and-agree checkbox, so reaching here means it was ticked.
-      body: JSON.stringify({ signatureImage, signatoryName, consent: true, clientMeta: collectClientMeta() }),
+      body: JSON.stringify({ signatureImage, signatoryName, consent: true, clientMeta: collectClientMeta(), geo: await collectGeo() }),
     });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
     onSigned();

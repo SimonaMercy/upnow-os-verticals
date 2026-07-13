@@ -673,7 +673,7 @@ export default function AddUnitsExperience({ backHref }: { backHref: string }) {
                         <div className={s.grid2}>
                           <div><label className={s.lbl}>Security Deposit</label><input className={s.input} type="number" min="0" step="any" placeholder="e.g. 10000" value={active?.securityDeposit ?? ''} onChange={e => upd({ securityDeposit: e.target.value })} /></div>
                           <div><label className={s.lbl}>Admin Fee</label><input className={s.input} type="number" min="0" step="any" placeholder="e.g. 5000" value={active?.adminFee ?? ''} onChange={e => upd({ adminFee: e.target.value })} /></div>
-                          <div><label className={s.lbl}>Ejari Fee</label><input className={s.input} type="number" min="0" step="any" placeholder="220" value={active?.ejariFeeFils ?? ''} onChange={e => upd({ ejariFeeFils: e.target.value })} /></div>
+                          <div><label className={s.lbl}>Contract Registration Fee</label><input className={s.input} type="number" min="0" step="any" placeholder="220" value={active?.ejariFeeFils ?? ''} onChange={e => upd({ ejariFeeFils: e.target.value })} /></div>
                           <div><label className={s.lbl}>Commission</label><input className={s.input} type="number" min="0" step="any" placeholder="e.g. 4000" value={active?.commission ?? ''} onChange={e => upd({ commission: e.target.value })} /></div>
                           <div><label className={s.lbl}>Service Charges</label><input className={s.input} type="number" min="0" step="any" placeholder="e.g. 3000" value={active?.serviceCharges ?? ''} onChange={e => upd({ serviceCharges: e.target.value })} /></div>
                         </div>

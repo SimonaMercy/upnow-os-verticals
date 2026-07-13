@@ -114,7 +114,7 @@ export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
  * the generic Contract / Financial groups.
  */
 export const CONTRACT_DOCS: DocReq[] = [
-  { key: 'ejari_certificate', label: 'Contract Registration', category: 'contract', required: false, hint: 'Ejari / DLD tenancy-contract registration certificate' },
+  { key: 'ejari_certificate', label: 'Contract Registration', category: 'contract', required: false, hint: 'Contract Registration / DLD tenancy-contract registration certificate' },
   { key: 'payment_advice',    label: 'Payment Advice',        category: 'payment',  required: false, hint: 'Rent cheques / payment advice — the cheques recorded in the Payments section' },
 ];
 
@@ -167,7 +167,8 @@ export function getOccupantDocs(occupantCount: number): DocReq[] {
   const out: DocReq[] = [];
   for (let i = 2; i <= occupantCount; i++) {
     out.push(
-      { key: `occupant_${i}_emirates_id`, label: `Occupant ${i} — Emirates ID`,         category: 'identity', required: false, hint: 'PDF with both sides or clear photos of front + back' },
+      { key: `occupant_${i}_emirates_id_front`, label: `Occupant ${i} — Emirates ID (Front)`, category: 'identity', required: false, hint: 'Front of the Emirates ID' },
+      { key: `occupant_${i}_emirates_id_back`,  label: `Occupant ${i} — Emirates ID (Back)`,  category: 'identity', required: false, hint: 'Back of the Emirates ID' },
       { key: `occupant_${i}_passport`,    label: `Occupant ${i} — Passport`,             category: 'identity', required: false, hint: 'Bio-data page of valid passport' },
       { key: `occupant_${i}_uae_visa`,    label: `Occupant ${i} — UAE Visa / Residency`, category: 'identity', required: false, hint: 'UAE residence visa page (skip for UAE nationals)' },
     );

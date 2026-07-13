@@ -50,7 +50,7 @@ const COLS: ColDef[] = [
   { key: 'kyc',          title: 'KYC verification',  hint: 'Emirates ID on file.',                                accent: '#4a5a8f', soft: '#eef0fa', dot: '#4a5a8f' },
   { key: 'payment_plan', title: 'Payment plan',      hint: 'Cheque / rent schedule entered.',                     accent: '#a9791f', soft: '#fdf6ea', dot: '#e6a91e' },
   { key: 'pdc',          title: 'PDC',               hint: 'Post-dated cheques confirmed.',                       accent: '#3f6f8f', soft: '#e6f0f3', dot: '#3f6f8f' },
-  { key: 'ejari',        title: 'Ejari',             hint: 'Tenancy registered with the certificate on file.',    accent: '#1a7a4f', soft: '#e7f3ec', dot: '#1a9a64' },
+  { key: 'ejari',        title: 'Contract Registration',             hint: 'Tenancy registered with the certificate on file.',    accent: '#1a7a4f', soft: '#e7f3ec', dot: '#1a9a64' },
   { key: 'utility',      title: 'Utility',           hint: 'DEWA / utility account on file (new leases).',        accent: '#6a4f8f', soft: '#efeaf5', dot: '#6a4f8f' },
   { key: 'move_in',      title: 'Move-in',           hint: 'Move-in inspection signed (new leases).',             accent: '#2b7a78', soft: '#e3f1f0', dot: '#2b7a78' },
   { key: 'ready',        title: 'Ready to activate', hint: 'Every step done — lock it and it moves to Leases.',   accent: '#1a7a5a', soft: '#ebf8f2', dot: '#2e9f82' },
@@ -75,7 +75,7 @@ function cardColumn(c: OpsContract): ColKey {
 const QUICK: Record<string, { path: string; label: string }> = {
   pdc:     { path: 'confirm-pdc',           label: 'Confirm PDC' },
   utility: { path: 'utility/mark-on-file',  label: 'Mark utility on file' },
-  ejari:   { path: 'ejari/mark-registered', label: 'Mark Ejari on file' },
+  ejari:   { path: 'ejari/mark-registered', label: 'Mark Contract Registration on file' },
 };
 
 type TypeKey = 'all' | 'new' | 'renewal';
@@ -216,7 +216,7 @@ export default function OperationsKanban({ listPath, contractHref, canAct = true
     try {
       const res = await apiPatch<{ matched?: boolean }>(`/contracts/${c.id}/${q.path}`, {});
       if (action === 'ejari' && res && res.matched === false) {
-        setNote({ id: c.id, text: 'No Ejari certificate on file — open the contract to upload/register it.', bad: true });
+        setNote({ id: c.id, text: 'No Contract Registration Certificate on file — open the contract to upload/register it.', bad: true });
       }
       await load();
     } catch (e) {
@@ -252,7 +252,7 @@ export default function OperationsKanban({ listPath, contractHref, canAct = true
       }
       await load();
       if (ejariUnmatched) {
-        setNote({ id: c.id, text: 'No Ejari certificate on file — open the contract to upload/register it.', bad: true });
+        setNote({ id: c.id, text: 'No Contract Registration Certificate on file — open the contract to upload/register it.', bad: true });
       } else if (wall) {
         setNote({ id: c.id, text: `Advanced as far as possible — ${wall.label} needs the contract page.`, bad: false });
       }
@@ -281,7 +281,7 @@ export default function OperationsKanban({ listPath, contractHref, canAct = true
           <div className="left">
             <div className="eyebrow"><ClipboardList size={12} /> Operations</div>
             <h1>Setup <span className="accent">pipeline</span></h1>
-            <p>Every contract on one board by setup stage — <b>new and renewals together</b>. Drag a card forward to clear the one-click steps (PDC · Ejari · Utility); the rest open the contract.</p>
+            <p>Every contract on one board by setup stage — <b>new and renewals together</b>. Drag a card forward to clear the one-click steps (PDC · Contract Registration · Utility); the rest open the contract.</p>
           </div>
           <div className="hero-actions">
             <OperationsViewToggle active="board" />

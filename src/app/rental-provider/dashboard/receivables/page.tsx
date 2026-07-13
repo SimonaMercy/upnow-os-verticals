@@ -25,7 +25,7 @@ const TYPE_LABELS: Record<string, string> = {
   rental_income:    'Rent',
   admin_fee:        'Admin Fee',
   security_deposit: 'Deposit',
-  ejari_fee:        'Ejari Fee',
+  ejari_fee:        'Contract Registration Fee',
   maintenance:      'Maintenance',
   other:            'Other',
 };

@@ -51,7 +51,7 @@ import { segRowsFromContract } from '@/lib/segregatedPlan';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
-import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
@@ -212,7 +212,7 @@ interface Step { key: StepKey; short: string; label: string; icon: IconKey }
 const STEPS_NEW: Step[] = [
   { key: 'issue',   short: 'Issue',   label: 'Contract issued',  icon: 'document' },
   { key: 'sign',    short: 'Sign',    label: 'Signatures',        icon: 'pen'      },
-  { key: 'ejari',   short: 'Ejari',   label: 'Ejari registration',icon: 'stamp'    },
+  { key: 'ejari',   short: 'Contract Registration',   label: 'Contract Registration',icon: 'stamp'    },
   { key: 'utility', short: 'Utility', label: 'Utility account',   icon: 'bolt'     },
   { key: 'movein',  short: 'Move-in', label: 'Move-in inspection',icon: 'key'      },
   { key: 'active',  short: 'Active',  label: 'Active tenancy',    icon: 'active'   },
@@ -222,7 +222,7 @@ const STEPS_RENEWAL: Step[] = [
   { key: 'documents', short: 'KYC',     label: 'Documents',       icon: 'document' },
   { key: 'cheques',   short: 'Cheques', label: 'Cheques / PDC',   icon: 'wallet'   },
   { key: 'sign',      short: 'Sign',    label: 'Signatures',      icon: 'pen'      },
-  { key: 'ejari',     short: 'Ejari',   label: 'Ejari renewal',   icon: 'stamp'    },
+  { key: 'ejari',     short: 'Contract Registration',   label: 'Contract Registration renewal',   icon: 'stamp'    },
   { key: 'active',    short: 'Active',  label: 'Renewal active',  icon: 'active'   },
 ];
 // Appended after "Active" once a termination is accepted and the lease is
@@ -334,7 +334,7 @@ const BASE_DOC_TYPES = [
   { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
   { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: false },
   { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
-  { value: 'ejari_certificate',      label: 'Ejari',                  category: 'property',   needsExpiry: false },
+  { value: 'ejari_certificate',      label: 'Contract Registration Certificate',                  category: 'property',   needsExpiry: false },
   { value: 'utility_registration',   label: 'Utility Registration',   category: 'property',   needsExpiry: false },
   { value: 'move_out_report',        label: 'Move-out Inspection Report', category: 'inspection', needsExpiry: false },
   { value: 'utility_clearance',      label: 'Utility Clearance',      category: 'property',   needsExpiry: false },
@@ -1161,18 +1161,18 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       ?? (h.contract.documents ?? []).find(d => d.documentKey.startsWith('ejari'));
     return done
       ? {
-          tone: 'celebrate', icon: 'stamp', sub: 'Stop 3 · complete', label: 'Ejari',
-          headline: mode === 'renewal' ? 'Ejari renewed.' : 'Ejari registered.',
+          tone: 'celebrate', icon: 'stamp', sub: 'Stop 3 · complete', label: 'Contract Registration',
+          headline: mode === 'renewal' ? 'Contract Registration renewed.' : 'Contract Registration completed.',
           body: 'Certificate is on file with the Dubai Land Department.',
           timing: null,
-          node: <Completed title="Registered with DLD" sub={ejariDoc?.displayName ?? 'Ejari-certificate.pdf'} viewUrl={ejariDoc?.fileUrl} viewLabel="View Ejari" />,
+          node: <Completed title="Registered with DLD" sub={ejariDoc?.displayName ?? 'Contract-Registration-Certificate.pdf'} viewUrl={ejariDoc?.fileUrl} viewLabel="View Contract Registration" />,
         }
       : {
-          tone: 'action', icon: 'stamp', sub: mode === 'renewal' ? 'Renewal · Ejari' : stopOf(3), label: 'Ejari',
-          headline: 'Register Ejari with the DLD.',
+          tone: 'action', icon: 'stamp', sub: mode === 'renewal' ? 'Renewal · Contract Registration' : stopOf(3), label: 'Contract Registration',
+          headline: 'Register the Contract Registration Certificate with the DLD.',
           body: 'Upload the certificate, or mark it as already on file when importing an existing lease.',
           timing: '2–5 business days',
-          node: <UploadAction fileLabel="Ejari-certificate.pdf" onUpload={h.onUploadEjari} onMark={() => h.onMarkEjari()} />,
+          node: <UploadAction fileLabel="Contract-Registration-Certificate.pdf" onUpload={h.onUploadEjari} onMark={() => h.onMarkEjari()} />,
         };
   }
 
@@ -2112,7 +2112,7 @@ function DetailsDrawer({
   const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other');
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
   const feeLabel = (t: string | null) =>
-    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission'
+    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
       : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
       : (t ?? 'Fee');
   // ── Fees editor (admin-filled: admin / ejari / commission + cheque charges).
@@ -2121,7 +2121,7 @@ function DetailsDrawer({
   //    The three cheque-charge types auto-fill their amount from Settings → Rules. ──
   const FEE_TYPE_OPTIONS = [
     { value: 'admin_fee', label: 'Admin fee' },
-    { value: 'ejari_fee', label: 'Ejari fee' },
+    { value: 'ejari_fee', label: 'Contract Registration fee' },
     { value: 'commission', label: 'Commission' },
     { value: 'bounced_cheque_fee', label: 'Bounced cheque' },
     { value: 'cheque_replacement_fee', label: 'Cheque replacement' },
@@ -3057,7 +3057,7 @@ function DetailsDrawer({
                           </Fragment>
                         ))}
                         {feeRows.length === 0 && otherPaymentRows.length === 0 && !showAddFee && (
-                          <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, ejari, or commission charges — amounts are not auto-calculated.</span></td></tr>
+                          <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, contract registration, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
                       </tbody>
                       {(feeRows.length > 0 || otherPaymentRows.length > 0) && (
@@ -3132,7 +3132,7 @@ function DetailsDrawer({
                             <option value="rental_income">Rental income</option>
                             <option value="security_deposit">Security deposit</option>
                             <option value="admin_fee">Admin fee</option>
-                            <option value="ejari_fee">Ejari fee</option>
+                            <option value="ejari_fee">Contract Registration fee</option>
                             <option value="commission">Commission</option>
                             <option value="maintenance_fee">Maintenance fee</option>
                             <option value="service_charge">Service charge</option>
@@ -3273,7 +3273,7 @@ function DetailsDrawer({
               // One file → all receipts inside (Rental Income · Security Deposit · Management Fee · Government fee).
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: [isRenewal ? 'Rental income' : 'Rental income, security deposit', 'management fee', showGovtVat ? 'Government fee' : null].filter(Boolean).join(', '), href: receiptsReady ? receiptBase : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
-              { kind: 'doc',  key: 'ejari_certificate', label: 'Ejari' },
+              { kind: 'doc',  key: 'ejari_certificate', label: 'Contract Registration Certificate' },
             ];
             if (!isRenewal) {
               binderSeq.push({ kind: 'doc',  key: 'utility_registration', label: 'Utility Proof of Payment' });
@@ -3956,12 +3956,13 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown> } = {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown>; geo?: { lat: number; lng: number; accuracy?: number } | null } = {
         role: 'landlord',
         signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
         method: 'online',
         consent,
         clientMeta: collectClientMeta(),
+        geo: await collectGeo(),
       };
       if (mode === 'canvas') body.signatureImage = sig!;
       else                   body.typedName     = name.trim();
@@ -4081,12 +4082,13 @@ function SignModal({
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown> } = {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown>; geo?: { lat: number; lng: number; accuracy?: number } | null } = {
         role: 'landlord',
         signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
         method: 'online',
         consent,
         clientMeta: collectClientMeta(),
+        geo: await collectGeo(),
       };
       if (mode === 'canvas') body.signatureImage = sig!;
       else                   body.typedName     = name.trim();
@@ -4419,7 +4421,7 @@ function RenewalProposeModal({
   rows.push(...vatRows);
   const feeDate = dueDates[0] ?? f.newStartDate;
   if (adminN > 0) rows.push({ key: 'admin', d: 'Admin Fee', date: feeDate, net: adminN, vat: 0 });
-  if (ejariN > 0) rows.push({ key: 'ejari', d: 'Ejari Fee', date: feeDate, net: ejariN, vat: 0 });
+  if (ejariN > 0) rows.push({ key: 'ejari', d: 'Contract Registration Fee', date: feeDate, net: ejariN, vat: 0 });
   if (commN > 0)  rows.push({ key: 'comm',  d: 'Commission', date: feeDate, net: commN, vat: 0 });
   extras.forEach((e, i) => {
     const amt = parseFloat(e.amount) || 0;
@@ -4543,7 +4545,7 @@ function RenewalProposeModal({
           <p className="subhead mut">Fees (AED) — billed as their own cheques</p>
           <div className="grid2">
             <div className="field"><label>Admin fee</label><input type="number" className="input" value={f.adminFee} onChange={e => set('adminFee', e.target.value)} /></div>
-            <div className="field"><label>Ejari fee</label><input type="number" className="input" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></div>
+            <div className="field"><label>Contract Registration fee</label><input type="number" className="input" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></div>
           </div>
           <div className="grid2" style={{ marginBottom: 18 }}>
             <div className="field"><label>Commission</label><input type="number" className="input" value={f.commission} onChange={e => set('commission', e.target.value)} /></div>
@@ -5116,28 +5118,28 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onEjariFilePicked = async (file: File) => {
     setEjariUploading(true);
     try {
-      await uploadContractDoc(file, 'Ejari', 'ejari_certificate');
+      await uploadContractDoc(file, 'Contract Registration Certificate', 'ejari_certificate');
       // Register Ejari once the certificate is on file.
       await fetch(`/api/contracts/${contract.id}/ejari`, {
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ejariStatus: 'registered' }),
       });
       void reload();
-    } catch (e) { alert(e instanceof Error ? e.message : 'Ejari upload failed'); }
+    } catch (e) { alert(e instanceof Error ? e.message : 'Contract Registration Certificate upload failed'); }
     finally { setEjariUploading(false); if (ejariInputRef.current) ejariInputRef.current.value = ''; }
   };
   const onMarkEjari = async () => {
     try {
       const res = await fetch(`/api/contracts/${contract.id}/ejari/mark-registered`, { method: 'PATCH', credentials: 'include' });
-      if (!res.ok) throw new Error(`Mark Ejari failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Mark Contract Registration failed: ${res.status}`);
       const data = await res.json().catch(() => ({ matched: true }));
       if (data.matched === false) {
-        alert('No Ejari certificate is on file for this lease period yet. Please upload the certificate.');
+        alert('No Contract Registration Certificate is on file for this lease period yet. Please upload the certificate.');
         return;
       }
       void reload();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not mark Ejari as on file.');
+      alert(e instanceof Error ? e.message : 'Could not mark the Contract Registration Certificate as on file.');
     }
   };
   const onUploadUtility = () => utilityInputRef.current?.click();
@@ -5354,12 +5356,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
   // ── Flow 4: Ejari reset / redo ──  PATCH /api/contracts/:id/ejari/reset
   const onRedoEjari = async () => {
-    if (!confirm('Roll the tenancy back to issued and clear the existing Ejari? You will then be able to upload a corrected certificate.')) return;
+    if (!confirm('Roll the tenancy back to issued and clear the existing Contract Registration? You will then be able to upload a corrected certificate.')) return;
     try {
       const res = await fetch(`/api/contracts/${contract.id}/ejari/reset`, { method: 'PATCH', credentials: 'include' });
       if (!res.ok) throw new Error(`Error ${res.status}`);
       void reload();
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to reset Ejari'); }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to reset Contract Registration'); }
   };
 
   // ── Flow 5: upload KYC / contract document ──
@@ -6110,7 +6112,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                  the workflow has not yet frozen (active / expired / terminated). */}
             {selStep.key === 'ejari' && derived.ejariStatus === 'registered' && !readOnlyWorkflow && (
               <button className="ca" style={{ justifySelf: 'start', marginTop: -4, padding: 0, color: 'var(--brick)' }} onClick={() => void onRedoEjari()}>
-                <RotateCcw size={12} /> Redo Ejari (reset &amp; re-upload)
+                <RotateCcw size={12} /> Redo Contract Registration (reset &amp; re-upload)
               </button>
             )}
             {content.timing && (
@@ -6180,7 +6182,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         onChange={(e) => { const f = e.target.files?.[0]; const k = windDownKind; if (f && k) void onWindDownFilePicked(f, k); }} />
       {(ejariUploading || utilityUploading || chequesUploading || windDownUploading) && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
-          Uploading {ejariUploading ? 'Ejari' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Advice' : 'wind-down'} document…
+          Uploading {ejariUploading ? 'Contract Registration' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Advice' : 'wind-down'} document…
         </div>
       )}
 

@@ -518,7 +518,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-[var(--neutral-900)]">Set up your fee rules</p>
             <p className="text-[13px] text-[var(--neutral-500)] mt-0.5 leading-snug">
-              Configure admin fees, Ejari, commission, and security deposits so they auto-fill on every new contract.
+              Configure admin fees, Contract Registration, commission, and security deposits so they auto-fill on every new contract.
             </p>
           </div>
           <Link

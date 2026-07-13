@@ -38,10 +38,14 @@ import {
   Sparkles, ArrowRight, Camera, Trash2, ClipboardCheck,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { LocationMap } from '@/components/upnow/LocationMap';
+import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
+import { buildSegregatedPlan, segRowsFromCustomerPlan } from '@/lib/segregatedPlan';
 import { openDocViewer } from '@/lib/docViewer';
-import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
-import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied, docNeedsExpiry } from '@/lib/docRequirements';
+import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import { DocExpiryField } from '@/components/upnow/DocExpiryField';
 import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import type { DocReq } from '@/lib/docRequirements';
@@ -90,6 +94,8 @@ interface ApiUnit {
   property?: {
     buildingName?: string;
     fullAddress?: string | null;
+    latitude?: number | string | null;
+    longitude?: number | string | null;
     community?: { name: string } | null;
     emirate?: { name: string } | null;
     rentalProvider?: ApiRentalProvider | null;
@@ -298,12 +304,12 @@ interface StateDef {
 const STATE_DEFS: Record<StateKey, StateDef> = {
   booked:                        { label: 'Viewing booked',                sub: 'Step 1 of 8',                     mode: 'new',     currentIndex: 0,  tone: 'action',    headline: 'Your viewing is confirmed.',                              body: 'Look over the cost summary below. Tap “I’m Interested” when you’re ready to commit to this unit.',                                                                                              timing: null },
   docs_required:                 { label: 'Documents required',            sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'action',    headline: 'Almost there. Let us gather your paperwork.',             body: 'Add the missing identity and supporting documents below. Most customers finish in under 5 minutes.',                                                                                            timing: 'Takes ~5 min' },
-  docs_under_review:             { label: 'Documents under review',        sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'waiting',   headline: 'Your documents are with our team.',                       body: 'Once approved, your payment summary and contract preview unlock so you can prepare payments.',                                                                                                  timing: 'Usually within 1 business day' },
+  docs_under_review:             { label: 'Documents under review',        sub: 'Step 2 of 8',                     mode: 'new',     currentIndex: 1,  tone: 'waiting',   headline: 'Your documents are being reviewed.',                       body: 'Once approved, your payment summary and contract preview unlock so you can prepare payments.',                                                                                                  timing: 'Usually within 1 business day' },
   payment_review:                { label: 'Payment & references',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your cheques or payments accordingly.', body: 'Attach a reference for each one — cheque photo, transfer screenshot, card slip or cash receipt — so it can be verified.',                                                                       timing: 'Takes ~5 min' },
   awaiting_rp_confirm:           { label: 'Payments under review',         sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is reviewing your payments.',       body: 'Each reference is being verified against your contract before it’s issued for signature.',                                                                                                       timing: 'Usually within 1 business day' },
-  signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'One signature stands between you and the keys.',          body: 'Open the final contract, then add your signature below.',                                                                                                                                         timing: 'Takes ~2 min' },
-  ejari:                         { label: 'Ejari in progress',             sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is registering Ejari.',              body: 'The certificate will appear here for download the moment it’s uploaded.',                                                                                                                       timing: '2-5 business days' },
-  utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your DEWA / utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
+  signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'Review and sign your tenancy contract.',          body: 'Open the final contract, then add your signature below.',                                                                                                                                         timing: 'Takes ~2 min' },
+  ejari:                         { label: 'Contract Registration in progress', sub: 'Step 5 of 8',                 mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is registering your Contract Registration Certificate.', body: 'The certificate will appear here for download the moment it’s uploaded.',                                                                                                                       timing: '2-5 business days' },
+  utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
   move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Walk through every room and meter reading, then counter-sign so the record is official.',                                                                                                       timing: 'Takes ~3 min' },
   active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: 'Manage payments, raise issues, or start a renewal request from here any time.',                                                                                                                 timing: null },
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
@@ -319,7 +325,7 @@ const STATE_DEFS: Record<StateKey, StateDef> = {
   // renewal pipeline / Operations kanban and the new-lease payment step).
   renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step 3 of 6',                mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
   renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 4 of 6',             mode: 'renewal', currentIndex: 3,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
-  renewal_ejari:                 { label: 'Renewing Ejari',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is renewing Ejari.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
+  renewal_ejari:                 { label: 'Renewing Contract Registration',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is renewing your Contract Registration Certificate.',                 body: 'The Dubai Land Department is updating your record.',                                                                                                                                            timing: '2-5 business days' },
   renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
   rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
@@ -342,7 +348,7 @@ const STEPS_NEW: Step[] = [
   { key: 'documents',       label: 'Documents',          short: 'Docs',     icon: 'document' },
   { key: 'payment',         label: 'Payment & cheques',  short: 'Payment',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign contract',      short: 'Sign',     icon: 'pen'      },
-  { key: 'ejari',           label: 'Ejari',              short: 'Ejari',    icon: 'stamp'    },
+  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
   { key: 'utility',         label: 'Utility',            short: 'Utility',  icon: 'bolt'     },
   { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
   { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
@@ -357,7 +363,7 @@ const STEPS_RENEWAL: Step[] = [
   { key: 'documents',       label: 'Renewal documents',  short: 'Docs',     icon: 'document' },
   { key: 'cheques',         label: 'Cheques / PDC',      short: 'Cheques',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen'      },
-  { key: 'ejari',           label: 'Ejari renewal',      short: 'Ejari',    icon: 'stamp'    },
+  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
   { key: 'active',          label: 'Renewal active',     short: 'Active',   icon: 'active'   },
 ];
 
@@ -1160,6 +1166,13 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const timeStr = when.toLocaleTimeString('en-AE', { hour: 'numeric', minute: '2-digit', timeZone: APP_TIME_ZONE });
   const buildingName = unit?.property?.buildingName ?? null;
   const fullAddress = unit?.property?.fullAddress ?? null;
+  // Unit location pin — coords ship from the backend property join; keyless Google embed.
+  const lat = Number(unit?.property?.latitude);
+  const lng = Number(unit?.property?.longitude);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+  // Availability window — this unit is offered on a 1-year lease from the upcoming start date.
+  const fmtDay = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }); };
+  const availabilityEnd = (() => { const [y, m, d] = defaultStart.slice(0, 10).split('-').map(Number); const dt = new Date(y + 1, m - 1, d); dt.setDate(dt.getDate() - 1); const p = (n: number) => (n < 10 ? `0${n}` : `${n}`); return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`; })();
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -1184,6 +1197,19 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             </div>
           </div>
         )}
+        {/* Availability window — this unit is offered on a 1-year lease from the upcoming start date */}
+        <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 8, background: 'var(--jade-tint, #eef8f4)', border: '1px solid #bfe3d6', borderRadius: 999, padding: '5px 12px' }}>
+          <Calendar size={13} style={{ color: 'var(--jade-deep, #1f5a3f)', flexShrink: 0 }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--jade-deep, #1f5a3f)' }}>
+            Available for a 1-year lease · {fmtDay(defaultStart)} – {fmtDay(availabilityEnd)}
+          </span>
+        </div>
+        {/* Unit location pin */}
+        {hasCoords && (
+          <div style={{ marginTop: 12 }}>
+            <LocationMap latitude={lat} longitude={lng} label={buildingName ?? undefined} height={190} />
+          </div>
+        )}
       </div>
 
       {/* Cost summary — totals only. The customer hasn't picked a payment
@@ -1204,7 +1230,7 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <PaymentRow label={`Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={plan.rentFils + (plan.rentVatFils ?? 0)} />
             <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
             <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
-            <PaymentRow label={`Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
+            <PaymentRow label={`Contract Registration Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
             <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
             {(plan.customFees ?? []).map((f, i) => (
               <PaymentRow key={i} label={`${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`} amountFils={f.netFils + f.vatFils} />
@@ -1844,7 +1870,7 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload, onSaveE
   // Identity / licence docs (Emirates ID, passport, visa, trade licence) carry
   // an expiry the customer records here. Sent with the upload; PATCHed if they
   // edit it after the file is already on file.
-  const needsExpiry = docNeedsExpiry(req.key);
+  const needsExpiry = false; // Customer only uploads — the rental provider fills document expiry after review.
   const [expiry, setExpiry] = useState(toDateInput(existing?.expiryDate));
   const [savingExpiry, setSavingExpiry] = useState(false);
   // For an expiring doc picked BEFORE an expiry is entered, hold the file and
@@ -2584,7 +2610,7 @@ function RenewalDocumentsAction({
     const isApproved = rec?.status === 'complete' || rec?.status === 'processed';
     const onFile     = !!rec && rec.status !== 'rejected' && rec.status !== 'missing';
     const isUploading = docUploading === req.key;
-    const needsExpiry = docNeedsExpiry(req.key);
+    const needsExpiry = false; // Customer only uploads — the rental provider fills document expiry after review.
     // In the renewal re-verification context, every listed doc is still flagged as
     // expired / undated (it's in expiredKycDocKeys) — surface THAT, not the stale
     // "Approved" record status the customer had from their last lease. Checked
@@ -2822,7 +2848,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     <div class="l">Annual Rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed(plan.rentFils + (plan.rentVatFils ?? 0))}</div>
     ${plan.securityDepositFils ? `<div class="l">Security Deposit</div><div class="v">${aed(plan.securityDepositFils)}</div>` : ''}
     ${plan.adminFeeFils ? `<div class="l">Admin Fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0))}</div>` : ''}
-    ${plan.ejariFils ? `<div class="l">Ejari Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0))}</div>` : ''}
+    ${plan.ejariFils ? `<div class="l">Contract Registration Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0))}</div>` : ''}
     ${plan.commissionFils ? `<div class="l">Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0))}</div>` : ''}
     ${(plan.customFees ?? []).map(f => `<div class="l">${String(f.label).replace(/</g, '&lt;')}${f.vatFils > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed(f.netFils + f.vatFils)}</div>`).join('')}
   </div>
@@ -2884,7 +2910,7 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
         <PaymentRow label={`Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={plan.rentFils + (plan.rentVatFils ?? 0)} />
         <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
         <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
-        <PaymentRow label={`Ejari fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
+        <PaymentRow label={`Contract Registration Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
         <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
         {(plan.customFees ?? []).map((f, i) => (
           <PaymentRow key={i} label={`${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`} amountFils={f.netFils + f.vatFils} />
@@ -2965,7 +2991,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     );
   }
 
-  async function uploadOneCheque(file: File, index: number) {
+  async function uploadOneCheque(file: File, label: string) {
     if (!resolved.tenantProfileId || !viewingId) return;
     const urlRes = await fetch('/api/documents/upload-url', {
       method: 'POST', credentials: 'include',
@@ -2983,7 +3009,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     const regRes = await fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads`, {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageUrl: fileUrl, fileKey, label: `Cheque ${index}` }),
+      body: JSON.stringify({ imageUrl: fileUrl, fileKey, label }),
     });
     if (!regRes.ok) {
       const b = await regRes.json().catch(() => ({}));
@@ -2999,7 +3025,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     let nextIndex = uploads.length + 1;
     try {
       for (const file of Array.from(files)) {
-        const saved = await uploadOneCheque(file, nextIndex);
+        const saved = await uploadOneCheque(file, `Reference ${nextIndex}`);
         if (saved) setUploads(prev => [...prev, saved]);
         nextIndex++;
       }
@@ -3008,6 +3034,22 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     } finally {
       setUploadingFiles(0);
       if (chequeFileInputRef.current) chequeFileInputRef.current.value = '';
+    }
+  }
+
+  async function handleSlotFiles(slotLabel: string, files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploadErr(null);
+    setUploadingFiles(files.length);
+    try {
+      for (const file of Array.from(files)) {
+        const saved = await uploadOneCheque(file, slotLabel);
+        if (saved) setUploads(prev => [...prev, saved]);
+      }
+    } catch (e) {
+      setUploadErr(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploadingFiles(0);
     }
   }
 
@@ -3036,15 +3078,28 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const beforeMoveInFils = items
     .filter(ch => ch.type === 'fee' || ch.type === 'security_deposit' || ch.type === 'first_bundle')
     .reduce((s, ch) => s + (ch.amountFils ?? 0), 0);
-  const typeMeta = (t?: string) => {
-    // Every component of the first cheque (fees, deposit, installment 1) is
-    // collected BEFORE move-in — all carry the same "Before move-in" badge.
-    if (t === 'fee')              return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
-    if (t === 'security_deposit') return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
-    if (t === 'first_bundle')     return { label: 'Before move-in',  bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
-    if (t === 'extra_installment')return { label: 'Extra',    bg: 'var(--jade-soft)',    fg: 'var(--jade-deep)' };
-    return                               { label: 'Rent',     bg: 'var(--surface)',      fg: 'var(--mute)'      };
+  // Full segregated plan — the four customer-facing groups (Security Deposit ·
+  // Rental Income · Management Fee · Third Party), built from the RP-issued items
+  // so amounts + per-instalment due dates match exactly what was proposed.
+  const segRows = segRowsFromCustomerPlan(plan);
+  const seg = buildSegregatedPlan(segRows);
+  const rp = resolved.unit?.property?.rentalProvider ?? resolved.unit?.property?.rental_provider;
+  const planMeta = {
+    landlordName: rp?.user?.name?.trim() || rp?.companyName?.trim() || null,
+    unitNumber: resolved.unit?.unitNumber ?? null,
+    buildingName: resolved.unit?.property?.buildingName ?? null,
+    community: resolved.unit?.property?.community?.name ?? null,
   };
+  // One payment slot per physical cheque/transfer: Security Deposit ×1, Rent ×N
+  // (per instalment), Management Fee combined ×1, Third Party combined ×1 — so a
+  // 4-instalment plan is 7 payments. Each slot gets its own reference-upload row.
+  const paymentSlots = seg.groups.flatMap(g =>
+    g.key === 'rental'
+      ? g.lines.map((l, i) => ({ key: `rent-${i}`, label: `Rent — ${l.item}`, amount: l.amount, dueDate: l.dueDate }))
+      : [{ key: g.key, label: g.title, amount: g.total, dueDate: g.lines[0]?.dueDate ?? null }],
+  );
+  // Uploads NOT tagged to a specific slot — shown in the "everything together" bucket.
+  const bulkUploads = uploads.filter(u => !paymentSlots.some(s => s.label === (u.notes ?? '')));
 
   // Note: the plan is intentionally method-agnostic on the customer side.
   // The customer just declares "here are my payment references" — cheque
@@ -3062,7 +3117,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payment schedule · {plan.chequeCount} payment{plan.chequeCount === 1 ? '' : 's'}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payment plan · {paymentSlots.length} payment{paymentSlots.length === 1 ? '' : 's'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>Issued {fmtDateShort(plan.issuedAt)}</span>
             <button type="button" onClick={() => printPaymentPlan(resolved, personName(user) || '—')}
@@ -3071,22 +3126,8 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
             </button>
           </div>
         </div>
-        {items.length === 0 ? (
-          <p style={{ padding: '14px 16px', fontSize: 12, color: 'var(--mute)', margin: 0 }}>No payment items listed.</p>
-        ) : items.map((ch, i) => {
-          const meta = typeMeta(ch.type);
-          return (
-            <div key={ch.index} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)' }}>
-              <span style={{ fontSize: 12, color: 'var(--mute)', fontWeight: 600 }}>#{ch.index}</span>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{ch.description ?? (ch.type === 'security_deposit' ? 'Security deposit' : `Payment ${ch.index}`)}</p>
-                <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{ch.dueDate ? fmtDateLong(ch.dueDate) : 'No due date'}</p>
-              </div>
-              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(ch.amountFils)}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: meta.bg, color: meta.fg, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{meta.label}</span>
-            </div>
-          );
-        })}
+        <PaymentPlanDownloadLink rows={segRows} refLabel={null} planRefNo={null} meta={{ contractType: 'new', ...planMeta }} />
+        <SegregatedPlanView plan={seg} style={{ padding: '6px 14px 14px' }} />
       </div>
       {plan.notes && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
@@ -3094,13 +3135,40 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{plan.notes}</p>
         </div>
       )}
-      {/* ── Payment references — cheque photos, transfer screenshots, card slips, cash receipts ── */}
+      {/* ── Attach a reference PER payment (Security Deposit · each rent cheque · Management Fee · Third Party) ── */}
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: '0 0 4px' }}>Attach a reference for each payment</p>
+        <p style={{ fontSize: 11.5, color: 'var(--mute)', margin: '0 0 12px', lineHeight: 1.5 }}>
+          A cheque photo, bank-transfer screenshot, card slip or cash receipt — one per payment. Prefer to send them all at once? Use the box below instead.
+        </p>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {paymentSlots.map((slot) => {
+            const refs = uploads.filter(u => (u.notes ?? '') === slot.label);
+            return (
+              <div key={slot.key} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 12, background: 'var(--surface)', border: `1px solid ${refs.length ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}` }}>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{slot.label}</p>
+                  <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>
+                    {fmtAedFils(Math.round(slot.amount * 100))}{slot.dueDate ? ` · due ${fmtDateShort(slot.dueDate)}` : ''}{refs.length ? ` · ${refs.length} attached` : ''}
+                  </p>
+                </div>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', cursor: uploadingFiles ? 'progress' : 'pointer', fontSize: 12, fontWeight: 700, color: refs.length ? 'var(--jade-deep)' : 'var(--ink-2)', flexShrink: 0 }}>
+                  <input type="file" accept="image/*,application/pdf" multiple disabled={uploadingFiles > 0} onChange={(e) => handleSlotFiles(slot.label, e.target.files)} style={{ display: 'none' }} />
+                  {refs.length ? <><CheckCircle2 size={13} /> Replace</> : <><UploadCloud size={13} /> Attach</>}
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Or upload all references together (bucket) ── */}
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
-            Attach payment references (optional)
+            Or upload all your references together
           </p>
-          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{uploads.length} uploaded</span>
+          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{bulkUploads.length} uploaded</span>
         </div>
         <label style={{
           marginTop: 12,
@@ -3125,9 +3193,9 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
         {uploadErr && <div style={{ marginTop: 10 }}><ErrorBox msg={uploadErr} /></div>}
 
-        {uploads.length > 0 && (
+        {bulkUploads.length > 0 && (
           <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-            {uploads.map((c, i) => (
+            {bulkUploads.map((c, i) => (
               <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
                 {c.imageUrl ? (
                   <button type="button" onClick={() => openDocViewer({ fileUrl: c.imageUrl, caption: c.notes || `Payment ${i + 1}` })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
@@ -3209,7 +3277,7 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
     if (!consent) { setErr('Please confirm the electronic-signature agreement.'); return; }
     setBusy(true); setErr(null);
     try {
-      const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: name.trim(), signatureImage: sig, consent, clientMeta: collectClientMeta() }) });
+      const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: name.trim(), signatureImage: sig, consent, clientMeta: collectClientMeta(), geo: await collectGeo() }) });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to sign'); } finally { setBusy(false); }
@@ -3640,6 +3708,11 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
       .finally(() => setLoading(false));
   }, [viewing]);
 
+  // Receipts unlock once the RP has reviewed/cleared the payments (PDC confirmed,
+  // or any cheque cleared). ONE control that previews AND downloads the bundle.
+  const contract = resolved.contract;
+  const receiptsReady = !!contract && (!!contract.pdcConfirmed || (contract.payments ?? []).some(p => (p.chequeStatus ?? '').toLowerCase() === 'cleared'));
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div style={{ background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
@@ -3651,6 +3724,20 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
           </p>
         </div>
       </div>
+
+      {receiptsReady && contract && (
+        <a href={`/dashboard/customer/contracts/${contract.id}/print/receipt`} target="_blank" rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 18px', borderRadius: 14, background: 'var(--paper)', border: '1.5px solid var(--jade)', textDecoration: 'none', color: 'var(--ink)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <span style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--jade)', color: 'var(--paper)', display: 'grid', placeItems: 'center', flexShrink: 0 }}><FileText size={18} /></span>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>View &amp; download receipts</p>
+              <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0' }}>Your payments are confirmed — preview and download all your receipts.</p>
+            </div>
+          </div>
+          <ExternalLink size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+        </a>
+      )}
 
       {loading ? (
         <div style={{ display: 'flex', gap: 8, color: 'var(--mute)', fontSize: 13, alignItems: 'center' }}>
@@ -3692,7 +3779,7 @@ const DOC_LABELS: Record<string, string> = {
   employment_letter: 'Employment Letter', bank_statement: 'Bank Statement',
   salary_certificate: 'Salary Certificate', trade_license: 'Trade License',
   moa: 'MOM / MOA', tax_registration: 'Tax Registration',
-  utility_proof_of_payment: 'Utility Proof', ejari: 'Ejari Certificate',
+  utility_proof_of_payment: 'Utility Proof', ejari: 'Contract Registration Certificate',
   profile_picture: 'Profile Picture',
 };
 
@@ -3779,7 +3866,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
 
   const sections = [
     { k: 'payments'  as const, label: 'Payments',  sub: chequeItems.length ? `${chequeItems.length} cheques · ${aed(chequesTotalFils)}` : 'No schedule yet' },
-    { k: 'documents' as const, label: 'Documents', sub: tenantDocs ? `${tenantDocs.filter(d => d.documentKey !== 'profile_picture').length} docs on file` : 'KYC + Ejari + utility' },
+    { k: 'documents' as const, label: 'Documents', sub: tenantDocs ? `${tenantDocs.filter(d => d.documentKey !== 'profile_picture').length} docs on file` : 'KYC + Contract Registration + utility' },
   ];
 
   return (
@@ -3987,10 +4074,11 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
               <p style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center', padding: '12px 0', margin: 0 }}>No payment schedule available</p>
             )}
             {chequeItems.map((it, i) => {
-              const isPast = it.dueDate ? new Date(it.dueDate + 'T00:00:00') < today : false;
+              // Per-payment status as a clear binary — Cleared vs Not cleared —
+              // while bounced/cancelled cheques keep their own explicit red label.
               const bounced = it.status === 'bounced' || it.status === 'cancelled';
-              const cleared = it.status ? it.status === 'cleared' : isPast;
-              const badgeTxt = it.status ?? (isPast ? 'cleared' : 'upcoming');
+              const cleared = it.status === 'cleared';
+              const badgeTxt = bounced ? (it.status ?? 'bounced') : cleared ? 'Cleared' : 'Not cleared';
               return (
                 <div key={i} style={{
                   display: 'grid', gridTemplateColumns: '36px 1fr auto auto', gap: 12, alignItems: 'center',
@@ -4412,7 +4500,7 @@ function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; ch
             <PaymentRow label={`VAT on rent (${rentVatRate}%)`} amountFils={newRentVat * 100} />
           )}
           {child?.ejariFeeFils != null && child.ejariFeeFils > 0 && (
-            <PaymentRow label="Ejari fee" amountFils={child.ejariFeeFils * 100} />
+            <PaymentRow label="Contract Registration Fee" amountFils={child.ejariFeeFils * 100} />
           )}
           {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
             <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />

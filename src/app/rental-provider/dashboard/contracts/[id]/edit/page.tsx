@@ -604,7 +604,7 @@ export default function EditContractPage() {
                     <input type="number" min={0} value={adminFee} onChange={(e) => setAdminFee(e.target.value)} className={inputCls} />
                   </div>
                   <div>
-                    <label className={labelCls}>Ejari Fee (AED)</label>
+                    <label className={labelCls}>Contract Registration Fee (AED)</label>
                     <input type="number" min={0} value={ejariFee} onChange={(e) => setEjariFee(e.target.value)} className={inputCls} />
                   </div>
                   <div>
@@ -804,7 +804,7 @@ export default function EditContractPage() {
                 ...(rentVat > 0 ? ([[`VAT on rent (${rentVatRate}%)`, fmtAed(rentVat)]] as [string, string][]) : []),
                 ['Security deposit', securityDeposit ? fmtAed(Number(securityDeposit)) : '—'],
                 ['Admin fee', adminFee ? fmtAed(Number(adminFee)) : '—'],
-                ['Ejari fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],
+                ['Contract Registration Fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],
                 ['Payments / year', String(inst)],
                 ['Per cheque', rentNum > 0 ? fmtAed(chequeAmount) : '—'],
                 ['Duration', durationLabel],

@@ -38,8 +38,8 @@ interface PaymentRow {
 const ITEM_LABELS: Record<string, string> = {
   rental_income:   'Rental Income',
   vat:             'VAT (rent + fees)',
-  ejari_dld:       'Ejari · DLD registration',
-  ejari_service:   'Ejari · service (handling)',
+  ejari_dld:       'Contract Registration · DLD registration',
+  ejari_service:   'Contract Registration · service (handling)',
   admin_fee:       'Admin fee',
   commission:      'Commission',
   security_deposit:'Security Deposit (held)',
@@ -300,8 +300,8 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
         out.push({ cat: catOf(itemKey), item: itemLabel(itemKey), row: d, amount, desc });
       };
       if (d.paymentType === 'ejari_fee') {
-        push('ejari_dld', Math.min(GOVT_EJARI_FEE, amt), 'Ejari · DLD registration');
-        push('ejari_service', Math.max(0, amt - GOVT_EJARI_FEE), 'Ejari · service (handling)');
+        push('ejari_dld', Math.min(GOVT_EJARI_FEE, amt), 'Contract Registration · DLD registration');
+        push('ejari_service', Math.max(0, amt - GOVT_EJARI_FEE), 'Contract Registration · service (handling)');
       } else if (d.paymentType === 'other') {
         const desc = (d.description ?? '').trim() || 'Other';
         push(`${OTHER_PREFIX}${desc}`, amt, desc);
@@ -378,7 +378,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     <div className="mb-5">
       <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
       <h1 className="text-2xl font-bold text-[#1a1916]">Payment Grouping</h1>
-      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Ejari splits into its DLD government portion and service handling. Totals recompute for the chosen year or custom date range. Session-only; use Print to export.</p>
+      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Contract Registration splits into its DLD government portion and service handling. Totals recompute for the chosen year or custom date range. Session-only; use Print to export.</p>
     </div>
   );
 

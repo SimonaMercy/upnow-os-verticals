@@ -297,8 +297,8 @@ export default function ContractDetailPage() {
       </Section>
 
       {/* Ejari */}
-      <Section title="Ejari Registration" icon={<Shield size={18} />}>
-        <Row label="Ejari Status" value={
+      <Section title="Contract Registration" icon={<Shield size={18} />}>
+        <Row label="Contract Registration Status" value={
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
             style={{ backgroundColor: ejariCfg.bg, color: ejariCfg.text }}>
             {ejariCfg.label}

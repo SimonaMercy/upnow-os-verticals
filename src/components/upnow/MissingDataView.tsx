@@ -239,7 +239,7 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
     chips: [
       { key: 'noRentalPrice', label: 'Rental price' }, { key: 'noMarketPrice', label: 'Market price' },
       { key: 'noDeposit', label: 'Deposit' }, { key: 'noAdminFee', label: 'Admin fee' },
-      { key: 'noEjariFee', label: 'Ejari fee' }, { key: 'noCommission', label: 'Commission' },
+      { key: 'noEjariFee', label: 'Contract Registration fee' }, { key: 'noCommission', label: 'Commission' },
       { key: 'noBedrooms', label: 'Bedrooms' }, { key: 'noBathrooms', label: 'Bathrooms' },
       { key: 'noSize', label: 'Size' }, { key: 'noFloor', label: 'Floor' },
       { key: 'noKitchen', label: 'Kitchen' }, { key: 'noView', label: 'View' },
@@ -264,7 +264,7 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
   },
   'missing-contracts': {
     title: 'Missing Contract Data',
-    description: 'Contracts (all statuses) still missing a document, payment plan, security deposit or Ejari number. Active and pending sort to the top.',
+    description: 'Contracts (all statuses) still missing a document, payment plan, security deposit or Contract Registration number. Active and pending sort to the top.',
     unitLabel: 'Contracts',
     columns: [
       { key: 'customer', label: 'Customer' }, { key: 'property', label: 'Property' }, { key: 'unit', label: 'Unit' },
@@ -272,7 +272,7 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
     ],
     chips: [
       { key: 'noContractDoc', label: 'Contract document' }, { key: 'noPaymentPlan', label: 'Payment plan' },
-      { key: 'noDeposit', label: 'Security deposit' }, { key: 'noEjari', label: 'Ejari number' },
+      { key: 'noDeposit', label: 'Security deposit' }, { key: 'noEjari', label: 'Contract Registration number' },
     ],
     openHref: (row) => `${RP}/contracts/${row.contractId}/v2`,
   },

@@ -216,7 +216,7 @@ export function DataGapsView({
             )}
 
             {/* Contracts missing documents / payment plan / deposit / Ejari */}
-            <Section icon={FileText} title="Contracts missing documents, payment plan, deposit or Ejari" count={data.contractGaps.length}>
+            <Section icon={FileText} title="Contracts missing documents, payment plan, deposit or Contract Registration" count={data.contractGaps.length}>
               <table className="w-full text-sm">
                 <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                   <tr><TH>Customer</TH><TH>Property</TH><TH>Unit</TH><TH>Status</TH><TH right>Annual rent</TH><TH>Missing</TH><th className="px-3 print:hidden" /></tr>
@@ -231,7 +231,7 @@ export function DataGapsView({
                         <MissingChip label="Contract document" on={c.noContractDoc} />
                         <MissingChip label="Payment plan" on={c.noPaymentPlan} />
                         <MissingChip label="Security deposit" on={c.noDeposit} />
-                        <MissingChip label="Ejari number" on={c.noEjari} />
+                        <MissingChip label="Contract Registration number" on={c.noEjari} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
                         <Link href={`/rental-provider/dashboard/contracts/${c.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
@@ -290,7 +290,7 @@ export function DataGapsView({
                       <td className="px-4 py-2.5">
                         <MissingChip label="Rental price" on={u.noRentalPrice} /><MissingChip label="Market price" on={u.noMarketPrice} />
                         <MissingChip label="Deposit" on={u.noDeposit} /><MissingChip label="Admin fee" on={u.noAdminFee} />
-                        <MissingChip label="Ejari fee" on={u.noEjariFee} /><MissingChip label="Commission" on={u.noCommission} />
+                        <MissingChip label="Contract Registration fee" on={u.noEjariFee} /><MissingChip label="Commission" on={u.noCommission} />
                         <MissingChip label="Bedrooms" on={u.noBedrooms} /><MissingChip label="Bathrooms" on={u.noBathrooms} />
                         <MissingChip label="Size" on={u.noSize} /><MissingChip label="Floor" on={u.noFloor} />
                         <MissingChip label="Kitchen" on={u.noKitchen} /><MissingChip label="View" on={u.noView} />

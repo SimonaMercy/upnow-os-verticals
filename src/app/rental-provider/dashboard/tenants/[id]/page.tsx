@@ -723,7 +723,7 @@ export default function CustomerDetailPage() {
             <button
               type="button"
               onClick={openHistoryReader}
-              title="Contract-wise history of all lease documents (contracts, Ejari, cheques, receipts), grouped per lease"
+              title="Contract-wise history of all lease documents (contracts, Contract Registration, cheques, receipts), grouped per lease"
               className="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer"
             >
               <History size={13} /> History Documents ({otherDocsCount})

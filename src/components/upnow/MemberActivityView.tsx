@@ -191,7 +191,7 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
         <Tile label="Leads attended" value={member.leadsWorked} hint="Leads this person worked on in the period." />
         <Tile label="Converted" value={member.leadsConverted} hint="Leads they moved all the way to a signed-up customer." />
-        <Tile label="Contracts worked" value={member.contractsWorked} hint="Leases they progressed — edits, renewals, Ejari, payments, terminations." />
+        <Tile label="Contracts worked" value={member.contractsWorked} hint="Leases they progressed — edits, renewals, Contract Registration, payments, terminations." />
         <Tile label="Renewals" value={member.renewalsWorked} hint="Leases where they ran renewal steps." />
         <Tile label="Documents" value={member.documentsWorked} hint="Documents they processed — uploads, verifications, rejections." />
         <Tile label="Days active" value={member.activeDays} hint="Days with at least one action or page visit." />

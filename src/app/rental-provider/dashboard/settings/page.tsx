@@ -50,7 +50,7 @@ const FEE_TAB_CATEGORIES = FEE_CATEGORIES.filter((c) => c !== 'mixed_use');
 const FEE_ORDER: FeeType[] = ['ejari_fee', 'admin_fee', 'commission', 'security_deposit', 'rent_vat'];
 
 const FEE_META: Record<FeeType, { title: string; description: string; tag: string; tagStyle: 'default' | 'green'; refundable?: boolean; newOnly?: boolean }> = {
-  ejari_fee:        { title: 'Ejari Fee',        description: 'Government Ejari registration charge',          tag: 'UAE default',  tagStyle: 'green' },
+  ejari_fee:        { title: 'Contract Registration Fee',        description: 'Government Contract Registration charge',          tag: 'UAE default',  tagStyle: 'green' },
   admin_fee:        { title: 'Admin Fee',         description: 'Processing fee charged by your company',        tag: 'Customisable', tagStyle: 'default' },
   commission:       { title: 'Commission',        description: 'Brokerage commission on annual contract value',  tag: 'Customisable', tagStyle: 'default' },
   security_deposit: { title: 'Security Deposit',  description: 'Refundable deposit held for contract duration',  tag: 'Refundable',   tagStyle: 'green', refundable: true, newOnly: true },
@@ -471,7 +471,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
       {/* Help card */}
       <div className="mt-3.5 bg-white border border-[#e6ebe7] rounded-[12px] p-3.5 text-[12.5px] text-[#2b3a34] leading-[1.5]">
         <h4 className="text-[12px] uppercase tracking-[.06em] text-[#6b7a74] font-bold mb-1.5">Need help?</h4>
-        These defaults reflect typical UAE practice (Ejari, agency commission, 5% VAT on services). Always verify with your accountant for jurisdiction-specific rules.
+        These defaults reflect typical UAE practice (Contract Registration, agency commission, 5% VAT on services). Always verify with your accountant for jurisdiction-specific rules.
       </div>
     </div>
   );
@@ -1915,7 +1915,7 @@ export default function SettingsPage() {
                 <p className="text-xs text-[#9b9890] mt-0.5">
                   How the 5% VAT on VATable (commercial / industrial) rent is collected. Rent and fee
                   cheques are always <strong>net</strong> — VAT is a separate cheque. Rent VAT follows
-                  this setting; fee VAT (admin / ejari / commission) is always one separate cheque.
+                  this setting; fee VAT (admin / Contract Registration / commission) is always one separate cheque.
                   Applies to new contracts and renewals; VAT-exempt (residential) leases are unaffected.
                 </p>
               </div>

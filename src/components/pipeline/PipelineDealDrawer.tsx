@@ -45,7 +45,7 @@ const STEPS: StepDef[] = [
   { stage: 'documents',       icon: FileText,       description: 'Collecting KYC and financial documents.' },
   { stage: 'plan',            icon: CreditCard,     description: 'Payment plan shared and under review by the customer.' },
   { stage: 'cheques',         icon: CreditCard,     description: 'Customer is submitting cheques / payments for collection.' },
-  { stage: 'contract_issued', icon: FileSignature,  description: 'Contract issued — awaiting signature and Ejari registration.' },
+  { stage: 'contract_issued', icon: FileSignature,  description: 'Contract issued — awaiting signature and Contract Registration.' },
   { stage: 'active',          icon: CheckCircle2,   description: 'Tenant has moved in. Contract is active.' },
 ];
 

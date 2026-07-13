@@ -775,7 +775,7 @@ tfoot td{font-weight:700;background:#f0f9ff;color:#0369a1;border-top:2px solid #
   ${discountLine}
   <div class="l">Security Deposit</div><div class="v">${aed(plan.securityDepositFils)}</div>
   ${plan.adminFeeFils ? `<div class="l">Admin Fee</div><div class="v">${aed(plan.adminFeeFils)}</div>` : ''}
-  ${plan.ejariFils ? `<div class="l">Ejari Fee</div><div class="v">${aed(plan.ejariFils)}</div>` : ''}
+  ${plan.ejariFils ? `<div class="l">Contract Registration Fee</div><div class="v">${aed(plan.ejariFils)}</div>` : ''}
   ${plan.commissionFils ? `<div class="l">Commission</div><div class="v">${aed(plan.commissionFils)}</div>` : ''}
 </div>
 <h2>Cheque Schedule (${plan.chequeCount} cheques)</h2>

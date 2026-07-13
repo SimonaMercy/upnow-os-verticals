@@ -536,7 +536,7 @@ export default function CustomerProfilePage() {
                         <span className={s.inputPrefix}><CreditCard size={14} /></span>
                         <input ref={fieldRefs.emiratesId} value={emiratesId} onChange={(e) => setEmiratesId(e.target.value)} placeholder="784-XXXX-XXXXXXX-X" style={{ fontFamily: 'ui-monospace, monospace' }} />
                       </div>
-                      <div className={s.fieldHint}>Required for contract generation and Ejari registration.</div>
+                      <div className={s.fieldHint}>Required for contract generation and Contract Registration.</div>
                     </div>
                   </div>
                 </div>

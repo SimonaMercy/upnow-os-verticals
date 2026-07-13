@@ -966,7 +966,7 @@ function CostSummary({ cp }: { cp: NonNullable<ApiLead['costPreview']> }) {
     { label: 'Security deposit', fils: cp.securityDepositFils },
   ];
   if (cp.adminFeeFils > 0) rows.push({ label: `Admin fee${cp.adminFeeVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.adminFeeFils + cp.adminFeeVatFils });
-  if (cp.ejariFils > 0) rows.push({ label: `Ejari fee${cp.ejariVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.ejariFils + cp.ejariVatFils });
+  if (cp.ejariFils > 0) rows.push({ label: `Contract Registration fee${cp.ejariVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.ejariFils + cp.ejariVatFils });
   if (cp.commissionFils > 0) rows.push({ label: `Commission${cp.commissionVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.commissionFils + cp.commissionVatFils });
   for (const f of cp.customFees ?? []) rows.push({ label: `${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`, fils: f.netFils + f.vatFils });
   return (
@@ -1648,7 +1648,7 @@ function PlanEditor({
   type Row = { kind: 'bundle' | 'deposit' | 'installment'; instIndex?: number; label: string; amountFils: number; dueDate: string };
   const KW: Record<Row['kind'], number> = { bundle: 0, installment: 1, deposit: 2 };
   const rows: Row[] = (rentFils > 0 ? [
-    { kind: 'bundle' as const, label: 'Admin + Ejari + Commission + Installment 1', amountFils: adminFils + ejariFils + commFils + per, dueDate: bundleDate },
+    { kind: 'bundle' as const, label: 'Admin + Contract Registration + Commission + Installment 1', amountFils: adminFils + ejariFils + commFils + per, dueDate: bundleDate },
     ...Array.from({ length: installmentCount - 1 }, (_, i) => ({
       kind: 'installment' as const, instIndex: i, label: `Installment ${i + 2}`,
       amountFils: i === installmentCount - 2 ? last : per, dueDate: instDates[i] ?? '',
@@ -1703,7 +1703,7 @@ function PlanEditor({
       <div className="subhead" style={{ marginTop: 12 }}>Fees &amp; deposit</div>
       <div className="fgrid">
         <label>Admin fee<input className="qinput" type="number" value={adminAed} onChange={e => setAdminAed(e.target.value)} placeholder="0" /></label>
-        <label>Ejari fee<input className="qinput" type="number" value={ejariAed} onChange={e => setEjariAed(e.target.value)} placeholder="0" /></label>
+        <label>Contract Registration fee<input className="qinput" type="number" value={ejariAed} onChange={e => setEjariAed(e.target.value)} placeholder="0" /></label>
         <label>Commission<input className="qinput" type="number" value={commAed} onChange={e => setCommAed(e.target.value)} placeholder="0" /></label>
         <label>Security deposit<input className="qinput" type="number" value={depositAed} onChange={e => setDepositAed(e.target.value)} placeholder="0" /></label>
       </div>

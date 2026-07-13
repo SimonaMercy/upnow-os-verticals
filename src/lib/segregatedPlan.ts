@@ -164,9 +164,44 @@ export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput
   const comm = (p.commissionFils ?? 0) + (p.commissionVatFils ?? 0);
   if (comm > 0) rows.push({ paymentType: 'commission', description: 'Commission', amount: comm / 100, chequeNumber: null });
   const ejari = (p.ejariFils ?? 0) + (p.ejariVatFils ?? 0);
-  if (ejari > 0) rows.push({ paymentType: 'ejari_fee', description: 'Ejari Fee', amount: ejari / 100, chequeNumber: null });
+  if (ejari > 0) rows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: ejari / 100, chequeNumber: null });
   for (const f of (p.customFees ?? [])) rows.push({ paymentType: 'other', description: f.label, amount: (f.netFils + f.vatFils) / 100, chequeNumber: null });
   return rows;
+}
+
+/** Customer `ApiPaymentPlan` (spaces page) items → segregation rows. Its items
+ *  carry a `type` (fee / first_bundle / installment / extra_installment /
+ *  security_deposit) + a human description, NOT a paymentType — so classify by
+ *  type, and fees by their description (Admin / Commission → Management Fee;
+ *  Ejari + anything else → Third Party). The per-item gross amounts + due dates
+ *  are authoritative, so the on-screen plan matches exactly what the RP issued
+ *  (no even-split re-derivation, so extra installments are never dropped). */
+export function segRowsFromCustomerPlan(plan: {
+  items?: Array<{ amountFils?: number | null; dueDate?: string | null; description?: string | null; type?: string | null }> | null;
+}): SegPaymentInput[] {
+  const feePaymentType = (desc: string): string => {
+    const d = desc.toLowerCase();
+    if (d.includes('admin')) return 'admin_fee';
+    if (d.includes('commission')) return 'commission';
+    if (d.includes('ejari') || d.includes('contract registration')) return 'ejari_fee';
+    return 'other';
+  };
+  return (plan.items ?? []).map(it => {
+    const t = (it.type ?? '').toLowerCase();
+    const desc = it.description ?? '';
+    const paymentType =
+      t === 'security_deposit' ? 'security_deposit'
+      : (t === 'first_bundle' || t === 'installment' || t === 'extra_installment') ? 'rental_income'
+      : t === 'fee' ? feePaymentType(desc)
+      : 'other';
+    return {
+      paymentType,
+      description: desc || null,
+      amount: (it.amountFils ?? 0) / 100,
+      chequeNumber: null,
+      transactionDate: it.dueDate ?? null,
+    };
+  });
 }
 
 const RENTAL_TYPES = new Set(['rental_income', 'rent']);
@@ -244,7 +279,7 @@ export function buildSegregatedPlan(rows: SegPaymentInput[]): SegregatedPlan {
     lineOf(p, n > 1 ? `Instalment ${i + 1} of ${n}` : 'Rent', p.amount || 0));
 
   // ── Ejari → Third Party in FULL (not split), always on TOP of the section ──
-  const ejariLines: SegLine[] = ejari.map(p => lineOf(p, p.description || 'Ejari Fee', p.amount || 0));
+  const ejariLines: SegLine[] = ejari.map(p => lineOf(p, p.description || 'Contract Registration Fee', p.amount || 0));
 
   // ── Management Fee ── (Admin, Commission)
   const managementLines: SegLine[] = [

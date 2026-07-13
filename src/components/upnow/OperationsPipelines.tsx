@@ -92,7 +92,7 @@ const NEW_STAGES: StageDef[] = [
   { key: 'payment_plan', title: 'Payment plan',      keys: ['payment_plan'] },
   { key: 'pdc',          title: 'Cheques / PDC',     keys: ['pdc'] },
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
-  { key: 'ejari',        title: 'Ejari',             keys: ['ejari'] },
+  { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
   { key: 'utility',      title: 'Utility',           keys: ['utility'] },
   { key: 'move_in',      title: 'Move-in',           keys: ['move_in'] },
   { key: 'ready',        title: 'Ready to activate', keys: [] },
@@ -104,7 +104,7 @@ const RENEWAL_STAGES: StageDef[] = [
   { key: 'payment_plan', title: 'Payment plan',      keys: ['payment_plan'] },
   { key: 'pdc',          title: 'Cheques / PDC',     keys: ['pdc'] },
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
-  { key: 'ejari',        title: 'Ejari',             keys: ['ejari'] },
+  { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
   { key: 'ready',        title: 'Ready to activate', keys: [] },
 ];
 

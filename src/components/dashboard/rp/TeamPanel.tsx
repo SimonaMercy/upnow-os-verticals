@@ -113,7 +113,7 @@ export const PERM_GROUPS = [
       { key: 'canManageInspections', label: 'Move-in / move-out inspections', meta: 'can_manage_inspections' },
       { key: 'canSignDocuments',     label: 'Sign tenancy contracts',       meta: 'can_sign_documents' },
       { key: 'canSignAddenda',       label: 'Sign addenda & amendments',    meta: 'can_sign_addenda' },
-      { key: 'canManageEjari',       label: 'Register / manage Ejari',      meta: 'can_manage_ejari' },
+      { key: 'canManageEjari',       label: 'Register / manage Contract Registration',      meta: 'can_manage_ejari' },
       { key: 'canActAsPoa',          label: 'Act with full POA (Power of Attorney)', meta: 'can_act_as_poa' },
     ],
   },
