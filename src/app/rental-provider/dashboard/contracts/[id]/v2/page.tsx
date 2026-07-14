@@ -2176,8 +2176,12 @@ function DetailsDrawer({
   const MGMT_FEE_TYPES = new Set(['admin_fee', 'commission']);
   const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
-  const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (f.amount || 0), 0);
-  const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (f.amount || 0), 0) + otherGross;
+  // Bounced / cancelled cheques are void — excluded from every section total and the
+  // grand total, exactly as the header's Total payable does, so the two never diverge.
+  const feeActive = (p: { chequeStatus?: string | null }) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
+  const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0);
+  const otherActiveGross = otherPaymentRows.reduce((s, p) => s + (feeActive(p) ? (p.amount || 0) : 0), 0);
+  const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0) + otherActiveGross;
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
       : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
@@ -2308,9 +2312,11 @@ function DetailsDrawer({
   const rentVat   = rentScheduleRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
-  // Everything on the contract, all four segments summed — the single figure the RP/manager
-  // reads at settlement (deposit is included as it is collected, though refundable).
-  const paymentsGrandTotal = (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0) + rentGross + feeGross + otherGross;
+  // All four segments summed — identical to the header pass's "Total payable" so the two
+  // never disagree: rent + management + third party, plus the deposit ONLY when it is this
+  // contract's own (a renewal carries it forward, never re-collected → excluded here too).
+  const grandDeposit = contract.contractType === 'renewal' ? 0 : (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0);
+  const paymentsGrandTotal = grandDeposit + rentGross + managementFeeTotal + thirdPartyTotal;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
   //    assembled from the contract's recorded rent cheques, fees, and deposit.
   //    Replaces the old origin-lead "offer" snapshot in the receipt modal.
