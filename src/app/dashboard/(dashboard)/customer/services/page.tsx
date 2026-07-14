@@ -53,6 +53,10 @@ export default function CustomerServicesPage() {
   const [approving, setApproving] = useState<number | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reportFor, setReportFor] = useState<number | null>(null);
+  const [reportTitle, setReportTitle] = useState('');
+  const [reportBody, setReportBody] = useState('');
+  const [reporting, setReporting] = useState(false);
 
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
@@ -124,6 +128,27 @@ export default function CustomerServicesPage() {
       setError(e instanceof Error ? e.message : 'Could not cancel');
     } finally {
       setBusy(null);
+    }
+  };
+
+  const submitReport = async () => {
+    if (reportFor == null || !reportTitle.trim()) return;
+    setReporting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/disputes', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: reportFor, title: reportTitle.trim(), description: reportBody.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not submit');
+      setReportFor(null); setReportTitle(''); setReportBody('');
+      setTimeline((prev) => { const n = { ...prev }; delete n[reportFor]; return n; });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not submit your report');
+    } finally {
+      setReporting(false);
     }
   };
 
@@ -268,11 +293,51 @@ export default function CustomerServicesPage() {
                         {busy === b.id ? 'Cancelling…' : 'Cancel booking'}
                       </button>
                     )}
+                    {b.status === 'completed' && (
+                      <button
+                        type="button"
+                        onClick={() => { setReportFor(b.id); setReportTitle(''); setReportBody(''); }}
+                        className="mt-4 ml-2 text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                        style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+                      >
+                        Report an issue
+                      </button>
+                    )}
+                    {b.status === 'dispute' && (
+                      <p className="mt-4 text-xs" style={{ color: '#92400e' }}>
+                        Issue reported — our team is reviewing it.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {reportFor != null && (
+        <div onClick={() => setReportFor(null)} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,20,18,.45)' }}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl p-5 w-full max-w-md" style={{ border: '1px solid var(--color-base-200)' }}>
+            <h2 className="text-base font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Report an issue</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-500)' }}>Tell us what went wrong with BK-{reportFor}. Our team will review and get back to you.</p>
+            <input
+              value={reportTitle} onChange={(e) => setReportTitle(e.target.value)}
+              placeholder="What's the issue?"
+              className="w-full mt-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--color-base-200)' }}
+            />
+            <textarea
+              value={reportBody} onChange={(e) => setReportBody(e.target.value)}
+              placeholder="Add any details (optional)" rows={3}
+              className="w-full mt-2 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--color-base-200)' }}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setReportFor(null)} className="text-xs font-semibold px-3.5 py-2 rounded-lg border" style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-500)' }}>Cancel</button>
+              <button onClick={submitReport} disabled={reporting || !reportTitle.trim()} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ backgroundColor: 'var(--color-primary)', opacity: reporting || !reportTitle.trim() ? 0.5 : 1 }}>
+                {reporting ? 'Submitting…' : 'Submit report'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
