@@ -33,6 +33,8 @@ import { putKycSlot } from '@/lib/kycSlotUpload';
 import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
+import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { buildSegregatedPlan, segRowsFromAggregatePlan } from '@/lib/segregatedPlan';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
@@ -961,21 +963,14 @@ type StageBodyProps = {
  *  ejari · commission · custom fees · total payable). Shown at the viewing stage
  *  before a firm plan exists. ──────────────────────────────────────────────────── */
 function CostSummary({ cp }: { cp: NonNullable<ApiLead['costPreview']> }) {
-  const rows: { label: string; fils: number }[] = [
-    { label: `Annual rent${cp.rentVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.rentFils + cp.rentVatFils },
-    { label: 'Security deposit', fils: cp.securityDepositFils },
-  ];
-  if (cp.adminFeeFils > 0) rows.push({ label: `Admin fee${cp.adminFeeVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.adminFeeFils + cp.adminFeeVatFils });
-  if (cp.ejariFils > 0) rows.push({ label: `Contract Registration fee${cp.ejariVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.ejariFils + cp.ejariVatFils });
-  if (cp.commissionFils > 0) rows.push({ label: `Commission${cp.commissionVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.commissionFils + cp.commissionVatFils });
-  for (const f of cp.customFees ?? []) rows.push({ label: `${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`, fils: f.netFils + f.vatFils });
+  // Centralised four-group segregation — same SegregatedPlanView as the contract
+  // Payment Summary, the receipts, and the customer proposal, so RP and customer
+  // see one consistent layout.
+  const seg = buildSegregatedPlan(segRowsFromAggregatePlan(cp));
   return (
     <div>
       <div className="subhead"><Wallet size={13} /> Payment summary · shared with customer</div>
-      <table className="ptable">
-        <tbody>{rows.map((r, i) => <tr key={i}><td>{r.label}</td><td className="amt">{aed(r.fils)}</td></tr>)}</tbody>
-        <tfoot><tr><td className="tot">Total payable</td><td className="amt tot">{aed(cp.totalFils)}</td></tr></tfoot>
-      </table>
+      <SegregatedPlanView plan={seg} />
     </div>
   );
 }
@@ -2005,54 +2000,13 @@ function RecordChequeRow({
   );
 }
 
-/* ─── PlanTable: real instalments ─────────────────────────────────────────── */
+/* ─── PlanTable: the proposed plan, as the centralised four-group view ──────── */
 function PlanTable({ plan, advice }: { plan: NonNullable<ApiLead['paymentPlan']>; advice?: boolean }) {
-  const items: PaymentPlanItem[] = plan.items
-    .slice()
-    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
-  // Group consecutive line items sharing a due date into one dated payment block
-  // (kills the repeated-date noise and reads like the cheque schedule it is).
-  const groups: { date: string | null; items: PaymentPlanItem[]; total: number }[] = [];
-  for (const it of items) {
-    const key = it.dueDate ?? null;
-    const last = groups[groups.length - 1];
-    if (last && last.date === key) { last.items.push(it); last.total += it.amountFils; }
-    else groups.push({ date: key, items: [it], total: it.amountFils });
-  }
-  const dateOf = (d: string | null) => (d ? fmtDateOnly(d) : 'No date set');
+  const seg = buildSegregatedPlan(segRowsFromAggregatePlan(plan));
   return (
     <div>
       <div className="subhead"><Wallet size={13} /> Payment plan{advice ? ' · advice submitted' : ' · proposed to customer'}</div>
-      <div className="plan2">
-        {groups.map((g, gi) => (
-          g.items.length === 1 ? (
-            /* Solo line — date · description · amount on one row. */
-            <div className="pline" key={gi}>
-              <span className="pl-date"><Calendar size={12} /> {dateOf(g.date)}</span>
-              <span className="pl-desc">{g.items[0].description ?? '—'}</span>
-              <span className="pl-amt">{aed(g.items[0].amountFils)}</span>
-            </div>
-          ) : (
-            /* Grouped block — one dated header + indented line items + subtotal. */
-            <div className="pgrp" key={gi}>
-              <div className="pgrp-h">
-                <span className="pgrp-d"><Calendar size={12} /> {dateOf(g.date)}</span>
-                <span className="pgrp-t">{aed(g.total)}</span>
-              </div>
-              {g.items.map((it, i) => (
-                <div className="pgrp-r" key={i}>
-                  <span className="pr-desc">{it.description ?? '—'}</span>
-                  <span className="pr-amt">{aed(it.amountFils)}</span>
-                </div>
-              ))}
-            </div>
-          )
-        ))}
-        <div className="plan2-tot">
-          <span>Total · {plan.chequeCount} {plan.chequeCount === 1 ? 'payment' : 'payments'}</span>
-          <span>{aed(plan.totalAmountFils)}</span>
-        </div>
-      </div>
+      <SegregatedPlanView plan={seg} />
     </div>
   );
 }
