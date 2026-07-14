@@ -2530,7 +2530,7 @@ function DetailsDrawer({
                   <table className="ptable">
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
-                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" onAdd={perms.collections ? () => openRecordFor('security_deposit') : undefined} />}
+                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" />}
                       {/* Security deposit folds in as the first payment row. When
                           the deposit is THIS contract's own payment it's editable;
                           a renewal that only carries the deposit gets a read-only
