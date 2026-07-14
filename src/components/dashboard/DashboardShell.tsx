@@ -104,7 +104,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Reviews',          href: '/dashboard/service-provider/reviews',    icon: Star },
     { divider: true },
     { section: 'More' },
-    { label: 'Earnings',         href: '/dashboard/service-provider/earnings',   icon: Wallet, soon: true },
+    { label: 'Earnings',         href: '/dashboard/service-provider/earnings',   icon: Wallet },
     { label: 'Settings',         href: '/dashboard/service-provider/settings',   icon: Settings },
   ],
   manager: [

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
+interface QuoteItem { itemName: string; description?: string | null; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
+interface Quote { id: number; status: string; totalAmount: number | string; summary?: string | null; validUntil?: string | null; items: QuoteItem[] }
 interface BookingRow {
   id: number;
   status: string;
@@ -47,6 +49,8 @@ export default function CustomerServicesPage() {
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<number | null>(null);
   const [timeline, setTimeline] = useState<Record<number, TimelineStep[]>>({});
+  const [quotes, setQuotes] = useState<Record<number, Quote | null>>({});
+  const [approving, setApproving] = useState<number | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,11 +66,37 @@ export default function CustomerServicesPage() {
   const toggleDetail = async (id: number) => {
     if (openId === id) { setOpenId(null); return; }
     setOpenId(id);
+    const row = bookings.find((x) => x.id === id);
     if (!timeline[id]) {
       try {
         const d = await fetch(`/api/bookings/${id}`, { credentials: 'include' }).then((r) => r.json());
         setTimeline((prev) => ({ ...prev, [id]: d.timeline ?? [] }));
       } catch { /* detail stays collapsed-empty */ }
+    }
+    if (row?.pricingMode === 'quote' && quotes[id] === undefined) {
+      try {
+        const q = await fetch(`/api/bookings/${id}/quote`, { credentials: 'include' }).then((r) => (r.ok ? r.json() : null));
+        setQuotes((prev) => ({ ...prev, [id]: q }));
+      } catch { setQuotes((prev) => ({ ...prev, [id]: null })); }
+    }
+  };
+
+  const approveQuote = async (id: number) => {
+    setApproving(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/bookings/${id}/quote/accept`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not approve the quote');
+      setQuotes((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      setTimeline((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not approve the quote');
+    } finally {
+      setApproving(null);
     }
   };
 
@@ -142,6 +172,7 @@ export default function CustomerServicesPage() {
             const tone = STATUS_TONES[b.status] ?? STATUS_TONES.booked;
             const open = openId === b.id;
             const cancellable = ['booked', 'confirmed'].includes(b.status);
+            const quote = quotes[b.id];
             return (
               <div key={b.id} className="rounded-2xl border bg-white" style={{ borderColor: 'var(--color-base-200)' }}>
                 <button type="button" onClick={() => toggleDetail(b.id)} className="w-full flex items-center gap-4 px-5 py-4 text-left">
@@ -190,6 +221,37 @@ export default function CustomerServicesPage() {
                       ))}
                       {!timeline[b.id] && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-neutral-400)' }} />}
                     </div>
+
+                    {quote && quote.status === 'submitted' && (
+                      <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'var(--color-primary)', background: 'var(--color-primary-50)' }}>
+                        <div className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Your quote is ready</div>
+                        {quote.summary && <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-600)' }}>{quote.summary}</p>}
+                        <div className="mt-3 space-y-1.5">
+                          {quote.items.map((it, i) => (
+                            <div key={i} className="flex justify-between text-xs" style={{ color: 'var(--color-neutral-700)' }}>
+                              <span>{it.itemName}{Number(it.quantity) > 1 ? ` × ${it.quantity}` : ''}</span>
+                              <span className="font-mono">AED {fmtAed(it.lineTotal)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: '1px solid var(--color-base-200)' }}>
+                          <span className="text-sm font-bold" style={{ color: 'var(--color-neutral-900)' }}>Total</span>
+                          <span className="text-sm font-bold" style={{ color: 'var(--color-neutral-900)' }}>AED {fmtAed(quote.totalAmount)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={approving === b.id}
+                          onClick={() => approveQuote(b.id)}
+                          className="mt-3 w-full py-2.5 rounded-lg text-sm font-semibold text-white"
+                          style={{ background: 'var(--color-primary)' }}
+                        >
+                          {approving === b.id ? 'Processing…' : `Approve & pay · AED ${fmtAed(quote.totalAmount)}`}
+                        </button>
+                        <p className="text-[10px] mt-2 text-center" style={{ color: 'var(--color-neutral-400)' }}>
+                          You only pay after approving.{quote.validUntil ? ` Valid until ${new Date(quote.validUntil).toLocaleDateString('en-AE', { day: 'numeric', month: 'short' })}.` : ''}
+                        </p>
+                      </div>
+                    )}
                     {b.status === 'cancelled' && b.cancellationFee != null && Number(b.cancellationFee) > 0 && (
                       <p className="text-[11px] mt-3" style={{ color: 'var(--color-neutral-400)' }}>
                         Cancellation fee applied: AED {fmtAed(b.cancellationFee)}
