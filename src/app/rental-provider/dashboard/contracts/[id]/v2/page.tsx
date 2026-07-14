@@ -1850,6 +1850,29 @@ function PaySegRail({ title, extra }: { title: string; extra?: React.ReactNode }
   );
 }
 
+/** Per-section subtotal row — closes each segment (Security Deposit / Rental Income /
+ *  Management Fee / Third Party) with its own total, so no section is left un-summed
+ *  and the totals never get lumped together. Optional sub-lines (e.g. Net rent / VAT). */
+function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amount: number; sub?: { label: string; amount: number }[] }) {
+  const tot: React.CSSProperties = { borderTop: '2px solid #bfe3d5', background: 'var(--jade-tint, #eef2f0)' };
+  return (
+    <>
+      {(sub ?? []).map(s => (
+        <tr key={s.label}>
+          <td colSpan={2} style={{ color: 'var(--mute)' }}>{s.label}</td>
+          <td className="amt" style={{ color: 'var(--mute)', fontWeight: 600 }}>{fmtAed(s.amount)}</td>
+          <td colSpan={4} />
+        </tr>
+      ))}
+      <tr>
+        <td colSpan={2} style={{ ...tot, fontWeight: 800, fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.04em', color: '#6b6860' }}>{label}</td>
+        <td className="amt" style={{ ...tot, fontWeight: 800, color: 'var(--jade-deep)' }}>{fmtAed(amount)}</td>
+        <td colSpan={4} style={tot} />
+      </tr>
+    </>
+  );
+}
+
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
@@ -2132,6 +2155,9 @@ function DetailsDrawer({
   const MGMT_FEE_TYPES = new Set(['admin_fee', 'commission']);
   const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
+  const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (f.amount || 0), 0);
+  const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (f.amount || 0), 0) + otherGross;
+  const depositHeldAmt = depositRow?.amount ?? contract.securityDeposit?.amount ?? 0;
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
       : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
@@ -2712,6 +2738,7 @@ function DetailsDrawer({
                           </Fragment>
                         );
                       })()}
+                      {(depositRow || contract.securityDeposit) && <PaySegTotalRow label="Security Deposit total" amount={depositHeldAmt} />}
                       <PaySegRail title="Rental Income" extra={rentScheduleRows.length ? `${rentScheduleRows.length} cheque${rentScheduleRows.length === 1 ? '' : 's'}` : undefined} />
                       {rentScheduleRows.map((p, i) => (
                         <Fragment key={p.id}>
@@ -2818,23 +2845,14 @@ function DetailsDrawer({
                       {rentScheduleRows.length === 0 && (
                         <tr><td colSpan={7}><span className="note">No payments recorded yet.</span></td></tr>
                       )}
+                      {rentScheduleRows.length > 0 && (
+                        <PaySegTotalRow
+                          label={showVat ? 'Rental Income total (incl. VAT)' : 'Rental Income total'}
+                          amount={rentGross}
+                          sub={showVat ? [{ label: 'Net rent', amount: rentNet }, { label: `VAT${(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}`, amount: rentVat }] : undefined}
+                        />
+                      )}
                     </tbody>
-                    <tfoot>
-                      {showVat && (
-                        <>
-                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td colSpan={4} /></tr>
-                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td colSpan={4} /></tr>
-                        </>
-                      )}
-                      <tr><td colSpan={2}>{showVat ? 'Total rent (incl. VAT)' : 'Total rent'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={4} /></tr>
-                      {(depositRow || contract.securityDeposit) && (
-                        <tr style={{ opacity: 0.75 }}>
-                          <td colSpan={2}>Security deposit held (refundable, not in rent total)</td>
-                          <td className="amt">{(depositRow?.amount ?? contract.securityDeposit?.amount) ? fmtAed(depositRow?.amount ?? contract.securityDeposit?.amount ?? 0) : <span style={{ color: '#9b9890', fontWeight: 400 }}>Not set</span>}</td>
-                          <td colSpan={4} />
-                        </tr>
-                      )}
-                    </tfoot>
                   </table>
 
                   {/* Fees — admin / ejari / commission as their own line items,
@@ -2986,6 +3004,7 @@ function DetailsDrawer({
                               </td>
                             </tr>
                           )}
+                          {i === managementFeeRows.length - 1 && managementFeeRows.length > 0 && <PaySegTotalRow label="Management Fee total" amount={managementFeeTotal} />}
                           </Fragment>
                         ))}
                         {/* Custom "Other" charges (payment_type 'other') — per-unit taxes
@@ -3081,13 +3100,11 @@ function DetailsDrawer({
                           )}
                           </Fragment>
                         ))}
+                        {(thirdPartyFeeRows.length > 0 || otherPaymentRows.length > 0) && <PaySegTotalRow label="Third Party total" amount={thirdPartyTotal} />}
                         {feeRows.length === 0 && otherPaymentRows.length === 0 && !showAddFee && (
                           <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, contract registration, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
                       </tbody>
-                      {(feeRows.length > 0 || otherPaymentRows.length > 0) && (
-                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross + otherGross)}</td><td colSpan={4} /></tr></tfoot>
-                      )}
                     </table>
 
                     {/* Add-fee form (admin-filled) */}
