@@ -22,6 +22,10 @@ function thCss(width: number): React.CSSProperties {
 const tdCss: React.CSSProperties = { padding: '6px 10px', fontSize: 12, borderBottom: '1px solid #f4f1ea', verticalAlign: 'middle' };
 
 export function SegregatedPlanView({ plan, style }: { plan: SegregatedPlan; style?: React.CSSProperties }) {
+  // The Payment Ref column only earns its place once a real cheque/transfer ref exists
+  // (contract, receipts). On proposals/previews every line is blank, so it's dropped and
+  // the remaining columns widen — no dead "—" column.
+  const showRef = plan.groups.some(g => g.lines.some(l => !!l.chequeNo));
   return (
     <div style={style}>
       {plan.groups.map(g => {
@@ -36,24 +40,24 @@ export function SegregatedPlanView({ plan, style }: { plan: SegregatedPlan; styl
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 380 }}>
                 <thead>
                   <tr>
-                    <th style={thCss(34)}>Item</th>
-                    <th style={thCss(30)}>Payment Ref</th>
-                    <th style={thCss(20)}>Due date</th>
-                    <th style={{ ...thCss(16), textAlign: 'right' }}>Amount</th>
+                    <th style={thCss(showRef ? 34 : 52)}>Item</th>
+                    {showRef && <th style={thCss(30)}>Payment Ref</th>}
+                    <th style={thCss(showRef ? 20 : 26)}>Due date</th>
+                    <th style={{ ...thCss(showRef ? 16 : 22), textAlign: 'right' }}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                   {g.lines.map((l, i) => (
                     <tr key={i}>
                       <td style={{ ...tdCss, fontWeight: 600 }}>{l.item}</td>
-                      <td style={{ ...tdCss, color: '#6b6860', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>{paymentRefLabel(l.chequeNo, l.method)}</td>
+                      {showRef && <td style={{ ...tdCss, color: '#6b6860', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>{paymentRefLabel(l.chequeNo, l.method)}</td>}
                       <td style={{ ...tdCss, color: '#6b6860' }}>{fmtD(l.dueDate)}</td>
                       <td style={{ ...tdCss, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{aed(l.amount)}</td>
                     </tr>
                   ))}
                   {g.lines.length > 1 && (
                     <tr>
-                      <td colSpan={3} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Total</td>
+                      <td colSpan={showRef ? 3 : 2} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Total</td>
                       <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, textAlign: 'right', fontWeight: 800, color: c.accent, fontVariantNumeric: 'tabular-nums' }}>{aed(g.total)}</td>
                     </tr>
                   )}
