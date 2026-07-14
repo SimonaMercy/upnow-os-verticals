@@ -1836,6 +1836,20 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'notes',     label: 'Notes',     icon: StickyNote },
 ];
 
+/** A segregation-group divider row inside the Payments/Fees tables — the same
+ *  Security Deposit / Rental Income / Management Fee / Third Party rail used by the
+ *  read-only plan view, so the working (editable) table reads in the same four groups. */
+function PaySegRail({ title, extra }: { title: string; extra?: React.ReactNode }) {
+  return (
+    <tr>
+      <td colSpan={7} style={{ borderLeft: '3px solid #1a5a4a', background: 'var(--jade-tint, #eef2f0)', fontWeight: 750, fontSize: 13, letterSpacing: '-.01em', padding: '8px 12px' }}>
+        {title}
+        {extra != null && <span className="note" style={{ float: 'right', fontWeight: 400 }}>{extra}</span>}
+      </td>
+    </tr>
+  );
+}
+
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
@@ -2112,11 +2126,12 @@ function DetailsDrawer({
     .sort((a, b) => (a.amount ?? 0) - (b.amount ?? 0));
   const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other');
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
-  // At-a-glance segregation of everything actually recorded (Security Deposit · Rental
-  // Income · Management Fee · Third Party) — the SAME four-group view as the plan, receipts
-  // and PDFs, surfaced inline above the working table so Payments reads against a clear
-  // picture. Built from the real payment rows, so cheque refs show here.
-  const paymentsSeg = buildSegregatedPlan(segRowsFromContract(contract, payments));
+  // Fees split into the two segregation groups so the working table reads in the SAME
+  // four sections as the plan/receipts: Admin + Commission → Management Fee; Ejari
+  // (Contract Registration) + cheque-charge penalties → Third Party (with 'other' charges).
+  const MGMT_FEE_TYPES = new Set(['admin_fee', 'commission']);
+  const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
+  const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
       : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
@@ -2471,15 +2486,10 @@ function DetailsDrawer({
                   )}
                 </div>
                 <div className="secb">
-                  {paymentsSeg.groups.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <SegregatedPlanView plan={paymentsSeg} />
-                    </div>
-                  )}
-                  <p className="subhead mut" style={{ margin: '0 0 6px' }}>Record &amp; manage</p>
                   <table className="ptable">
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
+                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" />}
                       {/* Security deposit folds in as the first payment row. When
                           the deposit is THIS contract's own payment it's editable;
                           a renewal that only carries the deposit gets a read-only
@@ -2702,6 +2712,7 @@ function DetailsDrawer({
                           </Fragment>
                         );
                       })()}
+                      <PaySegRail title="Rental Income" extra={rentScheduleRows.length ? `${rentScheduleRows.length} cheque${rentScheduleRows.length === 1 ? '' : 's'}` : undefined} />
                       {rentScheduleRows.map((p, i) => (
                         <Fragment key={p.id}>
                         <tr>
@@ -2848,8 +2859,10 @@ function DetailsDrawer({
                     <table className="ptable">
                       <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                       <tbody>
-                        {feeRows.map(f => (
+                        {[...managementFeeRows, ...thirdPartyFeeRows].map((f, i) => (
                           <Fragment key={f.id}>
+                          {i === 0 && managementFeeRows.length > 0 && <PaySegRail title="Management Fee" />}
+                          {i === managementFeeRows.length && thirdPartyFeeRows.length > 0 && <PaySegRail title="Third Party" />}
                           <tr>
                             <td>
                               {feeLabel(f.paymentType)}
@@ -2976,9 +2989,9 @@ function DetailsDrawer({
                           </Fragment>
                         ))}
                         {/* Custom "Other" charges (payment_type 'other') — per-unit taxes
-                            and service fees, shown here under Fees rather than in the rent
-                            schedule. They are payments, so they keep the payment status +
-                            edit controls (changeStatus / startEdit). */}
+                            and service fees, under Third Party. They are payments, so they
+                            keep the payment status + edit controls (changeStatus / startEdit). */}
+                        {thirdPartyFeeRows.length === 0 && otherPaymentRows.length > 0 && <PaySegRail title="Third Party" />}
                         {otherPaymentRows.map(p => (
                           <Fragment key={p.id}>
                           <tr>
