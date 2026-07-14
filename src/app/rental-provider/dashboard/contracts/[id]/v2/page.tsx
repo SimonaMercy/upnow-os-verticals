@@ -1836,6 +1836,22 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'notes',     label: 'Notes',     icon: StickyNote },
 ];
 
+/** Shared fixed column widths for BOTH payment tables (deposit/rent + fees) so
+ *  every section's columns — amounts especially — line up in one vertical grid. */
+function PayCols() {
+  return (
+    <colgroup>
+      <col style={{ width: '15%' }} />{/* # / Fee */}
+      <col style={{ width: '21%' }} />{/* Description */}
+      <col style={{ width: '12%' }} />{/* Amount */}
+      <col style={{ width: '14%' }} />{/* Reference */}
+      <col style={{ width: '10%' }} />{/* Method */}
+      <col style={{ width: '12%' }} />{/* Due date */}
+      <col style={{ width: '16%' }} />{/* Status */}
+    </colgroup>
+  );
+}
+
 /** A segregation-group divider row inside the Payments/Fees tables — the same
  *  Security Deposit / Rental Income / Management Fee / Third Party rail used by the
  *  read-only plan view, so the working (editable) table reads in the same four groups. */
@@ -2525,7 +2541,8 @@ function DetailsDrawer({
                   <span className="st">Payments</span>
                 </div>
                 <div className="secb">
-                  <table className="ptable">
+                  <table className="ptable" style={{ tableLayout: 'fixed' }}>
+                    <PayCols />
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
                       {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" />}
@@ -2878,7 +2895,8 @@ function DetailsDrawer({
                         </button>
                       </div>
                     )}
-                    <table className="ptable">
+                    <table className="ptable" style={{ tableLayout: 'fixed' }}>
+                      <PayCols />
                       <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                       <tbody>
                         {[...managementFeeRows, ...thirdPartyFeeRows].map((f, i) => (
@@ -6452,7 +6470,7 @@ function GlobalStyle() {
       @media (max-width: 520px) { .quest-page .grid2 { grid-template-columns: 1fr; } }
       .quest-page .ptable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
       .quest-page .ptable th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); font-weight: 700; padding: 8px 8px; border-bottom: 1px solid var(--mist-strong); }
-      .quest-page .ptable td { padding: 10px 8px; border-bottom: 1px solid var(--mist); color: var(--ink-2); }
+      .quest-page .ptable td { padding: 10px 8px; border-bottom: 1px solid var(--mist); color: var(--ink-2); overflow-wrap: anywhere; }
       .quest-page .ptable tr:last-child td { border-bottom: 0; }
       .quest-page .ptable .amt { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
       .quest-page .ptable tfoot td { border-top: 2px solid #bfe3d5; background: var(--jade-tint); font-weight: 800; }
