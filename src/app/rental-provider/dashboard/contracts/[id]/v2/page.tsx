@@ -1839,12 +1839,17 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
 /** A segregation-group divider row inside the Payments/Fees tables — the same
  *  Security Deposit / Rental Income / Management Fee / Third Party rail used by the
  *  read-only plan view, so the working (editable) table reads in the same four groups. */
-function PaySegRail({ title, extra }: { title: string; extra?: React.ReactNode }) {
+function PaySegRail({ title, extra, onAdd }: { title: string; extra?: React.ReactNode; onAdd?: () => void }) {
   return (
     <tr>
-      <td colSpan={7} style={{ borderLeft: '3px solid #1a5a4a', background: 'var(--jade-tint, #eef2f0)', fontWeight: 750, fontSize: 13, letterSpacing: '-.01em', padding: '8px 12px' }}>
-        {title}
-        {extra != null && <span className="note" style={{ float: 'right', fontWeight: 400 }}>{extra}</span>}
+      <td colSpan={7} style={{ borderLeft: '3px solid #1a5a4a', background: 'var(--jade-tint, #eef2f0)', padding: '6px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontWeight: 750, fontSize: 13, letterSpacing: '-.01em' }}>{title}</span>
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {extra != null && <span className="note" style={{ fontWeight: 400 }}>{extra}</span>}
+            {onAdd && <button type="button" className="mini-btn view" onClick={onAdd}><Plus size={11} /> Add</button>}
+          </span>
+        </div>
       </td>
     </tr>
   );
@@ -2157,7 +2162,6 @@ function DetailsDrawer({
   const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (f.amount || 0), 0);
   const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (f.amount || 0), 0) + otherGross;
-  const depositHeldAmt = depositRow?.amount ?? contract.securityDeposit?.amount ?? 0;
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
       : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
@@ -2266,6 +2270,17 @@ function DetailsDrawer({
     setFeeDeleteBusy(paymentId);
     try { await onDeletePayment(paymentId); }
     finally { setFeeDeleteBusy(null); }
+  };
+  // Per-section "Add" → open the right popup pre-typed for that segment. Deposit + rent
+  // use the payment popup; management + third-party fees use the fee popup (VAT-aware).
+  const openRecordFor = (paymentType: string) => {
+    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '' }));
+    setShowAddFee(false); setRecErr(null); setShowRec(true);
+  };
+  const openFeeFor = (paymentType: string) => {
+    const auto = feeAutoAmount(paymentType);
+    setFeeAdd({ ...emptyFeeForm, paymentType, ...(auto ? { amount: auto } : {}) });
+    setShowRec(false); setFeeAddErr(null); setShowAddFee(true);
   };
   // A bounced or cancelled cheque is void (it never cleared / was replaced by a new
   // cheque), so it must NOT count toward the rent total — otherwise it double-counts
@@ -2515,7 +2530,7 @@ function DetailsDrawer({
                   <table className="ptable">
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
-                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" />}
+                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" onAdd={perms.collections ? () => openRecordFor('security_deposit') : undefined} />}
                       {/* Security deposit folds in as the first payment row. When
                           the deposit is THIS contract's own payment it's editable;
                           a renewal that only carries the deposit gets a read-only
@@ -2738,8 +2753,7 @@ function DetailsDrawer({
                           </Fragment>
                         );
                       })()}
-                      {(depositRow || contract.securityDeposit) && <PaySegTotalRow label="Security Deposit total" amount={depositHeldAmt} />}
-                      <PaySegRail title="Rental Income" extra={rentScheduleRows.length ? `${rentScheduleRows.length} cheque${rentScheduleRows.length === 1 ? '' : 's'}` : undefined} />
+                      <PaySegRail title="Rental Income" extra={rentScheduleRows.length ? `${rentScheduleRows.length} cheque${rentScheduleRows.length === 1 ? '' : 's'}` : undefined} onAdd={perms.collections ? () => openRecordFor('rental_income') : undefined} />
                       {rentScheduleRows.map((p, i) => (
                         <Fragment key={p.id}>
                         <tr>
@@ -2845,7 +2859,7 @@ function DetailsDrawer({
                       {rentScheduleRows.length === 0 && (
                         <tr><td colSpan={7}><span className="note">No payments recorded yet.</span></td></tr>
                       )}
-                      {rentScheduleRows.length > 0 && (
+                      {rentScheduleRows.length > 1 && (
                         <PaySegTotalRow
                           label={showVat ? 'Rental Income total (incl. VAT)' : 'Rental Income total'}
                           amount={rentGross}
@@ -2879,8 +2893,8 @@ function DetailsDrawer({
                       <tbody>
                         {[...managementFeeRows, ...thirdPartyFeeRows].map((f, i) => (
                           <Fragment key={f.id}>
-                          {i === 0 && managementFeeRows.length > 0 && <PaySegRail title="Management Fee" />}
-                          {i === managementFeeRows.length && thirdPartyFeeRows.length > 0 && <PaySegRail title="Third Party" />}
+                          {i === 0 && managementFeeRows.length > 0 && <PaySegRail title="Management Fee" onAdd={perms.collections ? () => openFeeFor('admin_fee') : undefined} />}
+                          {i === managementFeeRows.length && thirdPartyFeeRows.length > 0 && <PaySegRail title="Third Party" onAdd={perms.collections ? () => openFeeFor('ejari_fee') : undefined} />}
                           <tr>
                             <td>
                               {feeLabel(f.paymentType)}
@@ -3004,13 +3018,13 @@ function DetailsDrawer({
                               </td>
                             </tr>
                           )}
-                          {i === managementFeeRows.length - 1 && managementFeeRows.length > 0 && <PaySegTotalRow label="Management Fee total" amount={managementFeeTotal} />}
+                          {i === managementFeeRows.length - 1 && managementFeeRows.length > 1 && <PaySegTotalRow label="Management Fee total" amount={managementFeeTotal} />}
                           </Fragment>
                         ))}
                         {/* Custom "Other" charges (payment_type 'other') — per-unit taxes
                             and service fees, under Third Party. They are payments, so they
                             keep the payment status + edit controls (changeStatus / startEdit). */}
-                        {thirdPartyFeeRows.length === 0 && otherPaymentRows.length > 0 && <PaySegRail title="Third Party" />}
+                        {thirdPartyFeeRows.length === 0 && otherPaymentRows.length > 0 && <PaySegRail title="Third Party" onAdd={perms.collections ? () => openFeeFor('ejari_fee') : undefined} />}
                         {otherPaymentRows.map(p => (
                           <Fragment key={p.id}>
                           <tr>
@@ -3100,17 +3114,22 @@ function DetailsDrawer({
                           )}
                           </Fragment>
                         ))}
-                        {(thirdPartyFeeRows.length > 0 || otherPaymentRows.length > 0) && <PaySegTotalRow label="Third Party total" amount={thirdPartyTotal} />}
+                        {(thirdPartyFeeRows.length + otherPaymentRows.length) > 1 && <PaySegTotalRow label="Third Party total" amount={thirdPartyTotal} />}
                         {feeRows.length === 0 && otherPaymentRows.length === 0 && !showAddFee && (
                           <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, contract registration, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
                       </tbody>
                     </table>
 
-                    {/* Add-fee form (admin-filled) */}
+                    {/* Add-fee popup (admin-filled) */}
                     {showAddFee && (
-                      <div style={{ marginTop: 12, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
-                        <p className="subhead">Add fee</p>
+                      <div className="mscrim" onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>
+                        <div className="modal sm" onClick={e => e.stopPropagation()}>
+                          <div className="mh">
+                            <span className="mt"><span className="mti" style={{ background: 'var(--jade)' }}><Plus size={16} /></span> Add fee</span>
+                            <button className="x" onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}><X size={17} /></button>
+                          </div>
+                          <div className="mb">
                         <div className="grid2">
                           <div className="field"><label>Fee type</label>
                             <select className="input" value={feeAdd.paymentType}
@@ -3154,20 +3173,25 @@ function DetailsDrawer({
                         </div>
                         <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed((Number(feeAdd.amount) || 0) + (Number(feeAdd.vatAmount) || 0))}</strong></p>
                         {feeAddErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{feeAddErr}</p>}
-                        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                          <button className="btn btn-jade btn-sm" disabled={feeAddBusy} onClick={() => void submitAddFee()}>
-                            <Check size={14} /> {feeAddBusy ? 'Adding…' : 'Add fee'}
-                          </button>
-                          <button className="btn btn-ghost btn-sm" disabled={feeAddBusy} onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>Cancel</button>
+                          </div>
+                          <div className="mf">
+                            <button className="btn btn-ghost btn-sm" disabled={feeAddBusy} onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>Cancel</button>
+                            <button className="btn btn-jade btn-sm" disabled={feeAddBusy} onClick={() => void submitAddFee()}><Check size={14} /> {feeAddBusy ? 'Adding…' : 'Add fee'}</button>
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Record-payment form (Flow 1) */}
+                  {/* Record-payment popup (Flow 1) */}
                   {showRec && (
-                    <div style={{ marginTop: 14, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
-                      <p className="subhead">New payment</p>
+                    <div className="mscrim" onClick={() => { setShowRec(false); setRecErr(null); }}>
+                      <div className="modal sm" onClick={e => e.stopPropagation()}>
+                        <div className="mh">
+                          <span className="mt"><span className="mti" style={{ background: 'var(--jade)' }}><CreditCard size={16} /></span> New payment</span>
+                          <button className="x" onClick={() => { setShowRec(false); setRecErr(null); }}><X size={17} /></button>
+                        </div>
+                        <div className="mb">
                       <div className="grid2">
                         <div className="field"><label>Type</label>
                           <select className="input" value={rec.paymentType} onChange={e => setRec(v => ({ ...v, paymentType: e.target.value }))}>
@@ -3206,11 +3230,11 @@ function DetailsDrawer({
                         <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
                       </div>
                       {recErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{recErr}</p>}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                        <button className="btn btn-jade btn-sm" disabled={recBusy || !rec.amount} onClick={() => void submitRec()}>
-                          <Check size={14} /> {recBusy ? 'Saving…' : 'Save payment'}
-                        </button>
-                        <button className="btn btn-ghost btn-sm" disabled={recBusy} onClick={() => { setShowRec(false); setRecErr(null); }}>Cancel</button>
+                        </div>
+                        <div className="mf">
+                          <button className="btn btn-ghost btn-sm" disabled={recBusy} onClick={() => { setShowRec(false); setRecErr(null); }}>Cancel</button>
+                          <button className="btn btn-jade btn-sm" disabled={recBusy || !rec.amount} onClick={() => void submitRec()}><Check size={14} /> {recBusy ? 'Saving…' : 'Save payment'}</button>
+                        </div>
                       </div>
                     </div>
                   )}
