@@ -213,12 +213,20 @@ const isRental = (p: SegPaymentInput) => RENTAL_TYPES.has(typeOf(p));
 const isAdmin = (p: SegPaymentInput) => typeOf(p) === 'admin_fee';
 const isCommission = (p: SegPaymentInput) => typeOf(p) === 'commission';
 const isEjari = (p: SegPaymentInput) => typeOf(p) === 'ejari_fee';
-// Third Party is the CATCH-ALL: everything that isn't the deposit, rent, or a
-// management fee (admin/commission/ejari) — VAT, "other" pass-throughs, sub-lease
-// charges, service charges, bounced-/replacement-/deferral-cheque fees, and any
-// future/unknown type. Nothing is dropped and rent is never inflated.
+// RP-charged penalties + mid-lease admin charges from Settings → Rules (migrations
+// 0136 + 0144) — Management Fee, like admin/commission (money the RP earns), NOT
+// third-party pass-through. Ejari (government) stays Third Party.
+const RULE_FEE_TYPES = new Set([
+  'bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee', 'late_renewal_fee',
+  'early_termination_fee', 'late_moveout_fee', 'unauthorized_sharing_fee', 'access_card_fee',
+  'contract_name_change_fee', 'unit_transfer_fee',
+]);
+const isManagementFee = (p: SegPaymentInput) => isAdmin(p) || isCommission(p) || RULE_FEE_TYPES.has(typeOf(p));
+// Third Party is the CATCH-ALL: everything that isn't the deposit, rent, a management
+// fee (admin/commission/penalties), or Ejari — VAT, "other" pass-throughs, sub-lease
+// charges, service charges, and any future/unknown type. Rent is never inflated.
 const isThirdParty = (p: SegPaymentInput) =>
-  !isDeposit(p) && !isRental(p) && !isAdmin(p) && !isCommission(p) && !isEjari(p);
+  !isDeposit(p) && !isRental(p) && !isManagementFee(p) && !isEjari(p);
 
 const GROUP_TITLE: Record<SegKey, string> = {
   deposit: 'Security Deposit',
@@ -266,8 +274,7 @@ export function buildSegregatedPlan(rows: SegPaymentInput[]): SegregatedPlan {
   const deposits = rows.filter(isDeposit).slice().sort(byDate);
   const rentals = rows.filter(isRental).slice().sort(byDate);
   const thirdParty = rows.filter(isThirdParty).slice().sort(byDate);
-  const admin = rows.filter(isAdmin).slice().sort(byDate);
-  const commission = rows.filter(isCommission).slice().sort(byDate);
+  const management = rows.filter(isManagementFee).slice().sort(byDate);
   const ejari = rows.filter(isEjari).slice().sort(byDate);
 
   // ── Security Deposit ──
@@ -281,11 +288,9 @@ export function buildSegregatedPlan(rows: SegPaymentInput[]): SegregatedPlan {
   // ── Ejari → Third Party in FULL (not split), always on TOP of the section ──
   const ejariLines: SegLine[] = ejari.map(p => lineOf(p, p.description || 'Contract Registration Fee', p.amount || 0));
 
-  // ── Management Fee ── (Admin, Commission)
-  const managementLines: SegLine[] = [
-    ...admin.map(p => lineOf(p, p.description || 'Admin Fee', p.amount || 0)),
-    ...commission.map(p => lineOf(p, p.description || 'Commission', p.amount || 0)),
-  ];
+  // ── Management Fee ── (Admin, Commission, + RP penalties / admin charges)
+  const managementLines: SegLine[] = management.map(p =>
+    lineOf(p, p.description || (isAdmin(p) ? 'Admin Fee' : isCommission(p) ? 'Commission' : 'Fee'), p.amount || 0));
 
   // ── Third Party ── (Ejari on top, then VAT / other pass-throughs, cheque-charge fees, …)
   const thirdLines: SegLine[] = [

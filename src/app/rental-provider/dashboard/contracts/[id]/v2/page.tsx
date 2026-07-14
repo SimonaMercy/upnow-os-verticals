@@ -1836,6 +1836,23 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'notes',     label: 'Notes',     icon: StickyNote },
 ];
 
+/** Every Settings → Rules penalty / admin charge, as an addable fee type. Each maps
+ *  to the per-RP config columns its amount auto-fills from (flat fee, % of rent,
+ *  N months of rent, or pro-rated daily). Grouped under Management Fee (RP-charged). */
+const RULE_FEE_DEFS: { pt: string; label: string; feeK: string; pctK: string; monthsK?: string; dailyK?: string }[] = [
+  { pt: 'bounced_cheque_fee', label: 'Bounced cheque', feeK: 'bouncedChequePenaltyFee', pctK: 'bouncedChequePenaltyPct' },
+  { pt: 'cheque_replacement_fee', label: 'Cheque hold / replacement', feeK: 'chequeHoldPenaltyFee', pctK: 'chequeHoldPenaltyPct' },
+  { pt: 'cheque_deferral_fee', label: 'Cheque deferral', feeK: 'chequeDeferralPenaltyFee', pctK: 'chequeDeferralPenaltyPct' },
+  { pt: 'late_renewal_fee', label: 'Late renewal', feeK: 'lateRenewalPenaltyFee', pctK: 'lateRenewalPenaltyPct' },
+  { pt: 'early_termination_fee', label: 'Early termination', feeK: 'earlyTerminationPenaltyFee', pctK: 'earlyTerminationPenaltyPct', monthsK: 'earlyTerminationPenaltyMonths' },
+  { pt: 'late_moveout_fee', label: 'Late move-out', feeK: 'lateMoveoutPenaltyFee', pctK: 'lateMoveoutPenaltyPct', dailyK: 'lateMoveoutPenaltyDaily' },
+  { pt: 'unauthorized_sharing_fee', label: 'Sharing without notice / NOC', feeK: 'unauthorizedSharingPenaltyFee', pctK: 'unauthorizedSharingPenaltyPct' },
+  { pt: 'access_card_fee', label: 'Access card / remote replacement', feeK: 'accessCardReplacementFee', pctK: 'accessCardReplacementPct' },
+  { pt: 'contract_name_change_fee', label: 'Contract name change', feeK: 'contractNameChangeFee', pctK: 'contractNameChangePct' },
+  { pt: 'unit_transfer_fee', label: 'Unit transfer', feeK: 'unitTransferFee', pctK: 'unitTransferPct' },
+];
+const RULE_FEE_LABELS: Record<string, string> = Object.fromEntries(RULE_FEE_DEFS.map(d => [d.pt, d.label]));
+
 /** Shared fixed column widths for BOTH payment tables (deposit/rent + fees) so
  *  every section's columns — amounts especially — line up in one vertical grid. */
 function PayCols() {
@@ -2173,7 +2190,9 @@ function DetailsDrawer({
   // Fees split into the two segregation groups so the working table reads in the SAME
   // four sections as the plan/receipts: Admin + Commission → Management Fee; Ejari
   // (Contract Registration) + cheque-charge penalties → Third Party (with 'other' charges).
-  const MGMT_FEE_TYPES = new Set(['admin_fee', 'commission']);
+  // Management Fee = RP-charged fees: admin + commission + every Rules penalty/charge.
+  // (Ejari / VAT / sub-lease / service charges stay Third Party — pass-through.)
+  const MGMT_FEE_TYPES = new Set<string>(['admin_fee', 'commission', ...RULE_FEE_DEFS.map(d => d.pt)]);
   const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   // Bounced / cancelled cheques are void — excluded from every section total and the
@@ -2184,45 +2203,57 @@ function DetailsDrawer({
   const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0) + otherActiveGross;
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
-      : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
+      : (t && RULE_FEE_LABELS[t]) ? RULE_FEE_LABELS[t]
       : (t ?? 'Fee');
   // ── Fees editor (admin-filled: admin / ejari / commission + cheque charges).
   //    Fees are never auto-fabricated — the RP enters them here. Amount is NET
   //    (excl. VAT); VAT is an optional separate figure; stored gross = net + VAT.
   //    The three cheque-charge types auto-fill their amount from Settings → Rules. ──
-  const FEE_TYPE_OPTIONS = [
-    { value: 'admin_fee', label: 'Admin fee' },
-    { value: 'ejari_fee', label: 'Contract Registration fee' },
-    { value: 'commission', label: 'Commission' },
-    { value: 'bounced_cheque_fee', label: 'Bounced cheque' },
-    { value: 'cheque_replacement_fee', label: 'Cheque replacement' },
-    { value: 'cheque_deferral_fee', label: 'Cheque deferral' },
-  ];
-  // Auto-fill amounts for the cheque-charge fee types, read once from the RP's
-  // penalty settings (bounced → bouncedChequePenaltyFee, replacement →
-  // chequeHoldPenaltyFee, deferral → chequeDeferralPenaltyFee). null = unset.
-  const [chequeFees, setChequeFees] = useState<Record<string, number | null>>({});
+  // The whole RP Rules config (all penalty / admin-charge fields) so every rule type
+  // can auto-fill its amount + show its basis in the Add-fee popup.
+  const [rpRules, setRpRules] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     let alive = true;
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => (r.ok ? r.json() : null))
-      .then((data: { profile?: Record<string, unknown> } | null) => {
-        const rp = data?.profile;   // GET returns { profile, checklist }
-        if (!alive || !rp) return;
-        const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
-        setChequeFees({
-          bounced_cheque_fee: num(rp.bouncedChequePenaltyFee),
-          cheque_replacement_fee: num(rp.chequeHoldPenaltyFee),
-          cheque_deferral_fee: num(rp.chequeDeferralPenaltyFee),
-        });
-      })
+      .then((data: { profile?: Record<string, unknown> } | null) => { if (alive) setRpRules(data?.profile ?? null); })
       .catch(() => undefined);
     return () => { alive = false; };
   }, []);
-  /** Configured flat AED amount for a cheque-charge fee type (as a form string), or ''. */
+  const annualRentForRules = contract.annualRent || 0;
+  /** Suggested amount + a short basis label for a Rules fee type, from the RP config +
+   *  this contract's rent: N months → months x monthly rent; daily → 0 (set at
+   *  settlement); else the greater of the flat fee and % of annual rent. */
+  const ruleSuggest = (pt: string): { amount: number; basis: string } => {
+    const def = RULE_FEE_DEFS.find(d => d.pt === pt);
+    if (!def || !rpRules) return { amount: 0, basis: '' };
+    const num = (k?: string) => (k && rpRules[k] != null && rpRules[k] !== '' ? Number(rpRules[k]) : 0);
+    const fee = num(def.feeK), pct = num(def.pctK), months = num(def.monthsK);
+    const daily = def.dailyK ? !!rpRules[def.dailyK] : false;
+    const aed = (n: number) => `AED ${Math.round(n).toLocaleString('en-AE')}`;
+    if (months > 0) return { amount: Math.round(months * annualRentForRules / 12), basis: `${months} mo of rent` };
+    if (daily) return { amount: 0, basis: 'per day of overstay' };
+    const pctAmt = pct > 0 ? Math.round(pct / 100 * annualRentForRules) : 0;
+    if (fee > 0 && fee >= pctAmt) return { amount: fee, basis: aed(fee) };
+    if (pctAmt > 0) return { amount: pctAmt, basis: `${pct}% of rent` };
+    return { amount: 0, basis: 'not set' };
+  };
+  const FEE_TYPE_OPTIONS = [
+    { value: 'admin_fee', label: 'Admin fee' },
+    { value: 'ejari_fee', label: 'Contract Registration fee' },
+    { value: 'commission', label: 'Commission' },
+    ...RULE_FEE_DEFS.map(d => ({ value: d.pt, label: d.label })),
+  ];
+  /** Auto-filled amount (form string) for a fee type from Settings → Rules, or ''. */
   const feeAutoAmount = (t: string): string => {
-    const v = chequeFees[t];
-    return v != null && v > 0 ? String(v) : '';
+    const a = ruleSuggest(t).amount;
+    return a > 0 ? String(a) : '';
+  };
+  /** Dropdown label with the rule's basis + amount, e.g. "Early termination · 3 mo of rent (AED 25,000)". */
+  const feeOptionLabel = (t: string, base: string): string => {
+    const { amount, basis } = ruleSuggest(t);
+    if (!basis) return base;
+    return amount > 0 ? `${base} · ${basis}` : `${base} · ${basis}`;
   };
   const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '', paymentMethod: 'cheque', chequeNumber: '' };
   const [showAddFee, setShowAddFee] = useState(false);
@@ -2984,7 +3015,7 @@ function DetailsDrawer({
                                         const nt = e.target.value;
                                         setFeeEdit(v => { const auto = feeAutoAmount(nt); return { ...v, paymentType: nt, ...(auto ? { amount: auto } : {}) }; });
                                       }}>
-                                      {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                      {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{feeOptionLabel(o.value, o.label)}</option>)}
                                     </select>
                                     {feeAutoAmount(feeEdit.paymentType) && <p className="note" style={{ marginTop: 2 }}>Amount auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeEdit.paymentType)))}). Editable.</p>}
                                   </div>
@@ -3151,7 +3182,7 @@ function DetailsDrawer({
                                 const nt = e.target.value;
                                 setFeeAdd(v => { const auto = feeAutoAmount(nt); return { ...v, paymentType: nt, ...(auto ? { amount: auto } : {}) }; });
                               }}>
-                              {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                              {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{feeOptionLabel(o.value, o.label)}</option>)}
                             </select>
                             {feeAutoAmount(feeAdd.paymentType) && <p className="note" style={{ marginTop: 2 }}>Auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeAdd.paymentType)))}). Editable.</p>}
                           </div>
