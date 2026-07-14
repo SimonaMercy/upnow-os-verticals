@@ -2292,6 +2292,9 @@ function DetailsDrawer({
   const rentVat   = rentScheduleRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
+  // Everything on the contract, all four segments summed — the single figure the RP/manager
+  // reads at settlement (deposit is included as it is collected, though refundable).
+  const paymentsGrandTotal = (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0) + rentGross + feeGross + otherGross;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
   //    assembled from the contract's recorded rent cheques, fees, and deposit.
   //    Replaces the old origin-lead "offer" snapshot in the receipt modal.
@@ -2520,11 +2523,6 @@ function DetailsDrawer({
                 <div className="sech">
                   <span className="si"><CreditCard size={16} /></span>
                   <span className="st">Payments</span>
-                  {perms.collections && (
-                    <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
-                      {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
-                    </button>
-                  )}
                 </div>
                 <div className="secb">
                   <table className="ptable">
@@ -2873,21 +2871,13 @@ function DetailsDrawer({
                       separate from the rent schedule above. Admin-filled: the RP
                       adds / edits / removes them here; nothing is auto-fabricated. */}
                   <div style={{ marginTop: 18 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
-                      <p className="subhead" style={{ margin: 0 }}>
-                        Fees <span className="note" style={{ fontWeight: 400 }}>· one-off charges, separate from rent</span>
-                      </p>
-                      {perms.collections && (
-                        <button
-                          type="button"
-                          className="mini-btn view"
-                          title="Add a fee line"
-                          onClick={() => { setShowAddFee(v => !v); setFeeAddErr(null); }}
-                        >
+                    {perms.collections && (feeRows.length === 0 && otherPaymentRows.length === 0) && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 6 }}>
+                        <button type="button" className="mini-btn view" title="Add a fee line" onClick={() => openFeeFor('admin_fee')}>
                           <Plus size={12} /> Add fee
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                     <table className="ptable">
                       <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                       <tbody>
@@ -3181,6 +3171,12 @@ function DetailsDrawer({
                         </div>
                       </div>
                     )}
+                  </div>
+
+                  {/* Grand total — all four segments summed (deposit · rent · management · third party) */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
+                    <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(paymentsGrandTotal)}</span>
                   </div>
 
                   {/* Record-payment popup (Flow 1) */}
