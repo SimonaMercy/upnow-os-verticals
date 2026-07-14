@@ -47,7 +47,8 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
-import { segRowsFromContract } from '@/lib/segregatedPlan';
+import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
@@ -4430,6 +4431,21 @@ function RenewalProposeModal({
   const totalVat = rows.reduce((s, r) => s + r.vat, 0);
   const total = rows.reduce((s, r) => s + r.net + r.vat, 0);
 
+  // Segregated four-group preview — same shared view as the contract, receipts, PDFs,
+  // lead, creation and edit. Classify each planned row by its key: rent instalments →
+  // Rental Income; rental-VAT cheques + extras → Third Party; admin/Ejari/commission →
+  // Management/Third Party. (Renewals carry the deposit forward, so no deposit row.)
+  const seg = buildSegregatedPlan(rows.map((r): SegPaymentInput => {
+    const paymentType =
+      r.key.startsWith('rv') ? 'other'
+      : r.key.startsWith('r') ? 'rental_income'
+      : r.key === 'admin' ? 'admin_fee'
+      : r.key === 'ejari' ? 'ejari_fee'
+      : r.key === 'comm' ? 'commission'
+      : 'other';
+    return { paymentType, description: r.d, amount: r.net + r.vat, transactionDate: r.date || null };
+  }));
+
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
@@ -4568,25 +4584,10 @@ function RenewalProposeModal({
           {rows.length > 0 && (
             <>
               <p className="subhead mut" style={{ marginTop: 14 }}>Planned schedule</p>
-              <table className="ptable" style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, overflow: 'hidden' }}>
-                <thead><tr><th>#</th><th>Description</th><th>Due date</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
-                <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={r.key}>
-                      <td>{i + 1}</td>
-                      <td>{r.d}{r.vat > 0 && <span className="note mut"> · incl. VAT {r.vat.toLocaleString('en-AE')}</span>}</td>
-                      <td>{r.date ? fmtDate(r.date) : '—'}</td>
-                      <td className="amt" style={{ textAlign: 'right' }}>{(r.net + r.vat).toLocaleString('en-AE')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  {totalVat > 0 && (
-                    <tr><td colSpan={3} style={{ color: 'var(--mute)' }}>of which VAT</td><td className="amt" style={{ textAlign: 'right', color: 'var(--mute)' }}>{totalVat.toLocaleString('en-AE')}</td></tr>
-                  )}
-                  <tr><td colSpan={3}>Total</td><td className="tot" style={{ textAlign: 'right' }}>{total.toLocaleString('en-AE')}</td></tr>
-                </tfoot>
-              </table>
+              <SegregatedPlanView plan={seg} />
+              {totalVat > 0 && (
+                <p className="note mut" style={{ marginTop: 6 }}>Rent cheques are net; VAT of {totalVat.toLocaleString('en-AE')} is collected as its own cheque(s), shown under Third Party.</p>
+              )}
               {chequeDays.length === 0 && (
                 <p className="note mut" style={{ marginTop: 6 }}>Tip: set preferred cheque days in Settings → Rules to standardise due dates.</p>
               )}
