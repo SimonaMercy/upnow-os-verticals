@@ -2112,6 +2112,11 @@ function DetailsDrawer({
     .sort((a, b) => (a.amount ?? 0) - (b.amount ?? 0));
   const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other');
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
+  // At-a-glance segregation of everything actually recorded (Security Deposit · Rental
+  // Income · Management Fee · Third Party) — the SAME four-group view as the plan, receipts
+  // and PDFs, surfaced inline above the working table so Payments reads against a clear
+  // picture. Built from the real payment rows, so cheque refs show here.
+  const paymentsSeg = buildSegregatedPlan(segRowsFromContract(contract, payments));
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
       : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
@@ -2466,6 +2471,12 @@ function DetailsDrawer({
                   )}
                 </div>
                 <div className="secb">
+                  {paymentsSeg.groups.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <SegregatedPlanView plan={paymentsSeg} />
+                    </div>
+                  )}
+                  <p className="subhead mut" style={{ margin: '0 0 6px' }}>Record &amp; manage</p>
                   <table className="ptable">
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
