@@ -13,7 +13,6 @@
  * Searching params: ?unitId=X pre-selects a unit (linked from portfolio page).
  */
 'use client';
-import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -22,6 +21,8 @@ import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2, Sen
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
+import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { buildSegregatedPlan, segRowsFromCustomerPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -95,13 +96,6 @@ function addMonths(dateStr: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Format a YYYY-MM-DD due date (from buildInstallmentDueDates) for display. */
-function fmtDueDate(iso: string): string {
-  if (!iso) return '';
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-AE', {
-    timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric',
-  });
-}
 
 function calcDurationLabel(start: string, end: string): string {
   if (!start || !end) return '—';
@@ -648,6 +642,29 @@ export default function NewContractPage() {
     form.contractStartDate, form.contractEndDate, installments, preferredChequeDays,
   );
 
+  // Segregated four-group preview (Deposit · Rental Income · Management Fee · Third
+  // Party) — the SAME shared view as the contract, receipts, PDFs, lead and edit form.
+  // From a lead: mirror the issued plan's exact items (bundle, extras, deposit). Else:
+  // even-split the rent with a separate VAT line, matching the contract's own summary.
+  const previewSeg = buildSegregatedPlan((() => {
+    if (planFromLead) return segRowsFromCustomerPlan(planFromLead);
+    const rows: SegPaymentInput[] = [];
+    for (let i = 0; i < installments; i++) {
+      rows.push({
+        paymentType: 'rental_income',
+        description: installments > 1 ? `Instalment ${i + 1} of ${installments}` : 'Rent',
+        amount: chequeAmount,
+        transactionDate: previewDueDates[i] ?? null,
+      });
+    }
+    if (rentVat > 0) rows.push({ paymentType: 'other', description: 'VAT on rent (5%)', amount: rentVat });
+    if (secDeposit > 0) rows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: secDeposit });
+    if (adminFee > 0) rows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: adminFee });
+    if (commission > 0) rows.push({ paymentType: 'commission', description: 'Commission', amount: commission });
+    if (ejariFee > 0) rows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: ejariFee });
+    return rows;
+  })());
+
   // ─── Success screen ───────────────────────────────────────────────────────
 
   if (success) {
@@ -1157,91 +1174,10 @@ export default function NewContractPage() {
                 </div>
               </div>
 
-              {/* Cheque schedule — mirrors the lead's issued plan when available (covers bundle, all installments,
-                  extras and the security deposit). Falls back to a simple even split when no plan is present. */}
-              {planFromLead ? (() => {
-                const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
-                const sorted = planFromLead.items.slice().sort((a, b) => {
-                  if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-                  return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
-                });
-                return (
-                  <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
-                    <div className="bg-[#f0f9ff] px-4 py-2 border-b border-[#e8e6e0] flex items-center justify-between">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#0369a1]">Cheque Schedule (from issued plan)</span>
-                      <span className="text-[10px] text-[#6b6860]">{planFromLead.chequeCount} cheques</span>
-                    </div>
-                    <div className="grid grid-cols-12 bg-[#f4f3ef] px-4 py-2 border-b border-[#e8e6e0] text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">
-                      <span className="col-span-1">#</span>
-                      <span className="col-span-6">Description</span>
-                      <span className="col-span-2">Due Date</span>
-                      <span className="col-span-3 text-right">Amount</span>
-                    </div>
-                    {sorted.map((it, i) => (
-                      <div key={`${it.index}-${i}`} className={`grid grid-cols-12 px-4 py-2.5 items-center ${i < sorted.length - 1 ? 'border-b border-[#f0ede8]' : ''} ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}>
-                        <span className="col-span-1 text-xs text-[#9b9890]">{i + 1}</span>
-                        <span className="col-span-6 text-xs text-[#1a1916] truncate">{it.description ?? `Cheque ${i + 1}`}</span>
-                        <span className="col-span-2 text-xs text-[#6b6860]">{it.dueDate}</span>
-                        <span className="col-span-3 text-sm font-bold text-[#2e9f82] text-right">{fmtAed(it.amountFils / 100)}</span>
-                      </div>
-                    ))}
-                    <div className="grid grid-cols-12 px-4 py-2.5 bg-[#f0faf6] border-t-2 border-[#c5e8df]">
-                      <span className="col-span-9 text-xs font-semibold text-[#1a1916]">Contract Value ({planFromLead.chequeCount} cheques)</span>
-                      <span className="col-span-3 text-sm font-bold text-[#1a1916] text-right">{fmtAed(planFromLead.totalAmountFils / 100)}</span>
-                    </div>
-                  </div>
-                );
-              })() : annualRent > 0 && (
-                <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
-                  <div className="grid grid-cols-4 bg-[#f4f3ef] px-4 py-2 border-b border-[#e8e6e0]">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">#</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">Cheque</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">Due Date</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] text-right">Amount</span>
-                  </div>
-                  {Array.from({ length: installments }, (_, i) => (
-                    <div
-                      key={i}
-                      className={`grid grid-cols-4 px-4 py-2.5 items-center ${i < installments - 1 ? 'border-b border-[#f0ede8]' : ''} ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}
-                    >
-                      <span className="text-xs text-[#9b9890]">{i + 1}</span>
-                      <span className="text-xs text-[#6b6860]">Cheque {i + 1}</span>
-                      <span className="text-xs text-[#6b6860]">
-                        {form.contractStartDate && previewDueDates[i]
-                          ? fmtDueDate(previewDueDates[i])
-                          : <span className="text-[#c0bdb8]">Set start date</span>}
-                      </span>
-                      <span className="text-sm font-bold text-[#2e9f82] text-right">{fmtAed(chequeAmount)}</span>
-                    </div>
-                  ))}
-                  {/* Rent VAT collected as its own cheque(s). Mirrors the backend split
-                      (Settings → Rules): annual = one Rental VAT cheque for the year on
-                      the first rent date; installment = one beside each rent cheque. */}
-                  {rentVat > 0 && (rentVatMode === 'annual' ? (
-                    <div className="grid grid-cols-4 px-4 py-2 items-center bg-[#fdf7ea]">
-                      <span className="text-xs text-[#9b9890]">{installments + 1}</span>
-                      <span className="text-xs text-[#8a6d1f]">Rental VAT (5%)</span>
-                      <span className="text-xs text-[#8a6d1f]">
-                        {form.contractStartDate && previewDueDates[0] ? fmtDueDate(previewDueDates[0]) : <span className="text-[#c0bdb8]">Set start date</span>}
-                      </span>
-                      <span className="text-sm font-bold text-[#8a6d1f] text-right">{fmtAed(rentVat)}</span>
-                    </div>
-                  ) : Array.from({ length: installments }, (_, i) => (
-                    <div key={`v${i}`} className={`grid grid-cols-4 px-4 py-2 items-center bg-[#fdf7ea] ${i < installments - 1 ? 'border-b border-[#f7ecc8]' : ''}`}>
-                      <span className="text-xs text-[#9b9890]">{installments + i + 1}</span>
-                      <span className="text-xs text-[#8a6d1f]">Rental VAT {i + 1} of {installments} (5%)</span>
-                      <span className="text-xs text-[#8a6d1f]">
-                        {form.contractStartDate && previewDueDates[i] ? fmtDueDate(previewDueDates[i]) : <span className="text-[#c0bdb8]">Set start date</span>}
-                      </span>
-                      <span className="text-sm font-bold text-[#8a6d1f] text-right">{fmtAed(Math.round((rentVat / installments) * 100) / 100)}</span>
-                    </div>
-                  )))}
-                  <div className="grid grid-cols-4 px-4 py-2.5 bg-[#f0faf6] border-t-2 border-[#c5e8df]">
-                    <span className="col-span-3 text-xs font-semibold text-[#1a1916]">Total ({installments} cheque{installments === 1 ? '' : 's'}{rentVat > 0 ? ' + VAT' : ''})</span>
-                    <span className="text-sm font-bold text-[#1a1916] text-right">{fmtAed(annualRent + rentVat)}</span>
-                  </div>
-                </div>
-              )}
+              {/* Cheque schedule — the shared segregated four-group view. From a lead it
+                  mirrors the issued plan's exact items (bundle, extras, deposit); otherwise
+                  it even-splits the rent with a separate VAT line, matching the contract. */}
+              {(planFromLead || annualRent > 0) && <SegregatedPlanView plan={previewSeg} />}
 
               {/* Custom Clauses */}
               <div>
