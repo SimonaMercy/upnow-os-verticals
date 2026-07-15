@@ -57,6 +57,12 @@ export default function CustomerServicesPage() {
   const [reportTitle, setReportTitle] = useState('');
   const [reportBody, setReportBody] = useState('');
   const [reporting, setReporting] = useState(false);
+  const [reviews, setReviews] = useState<Record<number, { rating: number }>>({});
+  const [reviewFor, setReviewFor] = useState<number | null>(null);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHover, setReviewHover] = useState(0);
+  const [reviewBody, setReviewBody] = useState('');
+  const [reviewing, setReviewing] = useState(false);
 
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
@@ -65,7 +71,14 @@ export default function CustomerServicesPage() {
         setBookings(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
       .catch(() => setBookings([]));
 
-  useEffect(() => { load().finally(() => setLoading(false)); }, []);
+  const loadReviews = () =>
+    fetch('/api/reviews/written', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<{ bookingId: number; rating: number }>) =>
+        setReviews(Object.fromEntries((Array.isArray(rows) ? rows : []).map((x) => [x.bookingId, { rating: x.rating }]))))
+      .catch(() => {});
+
+  useEffect(() => { load().finally(() => setLoading(false)); loadReviews(); }, []);
 
   const toggleDetail = async (id: number) => {
     if (openId === id) { setOpenId(null); return; }
@@ -149,6 +162,26 @@ export default function CustomerServicesPage() {
       setError(e instanceof Error ? e.message : 'Could not submit your report');
     } finally {
       setReporting(false);
+    }
+  };
+
+  const submitReview = async () => {
+    if (reviewFor == null || reviewRating < 1) return;
+    setReviewing(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: reviewFor, rating: reviewRating, body: reviewBody.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not submit');
+      setReviews((prev) => ({ ...prev, [reviewFor]: { rating: reviewRating } }));
+      setReviewFor(null); setReviewRating(0); setReviewHover(0); setReviewBody('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not submit your review');
+    } finally {
+      setReviewing(false);
     }
   };
 
@@ -294,14 +327,31 @@ export default function CustomerServicesPage() {
                       </button>
                     )}
                     {b.status === 'completed' && (
-                      <button
-                        type="button"
-                        onClick={() => { setReportFor(b.id); setReportTitle(''); setReportBody(''); }}
-                        className="mt-4 ml-2 text-xs font-semibold px-3.5 py-2 rounded-lg border"
-                        style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
-                      >
-                        Report an issue
-                      </button>
+                      <div className="mt-4 flex items-center gap-2 flex-wrap">
+                        {reviews[b.id] ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#1a7a5a' }}>
+                            <span style={{ color: '#f59e0b', letterSpacing: '1px' }}>{'★'.repeat(reviews[b.id].rating)}{'☆'.repeat(5 - reviews[b.id].rating)}</span>
+                            <span className="font-normal" style={{ color: 'var(--color-neutral-500)' }}>You rated this</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { setReviewFor(b.id); setReviewRating(0); setReviewHover(0); setReviewBody(''); }}
+                            className="text-xs font-semibold px-3.5 py-2 rounded-lg text-white"
+                            style={{ background: 'var(--color-primary)' }}
+                          >
+                            Leave a review
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => { setReportFor(b.id); setReportTitle(''); setReportBody(''); }}
+                          className="text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                          style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+                        >
+                          Report an issue
+                        </button>
+                      </div>
                     )}
                     {b.status === 'dispute' && (
                       <p className="mt-4 text-xs" style={{ color: '#92400e' }}>
@@ -335,6 +385,45 @@ export default function CustomerServicesPage() {
               <button onClick={() => setReportFor(null)} className="text-xs font-semibold px-3.5 py-2 rounded-lg border" style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-500)' }}>Cancel</button>
               <button onClick={submitReport} disabled={reporting || !reportTitle.trim()} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ backgroundColor: 'var(--color-primary)', opacity: reporting || !reportTitle.trim() ? 0.5 : 1 }}>
                 {reporting ? 'Submitting…' : 'Submit report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviewFor != null && (
+        <div onClick={() => setReviewFor(null)} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,20,18,.45)' }}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl p-5 w-full max-w-md" style={{ border: '1px solid var(--color-base-200)' }}>
+            <h2 className="text-base font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Rate your service</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-500)' }}>How was your experience with BK-{reviewFor}? Your rating helps other customers.</p>
+            <div className="flex items-center gap-1 mt-4" onMouseLeave={() => setReviewHover(0)}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n} type="button"
+                  onMouseEnter={() => setReviewHover(n)}
+                  onClick={() => setReviewRating(n)}
+                  className="text-3xl leading-none"
+                  style={{ color: (reviewHover || reviewRating) >= n ? '#f59e0b' : 'var(--color-base-200)', cursor: 'pointer' }}
+                  aria-label={`${n} star${n > 1 ? 's' : ''}`}
+                >
+                  ★
+                </button>
+              ))}
+              {reviewRating > 0 && (
+                <span className="ml-2 text-xs font-semibold" style={{ color: 'var(--color-neutral-500)' }}>
+                  {['', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'][reviewRating]}
+                </span>
+              )}
+            </div>
+            <textarea
+              value={reviewBody} onChange={(e) => setReviewBody(e.target.value)}
+              placeholder="Tell others about your experience (optional)" rows={3}
+              className="w-full mt-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--color-base-200)' }}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setReviewFor(null)} className="text-xs font-semibold px-3.5 py-2 rounded-lg border" style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-500)' }}>Cancel</button>
+              <button onClick={submitReview} disabled={reviewing || reviewRating < 1} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ backgroundColor: 'var(--color-primary)', opacity: reviewing || reviewRating < 1 ? 0.5 : 1 }}>
+                {reviewing ? 'Submitting…' : 'Submit review'}
               </button>
             </div>
           </div>

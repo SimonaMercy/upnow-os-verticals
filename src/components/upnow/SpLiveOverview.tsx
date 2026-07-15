@@ -149,6 +149,7 @@ export function SpLiveOverview({ businessName }: { businessName?: string | null 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [pendingInvites, setPendingInvites] = useState(0);
+  const [rating, setRating] = useState<{ averageRating: number | null; totalReviews: number }>({ averageRating: null, totalReviews: 0 });
   const [granularity, setGranularity] = useState<'weekly' | 'monthly'>('weekly');
   // Captured once per mount (empty deps) rather than read fresh during render.
   const now = useMemo(() => new Date(), []);
@@ -157,6 +158,8 @@ export function SpLiveOverview({ businessName }: { businessName?: string | null 
     apiGet<unknown>('/bookings').then(d => setBookings(asArray<Booking>(d))).catch(() => {});
     apiGet<unknown>('/team/technicians').then(d => setTechnicians(asArray<Technician>(d))).catch(() => {});
     apiGet<unknown>('/invitations?status=pending').then(d => setPendingInvites(asArray(d).length)).catch(() => {});
+    apiGet<{ summary?: { averageRating: number | null; totalReviews: number } }>('/reviews/mine')
+      .then(d => { if (d?.summary) setRating(d.summary); }).catch(() => {});
   }, []);
 
   const todayKey = dubaiDayKey(now);
@@ -332,8 +335,9 @@ export function SpLiveOverview({ businessName }: { businessName?: string | null 
           trend={<b style={{ color: earned30 > 0 && earned30 >= earnedPrev30 ? GREEN : undefined }}>{earningsTrend}</b>}
         />
         <Kpi
-          label="Rating" icon={Star} value="—"
-          trend="No reviews yet"
+          label="Rating" icon={Star}
+          value={rating.averageRating != null ? rating.averageRating.toFixed(1) : '—'}
+          trend={rating.totalReviews > 0 ? `${rating.totalReviews} review${rating.totalReviews === 1 ? '' : 's'}` : 'No reviews yet'}
         />
       </div>
 
