@@ -61,15 +61,22 @@ export default function AdminOperationsPage() {
     return (id: number | null) => (id ? m.get(id) ?? `Provider #${id}` : null);
   }, [providers]);
 
+  // Paid-but-unplaced jobs AND quote-priced bookings still awaiting a callout
+  // provider — both are things the auto-matcher couldn't place and Ops must
+  // action. A callout (BOOKED quote) is placed provider-only (no technician).
   const needsAssignment = bookings.filter((b) => b.status === 'confirmed' && !b.serviceProviderId);
+  const needsCallout = bookings.filter((b) => b.status === 'booked' && b.pricingMode === 'quote' && !b.serviceProviderId);
+  const needsPlacement = [...needsAssignment, ...needsCallout];
   const chosenProvider = providers.find((p) => p.id === spId);
+  const assignBooking = assignId != null ? bookings.find((b) => b.id === assignId) ?? null : null;
+  const isCallout = assignBooking?.status === 'booked';
 
   const openAssign = (id: number) => { setAssignId(id); setSpId(''); setTechId(''); };
   const submitAssign = async () => {
-    if (!assignId || !spId || !techId) return;
+    if (!assignId || !spId || (!isCallout && !techId)) return;
     setBusy(true);
     try {
-      await apiPatch(`/bookings/${assignId}/assign`, { serviceProviderId: spId, technicianId: techId });
+      await apiPatch(`/bookings/${assignId}/assign`, isCallout ? { serviceProviderId: spId } : { serviceProviderId: spId, technicianId: techId });
       setAssignId(null);
       await load();
     } catch (e) {
@@ -87,24 +94,27 @@ export default function AdminOperationsPage() {
 
       {error && <div style={{ marginTop: 12, background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
 
-      {/* Needs-assignment queue */}
-      <div style={card({ marginTop: 18, overflow: 'hidden', borderColor: needsAssignment.length ? '#f3c6c6' : '#ececea' })}>
+      {/* Needs-placement queue: paid-unassigned + quote callouts the matcher couldn't place */}
+      <div style={card({ marginTop: 18, overflow: 'hidden', borderColor: needsPlacement.length ? '#f3c6c6' : '#ececea' })}>
         <div style={{ padding: '13px 18px', borderBottom: BORDER, display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>Needs assignment</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: needsAssignment.length ? '#991b1b' : PRIMARY, background: needsAssignment.length ? '#fee2e2' : '#e7f3ec', borderRadius: 999, padding: '2px 9px' }}>{needsAssignment.length}</span>
-          <span style={{ fontSize: 12.5, color: FAINT, marginLeft: 'auto' }}>Paid bookings the matcher couldn&apos;t place</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: needsPlacement.length ? '#991b1b' : PRIMARY, background: needsPlacement.length ? '#fee2e2' : '#e7f3ec', borderRadius: 999, padding: '2px 9px' }}>{needsPlacement.length}</span>
+          <span style={{ fontSize: 12.5, color: FAINT, marginLeft: 'auto' }}>Bookings the auto-matcher couldn&apos;t place</span>
         </div>
-        {needsAssignment.length === 0 ? (
-          <div style={{ padding: '22px 18px', color: FAINT, fontSize: 14 }}>All paid bookings are placed. 🎉</div>
-        ) : needsAssignment.map((b) => (
-          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: '1px solid #f6f6f4' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, color: INK, fontSize: 14 }}>{b.serviceName ?? 'Service'} <span style={{ color: FAINT, fontWeight: 400, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>BK-{b.id}</span></div>
-              <div style={{ fontSize: 12.5, color: MUTE, marginTop: 2 }}>{b.tenant?.user?.name ?? 'Customer'} · {fmtWhen(b.scheduledAt)} · {aed(b.totalAmount)}</div>
+        {needsPlacement.length === 0 ? (
+          <div style={{ padding: '22px 18px', color: FAINT, fontSize: 14 }}>Every booking is placed. 🎉</div>
+        ) : needsPlacement.map((b) => {
+          const callout = b.status === 'booked';
+          return (
+            <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: '1px solid #f6f6f4' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: INK, fontSize: 14 }}>{b.serviceName ?? 'Service'} <span style={{ color: FAINT, fontWeight: 400, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>BK-{b.id}</span>{callout && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 999, padding: '2px 7px', textTransform: 'uppercase', letterSpacing: '.04em' }}>Quote callout</span>}</div>
+                <div style={{ fontSize: 12.5, color: MUTE, marginTop: 2 }}>{b.tenant?.user?.name ?? 'Customer'} · {fmtWhen(b.scheduledAt)} · {callout ? 'Quote on assessment' : aed(b.totalAmount)}</div>
+              </div>
+              <button onClick={() => openAssign(b.id)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 15px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{callout ? 'Place callout' : 'Assign'}</button>
             </div>
-            <button onClick={() => openAssign(b.id)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 15px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Assign</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* All bookings */}
@@ -123,7 +133,7 @@ export default function AdminOperationsPage() {
               {bookings.map((b, i) => {
                 const st = STATUS[b.status] ?? STATUS.booked;
                 const pName = providerName(b.serviceProviderId);
-                const canAssign = ['confirmed', 'assigned'].includes(b.status);
+                const canAssign = ['confirmed', 'assigned'].includes(b.status) || (b.status === 'booked' && b.pricingMode === 'quote');
                 return (
                   <tr key={b.id} style={{ borderTop: i === 0 ? BORDER : '1px solid #f6f6f4', color: INK }}>
                     <td style={{ padding: '11px 18px' }}><span style={{ fontWeight: 600 }}>{b.serviceName ?? 'Service'}</span> <span style={{ color: FAINT, fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>BK-{b.id}</span></td>
@@ -132,7 +142,7 @@ export default function AdminOperationsPage() {
                     <td style={{ padding: '11px 18px' }}><span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: st.bg, color: st.fg, whiteSpace: 'nowrap' }}>{st.label}</span></td>
                     <td style={{ padding: '11px 18px', color: pName ? INK : FAINT }}>{pName ?? 'Unassigned'}</td>
                     <td style={{ padding: '11px 18px', textAlign: 'right' }}>
-                      {canAssign && <button onClick={() => openAssign(b.id)} style={{ background: 'none', border: BORDER, borderRadius: 8, padding: '5px 11px', fontSize: 12.5, fontWeight: 600, color: PRIMARY, cursor: 'pointer' }}>{b.serviceProviderId ? 'Reassign' : 'Assign'}</button>}
+                      {canAssign && <button onClick={() => openAssign(b.id)} style={{ background: 'none', border: BORDER, borderRadius: 8, padding: '5px 11px', fontSize: 12.5, fontWeight: 600, color: PRIMARY, cursor: 'pointer' }}>{b.serviceProviderId ? 'Reassign' : (b.status === 'booked' ? 'Place callout' : 'Assign')}</button>}
                     </td>
                   </tr>
                 );
@@ -146,22 +156,27 @@ export default function AdminOperationsPage() {
       {assignId != null && (
         <div onClick={() => setAssignId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,18,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
           <div onClick={(e) => e.stopPropagation()} style={card({ width: 440, maxWidth: '100%', padding: 22 })}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: INK }}>Assign a provider</div>
-            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>BK-{assignId} — pick a provider and one of their technicians.</p>
+            <div style={{ fontSize: 16, fontWeight: 700, color: INK }}>{isCallout ? 'Place a callout provider' : 'Assign a provider'}</div>
+            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>{isCallout ? `BK-${assignId} — the provider assesses the job and sends the customer a quote. A technician is chosen later, at quote approval.` : `BK-${assignId} — pick a provider and one of their technicians.`}</p>
 
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: MUTE, marginTop: 16 }}>Provider</label>
             <select value={spId} onChange={(e) => { setSpId(Number(e.target.value)); setTechId(''); }} style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 9, padding: '9px 11px', fontSize: 14, color: INK, background: '#fff' }}>
               <option value="" disabled>Select a provider…</option>
-              {providers.map((p) => (
+              {/* A callout needs no technician, so tech-less providers are eligible; the paid path still requires one. */}
+              {providers.filter((p) => isCallout || p.technicians.length > 0).map((p) => (
                 <option key={p.id} value={p.id}>{p.businessName}{p.jobReady ? '' : ' · not job-ready'}{p.compliant ? '' : ' · non-compliant'}</option>
               ))}
             </select>
 
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: MUTE, marginTop: 14 }}>Technician</label>
-            <select value={techId} onChange={(e) => setTechId(Number(e.target.value))} disabled={!chosenProvider} style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 9, padding: '9px 11px', fontSize: 14, color: INK, background: '#fff', opacity: chosenProvider ? 1 : 0.5 }}>
-              <option value="" disabled>{chosenProvider ? 'Select a technician…' : 'Pick a provider first'}</option>
-              {chosenProvider?.technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            {!isCallout && (
+              <>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: MUTE, marginTop: 14 }}>Technician</label>
+                <select value={techId} onChange={(e) => setTechId(Number(e.target.value))} disabled={!chosenProvider} style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 9, padding: '9px 11px', fontSize: 14, color: INK, background: '#fff', opacity: chosenProvider ? 1 : 0.5 }}>
+                  <option value="" disabled>{chosenProvider ? 'Select a technician…' : 'Pick a provider first'}</option>
+                  {chosenProvider?.technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </>
+            )}
 
             {chosenProvider && (!chosenProvider.jobReady || !chosenProvider.compliant) && (
               <p style={{ fontSize: 12, color: '#92400e', background: '#fef6e7', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
@@ -171,7 +186,7 @@ export default function AdminOperationsPage() {
 
             <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
               <button onClick={() => setAssignId(null)} style={{ background: 'none', border: BORDER, borderRadius: 9, padding: '9px 15px', fontSize: 13, fontWeight: 600, color: MUTE, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={submitAssign} disabled={busy || !spId || !techId} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 9, padding: '9px 17px', fontSize: 13, fontWeight: 600, opacity: busy || !spId || !techId ? 0.5 : 1, cursor: 'pointer' }}>{busy ? 'Assigning…' : 'Assign'}</button>
+              <button onClick={submitAssign} disabled={busy || !spId || (!isCallout && !techId)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 9, padding: '9px 17px', fontSize: 13, fontWeight: 600, opacity: busy || !spId || (!isCallout && !techId) ? 0.5 : 1, cursor: 'pointer' }}>{busy ? (isCallout ? 'Placing…' : 'Assigning…') : (isCallout ? 'Place callout' : 'Assign')}</button>
             </div>
           </div>
         </div>
