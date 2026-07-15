@@ -33,7 +33,17 @@ import {
   Clock,
   Info,
   PhoneCall,
+  Truck,
+  ClipboardCheck,
 } from "lucide-react";
+import {
+  CoverageCard,
+  TeamCard,
+  VehiclesCard,
+  HoursCard,
+  RulesCard,
+  type JobReadyStatus,
+} from "@/components/upnow/SpJobReady";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
@@ -89,6 +99,41 @@ const STEPS = [
     subtitle: "Personal information",
     icon: UserCheck,
     description: "Your Emirates ID, nationality, and date of birth. This helps us verify your identity for KYC.",
+  },
+  {
+    id: 6,
+    label: "Coverage areas",
+    subtitle: "Where you work",
+    icon: MapPin,
+    description: "Pick the neighbourhoods you cover. We only send you jobs inside these zones.",
+  },
+  {
+    id: 7,
+    label: "Your team",
+    subtitle: "Technicians & skills",
+    icon: Users,
+    description: "Set what each technician can do and who can lead a job. We match jobs to a qualified pro.",
+  },
+  {
+    id: 8,
+    label: "Vehicles",
+    subtitle: "Your fleet",
+    icon: Truck,
+    description: "How many crews you can send out at once — this sets how many jobs you can run in parallel.",
+  },
+  {
+    id: 9,
+    label: "Working hours",
+    subtitle: "When you work",
+    icon: Clock,
+    description: "Your weekly availability and any days off. We only offer jobs inside these hours.",
+  },
+  {
+    id: 10,
+    label: "Job rules",
+    subtitle: "How jobs work",
+    icon: ClipboardCheck,
+    description: "The ground rules for accepting and running jobs. Agree once to start receiving work.",
   },
 ] as const;
 
@@ -1753,6 +1798,50 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
+/* ── Operational-config steps — reuse the "job-ready" card editors inline ────── */
+type OpsCardKey = "coverage" | "team" | "fleet" | "hours" | "rules";
+
+function OpsConfigStep({ which, onDone }: { which: OpsCardKey; onDone: () => void }) {
+  const [status, setStatus] = useState<JobReadyStatus | null>(null);
+  useEffect(() => {
+    apiGet<JobReadyStatus>("/service-provider/job-ready").then(setStatus).catch(() => {});
+  }, []);
+  if (!status) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-primary)" }} />
+      </div>
+    );
+  }
+  const done = status.cards[which].complete;
+  const common = { status, absorb: (s: JobReadyStatus) => setStatus(s), back: () => {}, embedded: true };
+  return (
+    <div>
+      {which === "coverage" && <CoverageCard {...common} />}
+      {which === "team" && <TeamCard {...common} hideGapChips />}
+      {which === "fleet" && <VehiclesCard {...common} />}
+      {which === "hours" && <HoursCard {...common} />}
+      {which === "rules" && <RulesCard {...common} />}
+      <div className="mt-6 flex items-center gap-3">
+        <button
+          type="button"
+          disabled={!done}
+          onClick={onDone}
+          className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition disabled:opacity-40"
+          style={{ backgroundColor: "var(--color-primary)" }}
+        >
+          Continue <ChevronRight className="w-4 h-4" />
+        </button>
+        {!done && (
+          <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
+            Finish this step to continue
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ServiceProviderOnboardingPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -1809,6 +1898,18 @@ export default function ServiceProviderOnboardingPage() {
 
       } catch {
         // profile not created yet — steps 1–4 stay incomplete
+      }
+
+      // Steps 6–10 — operational config (server-computed job-ready cards)
+      try {
+        const jr = await apiGet<JobReadyStatus>("/service-provider/job-ready");
+        if (jr.cards.coverage.complete) done.add(6);
+        if (jr.cards.team.complete) done.add(7);
+        if (jr.cards.fleet.complete) done.add(8);
+        if (jr.cards.hours.complete) done.add(9);
+        if (jr.cards.rules.complete) done.add(10);
+      } catch {
+        // job-ready endpoint not reachable until the profile exists
       }
 
       setCompleted(done);
@@ -2046,9 +2147,7 @@ export default function ServiceProviderOnboardingPage() {
                 <>Your details are prefilled &mdash; review each step, correct what the
                 reviewer flagged, and re-submit. We&apos;ll take another look within 48 hours.</>
               ) : (
-                <>{completed.size} of {STEPS.length} steps complete &mdash; finish
-                setup, then our team verifies your profile within 48 hours and you
-                can start receiving bookings.</>
+                `${completed.size} of ${STEPS.length} steps complete — finish setup, then our team verifies your profile within 48 hours and you can start receiving bookings.`
               )}
             </p>
           </div>
@@ -2168,6 +2267,11 @@ export default function ServiceProviderOnboardingPage() {
                 {step === 3 && <ServiceAreaStep onDone={() => advance(3)} />}
                 {step === 4 && <StrengthStep onDone={() => advance(4)} />}
                 {step === 5 && <OwnerDetailsStep onDone={() => advance(5)} />}
+                {step === 6 && <OpsConfigStep which="coverage" onDone={() => advance(6)} />}
+                {step === 7 && <OpsConfigStep which="team" onDone={() => advance(7)} />}
+                {step === 8 && <OpsConfigStep which="fleet" onDone={() => advance(8)} />}
+                {step === 9 && <OpsConfigStep which="hours" onDone={() => advance(9)} />}
+                {step === 10 && <OpsConfigStep which="rules" onDone={() => advance(10)} />}
               </div>
 
               {/* Skip — available only on optional steps (owner details) or before final docs */}

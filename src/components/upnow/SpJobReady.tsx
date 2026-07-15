@@ -26,7 +26,7 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '@/lib/api';
 
 /* ── Types (mirror the backend contract) ─────────────────────────────────── */
 
-interface JobReadyStatus {
+export interface JobReadyStatus {
   jobReady: boolean;
   jobReadyAt: string | null;
   cards: {
@@ -413,11 +413,13 @@ function FlipCelebration({ status, onDashboard, onSettings }: { status: JobReady
 
 /* ── Card ① · Where you work (1o) ────────────────────────────────────────── */
 
-interface CardProps { status: JobReadyStatus; absorb: (s: JobReadyStatus) => void; back: () => void }
+interface CardProps { status: JobReadyStatus; absorb: (s: JobReadyStatus) => void; back: () => void;
+  /** When embedded in the onboarding wizard, save bars render inline (not fixed) and the Cancel button is hidden. */
+  embedded?: boolean }
 
 const cityOf = (o: CoverageOption) => o.emirate ?? 'Dubai';
 
-function CoverageCard({ status, absorb, back }: CardProps) {
+export function CoverageCard({ status, absorb, back, embedded }: CardProps) {
   const [options, setOptions] = useState<CoverageOption[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [query, setQuery] = useState('');
@@ -478,7 +480,7 @@ function CoverageCard({ status, absorb, back }: CardProps) {
   const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   return (
-    <div className="mx-auto max-w-2xl pb-24">
+    <div className={`mx-auto max-w-2xl ${embedded ? '' : 'pb-24'}`}>
       <CardHeader title="Where you work" sub="Wider area = more jobs. Change anytime." onBack={back} />
 
       {/* City tabs — one per served emirate, with that city's selected count */}
@@ -589,10 +591,10 @@ function CoverageCard({ status, absorb, back }: CardProps) {
         })}
       </div>
 
-      {/* sticky save bar */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-white/95 p-3 backdrop-blur" style={{ borderColor: '#E4E7E2' }}>
+      {/* save bar — inline inside the onboarding wizard, sticky in Settings */}
+      <div className={embedded ? 'mt-5 border-t pt-4' : 'fixed inset-x-0 bottom-0 z-20 border-t bg-white/95 p-3 backdrop-blur'} style={{ borderColor: '#E4E7E2' }}>
         <div className="mx-auto flex max-w-2xl gap-3">
-          <button onClick={back} className="rounded-[12px] bg-white px-6 py-3 text-sm font-semibold" style={{ border: '1px solid #D7DCD7', color: INK }}>Cancel</button>
+          {!embedded && <button onClick={back} className="rounded-[12px] bg-white px-6 py-3 text-sm font-semibold" style={{ border: '1px solid #D7DCD7', color: INK }}>Cancel</button>}
           <button onClick={onSave} disabled={saving}
             className="flex flex-1 items-center justify-center gap-2 rounded-[12px] py-3 text-sm font-bold text-white disabled:opacity-60"
             style={{ background: GREEN_DARK }}>
@@ -606,7 +608,7 @@ function CoverageCard({ status, absorb, back }: CardProps) {
 
 /* ── Card ② · Your team (1p) ─────────────────────────────────────────────── */
 
-function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { hideGapChips?: boolean }) {
+export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { hideGapChips?: boolean }) {
   const [techs, setTechs] = useState<Tech[] | null>(null);
   const [services, setServices] = useState<SpService[]>([]);
   const t = status.cards.team;
@@ -777,7 +779,7 @@ const VEHICLE_TYPES = [
   { value: 'motorbike', label: 'Motorbike' }, { value: 'none_needed', label: 'No vehicle needed' },
 ];
 
-function VehiclesCard({ status, absorb, back }: CardProps) {
+export function VehiclesCard({ status, absorb, back }: CardProps) {
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [newType, setNewType] = useState('van');
@@ -944,7 +946,7 @@ const HOLIDAY_SUGGESTIONS = [
 ];
 const hhmm = (t: string) => t.slice(0, 5);
 
-function HoursCard({ absorb, back }: CardProps) {
+export function HoursCard({ absorb, back, embedded }: CardProps) {
   type DayState = { on: boolean; blocks: Array<{ opensAt: string; closesAt: string }> };
   const [days, setDays] = useState<Record<number, DayState> | null>(null);
   const [timeOff, setTimeOff] = useState<TimeOff[]>([]);
@@ -990,7 +992,7 @@ function HoursCard({ absorb, back }: CardProps) {
   );
 
   return (
-    <div className="mx-auto max-w-2xl pb-24">
+    <div className={`mx-auto max-w-2xl ${embedded ? '' : 'pb-24'}`}>
       <CardHeader title="When you work" sub="Only promise hours you can serve" onBack={back} />
 
       <div className="space-y-2">
@@ -1063,7 +1065,7 @@ function HoursCard({ absorb, back }: CardProps) {
       )}
       <p className="mt-2.5 text-[12.5px]" style={{ color: FAINT }}>We never penalize declared time off.</p>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-white/95 p-3 backdrop-blur" style={{ borderColor: '#E4E7E2' }}>
+      <div className={embedded ? 'mt-5 border-t pt-4' : 'fixed inset-x-0 bottom-0 z-20 border-t bg-white/95 p-3 backdrop-blur'} style={{ borderColor: '#E4E7E2' }}>
         <div className="mx-auto max-w-2xl">
           <button onClick={() => void save()} disabled={saving}
             className="flex w-full items-center justify-center gap-2 rounded-[12px] py-3 text-sm font-bold text-white disabled:opacity-60" style={{ background: GREEN_DARK }}>
@@ -1083,7 +1085,7 @@ const NOTICE_OPTIONS = [
   { value: 24, label: 'Next-day only', sub: 'fewer jobs' },
 ];
 
-function RulesCard({ status, absorb, back }: CardProps) {
+export function RulesCard({ status, absorb, back }: CardProps) {
   const r = status.cards.rules;
   const [notice, setNotice] = useState<number>(r.minNoticeHours ?? 4);
   const [saving, setSaving] = useState(false);
