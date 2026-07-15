@@ -29,6 +29,11 @@ interface TeamMember { id: number; name: string; isLeadCapable: boolean }
 interface QuoteItem { itemName: string; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
 interface Quote { id: number; status: string; totalAmount: number | string; summary?: string | null; validUntil?: string | null; items: QuoteItem[] }
 interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null }
+interface Dispute {
+  id: number; status: string; title: string; description: string | null;
+  resolutionSummary: string | null; providerResponse: string | null; bookingId: number;
+}
+const DISPUTE_OPEN = ['open', 'under_review', 'awaiting_evidence'];
 
 const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
   booked: { label: 'Awaiting quote approval', bg: TINT_AMBER, fg: AMBER },
@@ -38,6 +43,7 @@ const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
   in_progress: { label: 'In progress', bg: '#E0E7FF', fg: '#4338CA' },
   completed: { label: 'Completed', bg: TINT_GREEN, fg: GREEN },
   cancelled: { label: 'Cancelled', bg: '#FEE2E2', fg: '#991B1B' },
+  dispute: { label: 'In dispute', bg: '#FEF2F2', fg: '#B42318' },
 };
 const NEXT: Record<string, { label: string; to: string }> = {
   assigned: { label: "I'm on my way", to: 'en_route' },
@@ -58,13 +64,32 @@ export default function ProviderJobPage() {
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState([emptyRow()]);
   const [summary, setSummary] = useState('');
+  const [dispute, setDispute] = useState<Dispute | null>(null);
+  const [respondText, setRespondText] = useState('');
 
   const load = useCallback(async () => {
-    try { setData(await apiGet<JobDetail>(`/bookings/${id}/job`)); setError(null); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Could not load this job'); }
+    try {
+      const [job, disputes] = await Promise.all([
+        apiGet<JobDetail>(`/bookings/${id}/job`),
+        apiGet<Dispute[]>('/disputes/provider').catch(() => [] as Dispute[]),
+      ]);
+      setData(job);
+      const d = disputes.find((x) => x.bookingId === Number(id)) ?? null;
+      setDispute(d);
+      setRespondText(d?.providerResponse ?? '');
+      setError(null);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not load this job'); }
     finally { setLoading(false); }
   }, [id]);
   useEffect(() => { load(); }, [load]);
+
+  const submitResponse = async () => {
+    if (!dispute || !respondText.trim()) return;
+    setBusy(true);
+    try { await apiPatch(`/disputes/${dispute.id}/respond`, { response: respondText.trim() }); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not submit your response'); }
+    finally { setBusy(false); }
+  };
 
   const reassign = async (technicianId: number) => {
     setBusy(true);
@@ -110,6 +135,51 @@ export default function ProviderJobPage() {
       </div>
 
       {error && <div style={{ marginTop: 12, background: '#FEF2F2', color: '#B42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
+
+      {/* Dispute panel — a customer reported an issue on this job */}
+      {dispute && (() => {
+        const dOpen = DISPUTE_OPEN.includes(dispute.status);
+        return (
+          <div style={card({ marginTop: 16, padding: '16px 18px', border: '1px solid #FECDCA', background: '#FFFBFA' })}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#B42318' }}>⚠ Customer reported an issue</span>
+              <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: dOpen ? '#FEF2F2' : TINT_GREEN, color: dOpen ? '#B42318' : GREEN }}>
+                {dOpen ? 'Open — under review by UpNow' : dispute.status === 'resolved' ? 'Resolved — refunded' : 'Closed — in your favour'}
+              </span>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontWeight: 700, color: INK, fontSize: 14 }}>{dispute.title}</div>
+              {dispute.description && <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>{dispute.description}</p>}
+            </div>
+            {dispute.resolutionSummary && (
+              <div style={{ marginTop: 10, padding: '10px 12px', background: '#fff', border: BORDER, borderRadius: 10 }}>
+                <div style={lbl}>Resolution</div>
+                <p style={{ fontSize: 13, color: INK, marginTop: 4 }}>{dispute.resolutionSummary}</p>
+              </div>
+            )}
+            <div style={{ marginTop: 12 }}>
+              <div style={lbl}>Your response{!dispute.providerResponse && dOpen ? ' — tell the team your side' : ''}</div>
+              {dOpen ? (
+                <>
+                  <textarea value={respondText} onChange={(e) => setRespondText(e.target.value)} rows={3}
+                    placeholder="Explain what happened on the job — this goes to the UpNow team reviewing the dispute."
+                    style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 10, padding: '9px 11px', fontSize: 13, color: INK, resize: 'vertical', fontFamily: 'inherit' }} />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                    <button disabled={busy || !respondText.trim()} onClick={submitResponse}
+                      style={{ background: GREEN, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 16px', fontSize: 13, fontWeight: 600, opacity: busy || !respondText.trim() ? 0.5 : 1, cursor: 'pointer' }}>
+                      {busy ? 'Saving…' : dispute.providerResponse ? 'Update response' : 'Submit response'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p style={{ fontSize: 13, color: dispute.providerResponse ? INK : FAINT, marginTop: 4 }}>
+                  {dispute.providerResponse || 'No response was added.'}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Job facts */}
       <div style={card({ marginTop: 16, padding: '16px 18px' })}>

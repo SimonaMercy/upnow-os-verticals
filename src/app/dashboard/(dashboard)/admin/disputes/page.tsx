@@ -15,6 +15,7 @@ interface Dispute {
   id: number; status: string; title: string; description: string | null; resolutionSummary: string | null;
   openedAt: string; resolvedAt: string | null; bookingId: number | null; serviceName: string | null;
   amount: number | string | null; customerName: string; providerName: string | null;
+  providerResponse: string | null;
 }
 const OPEN = new Set(['open', 'under_review', 'awaiting_evidence']);
 const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
@@ -75,6 +76,13 @@ export default function AdminDisputesPage() {
                   {d.customerName} vs {d.providerName ?? 'provider'} · {d.serviceName ?? 'service'} <span style={{ fontFamily: 'ui-monospace, monospace' }}>BK-{d.bookingId}</span> · {aed(d.amount)}
                 </div>
                 {d.description && <p style={{ fontSize: 13.5, color: '#4A544D', marginTop: 8, lineHeight: 1.5 }}>{d.description}</p>}
+
+                {d.providerResponse && (
+                  <div style={{ marginTop: 10, padding: '9px 12px', background: '#F5F7F4', borderRadius: 9, borderLeft: '3px solid #0B7A4E' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#0B7A4E' }}>Provider&apos;s response</div>
+                    <p style={{ fontSize: 13, color: '#182420', marginTop: 4, lineHeight: 1.5 }}>{d.providerResponse}</p>
+                  </div>
+                )}
 
                 {isOpen ? (
                   <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
