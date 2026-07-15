@@ -114,7 +114,7 @@ export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
  * the generic Contract / Financial groups.
  */
 export const CONTRACT_DOCS: DocReq[] = [
-  { key: 'ejari_certificate', label: 'Contract Registration', category: 'contract', required: false, hint: 'Contract Registration / DLD tenancy-contract registration certificate' },
+  { key: 'ejari_certificate', label: 'Contract Registration Certificate', category: 'contract', required: false, hint: 'Contract Registration / DLD tenancy-contract registration certificate' },
   { key: 'payment_advice',    label: 'Payment Advice',        category: 'payment',  required: false, hint: 'Rent cheques / payment advice — the cheques recorded in the Payments section' },
 ];
 

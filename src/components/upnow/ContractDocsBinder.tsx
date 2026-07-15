@@ -298,7 +298,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     { kind: 'doc', key: 'payment_advice', label: 'Payment Advice' },
     ...(showReceipts ? [{ kind: 'receipts' } as Slot] : []),
     { kind: 'agreement' },
-    { kind: 'doc', key: 'ejari_certificate', label: 'Contract Registration' },
+    { kind: 'doc', key: 'ejari_certificate', label: 'Contract Registration Certificate' },
   ];
   if (!isRenewal) {
     seq.push({ kind: 'doc', key: 'utility_registration', label: 'Utility Proof of Payment' });

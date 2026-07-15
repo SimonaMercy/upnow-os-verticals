@@ -370,7 +370,7 @@ export default function EditContractPage() {
   if (rentVat > 0) previewRows.push({ paymentType: 'other', description: `VAT on rent (${rentVatRate}%)`, amount: rentVat });
   if (Number(securityDeposit) > 0) previewRows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: Number(securityDeposit) });
   if (Number(adminFee) > 0) previewRows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: Number(adminFee) });
-  if (Number(ejariFee) > 0) previewRows.push({ paymentType: 'ejari_fee', description: 'Ejari Fee', amount: Number(ejariFee) });
+  if (Number(ejariFee) > 0) previewRows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: Number(ejariFee) });
   const previewSeg = buildSegregatedPlan(previewRows);
 
   const save = async () => {
