@@ -143,7 +143,7 @@ function rowStatusConfig(row: SpaceRow): { label: string; bg: string; text: stri
       return { label: 'Renewal Offered', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
     if (c.status === 'active') return { label: 'Active Tenancy', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false };
     if (c.status === 'issued' && !c.tenantSignedAt) return { label: 'Sign Contract', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
-    if (c.status === 'issued' && c.tenantSignedAt)  return { label: 'Awaiting Ejari', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
+    if (c.status === 'issued' && c.tenantSignedAt)  return { label: 'Awaiting Contract Registration', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
     if (c.status === 'expired')    return { label: 'Lease Ended', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
     if (c.status === 'terminated') return { label: 'Terminated',  bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
     return { label: 'Contract Pending', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };

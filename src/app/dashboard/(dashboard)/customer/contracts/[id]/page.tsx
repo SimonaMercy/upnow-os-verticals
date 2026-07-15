@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { openDocViewer } from '@/lib/docViewer';
-import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -381,7 +381,7 @@ export default function TenantContractDetailPage() {
       const res = await fetch(`/api/contracts/tenant/${contract.id}/sign`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatoryName: signatoryName.trim(), signatureImage, consent: signConsent, clientMeta: collectClientMeta() }),
+        body: JSON.stringify({ signatoryName: signatoryName.trim(), signatureImage, consent: signConsent, clientMeta: collectClientMeta(), geo: await collectGeo() }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { message?: string };
@@ -679,7 +679,7 @@ export default function TenantContractDetailPage() {
                       <Row label="Duration"     value={contract.durationYears ? `${contract.durationYears} year(s)` : null} />
                       <Row label="Type"         value={contract.contractType} />
                       <Row label="Status"       value={<StatusBadge status={contract.status} />} />
-                      <Row label="Ejari Status" value={contract.ejariStatus} />
+                      <Row label="Contract Registration Status" value={contract.ejariStatus} />
                     </SectionCard>
                   </div>
 
@@ -1041,7 +1041,7 @@ export default function TenantContractDetailPage() {
 
                 {/* Step 4: Ejari Registration */}
                 {(()=>{ const state: TLState = ss(st3Done, st4Done); return (
-                <StepRow num={4} label="Ejari Registration" state={state} last={false}>
+                <StepRow num={4} label="Contract Registration" state={state} last={false}>
                   {state === 'current' && (
                     <p className="text-[10px] text-[#9b9890] mt-1">
                       Your landlord is registering the contract with Dubai Land Department. This typically takes 2–5 business days.

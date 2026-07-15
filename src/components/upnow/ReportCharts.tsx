@@ -211,7 +211,7 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
           </BarChart>
         </ResponsiveContainer>
       </Card>
-      <Card title="Ejari on the month's contracts" hint="Compliance at a glance: of the leases starting each month, how many are Ejari-registered (green) vs still pending (orange).">
+      <Card title="Contract Registration on the month's contracts" hint="Compliance at a glance: of the leases starting each month, how many have completed Contract Registration (green) vs still pending (orange).">
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -18 }} barSize={14}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
@@ -219,8 +219,8 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
             <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
             <Tooltip cursor={{ fill: '#fafaf8' }} />
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
-            <Bar dataKey="ejariRegistered" name="Ejari registered" stackId="e" fill={JADE} stroke="#fff" strokeWidth={2} />
-            <Bar dataKey="ejariPending" name="Ejari pending" stackId="e" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="ejariRegistered" name="Contract Registration completed" stackId="e" fill={JADE} stroke="#fff" strokeWidth={2} />
+            <Bar dataKey="ejariPending" name="Awaiting Contract Registration" stackId="e" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </Card>

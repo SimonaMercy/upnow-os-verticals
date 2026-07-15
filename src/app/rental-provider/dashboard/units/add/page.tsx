@@ -1536,7 +1536,7 @@ function UnitCard({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Ejari Fee</label>
+                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Contract Registration Fee</label>
                 <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="220"
                   value={row.ejariFeeFils}

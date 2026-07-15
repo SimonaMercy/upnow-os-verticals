@@ -39,3 +39,40 @@ export function collectClientMeta(): SignClientMeta {
   try { meta.viewport = `${window.innerWidth}x${window.innerHeight}`; } catch { /* optional */ }
   return meta;
 }
+
+export interface SignGeo { lat: number; lng: number; accuracy?: number }
+
+/**
+ * Best-effort signing geolocation — captured to stamp the signer's location on
+ * the signature certificate. Strictly NON-BLOCKING and safe on EVERY browser
+ * (Safari iOS/macOS, Chrome, Firefox, embedded webviews):
+ *   • feature-detects navigator.geolocation (absent in some old/embedded views)
+ *   • only prompts in a secure context (https / localhost) — geolocation is
+ *     unavailable otherwise, so we skip straight to null instead of erroring
+ *   • hard timeout so a slow or ignored prompt never hangs the Sign action
+ *   • resolves null on denial / error / timeout / unsupported (the server then
+ *     falls back to an IP-derived city)
+ * Call it from the actual Sign click (a user gesture) — Safari/iOS requires one.
+ * NEVER gate the Sign button on the result.
+ */
+export function collectGeo(timeoutMs = 7000): Promise<SignGeo | null> {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+    return Promise.resolve(null);
+  }
+  if (window.isSecureContext === false) return Promise.resolve(null);
+  return new Promise<SignGeo | null>((resolve) => {
+    let settled = false;
+    const done = (v: SignGeo | null) => { if (!settled) { settled = true; resolve(v); } };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { clearTimeout(timer); done({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }); },
+        () => { clearTimeout(timer); done(null); },
+        { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 300000 },
+      );
+    } catch {
+      clearTimeout(timer);
+      done(null);
+    }
+  });
+}

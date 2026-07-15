@@ -213,7 +213,7 @@ export function LayoutPreviewModal({
   if (plan) {
     pushFee('Security Deposit', plan.securityDeposit);
     pushFee('Admin Fee', plan.adminFee);
-    pushFee('Ejari Fee', plan.ejariFee);
+    pushFee('Contract Registration Fee', plan.ejariFee);
     pushFee('Commission', plan.commission);
     pushFee('Service Charges', plan.serviceCharges);
   }

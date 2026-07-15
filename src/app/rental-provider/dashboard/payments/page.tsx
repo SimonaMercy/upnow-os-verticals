@@ -28,8 +28,8 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
 const CATEGORY_SUB: Record<CategoryKey, string> = {
   rental_income:    'rent collected',
   security_deposit: 'deposits',
-  govt_fee:         'VAT · Ejari DLD',
-  management_fee:   'ejari · admin · commission',
+  govt_fee:         'VAT · Contract Registration DLD',
+  management_fee:   'Contract Registration · admin · commission',
   others:           'maintenance · service · other',
 };
 // The DLD Ejari registration is the ONLY government portion of the RP's Ejari
@@ -66,7 +66,7 @@ const TYPE_LABELS: Record<string, string> = {
   rental_income:    'Rental Income',
   security_deposit: 'Security Deposit',
   vat:              'VAT',
-  ejari_fee:        'Ejari',
+  ejari_fee:        'Contract Registration',
   admin_fee:        'Admin',
   commission:       'Commission',
   maintenance_fee:  'Maintenance',
@@ -283,8 +283,8 @@ export default function PaymentsPage() {
       if (r.paymentType === 'ejari_fee') {
         const gov  = Math.min(GOVT_EJARI_FEE, r.amount);
         const rest = Math.max(0, r.amount - GOVT_EJARI_FEE);
-        if (gov > 0)  m.govt_fee.push({ ...r, id: `${r.id}:g`, amount: gov,  vatAmount: 0, description: 'Ejari · DLD registration' });
-        if (rest > 0) m.management_fee.push({ ...r, id: `${r.id}:m`, amount: rest, vatAmount: 0, description: 'Ejari · service (handling)' });
+        if (gov > 0)  m.govt_fee.push({ ...r, id: `${r.id}:g`, amount: gov,  vatAmount: 0, description: 'Contract Registration · DLD registration' });
+        if (rest > 0) m.management_fee.push({ ...r, id: `${r.id}:m`, amount: rest, vatAmount: 0, description: 'Contract Registration · service (handling)' });
       } else {
         m[categoryOf(r.paymentType)].push(r);
       }

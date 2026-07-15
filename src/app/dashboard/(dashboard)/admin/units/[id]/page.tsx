@@ -101,7 +101,7 @@ export default function AdminUnitDetailPage() {
   const pricingRows: [string, string][] = [
     ['Security deposit', u.securityDeposit != null ? aed(u.securityDeposit) : ''],
     ['Admin fee', u.adminFee != null ? aed(u.adminFee) : ''],
-    ['Ejari fee', u.ejariFeeFils != null ? aed(u.ejariFeeFils / 100) : ''],
+    ['Contract Registration Fee', u.ejariFeeFils != null ? aed(u.ejariFeeFils / 100) : ''],
     ['Commission', u.commission != null ? aed(u.commission) : ''],
     ['Service charges', u.serviceCharges != null ? aed(u.serviceCharges) : ''],
   ].filter(([, v]) => v) as [string, string][];

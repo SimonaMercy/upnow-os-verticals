@@ -10,7 +10,6 @@
  * stored payment rows, so recorded cheques are preserved.
  */
 'use client';
-import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -18,6 +17,8 @@ import Link from 'next/link';
 import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check, Lock } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 
 interface Tenant {
   id: number;
@@ -102,12 +103,12 @@ function addMonths(dateStr: string, months: number): string {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
-function chequeDate(startDate: string, installments: number, i: number): string {
-  if (!startDate || !installments) return '';
-  const monthsPerCheque = 12 / installments;
+/** Due date of cheque i (ISO yyyy-mm-dd) — fed to the shared segregated view so it formats dates itself. */
+function chequeDateISO(startDate: string, installments: number, i: number): string | null {
+  if (!startDate || !installments) return null;
   const d = new Date(`${startDate}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + Math.round(i * monthsPerCheque));
-  return d.toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
+  d.setUTCMonth(d.getUTCMonth() + Math.round(i * (12 / installments)));
+  return d.toISOString().slice(0, 10);
 }
 function calcDurationLabel(start: string, end: string): string {
   if (!start || !end) return '—';
@@ -353,8 +354,24 @@ export default function EditContractPage() {
   // Rent VAT (commercial/industrial) is collected as SEPARATE VAT cheque(s), so the
   // rent cheques stay NET. Shown here so the edit form reflects the tax.
   const rentVat = rentVatRate > 0 ? Math.round(rentNum * rentVatRate) / 100 : 0;
-  const chequeVat = inst > 0 ? Math.round((rentVat / inst) * 100) / 100 : 0;
   const durationLabel = calcDurationLabel(startDate, endDate);
+
+  // Live four-group preview — same segregated view (Deposit · Rent · Management · Third Party)
+  // shown on the contract, receipts and lead. Built from the form state so it updates as you type.
+  const previewRows: SegPaymentInput[] = [];
+  for (let i = 0; i < inst; i++) {
+    previewRows.push({
+      paymentType: 'rental_income',
+      description: inst > 1 ? `Instalment ${i + 1} of ${inst}` : 'Rent',
+      amount: chequeAmount,
+      transactionDate: chequeDateISO(startDate, inst, i),
+    });
+  }
+  if (rentVat > 0) previewRows.push({ paymentType: 'other', description: `VAT on rent (${rentVatRate}%)`, amount: rentVat });
+  if (Number(securityDeposit) > 0) previewRows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: Number(securityDeposit) });
+  if (Number(adminFee) > 0) previewRows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: Number(adminFee) });
+  if (Number(ejariFee) > 0) previewRows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: Number(ejariFee) });
+  const previewSeg = buildSegregatedPlan(previewRows);
 
   const save = async () => {
     setError(null);
@@ -604,7 +621,7 @@ export default function EditContractPage() {
                     <input type="number" min={0} value={adminFee} onChange={(e) => setAdminFee(e.target.value)} className={inputCls} />
                   </div>
                   <div>
-                    <label className={labelCls}>Ejari Fee (AED)</label>
+                    <label className={labelCls}>Contract Registration Fee (AED)</label>
                     <input type="number" min={0} value={ejariFee} onChange={(e) => setEjariFee(e.target.value)} className={inputCls} />
                   </div>
                   <div>
@@ -686,34 +703,8 @@ export default function EditContractPage() {
                   </div>
                 </div>
 
-                {/* Cheque schedule preview (even split — preview only) */}
-                {rentNum > 0 && (
-                  <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
-                    <div className="grid grid-cols-4 bg-[#f4f3ef] px-4 py-2 border-b border-[#e8e6e0]">
-                      {['#', 'Cheque', 'Due Date', 'Amount'].map((h, i) => (
-                        <span key={h} className={`text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] ${i === 3 ? 'text-right' : ''}`}>{h}</span>
-                      ))}
-                    </div>
-                    {Array.from({ length: inst }, (_, i) => (
-                      <div key={i} className={`grid grid-cols-4 px-4 py-2.5 items-center ${i < inst - 1 ? 'border-b border-[#f0ede8]' : ''} ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}>
-                        <span className="text-xs text-[#9b9890]">{i + 1}</span>
-                        <span className="text-xs text-[#6b6860]">Cheque {i + 1}</span>
-                        <span className="text-xs text-[#6b6860]">{startDate ? chequeDate(startDate, inst, i) : '—'}</span>
-                        <span className="text-sm font-bold text-[#2e9f82] text-right">{fmtAed(chequeAmount)}</span>
-                      </div>
-                    ))}
-                    <div className="grid grid-cols-4 px-4 py-2.5 bg-[#f0faf6] border-t-2 border-[#c5e8df]">
-                      <span className="col-span-3 text-xs font-semibold text-[#1a1916]">Total ({inst} cheque{inst === 1 ? '' : 's'})</span>
-                      <span className="text-sm font-bold text-[#1a1916] text-right">{fmtAed(rentNum)}</span>
-                    </div>
-                    {rentVat > 0 && (
-                      <div className="grid grid-cols-4 px-4 py-2 bg-[#fdf7ea] border-t border-[#e7d8a8]">
-                        <span className="col-span-3 text-xs font-medium text-[#8a6d1f]">+ Rent VAT ({rentVatRate}%) — collected as separate cheque{inst === 1 ? '' : 's'}</span>
-                        <span className="text-xs font-bold text-[#8a6d1f] text-right">{fmtAed(rentVat)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Cheque schedule preview — segregated four-group view (matches the contract, receipts & lead) */}
+                {rentNum > 0 && <SegregatedPlanView plan={previewSeg} />}
                 <div className="flex items-start gap-2 rounded-lg bg-[#f4f7f5] px-3 py-2.5 text-xs text-[#6b6860]">
                   <Info className="h-4 w-4 shrink-0 text-[#2e9f82]" />
                   Saving regenerates the cheque schedule to match these terms — as long as no cheque has been recorded yet (cleared/bounced). If any payment is already recorded, the existing cheques are kept and you can adjust them on the contract page.
@@ -804,7 +795,7 @@ export default function EditContractPage() {
                 ...(rentVat > 0 ? ([[`VAT on rent (${rentVatRate}%)`, fmtAed(rentVat)]] as [string, string][]) : []),
                 ['Security deposit', securityDeposit ? fmtAed(Number(securityDeposit)) : '—'],
                 ['Admin fee', adminFee ? fmtAed(Number(adminFee)) : '—'],
-                ['Ejari fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],
+                ['Contract Registration Fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],
                 ['Payments / year', String(inst)],
                 ['Per cheque', rentNum > 0 ? fmtAed(chequeAmount) : '—'],
                 ['Duration', durationLabel],

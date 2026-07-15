@@ -102,7 +102,7 @@ interface AddendumDefaultResp {
 const FIN_FIELDS = [
   { key: 'securityDeposit', label: 'Security Deposit' },
   { key: 'adminFee',        label: 'Admin Fee' },
-  { key: 'ejariFee',        label: 'Ejari Fee' },
+  { key: 'ejariFee',        label: 'Contract Registration Fee' },
   { key: 'commission',      label: 'Commission' },
   { key: 'serviceCharges',  label: 'Service Charges (AED/yr)' },
 ] as const;

@@ -17,7 +17,7 @@ import { type PlanPayment } from '@/lib/currentPlan';
 import { toEjari } from '@/lib/toEjari';
 import { currentDocWatermark } from '@/lib/docViewer';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
-import { collectClientMeta } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo } from '@/lib/signEvidence';
 import { fetchSignatureCertificate, type SignatureCertificateData } from '@/components/upnow/SignatureCertificatePdf';
 
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
@@ -74,7 +74,7 @@ export default function ContractDocumentsPage() {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       // consent: the binder's ContractSignBar gates signing behind its
       // review-and-agree checkbox, so reaching here means it was ticked.
-      body: JSON.stringify({ role: 'landlord', signatoryName, signatureImage, method: 'online', consent: true, clientMeta: collectClientMeta() }),
+      body: JSON.stringify({ role: 'landlord', signatoryName, signatureImage, method: 'online', consent: true, clientMeta: collectClientMeta(), geo: await collectGeo() }),
     });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || `Could not sign (${res.status})`); }
     refresh();

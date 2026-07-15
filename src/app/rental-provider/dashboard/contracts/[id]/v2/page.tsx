@@ -47,11 +47,12 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
-import { segRowsFromContract } from '@/lib/segregatedPlan';
+import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
-import { collectClientMeta, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
@@ -212,7 +213,7 @@ interface Step { key: StepKey; short: string; label: string; icon: IconKey }
 const STEPS_NEW: Step[] = [
   { key: 'issue',   short: 'Issue',   label: 'Contract issued',  icon: 'document' },
   { key: 'sign',    short: 'Sign',    label: 'Signatures',        icon: 'pen'      },
-  { key: 'ejari',   short: 'Ejari',   label: 'Ejari registration',icon: 'stamp'    },
+  { key: 'ejari',   short: 'Contract Registration',   label: 'Contract Registration',icon: 'stamp'    },
   { key: 'utility', short: 'Utility', label: 'Utility account',   icon: 'bolt'     },
   { key: 'movein',  short: 'Move-in', label: 'Move-in inspection',icon: 'key'      },
   { key: 'active',  short: 'Active',  label: 'Active tenancy',    icon: 'active'   },
@@ -222,7 +223,7 @@ const STEPS_RENEWAL: Step[] = [
   { key: 'documents', short: 'KYC',     label: 'Documents',       icon: 'document' },
   { key: 'cheques',   short: 'Cheques', label: 'Cheques / PDC',   icon: 'wallet'   },
   { key: 'sign',      short: 'Sign',    label: 'Signatures',      icon: 'pen'      },
-  { key: 'ejari',     short: 'Ejari',   label: 'Ejari renewal',   icon: 'stamp'    },
+  { key: 'ejari',     short: 'Contract Registration',   label: 'Contract Registration renewal',   icon: 'stamp'    },
   { key: 'active',    short: 'Active',  label: 'Renewal active',  icon: 'active'   },
 ];
 // Appended after "Active" once a termination is accepted and the lease is
@@ -334,7 +335,7 @@ const BASE_DOC_TYPES = [
   { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
   { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: false },
   { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
-  { value: 'ejari_certificate',      label: 'Ejari',                  category: 'property',   needsExpiry: false },
+  { value: 'ejari_certificate',      label: 'Contract Registration Certificate',                  category: 'property',   needsExpiry: false },
   { value: 'utility_registration',   label: 'Utility Registration',   category: 'property',   needsExpiry: false },
   { value: 'move_out_report',        label: 'Move-out Inspection Report', category: 'inspection', needsExpiry: false },
   { value: 'utility_clearance',      label: 'Utility Clearance',      category: 'property',   needsExpiry: false },
@@ -1161,18 +1162,18 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       ?? (h.contract.documents ?? []).find(d => d.documentKey.startsWith('ejari'));
     return done
       ? {
-          tone: 'celebrate', icon: 'stamp', sub: 'Stop 3 · complete', label: 'Ejari',
-          headline: mode === 'renewal' ? 'Ejari renewed.' : 'Ejari registered.',
+          tone: 'celebrate', icon: 'stamp', sub: 'Stop 3 · complete', label: 'Contract Registration',
+          headline: mode === 'renewal' ? 'Contract Registration renewed.' : 'Contract Registration completed.',
           body: 'Certificate is on file with the Dubai Land Department.',
           timing: null,
-          node: <Completed title="Registered with DLD" sub={ejariDoc?.displayName ?? 'Ejari-certificate.pdf'} viewUrl={ejariDoc?.fileUrl} viewLabel="View Ejari" />,
+          node: <Completed title="Registered with DLD" sub={ejariDoc?.displayName ?? 'Contract-Registration-Certificate.pdf'} viewUrl={ejariDoc?.fileUrl} viewLabel="View Contract Registration" />,
         }
       : {
-          tone: 'action', icon: 'stamp', sub: mode === 'renewal' ? 'Renewal · Ejari' : stopOf(3), label: 'Ejari',
-          headline: 'Register Ejari with the DLD.',
+          tone: 'action', icon: 'stamp', sub: mode === 'renewal' ? 'Renewal · Contract Registration' : stopOf(3), label: 'Contract Registration',
+          headline: 'Register the Contract Registration Certificate with the DLD.',
           body: 'Upload the certificate, or mark it as already on file when importing an existing lease.',
           timing: '2–5 business days',
-          node: <UploadAction fileLabel="Ejari-certificate.pdf" onUpload={h.onUploadEjari} onMark={() => h.onMarkEjari()} />,
+          node: <UploadAction fileLabel="Contract-Registration-Certificate.pdf" onUpload={h.onUploadEjari} onMark={() => h.onMarkEjari()} />,
         };
   }
 
@@ -1835,6 +1836,81 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'notes',     label: 'Notes',     icon: StickyNote },
 ];
 
+/** Every Settings → Rules penalty / admin charge, as an addable fee type. Each maps
+ *  to the per-RP config columns its amount auto-fills from (flat fee, % of rent,
+ *  N months of rent, or pro-rated daily). Grouped under Management Fee (RP-charged). */
+const RULE_FEE_DEFS: { pt: string; label: string; feeK: string; pctK: string; monthsK?: string; dailyK?: string }[] = [
+  { pt: 'bounced_cheque_fee', label: 'Bounced cheque', feeK: 'bouncedChequePenaltyFee', pctK: 'bouncedChequePenaltyPct' },
+  { pt: 'cheque_replacement_fee', label: 'Cheque hold / replacement', feeK: 'chequeHoldPenaltyFee', pctK: 'chequeHoldPenaltyPct' },
+  { pt: 'cheque_deferral_fee', label: 'Cheque deferral', feeK: 'chequeDeferralPenaltyFee', pctK: 'chequeDeferralPenaltyPct' },
+  { pt: 'late_renewal_fee', label: 'Late renewal', feeK: 'lateRenewalPenaltyFee', pctK: 'lateRenewalPenaltyPct' },
+  { pt: 'early_termination_fee', label: 'Early termination', feeK: 'earlyTerminationPenaltyFee', pctK: 'earlyTerminationPenaltyPct', monthsK: 'earlyTerminationPenaltyMonths' },
+  { pt: 'late_moveout_fee', label: 'Late move-out', feeK: 'lateMoveoutPenaltyFee', pctK: 'lateMoveoutPenaltyPct', dailyK: 'lateMoveoutPenaltyDaily' },
+  { pt: 'unauthorized_sharing_fee', label: 'Sharing without notice / NOC', feeK: 'unauthorizedSharingPenaltyFee', pctK: 'unauthorizedSharingPenaltyPct' },
+  { pt: 'access_card_fee', label: 'Access card / remote replacement', feeK: 'accessCardReplacementFee', pctK: 'accessCardReplacementPct' },
+  { pt: 'contract_name_change_fee', label: 'Contract name change', feeK: 'contractNameChangeFee', pctK: 'contractNameChangePct' },
+  { pt: 'unit_transfer_fee', label: 'Unit transfer', feeK: 'unitTransferFee', pctK: 'unitTransferPct' },
+];
+const RULE_FEE_LABELS: Record<string, string> = Object.fromEntries(RULE_FEE_DEFS.map(d => [d.pt, d.label]));
+
+/** Shared fixed column widths for BOTH payment tables (deposit/rent + fees) so
+ *  every section's columns — amounts especially — line up in one vertical grid. */
+function PayCols() {
+  return (
+    <colgroup>
+      <col style={{ width: '15%' }} />{/* # / Fee */}
+      <col style={{ width: '21%' }} />{/* Description */}
+      <col style={{ width: '12%' }} />{/* Amount */}
+      <col style={{ width: '14%' }} />{/* Reference */}
+      <col style={{ width: '10%' }} />{/* Method */}
+      <col style={{ width: '12%' }} />{/* Due date */}
+      <col style={{ width: '16%' }} />{/* Status */}
+    </colgroup>
+  );
+}
+
+/** A segregation-group divider row inside the Payments/Fees tables — the same
+ *  Security Deposit / Rental Income / Management Fee / Third Party rail used by the
+ *  read-only plan view, so the working (editable) table reads in the same four groups. */
+function PaySegRail({ title, extra, onAdd }: { title: string; extra?: React.ReactNode; onAdd?: () => void }) {
+  return (
+    <tr>
+      <td colSpan={7} style={{ borderLeft: '3px solid #1a5a4a', background: 'var(--jade-tint, #eef2f0)', padding: '6px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontWeight: 750, fontSize: 13, letterSpacing: '-.01em' }}>{title}</span>
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {extra != null && <span className="note" style={{ fontWeight: 400 }}>{extra}</span>}
+            {onAdd && <button type="button" className="mini-btn view" onClick={onAdd}><Plus size={11} /> Add</button>}
+          </span>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/** Per-section subtotal row — closes each segment (Security Deposit / Rental Income /
+ *  Management Fee / Third Party) with its own total, so no section is left un-summed
+ *  and the totals never get lumped together. Optional sub-lines (e.g. Net rent / VAT). */
+function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amount: number; sub?: { label: string; amount: number }[] }) {
+  const tot: React.CSSProperties = { borderTop: '2px solid #bfe3d5', background: 'var(--jade-tint, #eef2f0)' };
+  return (
+    <>
+      {(sub ?? []).map(s => (
+        <tr key={s.label}>
+          <td colSpan={2} style={{ color: 'var(--mute)' }}>{s.label}</td>
+          <td className="amt" style={{ color: 'var(--mute)', fontWeight: 600 }}>{fmtAed(s.amount)}</td>
+          <td colSpan={4} />
+        </tr>
+      ))}
+      <tr>
+        <td colSpan={2} style={{ ...tot, fontWeight: 800, fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.04em', color: '#6b6860' }}>{label}</td>
+        <td className="amt" style={{ ...tot, fontWeight: 800, color: 'var(--jade-deep)' }}>{fmtAed(amount)}</td>
+        <td colSpan={4} style={tot} />
+      </tr>
+    </>
+  );
+}
+
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
@@ -2111,47 +2187,73 @@ function DetailsDrawer({
     .sort((a, b) => (a.amount ?? 0) - (b.amount ?? 0));
   const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other');
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
+  // Fees split into the two segregation groups so the working table reads in the SAME
+  // four sections as the plan/receipts: Admin + Commission → Management Fee; Ejari
+  // (Contract Registration) + cheque-charge penalties → Third Party (with 'other' charges).
+  // Management Fee = RP-charged fees: admin + commission + every Rules penalty/charge.
+  // (Ejari / VAT / sub-lease / service charges stay Third Party — pass-through.)
+  const MGMT_FEE_TYPES = new Set<string>(['admin_fee', 'commission', ...RULE_FEE_DEFS.map(d => d.pt)]);
+  const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
+  const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
+  // Bounced / cancelled cheques are void — excluded from every section total and the
+  // grand total, exactly as the header's Total payable does, so the two never diverge.
+  const feeActive = (p: { chequeStatus?: string | null }) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
+  const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0);
+  const otherActiveGross = otherPaymentRows.reduce((s, p) => s + (feeActive(p) ? (p.amount || 0) : 0), 0);
+  const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0) + otherActiveGross;
   const feeLabel = (t: string | null) =>
-    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission'
-      : t === 'bounced_cheque_fee' ? 'Bounced cheque' : t === 'cheque_replacement_fee' ? 'Cheque replacement' : t === 'cheque_deferral_fee' ? 'Cheque deferral'
+    t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
+      : (t && RULE_FEE_LABELS[t]) ? RULE_FEE_LABELS[t]
       : (t ?? 'Fee');
   // ── Fees editor (admin-filled: admin / ejari / commission + cheque charges).
   //    Fees are never auto-fabricated — the RP enters them here. Amount is NET
   //    (excl. VAT); VAT is an optional separate figure; stored gross = net + VAT.
   //    The three cheque-charge types auto-fill their amount from Settings → Rules. ──
-  const FEE_TYPE_OPTIONS = [
-    { value: 'admin_fee', label: 'Admin fee' },
-    { value: 'ejari_fee', label: 'Ejari fee' },
-    { value: 'commission', label: 'Commission' },
-    { value: 'bounced_cheque_fee', label: 'Bounced cheque' },
-    { value: 'cheque_replacement_fee', label: 'Cheque replacement' },
-    { value: 'cheque_deferral_fee', label: 'Cheque deferral' },
-  ];
-  // Auto-fill amounts for the cheque-charge fee types, read once from the RP's
-  // penalty settings (bounced → bouncedChequePenaltyFee, replacement →
-  // chequeHoldPenaltyFee, deferral → chequeDeferralPenaltyFee). null = unset.
-  const [chequeFees, setChequeFees] = useState<Record<string, number | null>>({});
+  // The whole RP Rules config (all penalty / admin-charge fields) so every rule type
+  // can auto-fill its amount + show its basis in the Add-fee popup.
+  const [rpRules, setRpRules] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     let alive = true;
     fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => (r.ok ? r.json() : null))
-      .then((data: { profile?: Record<string, unknown> } | null) => {
-        const rp = data?.profile;   // GET returns { profile, checklist }
-        if (!alive || !rp) return;
-        const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
-        setChequeFees({
-          bounced_cheque_fee: num(rp.bouncedChequePenaltyFee),
-          cheque_replacement_fee: num(rp.chequeHoldPenaltyFee),
-          cheque_deferral_fee: num(rp.chequeDeferralPenaltyFee),
-        });
-      })
+      .then((data: { profile?: Record<string, unknown> } | null) => { if (alive) setRpRules(data?.profile ?? null); })
       .catch(() => undefined);
     return () => { alive = false; };
   }, []);
-  /** Configured flat AED amount for a cheque-charge fee type (as a form string), or ''. */
+  const annualRentForRules = contract.annualRent || 0;
+  /** Suggested amount + a short basis label for a Rules fee type, from the RP config +
+   *  this contract's rent: N months → months x monthly rent; daily → 0 (set at
+   *  settlement); else the greater of the flat fee and % of annual rent. */
+  const ruleSuggest = (pt: string): { amount: number; basis: string } => {
+    const def = RULE_FEE_DEFS.find(d => d.pt === pt);
+    if (!def || !rpRules) return { amount: 0, basis: '' };
+    const num = (k?: string) => (k && rpRules[k] != null && rpRules[k] !== '' ? Number(rpRules[k]) : 0);
+    const fee = num(def.feeK), pct = num(def.pctK), months = num(def.monthsK);
+    const daily = def.dailyK ? !!rpRules[def.dailyK] : false;
+    const aed = (n: number) => `AED ${Math.round(n).toLocaleString('en-AE')}`;
+    if (months > 0) return { amount: Math.round(months * annualRentForRules / 12), basis: `${months} mo of rent` };
+    if (daily) return { amount: 0, basis: 'per day of overstay' };
+    const pctAmt = pct > 0 ? Math.round(pct / 100 * annualRentForRules) : 0;
+    if (fee > 0 && fee >= pctAmt) return { amount: fee, basis: aed(fee) };
+    if (pctAmt > 0) return { amount: pctAmt, basis: `${pct}% of rent` };
+    return { amount: 0, basis: 'not set' };
+  };
+  const FEE_TYPE_OPTIONS = [
+    { value: 'admin_fee', label: 'Admin fee' },
+    { value: 'ejari_fee', label: 'Contract Registration fee' },
+    { value: 'commission', label: 'Commission' },
+    ...RULE_FEE_DEFS.map(d => ({ value: d.pt, label: d.label })),
+  ];
+  /** Auto-filled amount (form string) for a fee type from Settings → Rules, or ''. */
   const feeAutoAmount = (t: string): string => {
-    const v = chequeFees[t];
-    return v != null && v > 0 ? String(v) : '';
+    const a = ruleSuggest(t).amount;
+    return a > 0 ? String(a) : '';
+  };
+  /** Dropdown label with the rule's basis + amount, e.g. "Early termination · 3 mo of rent (AED 25,000)". */
+  const feeOptionLabel = (t: string, base: string): string => {
+    const { amount, basis } = ruleSuggest(t);
+    if (!basis) return base;
+    return amount > 0 ? `${base} · ${basis}` : `${base} · ${basis}`;
   };
   const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '', paymentMethod: 'cheque', chequeNumber: '' };
   const [showAddFee, setShowAddFee] = useState(false);
@@ -2220,6 +2322,17 @@ function DetailsDrawer({
     try { await onDeletePayment(paymentId); }
     finally { setFeeDeleteBusy(null); }
   };
+  // Per-section "Add" → open the right popup pre-typed for that segment. Deposit + rent
+  // use the payment popup; management + third-party fees use the fee popup (VAT-aware).
+  const openRecordFor = (paymentType: string) => {
+    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '' }));
+    setShowAddFee(false); setRecErr(null); setShowRec(true);
+  };
+  const openFeeFor = (paymentType: string) => {
+    const auto = feeAutoAmount(paymentType);
+    setFeeAdd({ ...emptyFeeForm, paymentType, ...(auto ? { amount: auto } : {}) });
+    setShowRec(false); setFeeAddErr(null); setShowAddFee(true);
+  };
   // A bounced or cancelled cheque is void (it never cleared / was replaced by a new
   // cheque), so it must NOT count toward the rent total — otherwise it double-counts
   // with its replacement. It still appears in the table above as history.
@@ -2230,6 +2343,11 @@ function DetailsDrawer({
   const rentVat   = rentScheduleRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
+  // All four segments summed — identical to the header pass's "Total payable" so the two
+  // never disagree: rent + management + third party, plus the deposit ONLY when it is this
+  // contract's own (a renewal carries it forward, never re-collected → excluded here too).
+  const grandDeposit = contract.contractType === 'renewal' ? 0 : (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0);
+  const paymentsGrandTotal = grandDeposit + rentGross + managementFeeTotal + thirdPartyTotal;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
   //    assembled from the contract's recorded rent cheques, fees, and deposit.
   //    Replaces the old origin-lead "offer" snapshot in the receipt modal.
@@ -2458,16 +2576,13 @@ function DetailsDrawer({
                 <div className="sech">
                   <span className="si"><CreditCard size={16} /></span>
                   <span className="st">Payments</span>
-                  {perms.collections && (
-                    <button type="button" className="mini-btn view" style={{ marginLeft: 'auto' }} onClick={() => { setShowRec(s => !s); setRecErr(null); }}>
-                      {showRec ? <><X size={12} /> Close</> : <><CreditCard size={12} /> Record payment</>}
-                    </button>
-                  )}
                 </div>
                 <div className="secb">
-                  <table className="ptable">
+                  <table className="ptable" style={{ tableLayout: 'fixed' }}>
+                    <PayCols />
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
+                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" />}
                       {/* Security deposit folds in as the first payment row. When
                           the deposit is THIS contract's own payment it's editable;
                           a renewal that only carries the deposit gets a read-only
@@ -2690,6 +2805,7 @@ function DetailsDrawer({
                           </Fragment>
                         );
                       })()}
+                      <PaySegRail title="Rental Income" extra={rentScheduleRows.length ? `${rentScheduleRows.length} cheque${rentScheduleRows.length === 1 ? '' : 's'}` : undefined} onAdd={perms.collections ? () => openRecordFor('rental_income') : undefined} />
                       {rentScheduleRows.map((p, i) => (
                         <Fragment key={p.id}>
                         <tr>
@@ -2795,49 +2911,35 @@ function DetailsDrawer({
                       {rentScheduleRows.length === 0 && (
                         <tr><td colSpan={7}><span className="note">No payments recorded yet.</span></td></tr>
                       )}
+                      {rentScheduleRows.length > 1 && (
+                        <PaySegTotalRow
+                          label={showVat ? 'Rental Income total (incl. VAT)' : 'Rental Income total'}
+                          amount={rentGross}
+                          sub={showVat ? [{ label: 'Net rent', amount: rentNet }, { label: `VAT${(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}`, amount: rentVat }] : undefined}
+                        />
+                      )}
                     </tbody>
-                    <tfoot>
-                      {showVat && (
-                        <>
-                          <tr><td colSpan={2}>Net rent</td><td className="amt">{fmtAed(rentNet)}</td><td colSpan={4} /></tr>
-                          <tr><td colSpan={2}>VAT{(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}</td><td className="amt">{fmtAed(rentVat)}</td><td colSpan={4} /></tr>
-                        </>
-                      )}
-                      <tr><td colSpan={2}>{showVat ? 'Total rent (incl. VAT)' : 'Total rent'}</td><td className="tot">{fmtAed(rentGross)}</td><td colSpan={4} /></tr>
-                      {(depositRow || contract.securityDeposit) && (
-                        <tr style={{ opacity: 0.75 }}>
-                          <td colSpan={2}>Security deposit held (refundable, not in rent total)</td>
-                          <td className="amt">{(depositRow?.amount ?? contract.securityDeposit?.amount) ? fmtAed(depositRow?.amount ?? contract.securityDeposit?.amount ?? 0) : <span style={{ color: '#9b9890', fontWeight: 400 }}>Not set</span>}</td>
-                          <td colSpan={4} />
-                        </tr>
-                      )}
-                    </tfoot>
                   </table>
 
                   {/* Fees — admin / ejari / commission as their own line items,
                       separate from the rent schedule above. Admin-filled: the RP
                       adds / edits / removes them here; nothing is auto-fabricated. */}
                   <div style={{ marginTop: 18 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
-                      <p className="subhead" style={{ margin: 0 }}>
-                        Fees <span className="note" style={{ fontWeight: 400 }}>· one-off charges, separate from rent</span>
-                      </p>
-                      {perms.collections && (
-                        <button
-                          type="button"
-                          className="mini-btn view"
-                          title="Add a fee line"
-                          onClick={() => { setShowAddFee(v => !v); setFeeAddErr(null); }}
-                        >
+                    {perms.collections && (feeRows.length === 0 && otherPaymentRows.length === 0) && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 6 }}>
+                        <button type="button" className="mini-btn view" title="Add a fee line" onClick={() => openFeeFor('admin_fee')}>
                           <Plus size={12} /> Add fee
                         </button>
-                      )}
-                    </div>
-                    <table className="ptable">
+                      </div>
+                    )}
+                    <table className="ptable" style={{ tableLayout: 'fixed' }}>
+                      <PayCols />
                       <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                       <tbody>
-                        {feeRows.map(f => (
+                        {[...managementFeeRows, ...thirdPartyFeeRows].map((f, i) => (
                           <Fragment key={f.id}>
+                          {i === 0 && managementFeeRows.length > 0 && <PaySegRail title="Management Fee" onAdd={perms.collections ? () => openFeeFor('admin_fee') : undefined} />}
+                          {i === managementFeeRows.length && thirdPartyFeeRows.length > 0 && <PaySegRail title="Third Party" onAdd={perms.collections ? () => openFeeFor('ejari_fee') : undefined} />}
                           <tr>
                             <td>
                               {feeLabel(f.paymentType)}
@@ -2913,7 +3015,7 @@ function DetailsDrawer({
                                         const nt = e.target.value;
                                         setFeeEdit(v => { const auto = feeAutoAmount(nt); return { ...v, paymentType: nt, ...(auto ? { amount: auto } : {}) }; });
                                       }}>
-                                      {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                      {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{feeOptionLabel(o.value, o.label)}</option>)}
                                     </select>
                                     {feeAutoAmount(feeEdit.paymentType) && <p className="note" style={{ marginTop: 2 }}>Amount auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeEdit.paymentType)))}). Editable.</p>}
                                   </div>
@@ -2961,12 +3063,13 @@ function DetailsDrawer({
                               </td>
                             </tr>
                           )}
+                          {i === managementFeeRows.length - 1 && managementFeeRows.length > 1 && <PaySegTotalRow label="Management Fee total" amount={managementFeeTotal} />}
                           </Fragment>
                         ))}
                         {/* Custom "Other" charges (payment_type 'other') — per-unit taxes
-                            and service fees, shown here under Fees rather than in the rent
-                            schedule. They are payments, so they keep the payment status +
-                            edit controls (changeStatus / startEdit). */}
+                            and service fees, under Third Party. They are payments, so they
+                            keep the payment status + edit controls (changeStatus / startEdit). */}
+                        {thirdPartyFeeRows.length === 0 && otherPaymentRows.length > 0 && <PaySegRail title="Third Party" onAdd={perms.collections ? () => openFeeFor('ejari_fee') : undefined} />}
                         {otherPaymentRows.map(p => (
                           <Fragment key={p.id}>
                           <tr>
@@ -3056,19 +3159,22 @@ function DetailsDrawer({
                           )}
                           </Fragment>
                         ))}
+                        {(thirdPartyFeeRows.length + otherPaymentRows.length) > 1 && <PaySegTotalRow label="Third Party total" amount={thirdPartyTotal} />}
                         {feeRows.length === 0 && otherPaymentRows.length === 0 && !showAddFee && (
-                          <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, ejari, or commission charges — amounts are not auto-calculated.</span></td></tr>
+                          <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, contract registration, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
                       </tbody>
-                      {(feeRows.length > 0 || otherPaymentRows.length > 0) && (
-                        <tfoot><tr><td colSpan={2}>Total fees</td><td className="tot">{fmtAed(feeGross + otherGross)}</td><td colSpan={4} /></tr></tfoot>
-                      )}
                     </table>
 
-                    {/* Add-fee form (admin-filled) */}
+                    {/* Add-fee popup (admin-filled) */}
                     {showAddFee && (
-                      <div style={{ marginTop: 12, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
-                        <p className="subhead">Add fee</p>
+                      <div className="mscrim" onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>
+                        <div className="modal sm" onClick={e => e.stopPropagation()}>
+                          <div className="mh">
+                            <span className="mt"><span className="mti" style={{ background: 'var(--jade)' }}><Plus size={16} /></span> Add fee</span>
+                            <button className="x" onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}><X size={17} /></button>
+                          </div>
+                          <div className="mb">
                         <div className="grid2">
                           <div className="field"><label>Fee type</label>
                             <select className="input" value={feeAdd.paymentType}
@@ -3076,7 +3182,7 @@ function DetailsDrawer({
                                 const nt = e.target.value;
                                 setFeeAdd(v => { const auto = feeAutoAmount(nt); return { ...v, paymentType: nt, ...(auto ? { amount: auto } : {}) }; });
                               }}>
-                              {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                              {FEE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{feeOptionLabel(o.value, o.label)}</option>)}
                             </select>
                             {feeAutoAmount(feeAdd.paymentType) && <p className="note" style={{ marginTop: 2 }}>Auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeAdd.paymentType)))}). Editable.</p>}
                           </div>
@@ -3112,27 +3218,38 @@ function DetailsDrawer({
                         </div>
                         <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed((Number(feeAdd.amount) || 0) + (Number(feeAdd.vatAmount) || 0))}</strong></p>
                         {feeAddErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{feeAddErr}</p>}
-                        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                          <button className="btn btn-jade btn-sm" disabled={feeAddBusy} onClick={() => void submitAddFee()}>
-                            <Check size={14} /> {feeAddBusy ? 'Adding…' : 'Add fee'}
-                          </button>
-                          <button className="btn btn-ghost btn-sm" disabled={feeAddBusy} onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>Cancel</button>
+                          </div>
+                          <div className="mf">
+                            <button className="btn btn-ghost btn-sm" disabled={feeAddBusy} onClick={() => { setShowAddFee(false); setFeeAddErr(null); setFeeAdd(emptyFeeForm); }}>Cancel</button>
+                            <button className="btn btn-jade btn-sm" disabled={feeAddBusy} onClick={() => void submitAddFee()}><Check size={14} /> {feeAddBusy ? 'Adding…' : 'Add fee'}</button>
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Record-payment form (Flow 1) */}
+                  {/* Grand total — all four segments summed (deposit · rent · management · third party) */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
+                    <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(paymentsGrandTotal)}</span>
+                  </div>
+
+                  {/* Record-payment popup (Flow 1) */}
                   {showRec && (
-                    <div style={{ marginTop: 14, padding: 14, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
-                      <p className="subhead">New payment</p>
+                    <div className="mscrim" onClick={() => { setShowRec(false); setRecErr(null); }}>
+                      <div className="modal sm" onClick={e => e.stopPropagation()}>
+                        <div className="mh">
+                          <span className="mt"><span className="mti" style={{ background: 'var(--jade)' }}><CreditCard size={16} /></span> New payment</span>
+                          <button className="x" onClick={() => { setShowRec(false); setRecErr(null); }}><X size={17} /></button>
+                        </div>
+                        <div className="mb">
                       <div className="grid2">
                         <div className="field"><label>Type</label>
                           <select className="input" value={rec.paymentType} onChange={e => setRec(v => ({ ...v, paymentType: e.target.value }))}>
                             <option value="rental_income">Rental income</option>
                             <option value="security_deposit">Security deposit</option>
                             <option value="admin_fee">Admin fee</option>
-                            <option value="ejari_fee">Ejari fee</option>
+                            <option value="ejari_fee">Contract Registration fee</option>
                             <option value="commission">Commission</option>
                             <option value="maintenance_fee">Maintenance fee</option>
                             <option value="service_charge">Service charge</option>
@@ -3164,11 +3281,11 @@ function DetailsDrawer({
                         <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
                       </div>
                       {recErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{recErr}</p>}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                        <button className="btn btn-jade btn-sm" disabled={recBusy || !rec.amount} onClick={() => void submitRec()}>
-                          <Check size={14} /> {recBusy ? 'Saving…' : 'Save payment'}
-                        </button>
-                        <button className="btn btn-ghost btn-sm" disabled={recBusy} onClick={() => { setShowRec(false); setRecErr(null); }}>Cancel</button>
+                        </div>
+                        <div className="mf">
+                          <button className="btn btn-ghost btn-sm" disabled={recBusy} onClick={() => { setShowRec(false); setRecErr(null); }}>Cancel</button>
+                          <button className="btn btn-jade btn-sm" disabled={recBusy || !rec.amount} onClick={() => void submitRec()}><Check size={14} /> {recBusy ? 'Saving…' : 'Save payment'}</button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3273,7 +3390,7 @@ function DetailsDrawer({
               // One file → all receipts inside (Rental Income · Security Deposit · Management Fee · Government fee).
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: [isRenewal ? 'Rental income' : 'Rental income, security deposit', 'management fee', showGovtVat ? 'Government fee' : null].filter(Boolean).join(', '), href: receiptsReady ? receiptBase : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
-              { kind: 'doc',  key: 'ejari_certificate', label: 'Ejari' },
+              { kind: 'doc',  key: 'ejari_certificate', label: 'Contract Registration Certificate' },
             ];
             if (!isRenewal) {
               binderSeq.push({ kind: 'doc',  key: 'utility_registration', label: 'Utility Proof of Payment' });
@@ -3956,12 +4073,13 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown> } = {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown>; geo?: { lat: number; lng: number; accuracy?: number } | null } = {
         role: 'landlord',
         signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
         method: 'online',
         consent,
         clientMeta: collectClientMeta(),
+        geo: await collectGeo(),
       };
       if (mode === 'canvas') body.signatureImage = sig!;
       else                   body.typedName     = name.trim();
@@ -4081,12 +4199,13 @@ function SignModal({
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown> } = {
+      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown>; geo?: { lat: number; lng: number; accuracy?: number } | null } = {
         role: 'landlord',
         signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
         method: 'online',
         consent,
         clientMeta: collectClientMeta(),
+        geo: await collectGeo(),
       };
       if (mode === 'canvas') body.signatureImage = sig!;
       else                   body.typedName     = name.trim();
@@ -4419,7 +4538,7 @@ function RenewalProposeModal({
   rows.push(...vatRows);
   const feeDate = dueDates[0] ?? f.newStartDate;
   if (adminN > 0) rows.push({ key: 'admin', d: 'Admin Fee', date: feeDate, net: adminN, vat: 0 });
-  if (ejariN > 0) rows.push({ key: 'ejari', d: 'Ejari Fee', date: feeDate, net: ejariN, vat: 0 });
+  if (ejariN > 0) rows.push({ key: 'ejari', d: 'Contract Registration Fee', date: feeDate, net: ejariN, vat: 0 });
   if (commN > 0)  rows.push({ key: 'comm',  d: 'Commission', date: feeDate, net: commN, vat: 0 });
   extras.forEach((e, i) => {
     const amt = parseFloat(e.amount) || 0;
@@ -4427,6 +4546,21 @@ function RenewalProposeModal({
   });
   const totalVat = rows.reduce((s, r) => s + r.vat, 0);
   const total = rows.reduce((s, r) => s + r.net + r.vat, 0);
+
+  // Segregated four-group preview — same shared view as the contract, receipts, PDFs,
+  // lead, creation and edit. Classify each planned row by its key: rent instalments →
+  // Rental Income; rental-VAT cheques + extras → Third Party; admin/Ejari/commission →
+  // Management/Third Party. (Renewals carry the deposit forward, so no deposit row.)
+  const seg = buildSegregatedPlan(rows.map((r): SegPaymentInput => {
+    const paymentType =
+      r.key.startsWith('rv') ? 'other'
+      : r.key.startsWith('r') ? 'rental_income'
+      : r.key === 'admin' ? 'admin_fee'
+      : r.key === 'ejari' ? 'ejari_fee'
+      : r.key === 'comm' ? 'commission'
+      : 'other';
+    return { paymentType, description: r.d, amount: r.net + r.vat, transactionDate: r.date || null };
+  }));
 
   const submit = async () => {
     setBusy(true); setErr(null);
@@ -4543,7 +4677,7 @@ function RenewalProposeModal({
           <p className="subhead mut">Fees (AED) — billed as their own cheques</p>
           <div className="grid2">
             <div className="field"><label>Admin fee</label><input type="number" className="input" value={f.adminFee} onChange={e => set('adminFee', e.target.value)} /></div>
-            <div className="field"><label>Ejari fee</label><input type="number" className="input" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></div>
+            <div className="field"><label>Contract Registration fee</label><input type="number" className="input" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></div>
           </div>
           <div className="grid2" style={{ marginBottom: 18 }}>
             <div className="field"><label>Commission</label><input type="number" className="input" value={f.commission} onChange={e => set('commission', e.target.value)} /></div>
@@ -4566,25 +4700,10 @@ function RenewalProposeModal({
           {rows.length > 0 && (
             <>
               <p className="subhead mut" style={{ marginTop: 14 }}>Planned schedule</p>
-              <table className="ptable" style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, overflow: 'hidden' }}>
-                <thead><tr><th>#</th><th>Description</th><th>Due date</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
-                <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={r.key}>
-                      <td>{i + 1}</td>
-                      <td>{r.d}{r.vat > 0 && <span className="note mut"> · incl. VAT {r.vat.toLocaleString('en-AE')}</span>}</td>
-                      <td>{r.date ? fmtDate(r.date) : '—'}</td>
-                      <td className="amt" style={{ textAlign: 'right' }}>{(r.net + r.vat).toLocaleString('en-AE')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  {totalVat > 0 && (
-                    <tr><td colSpan={3} style={{ color: 'var(--mute)' }}>of which VAT</td><td className="amt" style={{ textAlign: 'right', color: 'var(--mute)' }}>{totalVat.toLocaleString('en-AE')}</td></tr>
-                  )}
-                  <tr><td colSpan={3}>Total</td><td className="tot" style={{ textAlign: 'right' }}>{total.toLocaleString('en-AE')}</td></tr>
-                </tfoot>
-              </table>
+              <SegregatedPlanView plan={seg} />
+              {totalVat > 0 && (
+                <p className="note mut" style={{ marginTop: 6 }}>Rent cheques are net; VAT of {totalVat.toLocaleString('en-AE')} is collected as its own cheque(s), shown under Third Party.</p>
+              )}
               {chequeDays.length === 0 && (
                 <p className="note mut" style={{ marginTop: 6 }}>Tip: set preferred cheque days in Settings → Rules to standardise due dates.</p>
               )}
@@ -5116,28 +5235,28 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onEjariFilePicked = async (file: File) => {
     setEjariUploading(true);
     try {
-      await uploadContractDoc(file, 'Ejari', 'ejari_certificate');
+      await uploadContractDoc(file, 'Contract Registration Certificate', 'ejari_certificate');
       // Register Ejari once the certificate is on file.
       await fetch(`/api/contracts/${contract.id}/ejari`, {
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ejariStatus: 'registered' }),
       });
       void reload();
-    } catch (e) { alert(e instanceof Error ? e.message : 'Ejari upload failed'); }
+    } catch (e) { alert(e instanceof Error ? e.message : 'Contract Registration Certificate upload failed'); }
     finally { setEjariUploading(false); if (ejariInputRef.current) ejariInputRef.current.value = ''; }
   };
   const onMarkEjari = async () => {
     try {
       const res = await fetch(`/api/contracts/${contract.id}/ejari/mark-registered`, { method: 'PATCH', credentials: 'include' });
-      if (!res.ok) throw new Error(`Mark Ejari failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Mark Contract Registration failed: ${res.status}`);
       const data = await res.json().catch(() => ({ matched: true }));
       if (data.matched === false) {
-        alert('No Ejari certificate is on file for this lease period yet. Please upload the certificate.');
+        alert('No Contract Registration Certificate is on file for this lease period yet. Please upload the certificate.');
         return;
       }
       void reload();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not mark Ejari as on file.');
+      alert(e instanceof Error ? e.message : 'Could not mark the Contract Registration Certificate as on file.');
     }
   };
   const onUploadUtility = () => utilityInputRef.current?.click();
@@ -5354,12 +5473,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
   // ── Flow 4: Ejari reset / redo ──  PATCH /api/contracts/:id/ejari/reset
   const onRedoEjari = async () => {
-    if (!confirm('Roll the tenancy back to issued and clear the existing Ejari? You will then be able to upload a corrected certificate.')) return;
+    if (!confirm('Roll the tenancy back to issued and clear the existing Contract Registration? You will then be able to upload a corrected certificate.')) return;
     try {
       const res = await fetch(`/api/contracts/${contract.id}/ejari/reset`, { method: 'PATCH', credentials: 'include' });
       if (!res.ok) throw new Error(`Error ${res.status}`);
       void reload();
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to reset Ejari'); }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to reset Contract Registration'); }
   };
 
   // ── Flow 5: upload KYC / contract document ──
@@ -6110,7 +6229,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                  the workflow has not yet frozen (active / expired / terminated). */}
             {selStep.key === 'ejari' && derived.ejariStatus === 'registered' && !readOnlyWorkflow && (
               <button className="ca" style={{ justifySelf: 'start', marginTop: -4, padding: 0, color: 'var(--brick)' }} onClick={() => void onRedoEjari()}>
-                <RotateCcw size={12} /> Redo Ejari (reset &amp; re-upload)
+                <RotateCcw size={12} /> Redo Contract Registration (reset &amp; re-upload)
               </button>
             )}
             {content.timing && (
@@ -6180,7 +6299,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         onChange={(e) => { const f = e.target.files?.[0]; const k = windDownKind; if (f && k) void onWindDownFilePicked(f, k); }} />
       {(ejariUploading || utilityUploading || chequesUploading || windDownUploading) && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
-          Uploading {ejariUploading ? 'Ejari' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Advice' : 'wind-down'} document…
+          Uploading {ejariUploading ? 'Contract Registration' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Advice' : 'wind-down'} document…
         </div>
       )}
 
@@ -6388,7 +6507,7 @@ function GlobalStyle() {
       @media (max-width: 520px) { .quest-page .grid2 { grid-template-columns: 1fr; } }
       .quest-page .ptable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
       .quest-page .ptable th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); font-weight: 700; padding: 8px 8px; border-bottom: 1px solid var(--mist-strong); }
-      .quest-page .ptable td { padding: 10px 8px; border-bottom: 1px solid var(--mist); color: var(--ink-2); }
+      .quest-page .ptable td { padding: 10px 8px; border-bottom: 1px solid var(--mist); color: var(--ink-2); overflow-wrap: anywhere; }
       .quest-page .ptable tr:last-child td { border-bottom: 0; }
       .quest-page .ptable .amt { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
       .quest-page .ptable tfoot td { border-top: 2px solid #bfe3d5; background: var(--jade-tint); font-weight: 800; }

@@ -49,6 +49,14 @@ const s = StyleSheet.create({
 });
 
 export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
+  // Match the on-screen view: the Payment Ref column shows only when a real cheque/
+  // transfer ref exists (contract, receipts); on proposals it's dropped and the other
+  // columns widen so there's no dead "—" column.
+  const showRef = plan.groups.some(g => g.lines.some(l => !!l.chequeNo));
+  const wItem = showRef ? '34%' : '52%';
+  const wDue = showRef ? '20%' : '26%';
+  const wAmt = showRef ? '16%' : '22%';
+  const wTotalLab = showRef ? '84%' : '78%';
   return (
     <View>
       {plan.groups.map((g) => {
@@ -62,24 +70,24 @@ export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
                 : null}
             </View>
             <View style={s.thead}>
-              <Text style={[s.th, { width: '34%' }]}>Item</Text>
-              <Text style={[s.th, { width: '30%' }]}>Payment Ref</Text>
-              <Text style={[s.th, { width: '20%' }]}>Due date</Text>
-              <Text style={[s.th, { width: '16%', textAlign: 'right' }]}>Amount</Text>
+              <Text style={[s.th, { width: wItem }]}>Item</Text>
+              {showRef ? <Text style={[s.th, { width: '30%' }]}>Payment Ref</Text> : null}
+              <Text style={[s.th, { width: wDue }]}>Due date</Text>
+              <Text style={[s.th, { width: wAmt, textAlign: 'right' }]}>Amount</Text>
             </View>
             {g.lines.map((l, i) => (
               <View key={i} style={s.row}>
-                <Text style={s.cItem}>{l.item}</Text>
-                <Text style={s.cRef}>{paymentRefLabel(l.chequeNo, l.method)}</Text>
-                <Text style={s.cDue}>{fmtDate(l.dueDate)}</Text>
-                <Text style={s.cAmt}>{aed(l.amount)}</Text>
+                <Text style={[s.cItem, { width: wItem }]}>{l.item}</Text>
+                {showRef ? <Text style={s.cRef}>{paymentRefLabel(l.chequeNo, l.method)}</Text> : null}
+                <Text style={[s.cDue, { width: wDue }]}>{fmtDate(l.dueDate)}</Text>
+                <Text style={[s.cAmt, { width: wAmt }]}>{aed(l.amount)}</Text>
               </View>
             ))}
             {/* Single-line groups don't repeat a total that just restates the line. */}
             {g.lines.length > 1 ? (
               <View style={[s.totalRow, { borderTopColor: c.accent }]}>
-                <Text style={[s.totalLab, { width: '84%' }]}>Total</Text>
-                <Text style={[s.cAmt, { width: '16%', color: c.accent }]}>{aed(g.total)}</Text>
+                <Text style={[s.totalLab, { width: wTotalLab }]}>Total</Text>
+                <Text style={[s.cAmt, { width: wAmt, color: c.accent }]}>{aed(g.total)}</Text>
               </View>
             ) : null}
           </View>

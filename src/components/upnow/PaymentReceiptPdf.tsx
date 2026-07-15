@@ -217,7 +217,7 @@ function isRental(p: ReceiptPayment): boolean {
   return t !== 'security_deposit' && !GOVT_TYPES.has(t) && !FEE_TYPES.has(t);
 }
 const FEE_LABEL: Record<string, string> = {
-  admin_fee: 'Administration Fee', ejari_fee: 'Ejari Registration Fee', commission: 'Commission',
+  admin_fee: 'Administration Fee', ejari_fee: 'Contract Registration Fee', commission: 'Commission',
 };
 function isDeposit(p: ReceiptPayment): boolean {
   return (p.paymentType ?? '').toLowerCase() === 'security_deposit';
@@ -285,7 +285,7 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   const lines: LineItem[] = [];
   if (isFirstBundle) {
     if (admin > 0) lines.push({ desc: 'Administration Fee', net: admin, vat: 0, total: admin });
-    if (ejari > 0) lines.push({ desc: 'Ejari Registration Fee', net: ejari, vat: 0, total: ejari });
+    if (ejari > 0) lines.push({ desc: 'Contract Registration Fee', net: ejari, vat: 0, total: ejari });
     const rentNet = Math.max(0, net - admin - ejari);
     lines.push({ desc: `Rent — Installment ${ordinal} of ${n}`, net: rentNet, vat, total: rentNet + vat, date: sel.transactionDate ?? null, ...meta });
   } else {
@@ -349,7 +349,7 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
   if (adminNet + adminVat > 0) lines.push({ desc: 'Administration Fee', net: adminNet, vat: adminVat, total: round2(adminNet + adminVat), ...feeMeta(adminRow) });
   if (commissionNet + commissionVat > 0) lines.push({ desc: 'Commission', net: commissionNet, vat: commissionVat, total: round2(commissionNet + commissionVat), ...feeMeta(commRow) });
   const ejariLine: LineItem | null = ejariGross > 0
-    ? { desc: 'Ejari Registration Fee', net: ejariNet, vat: ejariVat, total: ejariGross, ...feeMeta(ejariRow) }
+    ? { desc: 'Contract Registration Fee', net: ejariNet, vat: ejariVat, total: ejariGross, ...feeMeta(ejariRow) }
     : null;
   return { lines, legacyBundle, feeCount: feeRows.length, ejariLine };
 }
@@ -739,7 +739,7 @@ function EmptyDoc({ kind }: { kind: Props['kind'] }) {
       <Page size="A4" style={st.page}>
         <Text style={{ marginTop: 40, textAlign: 'center', color: MUTE }}>
           {kind === 'deposit' ? 'No security deposit is recorded for this contract.'
-            : kind === 'management' ? 'No management fees (Ejari, admin or commission) are recorded for this contract.'
+            : kind === 'management' ? 'No management fees (Contract Registration, admin or commission) are recorded for this contract.'
             : kind === 'rental' ? 'No rent payments are recorded for this contract yet.'
             : 'No payments are available to receipt for this contract yet.'}
         </Text>

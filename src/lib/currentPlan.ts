@@ -40,7 +40,7 @@ export interface PlanContract {
 
 const toFils = (aed: number) => Math.round((aed || 0) * 100);
 const feeLabel = (t: string | null | undefined) =>
-  t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Ejari fee' : t === 'commission' ? 'Commission' : (t ?? 'Fee');
+  t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission' : (t ?? 'Fee');
 
 export function buildCurrentPlan(contract: PlanContract, payments: PlanPayment[]): OfferPlan {
   const rentRows = (payments ?? [])

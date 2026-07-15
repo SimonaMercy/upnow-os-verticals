@@ -81,7 +81,7 @@ const TYPE_TABS: { key: TypeKey; label: string }[] = [
 const QUICK: Record<string, { path: string; label: string }> = {
   pdc: { path: 'confirm-pdc', label: 'Confirm PDC' },
   utility: { path: 'utility/mark-on-file', label: 'Mark utility on file' },
-  ejari: { path: 'ejari/mark-registered', label: 'Mark Ejari on file' },
+  ejari: { path: 'ejari/mark-registered', label: 'Mark Contract Registration on file' },
 };
 
 function fmtShort(dateStr: string | null) {
@@ -224,7 +224,7 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
       // Ejari "mark on file" only links an EXISTING certificate; if none is on
       // file it returns matched:false and nothing changed — guide the admin in.
       if (action === 'ejari' && res && res.matched === false) {
-        setNote({ id: c.id, text: 'No Ejari certificate on file — open the contract to upload/register it.' });
+        setNote({ id: c.id, text: 'No Contract Registration Certificate on file — open the contract to upload/register it.' });
       }
       await load();
     } catch (e) {

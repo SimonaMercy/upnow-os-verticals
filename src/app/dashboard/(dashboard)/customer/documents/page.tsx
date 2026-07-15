@@ -626,7 +626,7 @@ export default function CustomerDocumentsPage() {
       {hasEjariRegistered && <SectionCard
         icon={Zap}
         title="Utility Setup"
-        subtitle="Required after Ejari registration — provide your utility account number and proof of payment"
+        subtitle="Required after Contract Registration — provide your utility account number and proof of payment"
         badge={
           utilityDocId && utilityAccountNum
             ? <span className="text-xs font-semibold text-[#16a34a] bg-[#dcfce7] px-2.5 py-1 rounded-full">Submitted ✓</span>

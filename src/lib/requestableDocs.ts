@@ -22,7 +22,7 @@ export const REQUESTABLE_DOCS = [
   'Pay Slip',
   'Credit Report',
   // Rental
-  'Ejari Certificate',
+  'Contract Registration Certificate',
   'Tenancy Contract',
   'Title Deed',
   'Cheque Copies (PDC)',

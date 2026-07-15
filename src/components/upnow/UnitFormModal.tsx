@@ -870,7 +870,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
             <div className={ds.grid2}>
               <div><label className={ds.lbl}>Security Deposit</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 10000" value={form.securityDeposit} onChange={e => upd('securityDeposit', e.target.value)} /></div>
               <div><label className={ds.lbl}>Admin Fee</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 5000" value={form.adminFee} onChange={e => upd('adminFee', e.target.value)} /></div>
-              <div><label className={ds.lbl}>Ejari Fee</label><input type="number" min="0" step="any" className={ds.input} placeholder={isResidential ? '220' : 'e.g. 250'} value={form.ejariFeeFils} onChange={e => upd('ejariFeeFils', e.target.value)} /></div>
+              <div><label className={ds.lbl}>Contract Registration Fee</label><input type="number" min="0" step="any" className={ds.input} placeholder={isResidential ? '220' : 'e.g. 250'} value={form.ejariFeeFils} onChange={e => upd('ejariFeeFils', e.target.value)} /></div>
               <div><label className={ds.lbl}>Commission</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 4000" value={form.commission} onChange={e => upd('commission', e.target.value)} /></div>
               <div><label className={ds.lbl}>Service Charges (AED/yr)</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 8000" value={form.serviceCharges} onChange={e => upd('serviceCharges', e.target.value)} /></div>
             </div>

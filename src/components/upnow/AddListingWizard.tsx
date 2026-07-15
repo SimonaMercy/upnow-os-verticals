@@ -877,7 +877,7 @@ function UnitTable({
               <th colSpan={6} />
               <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890] border-l border-[#e8e6e0]">Security Dep.</th>
               <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Admin Fee</th>
-              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Ejari Fee</th>
+              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Contract Registration Fee</th>
               <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Commission</th>
               <th />
             </tr>

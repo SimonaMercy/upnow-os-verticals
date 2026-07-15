@@ -64,7 +64,7 @@ export default function OfferReceiptModal({
   lines.push({ label: 'Rent (cheques)', fils: plan.rentFils });
   if ((plan.rentVatFils ?? 0) > 0) lines.push({ label: 'Rent VAT', fils: plan.rentVatFils ?? 0 });
   if (feeVatFils > 0) lines.push({ label: 'Fees VAT', fils: feeVatFils });
-  if (plan.ejariFils > 0) lines.push({ label: 'Ejari fee', fils: plan.ejariFils });
+  if (plan.ejariFils > 0) lines.push({ label: 'Contract Registration fee', fils: plan.ejariFils });
   if (plan.adminFeeFils > 0) lines.push({ label: 'Admin fee', fils: plan.adminFeeFils });
   if (plan.commissionFils > 0) lines.push({ label: 'Commission', fils: plan.commissionFils });
   (plan.customFees ?? []).forEach(f => lines.push({ label: f.label, fils: f.netFils }));

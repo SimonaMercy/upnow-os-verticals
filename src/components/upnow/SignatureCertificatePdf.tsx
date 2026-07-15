@@ -43,6 +43,10 @@ export interface CertificateSignature {
   actorUserId: number | null;
   actorName: string | null;
   actorEmail: string | null;
+  geoCity: string | null;
+  geoLat: number | string | null;
+  geoLng: number | string | null;
+  geoSource: string | null;
 }
 
 export interface CertificateEvent {
@@ -228,6 +232,7 @@ export function SignatureCertificateDoc({ data, refLabel }: { data: SignatureCer
               <KV k="Channel" v={SIGNED_VIA_LABEL[sig.signedVia ?? ''] ?? sig.signedVia ?? (sig.method === 'on_file' ? SIGNED_VIA_LABEL.on_file : 'Not recorded (legacy signature)')} />
               <KV k="Method" v={sig.method === 'on_file' ? 'On file (paper / imported)' : sig.method === 'paper' ? 'Paper (captured)' : 'Electronic signature'} />
               <KV k="IP address" v={sig.ipAddress} />
+              <KV k="Location" v={[sig.geoCity, (sig.geoLat != null && sig.geoLng != null) ? `${sig.geoLat}, ${sig.geoLng}` : null].filter(Boolean).join(' · ') || null} />
               <KV k="Device" v={device || null} />
               <KV k="Timezone / locale" v={[meta.timezone, meta.locale].filter(Boolean).join(' · ') || null} />
               <KV k="Consent" v={sig.consentGiven ? 'Agreed to sign electronically' : sig.method === 'on_file' ? '— (paper signature on file)' : 'Not captured'} />

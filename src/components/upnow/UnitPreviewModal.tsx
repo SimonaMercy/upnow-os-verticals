@@ -393,7 +393,7 @@ export function UnitPreviewModal({
   const pushFee = (label: string, value: string | null) => { if (value != null) fees.push({ label, value }); };
   pushFee('Security Deposit', aed(unit.securityDeposit));
   pushFee('Admin Fee', aed(unit.adminFee));
-  pushFee('Ejari Fee', aed(unit.ejariFeeFils));
+  pushFee('Contract Registration Fee', aed(unit.ejariFeeFils));
   pushFee('Commission', aed(unit.commission));
   pushFee('Service Charges', aed(unit.serviceCharges));
   additionalPayments.forEach((p) => pushFee(p.vat > 0 ? `${p.label} (incl. VAT)` : p.label, aed(p.amount + p.vat)));
