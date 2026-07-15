@@ -108,6 +108,8 @@ interface Props {
   onClose: () => void;
   /** RP action links. Pass null for the read-only (manager) view. */
   links?: EndedLeaseLinks | null;
+  /** Open the full-screen Tenant Final Settlement statement for a lease. */
+  onOpenStatement?: (leaseId: number) => void;
 }
 
 const OUTCOME_STYLE: Record<string, string> = {
@@ -195,7 +197,7 @@ function TenancyHeader({ lc }: { lc: Lifecycle }) {
 
 /** One tenancy's settlement block: move-in/out inspections, the final settlement
  *  breakdown, and the deposit + settlement documents (kept together). */
-function TenancySettlement({ lc, links, showHeader }: { lc: Lifecycle; links?: EndedLeaseLinks | null; showHeader: boolean }) {
+function TenancySettlement({ lc, links, showHeader, onOpenStatement }: { lc: Lifecycle; links?: EndedLeaseLinks | null; showHeader: boolean; onOpenStatement?: (leaseId: number) => void }) {
   const dep = lc.deposit;
   const settleHref = links?.settlement ? links.settlement(lc.leaseId) : null;
   const depDocs = dep ? [...dep.documents.cheque, ...dep.documents.receipt, ...dep.documents.attachment, ...dep.documents.bank] : [];
@@ -212,13 +214,26 @@ function TenancySettlement({ lc, links, showHeader }: { lc: Lifecycle; links?: E
 
       {/* Final settlement breakdown */}
       <div>
-        <DocGroupLabel right={settleHref ? (
-          <a href={settleHref} className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[#2e9f82] hover:underline">
-            <ExternalLink size={11} /> Open settlement
-          </a>
+        <DocGroupLabel right={(onOpenStatement || settleHref) ? (
+          <div className="flex items-center gap-3 shrink-0">
+            {onOpenStatement && (
+              <button type="button" onClick={() => onOpenStatement(lc.leaseId)}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2e9f82] hover:underline cursor-pointer">
+                <FileText size={11} /> View full statement
+              </button>
+            )}
+            {settleHref && (
+              <a href={settleHref} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6b6860] hover:underline">
+                <ExternalLink size={11} /> Contract page
+              </a>
+            )}
+          </div>
         ) : undefined}>Final settlement</DocGroupLabel>
         {lc.settlement ? (
-          <SettlementLines s={lc.settlement} openHref={null} />
+          <button type="button" onClick={onOpenStatement ? () => onOpenStatement(lc.leaseId) : undefined}
+            className={`block w-full text-left rounded-lg ${onOpenStatement ? 'hover:bg-[#f7faf9] transition-colors cursor-pointer' : ''}`}>
+            <SettlementLines s={lc.settlement} openHref={null} />
+          </button>
         ) : (
           <p className="text-[11px] text-[#9b9890]">No move-out settlement was recorded.{dep && dep.status === 'held' ? ' The deposit is still marked as held.' : ''}</p>
         )}
@@ -282,7 +297,7 @@ function TenancyContractDocs({ lc, leaseDocs, showHeader }: { lc: Lifecycle; lea
   );
 }
 
-export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links }: Props) {
+export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links, onOpenStatement }: Props) {
   const [detail, setDetail] = useState<EndedCustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -407,7 +422,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links 
                     </div>
                     <div className="space-y-4">
                       {detail.lifecycles.map(lc => (
-                        <TenancySettlement key={lc.leaseId} lc={lc} links={links} showHeader={detail.lifecycles.length > 1} />
+                        <TenancySettlement key={lc.leaseId} lc={lc} links={links} showHeader={detail.lifecycles.length > 1} onOpenStatement={onOpenStatement} />
                       ))}
                     </div>
                   </div>

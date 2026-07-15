@@ -90,6 +90,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare },
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
     { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart },
+    { label: 'Restoration List', href: '/rental-provider/dashboard/settings/inspection-prices', icon: Receipt },
     { divider: true },
     { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings },
   ],
@@ -270,6 +271,7 @@ function Sidebar({
           return false;                              // trailing empty section
         })
     : rawNav;
+  const navHrefs = navItems.flatMap((it) => ('href' in it ? [it.href] : []));
   const { user, signOut } = useAuth();
 
   const displayName = buildDisplayName(user, 'User');
@@ -342,9 +344,13 @@ function Sidebar({
           ];
           const isOverview = overviewRoutes.includes(item.href);
           const onPath = (base: string) => pathname === base || pathname.startsWith(base + '/');
+          const matchesThis = onPath(item.href) || (item.match?.some(onPath) ?? false);
+          // Most-specific wins: a parent (e.g. Settings) yields the highlight to a
+          // deeper nav item under it (e.g. Restoration List at /settings/inspection-prices).
+          const moreSpecific = navHrefs.some((h) => h !== item.href && h.startsWith(item.href + '/') && onPath(h));
           const isActive = isOverview
             ? pathname === item.href
-            : onPath(item.href) || (item.match?.some(onPath) ?? false);
+            : matchesThis && !moreSpecific;
 
           const badgeCount = item.badgeKey ? (counts[item.badgeKey] ?? 0) : 0;
           const hasBadge = badgeCount > 0;

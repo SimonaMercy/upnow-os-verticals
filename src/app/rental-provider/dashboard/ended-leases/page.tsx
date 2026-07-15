@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, X, Archive, Loader2, RefreshCw, Calendar, CalendarX } from 'lucide-react';
-import EndedLeaseDetailModal, { type EndedCustomerRow, type EndedCustomerDetail } from '@/components/upnow/EndedLeaseDetailModal';
+import { type EndedCustomerRow, type EndedCustomerDetail } from '@/components/upnow/EndedLeaseDetailModal';
+import SettlementStatementModal from '@/components/contract/SettlementStatementModal';
 
 const OUTCOME_LABELS: Record<string, string> = { expired: 'Expired', terminated: 'Terminated' };
 const OUTCOME_STYLE: Record<string, string> = {
@@ -52,7 +53,8 @@ export default function EndedLeasesPage() {
   const [filterOutcome, setFilterOutcome] = useState('all');
   const [filterProperty, setFilterProperty] = useState('all');
   const [filterYear, setFilterYear] = useState('all');
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [previewLeaseId, setPreviewLeaseId] = useState<number | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -74,6 +76,24 @@ export default function EndedLeasesPage() {
     if (!res.ok) throw new Error(`${res.status}`);
     return res.json();
   }, []);
+
+  // Row click → open the final settlement statement directly. Resolve the lease
+  // that holds the settlement (or the most recent tenancy) from the lifecycle.
+  const openStatement = useCallback(async (customerId: number) => {
+    setResolving(true);
+    try {
+      const detail = await loadDetail(customerId);
+      const lcs = detail.lifecycles ?? [];
+      const withSettle = lcs.filter(l => l.settlement);
+      const pool = withSettle.length ? withSettle : lcs;
+      const target = pool.slice().sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''))[0];
+      if (target) setPreviewLeaseId(target.leaseId);
+    } catch {
+      /* transient — the user can click again */
+    } finally {
+      setResolving(false);
+    }
+  }, [loadDetail]);
 
   const years = useMemo(() => collectYears(rows), [rows]);
   const yearScoped = useMemo(
@@ -103,8 +123,6 @@ export default function EndedLeasesPage() {
   const endedLeaseTotal = yearScoped.reduce((s, r) => s + r.endedLeaseCount, 0);
   const depositsToSettle = yearScoped.filter(r => r.depositStatus === 'held').length;
   const depositsSettled = yearScoped.filter(r => ['returned', 'partial_return', 'forfeited'].includes(r.depositStatus)).length;
-
-  const active = detailId !== null ? rows.find(r => r.customerId === detailId) ?? null : null;
 
   return (
     <div className="p-6">
@@ -211,7 +229,7 @@ export default function EndedLeasesPage() {
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.customerId} onClick={() => setDetailId(r.customerId)}
+                  <tr key={r.customerId} onClick={() => openStatement(r.customerId)}
                     className="border-b border-[#f0ede8] hover:bg-[#fafaf8] text-sm text-[#1a1916] cursor-pointer transition-colors">
                     <td className="px-4 py-3.5">
                       <div className="font-medium">{r.name || '—'}</div>
@@ -245,17 +263,21 @@ export default function EndedLeasesPage() {
         )}
       </div>
 
-      {active && (
-        <EndedLeaseDetailModal
-          row={active}
-          loadDetail={loadDetail}
-          onClose={() => setDetailId(null)}
+      {resolving && (
+        <div className="fixed inset-0 z-[55] bg-black/30 backdrop-blur-sm grid place-items-center">
+          <div className="flex items-center gap-2 text-white text-sm font-medium"><Loader2 className="animate-spin" size={22} /> Opening settlement…</div>
+        </div>
+      )}
+
+      {previewLeaseId != null && (
+        <SettlementStatementModal
+          contractId={previewLeaseId}
+          onClose={() => setPreviewLeaseId(null)}
           links={{
-            // Settlement now lives on the contract page (v2) — the standalone
-            // /settlement page is the old route.
-            contract: (id) => `/rental-provider/dashboard/contracts/${id}/v2`,
-            settlement: (id) => `/rental-provider/dashboard/contracts/${id}/v2`,
-            customer: (id) => `/rental-provider/dashboard/tenants/${id}`,
+            contract: `/rental-provider/dashboard/contracts/${previewLeaseId}/v2`,
+            payments: `/rental-provider/dashboard/payments`,
+            deposits: `/rental-provider/dashboard/deposits`,
+            worksheet: `/rental-provider/dashboard/contracts/${previewLeaseId}/settlement`,
           }}
         />
       )}

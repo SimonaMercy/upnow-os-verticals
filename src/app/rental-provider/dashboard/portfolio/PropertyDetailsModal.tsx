@@ -22,9 +22,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
-  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers, Info,
+  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers, Info, Download,
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
+import { downloadStoredDoc } from '@/lib/downloadDoc';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
@@ -1113,7 +1114,14 @@ export function PropertyDetailsModal({
                           <Trash2 size={13} />{rFiles.length > 1 ? 'Remove file' : 'Remove'}
                         </button>
                       )}
-                      {/* View-only on the platform — documents are not downloadable. */}
+                      {/* Download — available to the RP owner and any manager of the
+                          landlord (backend allows read/download for all of them).
+                          Managing (Replace/Remove) still requires `editable`. */}
+                      <button type="button" title="Download this document"
+                        onClick={() => { void downloadStoredDoc(rActive.id).catch(() => alert('Download failed. Please try again.')); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: '#fff', background: '#2e9f82', border: '1px solid #2e9f82', padding: '7px 11px', borderRadius: 8, cursor: 'pointer' }}>
+                        <Download size={14} />Download
+                      </button>
                     </>
                   )}
                 </div>

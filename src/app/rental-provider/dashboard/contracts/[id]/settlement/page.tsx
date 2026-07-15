@@ -5,9 +5,10 @@ import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
-  Wallet, BadgeCheck, Banknote, Coins, Download,
+  Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText,
 } from 'lucide-react';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
+import TenantFinalSettlementDoc, { type TFSContract, type TFSRow, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ const METHOD_LABELS: Record<PayMethod, string> = {
 
 interface ApiLine { id?: number; label: string; amount: number; type: LineType }
 interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null }
+interface ApiStatement { contract: TFSContract; contractSummary: TFSRow[]; rent: TFSRent }
 interface ApiSettlement {
   exists: boolean;
   id?: number;
@@ -44,6 +46,7 @@ interface ApiSettlement {
   paidAt: string | null;
   updatedAt: string | null;
   availablePenalties?: { key: string; label: string; amount: number }[];
+  statement?: ApiStatement;
 }
 
 interface ContractMeta {
@@ -79,6 +82,8 @@ export default function SettlementPage() {
   const backHref = (pathname ?? '').replace(/\/settlement\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${contractId}/v2`;
 
   const [meta, setMeta] = useState<ContractMeta | null>(null);
+  const [view, setView] = useState<'worksheet' | 'statement'>('worksheet');
+  const [statement, setStatement] = useState<ApiStatement | null>(null);
   const [status, setStatus] = useState<SettlementStatus>('draft');
   const [deposit, setDeposit] = useState('0');
   const [notes, setNotes] = useState('');
@@ -112,6 +117,7 @@ export default function SettlementPage() {
     setAvailable(s.availablePenalties ?? []);
     setPayRows((s.payments ?? []).map(p => ({ key: uid(), amount: String(p.amount), method: p.method, reference: p.reference ?? '', receivedOn: p.receivedOn ?? '' })));
     setStamps({ sentAt: s.sentAt, agreedAt: s.agreedAt, paidAt: s.paidAt });
+    if (s.statement) setStatement(s.statement);
   }, []);
 
   const load = useCallback(async () => {
@@ -289,13 +295,24 @@ export default function SettlementPage() {
   const sm = STATUS_META[status];
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+    <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4 py-8 space-y-6 transition-[max-width]`}>
       {/* Topbar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
           <ArrowLeft size={15} /> Back to contract
         </Link>
         <div className="flex items-center gap-2">
+          {/* Worksheet ⇄ Statement view toggle */}
+          <div className="flex rounded-full border border-[#e8e6e0] p-0.5 text-xs font-semibold">
+            <button type="button" onClick={() => setView('worksheet')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors ${view === 'worksheet' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
+              <PencilLine size={13} /> Worksheet
+            </button>
+            <button type="button" onClick={() => setView('statement')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors ${view === 'statement' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
+              <FileText size={13} /> Statement
+            </button>
+          </div>
           <button type="button" onClick={downloadSettlementPdf} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
             <Download size={13} /> Download PDF
           </button>
@@ -334,6 +351,7 @@ export default function SettlementPage() {
       {error && <div className="flex items-center gap-2 text-sm text-[#dc2626] bg-[#fef2f2] rounded-xl px-4 py-3"><AlertCircle size={15} /> {error}</div>}
       {savedTick && !error && <div className="flex items-center gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3"><CheckCircle size={15} className="text-[#2e9f82]" /> <span className="font-semibold text-[#1a7a5a]">Saved.</span></div>}
 
+      {view === 'worksheet' && (<>
       {/* Deposit */}
       <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-2">
         <label className="block text-[11px] font-semibold text-[#9b9890] uppercase tracking-wide">Security deposit held</label>
@@ -507,6 +525,43 @@ export default function SettlementPage() {
           <div className="flex items-center gap-2 text-sm font-semibold text-[#1a7a5a]"><BadgeCheck size={16} /> Settlement complete</div>
         )}
       </div>
+      </>)}
+
+      {/* Statement view — the Tenant Final Settlement document, rendered from live data.
+          Section 0/1/2 come from the API `statement` block; the deposit / deductions /
+          payments / balance reflect the current worksheet edits so the two stay in sync. */}
+      {view === 'statement' && (
+        statement ? (
+          <TenantFinalSettlementDoc data={{
+            contract: statement.contract,
+            contractSummary: statement.contractSummary,
+            rent: statement.rent,
+            depositHeld: depositNum,
+            lines: rows
+              .filter(r => r.label.trim() || Number(r.amount) > 0)
+              .map(r => ({ label: r.label.trim() || 'Adjustment', amount: Math.max(0, Number(r.amount) || 0), type: r.type })),
+            chargesTotal: sumLines,
+            payments: payRows
+              .filter(r => Number(r.amount) > 0)
+              .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
+            paymentsReceivedTotal: sumPayments,
+            balance,
+            notes: notes.trim() || null,
+            status,
+            settlementDate: stamps.paidAt,
+          }}
+          links={{
+            contract: `/rental-provider/dashboard/contracts/${contractId}/v2`,
+            payments: `/rental-provider/dashboard/payments`,
+            deposits: `/rental-provider/dashboard/deposits`,
+            worksheet: `/rental-provider/dashboard/contracts/${contractId}/settlement`,
+          }} />
+        ) : (
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
+            <Loader2 className="animate-spin inline mr-2" size={16} /> Preparing statement…
+          </div>
+        )
+      )}
     </div>
   );
 }
