@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
@@ -517,27 +518,54 @@ type PenaltyRuleKey =
   | 'lateRenewalPenalty'
   | 'earlyTerminationPenalty'
   | 'lateMoveoutPenalty'
-  | 'unauthorizedSharingPenalty';
+  | 'unauthorizedSharingPenalty'
+  | 'accessCardReplacement'
+  | 'contractNameChange'
+  | 'unitTransfer';
+
+// How a rule's amount is expressed. 'aed'/'pct' map to the backend _fee/_pct
+// columns; 'months' (Early Termination) and 'daily' (Late Move-out) are the
+// purpose-built modes that map to _months / _daily and override _fee/_pct.
+type PenaltyValueType = 'aed' | 'pct' | 'months' | 'daily';
 
 // pctLabel = what a % is taken of (annual rent for most; the cheque's face value
-// for the bounced-cheque rule).
-type PenaltyRuleCfg = { key: PenaltyRuleKey; title: string; description: string; pctLabel?: string };
+// for the bounced-cheque rule). modes = the allowed value types (first is the
+// default).
+type PenaltyRuleCfg = {
+  key: PenaltyRuleKey;
+  title: string;
+  description: string;
+  pctLabel?: string;
+  modes?: PenaltyValueType[];
+};
 
 const PENALTY_RULES: PenaltyRuleCfg[] = [
   { key: 'bouncedChequePenalty', title: 'Bounced Cheque Penalty', description: 'Charge for each bounced rent cheque. Auto-added as an editable deduction at move-out settlement.', pctLabel: '% of cheque' },
   { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-fills the "Cheque replacement" fee on a contract; also an editable deduction at move-out settlement.' },
   { key: 'chequeDeferralPenalty', title: 'Cheque Deferral', description: 'Charge to defer a cheque’s due date. Auto-fills the "Cheque deferral" fee when the RP adds it on a contract.' },
   { key: 'lateRenewalPenalty', title: 'Late Renewal', description: 'Charge when the tenant renews after the renewal window.' },
-  { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early.' },
-  { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant moves out after the lease end date.' },
+  { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early — typically a number of months of annual rent. Auto-added as an editable deduction at settlement.', modes: ['months', 'pct', 'aed'] },
+  { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant overstays past the lease end date — typically pro-rated per day of delay. Auto-added as an editable deduction at settlement.', modes: ['daily', 'aed', 'pct'] },
   { key: 'unauthorizedSharingPenalty', title: 'Sharing without notice / NOC', description: 'Charge when the unit is shared without notice or an NOC.' },
+  { key: 'accessCardReplacement', title: 'Access Card / Remote Replacement', description: 'Charge to replace a lost or damaged access card and/or remote.' },
+  { key: 'contractNameChange', title: 'Contract Name Change', description: 'Charge to change the tenant name on an existing contract.' },
+  { key: 'unitTransfer', title: 'Unit Transfer', description: 'Charge to transfer a tenant to a different unit.' },
 ];
 
-// A rule is either a flat AED amount or a percentage (single value + type), like
-// the fee rows. The backend keeps separate _fee / _pct columns; we map one of
-// them and null the other on save.
-type PenaltyState = { enabled: boolean; valueType: 'aed' | 'pct'; value: string };
+// A rule carries a single value + its type. The backend keeps separate
+// _fee / _pct / _months / _daily columns; we map the active one and null the rest
+// on save. 'daily' needs no value (computed from the overstay at settlement).
+type PenaltyState = { enabled: boolean; valueType: PenaltyValueType; value: string };
 const EMPTY_PENALTY: PenaltyState = { enabled: false, valueType: 'aed', value: '' };
+
+// Pill label per mode ('pct' is overridden by cfg.pctLabel where set).
+const PENALTY_MODE_LABEL: Record<PenaltyValueType, string> = {
+  aed: 'Fixed',
+  pct: '% of rent',
+  months: 'Months of rent',
+  daily: 'Daily prorate',
+};
+const penaltyModes = (cfg: PenaltyRuleCfg): PenaltyValueType[] => cfg.modes ?? ['aed', 'pct'];
 
 function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }: {
   cfg: PenaltyRuleCfg;
@@ -549,7 +577,8 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
   onSave: () => void;
 }) {
   const { enabled, valueType, value } = state;
-  const pctLabel = cfg.pctLabel ?? '% of rent';
+  const modes = penaltyModes(cfg);
+  const modeLabel = (m: PenaltyValueType) => (m === 'pct' ? (cfg.pctLabel ?? '% of rent') : PENALTY_MODE_LABEL[m]);
   const setVal = (patch: Partial<PenaltyState>) => onChange({ ...state, ...patch });
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -563,22 +592,29 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
 
       {enabled && (
         <div className="flex items-center gap-2 flex-wrap mb-3">
-          {/* Type pill — AED or % (matches the fee rows) */}
-          <div className="inline-flex bg-[#f6f7f4] rounded-[9px] p-[3px] border border-[#e6ebe7]">
-            <button type="button" onClick={() => setVal({ valueType: 'aed' })}
-              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${valueType === 'aed' ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'}`}>Fixed</button>
-            <button type="button" onClick={() => setVal({ valueType: 'pct' })}
-              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${valueType === 'pct' ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'}`}>{pctLabel}</button>
-          </div>
-          {/* Value input */}
-          <div className="inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white">
-            {valueType === 'aed' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">AED</span>}
-            <input type="text" inputMode="decimal" value={value}
-              onChange={(e) => setVal({ value: e.target.value.replace(/[^0-9.]/g, '') })}
-              placeholder="0"
-              className="w-24 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent tabular-nums" />
-            {valueType === 'pct' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">%</span>}
-          </div>
+          {/* Mode pills — one per allowed value type */}
+          {modes.length > 1 && (
+            <div className="inline-flex bg-[#f6f7f4] rounded-[9px] p-[3px] border border-[#e6ebe7]">
+              {modes.map((m) => (
+                <button key={m} type="button" onClick={() => setVal({ valueType: m })}
+                  className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${valueType === m ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'}`}>{modeLabel(m)}</button>
+              ))}
+            </div>
+          )}
+          {/* Value input — 'daily' is computed at settlement, so it shows a note instead */}
+          {valueType === 'daily' ? (
+            <p className="text-[12.5px] text-[#6b7a74] font-medium">Annual rent ÷ 365 × days overstayed, billed at move-out settlement.</p>
+          ) : (
+            <div className="inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white">
+              {valueType === 'aed' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">AED</span>}
+              <input type="text" inputMode="decimal" value={value}
+                onChange={(e) => setVal({ value: e.target.value.replace(/[^0-9.]/g, '') })}
+                placeholder="0"
+                className="w-24 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent tabular-nums" />
+              {valueType === 'pct' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">%</span>}
+              {valueType === 'months' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">months</span>}
+            </div>
+          )}
         </div>
       )}
 
@@ -687,15 +723,11 @@ export default function SettingsPage() {
   // ── Penalty Rules engine (Rules, SCRUM-578) ─────────────────
   // Six configurable penalties (Bounced Cheque + five more). One save at a time
   // (savingKey/savedKey/errorKey track which card is active).
-  const [penalties, setPenalties] = useState<Record<PenaltyRuleKey, PenaltyState>>({
-    bouncedChequePenalty:       { ...EMPTY_PENALTY },
-    chequeHoldPenalty:          { ...EMPTY_PENALTY },
-    chequeDeferralPenalty:      { ...EMPTY_PENALTY },
-    lateRenewalPenalty:         { ...EMPTY_PENALTY },
-    earlyTerminationPenalty:    { ...EMPTY_PENALTY },
-    lateMoveoutPenalty:         { ...EMPTY_PENALTY },
-    unauthorizedSharingPenalty: { ...EMPTY_PENALTY },
-  });
+  const [penalties, setPenalties] = useState<Record<PenaltyRuleKey, PenaltyState>>(
+    () => Object.fromEntries(
+      PENALTY_RULES.map(cfg => [cfg.key, { ...EMPTY_PENALTY, valueType: penaltyModes(cfg)[0] }]),
+    ) as Record<PenaltyRuleKey, PenaltyState>,
+  );
   const [penaltySavingKey, setPenaltySavingKey] = useState<PenaltyRuleKey | null>(null);
   const [penaltySavedKey,  setPenaltySavedKey]  = useState<PenaltyRuleKey | null>(null);
   const [penaltyErrorKey,  setPenaltyErrorKey]  = useState<PenaltyRuleKey | null>(null);
@@ -781,26 +813,34 @@ export default function SettingsPage() {
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
-        // Penalty Rules engine — round-trip each rule. A rule stored as a % maps
-        // to valueType 'pct'; otherwise (flat fee, or nothing yet) to 'aed'.
-        const seedPenalty = (key: PenaltyRuleKey): PenaltyState => {
+        // Penalty Rules engine — round-trip each rule to its stored mode. Months
+        // (Early Termination) and Daily (Late Move-out) take precedence when set;
+        // then % → 'pct', flat fee → 'aed'; nothing yet → the rule's default mode.
+        const seedPenalty = (cfg: PenaltyRuleCfg): PenaltyState => {
+          const key = cfg.key;
+          const modes = penaltyModes(cfg);
           const fee = p[`${key}Fee`];
           const pct = p[`${key}Pct`];
+          const months = p[`${key}Months`];
+          const daily = p[`${key}Daily`];
           const enabled = Boolean(p[`${key}Enabled`]);
+          if (modes.includes('months') && months != null && Number(months) > 0) {
+            return { enabled, valueType: 'months', value: String(months) };
+          }
+          if (modes.includes('daily') && Boolean(daily)) {
+            return { enabled, valueType: 'daily', value: '' };
+          }
           if (pct != null && (fee == null || Number(fee) <= 0)) {
             return { enabled, valueType: 'pct', value: String(pct) };
           }
-          return { enabled, valueType: 'aed', value: fee != null ? String(fee) : '' };
+          if (fee != null) {
+            return { enabled, valueType: 'aed', value: String(fee) };
+          }
+          return { enabled, valueType: modes[0], value: '' };
         };
-        setPenalties({
-          bouncedChequePenalty:       seedPenalty('bouncedChequePenalty'),
-          chequeHoldPenalty:          seedPenalty('chequeHoldPenalty'),
-          chequeDeferralPenalty:      seedPenalty('chequeDeferralPenalty'),
-          lateRenewalPenalty:         seedPenalty('lateRenewalPenalty'),
-          earlyTerminationPenalty:    seedPenalty('earlyTerminationPenalty'),
-          lateMoveoutPenalty:         seedPenalty('lateMoveoutPenalty'),
-          unauthorizedSharingPenalty: seedPenalty('unauthorizedSharingPenalty'),
-        });
+        setPenalties(
+          Object.fromEntries(PENALTY_RULES.map(cfg => [cfg.key, seedPenalty(cfg)])) as Record<PenaltyRuleKey, PenaltyState>,
+        );
         if (Array.isArray(p.allowedInstallments)) setAllowedInst(p.allowedInstallments as number[]);
         if (p.rentVatMode === 'annual' || p.rentVatMode === 'installment') setVatMode(p.rentVatMode);
         // Parse contactAddress into emirate + street
@@ -1123,29 +1163,46 @@ export default function SettingsPage() {
 
   async function savePenaltyRule(key: PenaltyRuleKey) {
     const st = penalties[key];
+    const cfg = PENALTY_RULES.find(r => r.key === key)!;
+    const modes = penaltyModes(cfg);
     setPenaltyErrorKey(null);
     setPenaltyErrorMsg(null);
     setPenaltySavedKey(null);
+    const isDaily = st.valueType === 'daily';
     const num = st.value.trim() === '' ? null : Number(st.value);
-    if (num !== null && (Number.isNaN(num) || num < 0)) {
-      setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a valid amount (0 or more).'); return;
+    // 'daily' is computed at settlement and carries no configured value, so it
+    // skips the amount checks and can be enabled with no number.
+    if (!isDaily) {
+      if (num !== null && (Number.isNaN(num) || num < 0)) {
+        setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a valid amount (0 or more).'); return;
+      }
+      if (st.valueType === 'pct' && num !== null && num > 100) {
+        setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a percentage between 0 and 100.'); return;
+      }
+      if (st.valueType === 'months' && num !== null && num > 12) {
+        setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a number of months between 0 and 12.'); return;
+      }
+      if (st.enabled && (num == null || num <= 0)) {
+        setPenaltyErrorKey(key); setPenaltyErrorMsg('Set an amount before enabling.'); return;
+      }
     }
-    if (st.valueType === 'pct' && num !== null && num > 100) {
-      setPenaltyErrorKey(key); setPenaltyErrorMsg('Enter a percentage between 0 and 100.'); return;
-    }
-    if (st.enabled && (num == null || num <= 0)) {
-      setPenaltyErrorKey(key); setPenaltyErrorMsg('Set an amount before enabling.'); return;
-    }
-    // Map the single value onto the backend's _fee / _pct columns.
-    const fee = st.valueType === 'aed' ? num : null;
-    const pct = st.valueType === 'pct' ? num : null;
+    // Map the single value onto the backend's _fee / _pct / _months / _daily
+    // columns, nulling the inactive ones. Only send _months / _daily for rules
+    // that support them (the API rejects unknown properties).
+    const body: Record<string, unknown> = {
+      [`${key}Enabled`]: st.enabled,
+      [`${key}Fee`]: st.valueType === 'aed' ? num : null,
+      [`${key}Pct`]: st.valueType === 'pct' ? num : null,
+    };
+    if (modes.includes('months')) body[`${key}Months`] = st.valueType === 'months' ? num : null;
+    if (modes.includes('daily')) body[`${key}Daily`] = isDaily;
     setPenaltySavingKey(key);
     try {
       const res = await fetch('/api/profiles/rental-provider/me', {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [`${key}Enabled`]: st.enabled, [`${key}Fee`]: fee, [`${key}Pct`]: pct }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await res.text());
       setPenaltySavedKey(key);
@@ -1249,6 +1306,12 @@ export default function SettingsPage() {
         >
           <Bell size={14} /> Notifications
         </button>
+        <Link
+          href="/rental-provider/dashboard/settings/inspection-prices"
+          className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer text-[#6b6860] hover:bg-[#f4f3ef]"
+        >
+          <CreditCard size={14} /> Inspection Prices
+        </Link>
       </div>
 
       {/* ── Team tab ───────────────────────────────────────────── */}
@@ -1830,9 +1893,10 @@ export default function SettingsPage() {
               </div>
             </form>
 
-            {/* Penalty rules — 2 configurations per row (Bounced Cheque · Cheque Hold · Late Renewal · Early Termination · Late Move-out · Sharing) */}
+            {/* Penalty & charge rules — 2 configurations per row. Early Termination
+                (months of rent) and Late Move-out (daily prorate) carry purpose-built
+                modes; the access-card / name-change / unit-transfer rules are flat/%. */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-            {/* All six penalty rules (Bounced Cheque + five) render via the unified easy-design card */}
             {PENALTY_RULES.map(cfg => (
               <PenaltyRuleCard
                 key={cfg.key}
