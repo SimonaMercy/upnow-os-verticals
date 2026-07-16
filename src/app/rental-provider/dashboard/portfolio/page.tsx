@@ -163,11 +163,6 @@ function formToCreateDto(data: PropertyFormData) {
     buildingName: data.buildingName,
     spaceCategory: data.spaceCategory,
     leasingType: data.leasingType,
-    // Property-management assignment — only meaningful for a managed property;
-    // cleared (null / []) when the model isn't 'management'.
-    landlordSignatory: data.leasingType === 'management' ? data.landlordSignatory ?? undefined : null,
-    chequeRecipient: data.leasingType === 'management' ? data.chequeRecipient ?? undefined : null,
-    ownerLinks: data.leasingType === 'management' ? data.ownerLinks : [],
     street: data.street || undefined,
     // Without a street segment, leave full_address untouched (PATCH omits it)
     // so a legacy row's embedded street isn't recomposed away.

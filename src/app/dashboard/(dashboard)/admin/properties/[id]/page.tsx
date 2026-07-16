@@ -25,13 +25,9 @@ interface PropertyDetail {
     emirate?: { nameEn?: string | null } | null; community?: { nameEn?: string | null } | null;
   };
   owner: { rentalProviderId: number; userId: number | null; name: string | null } | null;
-  externalOwners?: { id: number; name: string | null; ownerType: string | null; email: string | null; phone: string | null; ownershipPct: number; isPrimary: boolean }[];
   units: UnitRow[];
   documents: { id: number; documentKey: string; displayName: string | null; fileUrl: string | null; status: string | null }[];
 }
-
-const LEASING_LABEL: Record<string, string> = { direct: 'Owned (direct lease)', sub: 'Sub-lease', management: 'Managed (on owner’s behalf)' };
-const leasingLabel = (t: string | null) => (t ? LEASING_LABEL[t] ?? t : '—');
 
 const availCls: Record<string, string> = {
   available: 'bg-[#d8f2e8] text-[#1a7a5a]', occupied: 'bg-[#e8f0fb] text-[#1a5fb4]',
@@ -80,22 +76,10 @@ export default function AdminPropertyDetailPage() {
           </div>
           {d.owner && (
             <div className="text-right">
-              {/* Managed → the RP is the managing agent; the real owner(s) below. */}
-              <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{p.leasingType === 'management' ? 'Managing Agent (RP)' : 'Owner (RP)'}</div>
+              <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Owner (RP)</div>
               {d.owner.userId ? (
                 <Link href={`/dashboard/admin/users/${d.owner.userId}`} className="text-sm font-semibold text-[#1a7a5a] hover:underline inline-flex items-center gap-1">{d.owner.name ?? 'Rental Provider'} <ExternalLink size={12} /></Link>
               ) : <div className="text-sm font-semibold text-[#3f3d39]">{d.owner.name ?? '—'}</div>}
-              {p.leasingType === 'management' && (d.externalOwners?.length ?? 0) > 0 && (
-                <div className="mt-2 flex flex-col items-end gap-0.5">
-                  <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Owner{(d.externalOwners?.length ?? 0) > 1 ? 's' : ''}</div>
-                  {d.externalOwners!.map((o) => (
-                    <div key={o.id} className="text-sm text-[#3f3d39]">
-                      {o.name}{' '}
-                      <span className="text-xs text-[#9b9890]">{o.ownershipPct}%{o.isPrimary ? ' · primary' : ''}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -125,7 +109,7 @@ export default function AdminPropertyDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
           {[
             { label: 'Category', value: p.spaceCategory?.replace(/_/g, ' ') },
-            { label: 'Ownership / leasing model', value: leasingLabel(p.leasingType) },
+            { label: 'Leasing type', value: p.leasingType },
             { label: 'Emirate', value: p.emirate?.nameEn },
             { label: 'Community', value: p.community?.nameEn },
             { label: 'Makani', value: p.makaniNumber },

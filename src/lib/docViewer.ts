@@ -32,28 +32,9 @@ export type DocViewerDoc = {
   displayName?: string | null;
   documentKey?: string | null;
   mimeType?: string | null;
-  /**
-   * `documents` table id. When present AND the viewer is allowed to download
-   * (landlord / manager / admin — see `canRoleDownloadDocs`), the host shows a
-   * "Download" control that pulls the clean file via /documents/:id/download.
-   * Omit for property/unit MEDIA (a different table) — those aren't downloadable.
-   */
-  id?: number | null;
 };
 
-export type DocViewerState = { docs: DocViewerDoc[]; title: string; watermark: string; canDownload: boolean };
-
-/**
- * Roles allowed to download uploaded documents. Landlords, their managers, and
- * admins may pull the clean (watermark-free) file; customers, tenants (magic
- * link) and service providers stay strictly view-only, per the anti-exfiltration
- * policy. Single source of truth — used both to set the viewer store flag and to
- * gate the in-context readers (DocumentReaderModal, KycDocumentsPanel).
- */
-const DOWNLOAD_ROLES = new Set(['rental_provider', 'manager', 'admin', 'super_admin']);
-export function canRoleDownloadDocs(role?: string | null): boolean {
-  return !!role && DOWNLOAD_ROLES.has(role.toLowerCase());
-}
+export type DocViewerState = { docs: DocViewerDoc[]; title: string; watermark: string };
 
 let current: DocViewerState | null = null;
 const listeners = new Set<() => void>();
@@ -68,17 +49,6 @@ const notify = () => { for (const l of listeners) l(); };
 let watermarkLabel = '';
 export function setDocViewerWatermark(label: string | null | undefined): void {
   watermarkLabel = (label ?? '').trim();
-}
-
-/**
- * Whether the current viewer may download documents. Set once from the authed
- * user's role by <DocViewerIdentityBinder/> (same place the watermark identity is
- * bound), since <DocViewerHost/> is mounted outside the auth context. Captured
- * into each viewer state at open time, like the watermark.
- */
-let canDownloadFlag = false;
-export function setDocViewerCanDownload(allowed: boolean): void {
-  canDownloadFlag = allowed;
 }
 
 /**
@@ -104,7 +74,7 @@ export function openDocViewer(docs: DocViewerDoc | DocViewerDoc[], title = 'Docu
     (d): d is DocViewerDoc => !!d && !!d.fileUrl,
   );
   if (!list.length) return;
-  current = { docs: list, title, watermark: currentDocWatermark(), canDownload: canDownloadFlag };
+  current = { docs: list, title, watermark: currentDocWatermark() };
   notify();
 }
 

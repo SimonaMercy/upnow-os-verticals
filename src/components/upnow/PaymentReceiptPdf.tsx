@@ -112,11 +112,6 @@ export interface ReceiptContract {
     poaPersonName?: string | null;
     poaPersonPhone?: string | null;
   };
-  // Property-management: the landlord above is the OWNER; the RP collects as
-  // managing agent (chequeRecipient='rp') or the owner collects directly ('owner').
-  isManaged?: boolean;
-  chequeRecipient?: 'owner' | 'rp' | null;
-  managingAgent?: { name: string | null } | null;
   tenant: {
     name: string | null;
     companyName?: string | null;
@@ -612,14 +607,7 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const lessorPhone = contract.landlord?.hasPoa
     ? (contract.landlord?.poaPersonPhone || contract.landlord?.phone)
     : contract.landlord?.phone;
-  // Managed lease → note who actually collected the rent on the owner's behalf.
-  const collectedByLine = contract.isManaged
-    ? (contract.chequeRecipient === 'owner'
-        ? 'Collected by the owner directly'
-        : `Collected by ${contract.managingAgent?.name ?? 'the managing agent'} (Managing Agent)`)
-    : null;
   const issuerLines = [
-    collectedByLine,
     (contract.landlord?.licenseNumber || contract.landlord?.licenseAuthority)
       ? `Licence ${contract.landlord?.licenseNumber || '—'}${contract.landlord?.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
     lessorPhone ? `Tel ${lessorPhone}` : null,

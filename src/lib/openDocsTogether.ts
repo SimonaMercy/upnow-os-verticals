@@ -10,9 +10,6 @@
 import { openDocViewer } from './docViewer';
 
 export interface ViewableDoc {
-  /** `documents` table id — carried through so landlord/manager/admin get a
-   *  per-doc download control in the viewer (omit for non-document media). */
-  id?: number | null;
   fileUrl?: string | null;
   displayName?: string | null;
   documentKey?: string | null;

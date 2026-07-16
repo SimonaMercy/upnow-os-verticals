@@ -125,7 +125,6 @@ const EMPTY_PROP: PropertyFormData = {
   sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
   googlePlaceId: null,
-  landlordSignatory: null, chequeRecipient: null, ownerLinks: [],
 };
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────────── */
@@ -439,10 +438,6 @@ export default function AddListingPage() {
           buildingName: pf.buildingName,
           spaceCategory: pf.spaceCategory,
           leasingType: pf.leasingType,
-          // Property-management assignment (only when managed).
-          landlordSignatory: pf.leasingType === 'management' ? pf.landlordSignatory ?? undefined : null,
-          chequeRecipient: pf.leasingType === 'management' ? pf.chequeRecipient ?? undefined : null,
-          ownerLinks: pf.leasingType === 'management' ? pf.ownerLinks : [],
           fullAddress: parts.join(', ') || undefined,
           countryId: pf.countryId ?? undefined,
           emirateId: pf.emirateId ?? undefined,

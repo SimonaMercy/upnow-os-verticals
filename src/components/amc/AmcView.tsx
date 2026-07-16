@@ -199,7 +199,7 @@ function ContractCard({ base, rp, c, onTasksChanged }: { base: string; rp?: numb
         {c.documents.length > 0 && (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {c.documents.map(d => (
-              <button key={d.id} type="button" onClick={() => openDocViewer({ id: d.id, fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey, documentKey: d.documentKey })}
+              <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey, documentKey: d.documentKey })}
                 className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-[#f7f6f2] text-[#2e9f82] hover:bg-[#eef0ec] cursor-pointer">
                 <FileText size={11} /> {cap(d.displayName ?? d.documentKey)}
               </button>

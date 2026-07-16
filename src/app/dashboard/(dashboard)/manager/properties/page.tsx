@@ -174,10 +174,6 @@ function formToUpdateDto(data: PropertyFormData) {
     buildingName: data.buildingName,
     spaceCategory: data.spaceCategory,
     leasingType: data.leasingType ?? undefined,
-    // Property-management assignment (mirrors the RP portfolio).
-    landlordSignatory: data.leasingType === 'management' ? data.landlordSignatory ?? undefined : null,
-    chequeRecipient: data.leasingType === 'management' ? data.chequeRecipient ?? undefined : null,
-    ownerLinks: data.leasingType === 'management' ? data.ownerLinks : [],
     street: data.street || undefined,
     // Without a street segment, leave full_address untouched (PATCH omits it)
     // so a legacy row's embedded street isn't recomposed away.
@@ -735,7 +731,6 @@ export default function ManagerPropertiesPage() {
         } : undefined}
         propertyId={propertyModal.editing?.id}
         unitCount={propertyModal.editing?.unitCount}
-        apiRpQuery={propertyModal.editing ? `?rp=${propertyModal.editing.rentalProviderId}` : ''}
         onClose={() => setPropertyModal({ open: false })}
         onSave={handleSaveProperty}
       />

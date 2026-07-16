@@ -9,7 +9,7 @@ import {
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Landmark,
+  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
@@ -79,7 +79,6 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Properties',       href: '/rental-provider/dashboard/portfolio',      icon: Building2, badgeKey: 'properties' },
     { label: 'Units',            href: '/rental-provider/dashboard/units',          icon: Home, badgeKey: 'units' },
     { label: 'Customers',        href: '/rental-provider/dashboard/tenants',        icon: UserCheck },
-    { label: 'Landlords',        href: '/rental-provider/dashboard/landlords',      icon: Landmark },
     { label: 'Payments',         href: '/rental-provider/dashboard/payments',       icon: Wallet, match: ['/rental-provider/dashboard/deposits'] },
     { label: 'Operations',       href: '/rental-provider/dashboard/operations',     icon: ClipboardList, badgeKey: 'operations' },
     { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, badgeKey: 'leases', match: ['/rental-provider/dashboard/contracts'] },
@@ -116,7 +115,6 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Properties',       href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
     { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties' },
     { label: 'Customers',        href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
-    { label: 'Landlords',        href: '/dashboard/manager/landlords',  icon: Landmark, requirePerm: 'canListProperties' },
     { label: 'Payments',         href: '/dashboard/manager/payments',  icon: Wallet,  requirePerm: 'canManageDeposits', match: ['/dashboard/manager/deposits'] },
     { label: 'Operations',       href: '/dashboard/manager/operations', icon: ClipboardList, requirePerm: 'canManageAgreements' },
     { label: 'Leases',           href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },

@@ -186,7 +186,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                     {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
                     {d.fileUrl && (
                       <div className="ml-auto flex items-center gap-3 shrink-0">
-                        <button type="button" onClick={() => openDocViewer({ id: d.id, fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer">View <Eye size={12} /></button>
+                        <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer">View <Eye size={12} /></button>
                         {/* Contract paperwork (Contract Attachment, Contract Registration/Ejari, …) is the
                             counterparty's own document — offer a clean, watermark-free download alongside
                             the in-app viewer, same as move-in/move-out/settlement artifacts. */}

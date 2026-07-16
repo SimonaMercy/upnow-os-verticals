@@ -528,7 +528,7 @@ export default function ContractDetailPage() {
                     {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
                   </span>
                   {doc.fileUrl && (
-                    <button type="button" onClick={() => openDocViewer({ id: doc.id, fileUrl: doc.fileUrl, caption: doc.displayName ?? doc.documentKey })}
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName ?? doc.documentKey })}
                       className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
                       <Download size={13} className="text-[#6b6860]" />
                     </button>

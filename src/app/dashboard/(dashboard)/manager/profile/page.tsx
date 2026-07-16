@@ -283,7 +283,7 @@ export default function ManagerProfilePage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0 mt-0.5">
                   {uploaded && doc?.fileUrl && (
-                    <button type="button" onClick={() => openDocViewer({ id: doc.id, fileUrl: doc.fileUrl, caption: label })} className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer"><ExternalLink size={12} /> View</button>
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label })} className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer"><ExternalLink size={12} /> View</button>
                   )}
                   <label className={['flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white transition-opacity bg-[#9b9890] hover:bg-[#6b6860]', busy ? 'opacity-50 pointer-events-none' : ''].join(' ')}>
                     {busy ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}

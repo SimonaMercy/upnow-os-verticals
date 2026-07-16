@@ -78,13 +78,6 @@ interface FinancialSummary {
   rangeStart: string;
   rangeEnd: string;
   chartData: Array<{ m: string; receivable: number; collected: number }>;
-  // Owned vs Managed split (only meaningful when the RP manages properties).
-  ownership?: {
-    owned: { netRent: number };
-    managed: { netRent: number };   // owner pass-through — not RP revenue
-    managementFee: number;          // RP revenue from managed leases
-    rpNetRevenue: number;           // owned net + management fee
-  };
 }
 
 interface UpcomingRenewal {
@@ -564,15 +557,6 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
               <span className="text-white/55">No overdue payments</span>
             )}
           </div>
-          {/* Owned vs Managed split — only for RPs that manage properties. Managed
-              rent is the owner's money (pass-through); your revenue is the fee. */}
-          {fin?.ownership && fin.ownership.managed.netRent > 0 && (
-            <div className="mt-3 pt-3 border-t border-white/10 text-[11.5px] leading-relaxed space-y-1">
-              <div className="flex justify-between text-white/70"><span>Your rent (owned)</span><span className="tabular-nums text-white/90">{fmtAed(fin.ownership.owned.netRent)}</span></div>
-              <div className="flex justify-between text-white/70"><span>Managed · owner’s funds</span><span className="tabular-nums text-white/75">{fmtAed(fin.ownership.managed.netRent)}</span></div>
-              <div className="flex justify-between text-white/70"><span>Management fee · yours</span><span className="tabular-nums text-[#7be1c2] font-semibold">{fmtAed(fin.ownership.managementFee)}</span></div>
-            </div>
-          )}
           <ArrowUpRight size={56} className="absolute -right-3 -bottom-3 text-white/5" />
         </div>
 

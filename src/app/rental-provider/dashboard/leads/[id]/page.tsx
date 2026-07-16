@@ -1330,7 +1330,7 @@ function DocsSection({
       <DocItem key={d.key} state={st} name={label} status={statusText}>
         {doc?.fileUrl && (
           <button className="mini-btn view" type="button"
-            onClick={() => openDocViewer({ id: doc.id, fileUrl: doc.fileUrl, caption: d.label, mimeType: doc.mimeType })}>
+            onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: d.label, mimeType: doc.mimeType })}>
             <Eye size={12} /> View
           </button>
         )}
@@ -1389,7 +1389,7 @@ function DocsSection({
                   status={st === 'approved' ? 'Approved' : st === 'rejected' ? 'Rejected' : doc ? 'Uploaded · review' : 'Awaiting upload'}>
                   {doc?.fileUrl && (
                     <button className="mini-btn view" type="button"
-                      onClick={() => openDocViewer({ id: doc.id, fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType })}><Eye size={12} /> View</button>
+                      onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType })}><Eye size={12} /> View</button>
                   )}
                   {doc && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
                   {doc && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: item }); setRejectReason(''); }}><X size={12} /></button>}
