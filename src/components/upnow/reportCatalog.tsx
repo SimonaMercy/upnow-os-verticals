@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, AlertCircle, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart, ScrollText,
-  Banknote, TrendingUp,
+  Banknote, TrendingUp, ClipboardList, ListChecks,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -46,6 +46,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'new-leases-matrix',  title: 'New Leases by Month',       description: 'Property × month grid of leases commencing each month of the year (the matrix companion to Leasing Activity), with new-lease counts and annual rent per property.', Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'leasing-activity',   title: 'Leasing Activity',         description: 'New leases per month, rent signed, and Contract Registration status.',                 Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'lease-activity',     title: 'Lease Status Summary',      description: 'Month-by-month operations matrix — renewals due, new & renewal contracts, deposits, notices, tenant/landlord signatures, Contract Registration completed vs pending, move-outs, and average days to signature. The report the team used to compile by hand.', Icon: ScrollText, available: true, group: 'leasing' },
+  { slug: 'operations-pipeline', title: 'Operations Pipeline', description: 'The Operations page as a printable report — every lead, new lease, renewal and termination in progress, stage by stage in workflow order, with customer and landlord signatures tracked separately (“on file” marks are not counted as signed).', Icon: ClipboardList, available: true,  group: 'leasing' },
   { slug: 'rent-vs-market',     title: 'Rent vs Market',           description: 'Current rent vs market benchmark per unit — uplift recoverable at renewal.', Icon: TrendingUp, available: true, group: 'leasing' },
   // ── Rent & Collections ─────────────────────────────────────────────────
   { slug: 'rent-collection',    title: 'Rent Collection (Rent Roll)', description: 'Collection matrix — customers down, months across, totals.',          Icon: BarChart2,    available: true,  group: 'collections' },
@@ -63,6 +64,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'data-gaps',          title: 'Data Gaps & Exceptions',   description: 'A live worklist of missing data — contracts missing docs/payment plans/deposit, property & unit fields, customer KYC, and the landlord profile. Print to PDF.', Icon: AlertCircle, available: true, group: 'operations' },
   { slug: 'amc-vendor-spend',   title: 'AMC & Vendor Spend',       description: 'Vendor invoices and AMC contract costs.',                              Icon: Wrench,       available: false, group: 'operations' },
   { slug: 'manager-performance', title: 'Manager Performance Report', description: 'What each manager delivered — leads attended, contracts and renewals progressed, documents processed, and days active. Landlord-only report (managers don\u2019t see their own scorecard).', Icon: Users, available: true, group: 'operations', rpOnly: true },
+  { slug: 'manager-operations', title: 'Manager Operations Report', description: 'The manager evaluation report — every operations stage as a column with one row per manager (click any number for the records and their history), average working day, stage timing with customer wait separated, and each manager’s actions date by date. “On file” signatures are not counted. Landlord-only.', Icon: ListChecks, available: true, group: 'operations', rpOnly: true },
   // ── Missing Data Worklists (separate live report per entity) ────────────
   { slug: 'missing-properties', title: 'Missing Properties Data',   description: 'Properties missing location or descriptive fields — geo, floors, street, makani, plot, description.', Icon: MapPin,      available: true, group: 'missingdata' },
   { slug: 'missing-units',      title: 'Missing Units Data',        description: 'Units missing pricing, fees, specs or media — rent, deposit, admin/Contract Registration/commission, beds/baths, size, floor plan, images.', Icon: Building2,  available: true, group: 'missingdata' },

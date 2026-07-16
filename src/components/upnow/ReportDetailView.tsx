@@ -22,7 +22,7 @@ import { ManagerPerformanceCharts, LeaseActivityCharts } from '@/components/upno
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market' | 'operations-pipeline';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -31,6 +31,8 @@ interface DrilldownSpec {
   filterKey?: string;
   /** Row field used for the modal title (e.g. the month label). */
   titleKey: string;
+  /** CSV header for the group column (defaults to 'Month'). */
+  titleLabel?: string;
   /** Plural noun for the count, e.g. "leases". */
   countLabel: string;
   columns: Column[];
@@ -388,6 +390,50 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'moveOuts', label: 'Move-outs', type: 'number' },
       { key: 'avgDaysToSign', label: 'Avg days to sign', type: 'number' },
     ],
+  },
+
+
+  'operations-pipeline': {
+    title: 'Operations Pipeline',
+    tagline: 'Every deal in progress, stage by stage — with each signature tracked separately.',
+    description: 'The Operations page in report form — a live snapshot of every record still being worked. Each section is one stage of a pipeline, in workflow order (Lead → New Lease → Renewal → Terminated); a record sits in the first stage that still has work, exactly like the Operations board. Unlike the board’s single Signatures lane, the customer and landlord signatures are separate stages AND separate columns, so you can see exactly whose signature each lease is waiting on. A signature recorded as merely “on file” is NOT counted as signed — it shows as its own On file badge and the lease stays in its signature stage. Records leave the report automatically as their work completes.',
+    endpoint: '/api/reports/operations-pipeline',
+    layout: 'grouped',
+    columns: [
+      { key: 'stageLabel', label: 'Stage' },
+      { key: 'records', label: 'Records', align: 'right', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'inPipeline', label: 'In progress', type: 'number', keep: true },
+      { key: 'leads', label: 'Leads', type: 'number', keep: true },
+      { key: 'newLeases', label: 'New leases', type: 'number', keep: true },
+      { key: 'renewals', label: 'Renewals', type: 'number', keep: true },
+      { key: 'terminated', label: 'Terminations', type: 'number', keep: true },
+      { key: 'awaitingCustomerSig', label: 'Awaiting customer signature', type: 'number', keep: true },
+      { key: 'awaitingLandlordSig', label: 'Awaiting landlord signature', type: 'number', keep: true },
+      { key: 'pipelineRentFils', label: 'Annual rent (contracts)', type: 'aed' },
+    ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'stageLabel',
+      titleLabel: 'Stage',
+      countLabel: 'records',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'ref', label: 'Contract' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'startDate', label: 'Start', type: 'date' },
+        { key: 'endDate', label: 'End', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'tenantSignature', label: 'Customer signature', type: 'stage' },
+        { key: 'landlordSignature', label: 'Landlord signature', type: 'stage' },
+        { key: 'progress', label: 'Progress', align: 'right' },
+        { key: 'ageDays', label: 'Idle days', align: 'right', type: 'number' },
+      ],
+    },
   },
 
   'new-leases-matrix': {
@@ -767,6 +813,12 @@ const STAGE_STYLE: Record<string, string> = {
   at_market:    'bg-[#f4f3ef] text-[#6b6860]',  // within ±5% → neutral
   above_market: 'bg-[#fee2e2] text-[#b91c1c]',  // rent over market → downside on renewal
   no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market price set
+  // operations-pipeline signature states — on_file deliberately NOT signed
+  signed_state: 'bg-[#dbeafe] text-[#1e40af]',
+  // manager-operations stage-gap ownership — whose clock the gap runs on
+  manager:  'bg-[#e0f2fe] text-[#0369a1]',      // sky — manager work
+  customer: 'bg-[#fef3c7] text-[#854d0e]',      // amber — waiting on the customer
+  landlord: 'bg-[#d8f2e8] text-[#1a7a5a]',      // green — landlord counter-sign
 };
 
 function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
@@ -1248,7 +1300,7 @@ export function ReportDetailView({
     // Grouped layout: export one row per child lease, prefixed with its group.
     if (def.layout === 'grouped' && def.drilldown) {
       const dd = def.drilldown;
-      const headers = ['Month', ...dd.columns.map(c => c.label)];
+      const headers = [dd.titleLabel ?? 'Month', ...dd.columns.map(c => c.label)];
       const rows = groups.flatMap(g =>
         g.items.map(it => [String(g.row[dd.titleKey] ?? ''), ...dd.columns.map(c => fmtCell(it[c.key], c.type))]),
       );
