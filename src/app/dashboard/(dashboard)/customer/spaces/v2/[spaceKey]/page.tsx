@@ -46,7 +46,6 @@ import { openDocViewer } from '@/lib/docViewer';
 import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
-import { DocExpiryField } from '@/components/upnow/DocExpiryField';
 import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
@@ -396,7 +395,6 @@ interface TenantDoc {
 }
 
 // yyyy-mm-dd for a native date input, tolerant of full ISO timestamps.
-const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
 
 interface Resolved {
   spaceKey: string;
@@ -1857,34 +1855,18 @@ function KycContactChip({ icon, value, verified }: { icon: React.ReactNode; valu
   );
 }
 
-function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload, onSaveExpiry }: {
+function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
   req: DocReq;
   myDocs: Resolved['myDocs'];
   localPreviews: Record<string, { url: string; mime: string }>;
   docUploading: string | null;
-  onUpload: (req: DocReq, file: File, expiryDate?: string | null) => void;
-  onSaveExpiry: (docId: number, expiryDate: string) => Promise<void>;
+  onUpload: (req: DocReq, file: File) => void;
 }) {
   const existing   = myDocs.find(d => d.documentKey === req.key);
   const local      = localPreviews[req.key];
-  // Identity / licence docs (Emirates ID, passport, visa, trade licence) carry
-  // an expiry the customer records here. Sent with the upload; PATCHed if they
-  // edit it after the file is already on file.
-  const needsExpiry = false; // Customer only uploads — the rental provider fills document expiry after review.
-  const [expiry, setExpiry] = useState(toDateInput(existing?.expiryDate));
-  const [savingExpiry, setSavingExpiry] = useState(false);
-  // For an expiring doc picked BEFORE an expiry is entered, hold the file and
-  // require the date first — otherwise the row-tap would upload with no expiry.
-  const [staged, setStaged] = useState<File | null>(null);
-  const onExpiryChange = async (v: string) => {
-    setExpiry(v);
-    if (existing?.id != null) { setSavingExpiry(true); try { await onSaveExpiry(existing.id, v); } finally { setSavingExpiry(false); } }
-  };
-  const onPick = (f: File) => {
-    // Expiry already set (or the doc doesn't need one) → upload immediately.
-    if (!needsExpiry || expiry) { onUpload(req, f, needsExpiry ? (expiry || null) : undefined); return; }
-    setStaged(f); // otherwise hold it until the customer enters the expiry
-  };
+  // The customer only uploads — expiry on identity / licence docs is read off the copy
+  // and recorded by the rental provider at review time, so there's no date field here.
+  const onPick = (f: File) => onUpload(req, f);
   // A just-uploaded local preview always wins over a stale server status
   // (e.g. re-uploading over a rejected doc before the refetch lands).
   const isRejected = existing?.status === 'rejected' && !local;
@@ -1944,28 +1926,6 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload, onSaveE
       <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={isUp}
         onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); }} />
     </label>
-      {needsExpiry && staged ? (
-        // File chosen but no expiry yet — require the date, then upload.
-        <div style={{ marginLeft: 14, padding: '10px 12px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', border: '1px solid var(--saffron, #f59e0b)', display: 'grid', gap: 8 }}>
-          <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>
-            “{staged.name}” selected — enter the document&rsquo;s expiry date to finish uploading.
-          </p>
-          <DocExpiryField value={expiry} onChange={setExpiry} className="" />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" disabled={!expiry || isUp}
-              onClick={() => { onUpload(req, staged, expiry || null); setStaged(null); }}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: expiry ? 'var(--jade-deep, #16a34a)' : 'var(--mute)', border: 'none', borderRadius: 8, padding: '7px 12px', cursor: expiry ? 'pointer' : 'not-allowed', opacity: isUp ? 0.6 : 1 }}>
-              {isUp ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Upload document
-            </button>
-            <button type="button" onClick={() => setStaged(null)}
-              style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', background: 'none', border: 'none', cursor: 'pointer' }}>Cancel</button>
-          </div>
-        </div>
-      ) : needsExpiry ? (
-        <div style={{ paddingLeft: 14 }}>
-          <DocExpiryField value={expiry} onChange={onExpiryChange} saving={savingExpiry} className="" />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -2089,18 +2049,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
     }
   }, [refreshUser, onRefresh]);
 
-  // Save/replace an expiry on a document already on file (the upload carries it
-  // atomically; this covers editing it afterwards).
-  async function saveDocExpiry(docId: number, expiryDate: string) {
-    await fetch(`/api/documents/${docId}`, {
-      method: 'PATCH', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expiryDate: expiryDate || null }),
-    });
-    onRefresh();
-  }
-
-  async function uploadDoc(req: DocReq, file: File, expiryDate?: string | null) {
+  async function uploadDoc(req: DocReq, file: File) {
     if (!tenantProfileId) { setUploadErr('Profile not ready.'); return; }
     if (file.size > 10 * 1024 * 1024) { setUploadErr('File must be under 10 MB.'); return; }
     setDocUploading(req.key); setUploadErr(null);
@@ -2117,7 +2066,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
       await fetch('/api/documents', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerType: 'customer', ownerId: tenantProfileId, documentKey: req.key, category: req.category, displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3', ...(expiryDate !== undefined ? { expiryDate } : {}) }),
+        body: JSON.stringify({ ownerType: 'customer', ownerId: tenantProfileId, documentKey: req.key, category: req.category, displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3' }),
       });
       setLocalPreviews(p => ({ ...p, [req.key]: { url: localUrl, mime: file.type } }));
       onRefresh();
@@ -2412,12 +2361,12 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           doc is uploaded, so finished work stays visible instead of
           disappearing on the customer. */}
       <KycSection title="Identity documents (KYC)" accent allDone={kycAllDone}>
-        {kycRequired.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} onSaveExpiry={saveDocExpiry} />)}
+        {kycRequired.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
       </KycSection>
 
       {/* Supporting / business documents. Same persistent-Done pattern. */}
       <KycSection title={isRes ? 'Supporting documents' : 'Business documents'} allDone={supportingAllDone}>
-        {supportingDocs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} onSaveExpiry={saveDocExpiry} />)}
+        {supportingDocs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
       </KycSection>
 
       {/* Optional documents — only surface them once the mandatory work
@@ -2425,7 +2374,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           still has required uploads to finish. */}
       {isRes && financialOpt.length > 0 && allRequiredDone && (
         <KycSection title="Optional documents" allDone={financialOpt.every(d => uploadedKeys.has(d.key))}>
-          {financialOpt.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} onSaveExpiry={saveDocExpiry} />)}
+          {financialOpt.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
         </KycSection>
       )}
 
@@ -2434,7 +2383,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           docs are uploaded. */}
       {occupantDocList.length > 0 && (
         <KycSection title={`Additional occupants (${occupantCount - 1} more)`} allDone={occupantsAllDone}>
-          {occupantDocList.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} onSaveExpiry={saveDocExpiry} />)}
+          {occupantDocList.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
         </KycSection>
       )}
 
@@ -2443,7 +2392,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           is held at this step (see deriveStateKey's additional-docs gate). */}
       {additionalDocReqs.length > 0 && (
         <KycSection title="Requested by your rental provider" accent allDone={additionalAllDone}>
-          {additionalDocReqs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} onSaveExpiry={saveDocExpiry} />)}
+          {additionalDocReqs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
         </KycSection>
       )}
 
@@ -2535,7 +2484,7 @@ function RenewalDocumentsAction({
   const [docUploading, setDocUploading] = useState<string | null>(null);
   const [uploadError,  setUploadError]  = useState<string | null>(null);
 
-  async function handleUpload(req: DocReq, file: File, expiryDate?: string | null) {
+  async function handleUpload(req: DocReq, file: File) {
     if (!resolved.tenantProfileId) { setUploadError('Customer profile missing.'); return; }
     setDocUploading(req.key); setUploadError(null);
     try {
@@ -2559,7 +2508,7 @@ function RenewalDocumentsAction({
           ownerType: 'customer', ownerId: resolved.tenantProfileId,
           documentKey: req.key, category: req.category ?? 'identity',
           displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey,
-          isVisibleToTenant: true, ...(expiryDate !== undefined ? { expiryDate } : {}),
+          isVisibleToTenant: true,
         }),
       });
       if (!regRes.ok) throw new Error('Registration failed');
@@ -2569,15 +2518,6 @@ function RenewalDocumentsAction({
     } finally {
       setDocUploading(null);
     }
-  }
-
-  async function saveDocExpiry(docId: number, expiryDate: string) {
-    await fetch(`/api/documents/${docId}`, {
-      method: 'PATCH', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expiryDate: expiryDate || null }),
-    });
-    onRefresh();
   }
 
   async function handleSubmit() {
@@ -2610,7 +2550,6 @@ function RenewalDocumentsAction({
     const isApproved = rec?.status === 'complete' || rec?.status === 'processed';
     const onFile     = !!rec && rec.status !== 'rejected' && rec.status !== 'missing';
     const isUploading = docUploading === req.key;
-    const needsExpiry = false; // Customer only uploads — the rental provider fills document expiry after review.
     // In the renewal re-verification context, every listed doc is still flagged as
     // expired / undated (it's in expiredKycDocKeys) — surface THAT, not the stale
     // "Approved" record status the customer had from their last lease. Checked
@@ -2619,28 +2558,8 @@ function RenewalDocumentsAction({
     // lease term ends.
     const expMs = rec?.expiryDate ? Date.parse(rec.expiryDate) : NaN;
     const isExpiredForRenewal = !isRejected && (!Number.isFinite(expMs) || expMs < Date.now());
-    const [expiry, setExpiry] = useState(toDateInput(rec?.expiryDate));
-    const [savingExpiry, setSavingExpiry] = useState(false);
-    const [staged, setStaged] = useState<File | null>(null);
-    // Native <input type="date"> only fires React's onChange on a COMPLETE valid
-    // date (and, in some browsers, typed dates commit on blur, not per-keystroke) —
-    // so a typed date can leave the controlled `expiry` state empty and the Upload
-    // button disabled while a picked date works. Read the live DOM value via this
-    // ref at click time so typing is honoured too.
-    const stagedDateRef = useRef<HTMLInputElement>(null);
-    const onExpiryChange = async (v: string) => {
-      setExpiry(v);
-      if (rec?.id != null) { setSavingExpiry(true); try { await saveDocExpiry(rec.id, v); } finally { setSavingExpiry(false); } }
-    };
-    const onPick = (f: File) => {
-      // For a KYC doc that carries an expiry, ALWAYS ask for a fresh expiry on the
-      // replacement copy — the on-file date is the expired one, so reusing it would
-      // silently re-upload an already-expired document (the "replace does nothing"
-      // bug). Clearing it forces the customer to enter the new document's expiry.
-      if (!needsExpiry) { handleUpload(req, f, undefined); return; }
-      setExpiry('');
-      setStaged(f);
-    };
+    // The customer only uploads — the RP records the expiry when they review the copy.
+    const onPick = (f: File) => handleUpload(req, f);
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <label style={{
@@ -2671,44 +2590,6 @@ function RenewalDocumentsAction({
           disabled={isUploading}
           onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); }} />
       </label>
-        {needsExpiry && staged ? (
-          <div style={{ marginLeft: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', border: '1px solid var(--saffron, #f59e0b)', display: 'grid', gap: 8 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>“{staged.name}” selected — enter the document&rsquo;s expiry date, then press Upload.</p>
-            <div style={{ display: 'grid', gap: 4 }}>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <Calendar size={12} style={{ color: 'var(--jade-deep)' }} /> Expiry date
-              </label>
-              <input
-                ref={stagedDateRef}
-                type="date"
-                defaultValue={expiry}
-                autoFocus
-                onChange={e => setExpiry(e.target.value)}
-                onInput={e => setExpiry((e.target as HTMLInputElement).value)}
-                style={{ fontSize: 13, border: '1px solid var(--mist-strong)', borderRadius: 8, padding: '6px 10px', color: 'var(--ink)', width: 'fit-content' }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button type="button" disabled={isUploading}
-                onClick={() => {
-                  // Read the live DOM value so a TYPED date works even if onChange
-                  // never fired; fall back to the controlled state (picked date).
-                  const v = (stagedDateRef.current?.value || expiry || '').trim();
-                  if (!v) { stagedDateRef.current?.focus(); return; }
-                  handleUpload(req, staged, v); setStaged(null);
-                }}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#fff', background: 'var(--jade-deep, #16a34a)', border: 'none', borderRadius: 8, padding: '7px 12px', cursor: isUploading ? 'default' : 'pointer', opacity: isUploading ? 0.6 : 1 }}>
-                {isUploading ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Upload document
-              </button>
-              <button type="button" onClick={() => setStaged(null)}
-                style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', background: 'none', border: 'none', cursor: 'pointer' }}>Cancel</button>
-            </div>
-          </div>
-        ) : needsExpiry ? (
-          <div style={{ paddingLeft: 12 }}>
-            <DocExpiryField value={expiry} onChange={onExpiryChange} saving={savingExpiry} className="" />
-          </div>
-        ) : null}
       </div>
     );
   }

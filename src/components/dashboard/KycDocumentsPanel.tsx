@@ -207,6 +207,11 @@ export function KycDocumentsPanel({
   onlyKeys,
   excludeKeys,
 }: KycDocumentsPanelProps) {
+  // This panel serves three cases: an RP or SP recording expiry on their OWN compliance
+  // docs (fine — they are the reviewer), and a customer uploading their own identity docs
+  // (not fine — a tenant doesn't assert their own compliance dates; the RP reads the date
+  // off the copy at review). The backend ignores a customer-sent expiry either way.
+  const captureExpiry = ownerType !== "customer";
   const [data, setData] = useState<KycData | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -285,7 +290,7 @@ export function KycDocumentsPanel({
   // file is staged (picked before a date was entered), it becomes a required
   // "enter expiry to finish" prompt; otherwise a plain editable field.
   const renderExpiryArea = (item: KycChecklistItem, indentClass = "") => {
-    if (!docNeedsExpiry(item.key)) return null;
+    if (!captureExpiry || !docNeedsExpiry(item.key)) return null;
     const staged = stagedByKey[item.key];
     const expiry = expiryByKey[item.key] ?? toDateInput(item.expiryDate);
     const clear = () => setStagedByKey((p) => { const n = { ...p }; delete n[item.key]; return n; });
@@ -321,8 +326,9 @@ export function KycDocumentsPanel({
     const reqItem = checklist.find((c) => c.key === docKey) ?? data.checklist.find((c) => c.key === docKey)!;
     const storageKey = reqItem.documentKey ?? docKey;
     // Hold an expiring doc (identity / licence) until its expiry is entered so
-    // the upload can't go out without a date.
-    if (docNeedsExpiry(storageKey) && !expiryByKey[docKey]) {
+    // the upload can't go out without a date. Not for a customer's own docs —
+    // their expiry is recorded by the RP at review, so nothing to wait for.
+    if (captureExpiry && docNeedsExpiry(storageKey) && !expiryByKey[docKey]) {
       setStagedByKey((p) => ({ ...p, [docKey]: file }));
       return;
     }
@@ -389,9 +395,11 @@ export function KycDocumentsPanel({
       if (!s3Res.ok) throw new Error("Upload to storage failed");
 
       // Identity / licence docs (Emirates ID, passport, visa, trade licence)
-      // carry an expiry the uploader records — send it with the upload.
+      // carry an expiry the uploader records — send it with the upload. A customer
+      // uploading their OWN doc never sends one (the backend ignores it regardless):
+      // the RP reads the date off the copy when they review it.
       const expiryPatch =
-        docNeedsExpiry(storageKey) ? { expiryDate: expiryByKey[docKey] || null } : {};
+        captureExpiry && docNeedsExpiry(storageKey) ? { expiryDate: expiryByKey[docKey] || null } : {};
 
       if (reqItem.documentId) {
         // Document already exists — update file URL instead of inserting a duplicate

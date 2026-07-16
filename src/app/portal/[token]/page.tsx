@@ -13,8 +13,6 @@ import {
   ShieldCheck, AlertTriangle,
 } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
-import { docNeedsExpiry } from '@/lib/docRequirements';
-import { DocExpiryField } from '@/components/upnow/DocExpiryField';
 
 interface DocItem { key: string; displayName: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null; category?: string | null; hint?: string | null; notes?: string | null }
 interface Portal {
@@ -59,7 +57,9 @@ export default function TenantPortalPage() {
   // No auth user on the magic link — stamp viewed documents with the tenant name.
   useEffect(() => { setDocViewerWatermark(data?.tenant?.name ?? null); }, [data]);
 
-  async function upload(doc: DocItem, file: File, expiryDate?: string | null) {
+  // No expiry is sent: identity / licence expiry is recorded by the rental provider when
+  // they review the copy, so the tenant just picks the file and it goes.
+  async function upload(doc: DocItem, file: File) {
     setUploading(doc.key);
     try {
       const urlRes = await fetch(API(token, '/upload-url'), {
@@ -72,7 +72,7 @@ export default function TenantPortalPage() {
       await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
       await fetch(API(token, '/documents'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentKey: doc.key, category: doc.category ?? 'identity', displayName: doc.displayName, fileUrl, mimeType: file.type, s3Key: fileKey, ...(expiryDate !== undefined ? { expiryDate } : {}) }),
+        body: JSON.stringify({ documentKey: doc.key, category: doc.category ?? 'identity', displayName: doc.displayName, fileUrl, mimeType: file.type, s3Key: fileKey }),
       });
       load();
     } catch { setError('Upload failed — please try again.'); }
@@ -116,13 +116,8 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 function DocSection({ title, subtitle, docs, uploading, onUpload }: {
-  title: string; subtitle: string; docs: DocItem[]; uploading: string | null; onUpload: (d: DocItem, f: File, expiryDate?: string | null) => void;
+  title: string; subtitle: string; docs: DocItem[]; uploading: string | null; onUpload: (d: DocItem, f: File) => void;
 }) {
-  // Per-doc expiry for identity / licence docs — sent with the upload. The
-  // portal is a one-shot upload (no PATCH), so the expiry MUST be captured at
-  // upload time: a file picked before its date is entered is held until it is.
-  const [expiryByKey, setExpiryByKey] = useState<Record<string, string>>({});
-  const [stagedByKey, setStagedByKey] = useState<Record<string, File>>({});
   const required = docs.filter(d => d.required);
   // A rejected doc is NOT "done" — it must be re-uploaded.
   const done = required.filter(d => d.uploaded && d.status !== 'rejected').length;
@@ -142,14 +137,6 @@ function DocSection({ title, subtitle, docs, uploading, onUpload }: {
           const isRejected = doc.status === 'rejected';
           const ok = doc.uploaded && !isRejected;
           const busy = uploading === doc.key;
-          const needsExpiry = docNeedsExpiry(doc.key);
-          const expiry = expiryByKey[doc.key] ?? '';
-          const staged = stagedByKey[doc.key];
-          const onPick = (f: File) => {
-            if (!needsExpiry || expiry) { onUpload(doc, f, needsExpiry ? (expiry || null) : undefined); return; }
-            setStagedByKey(p => ({ ...p, [doc.key]: f }));
-          };
-          const clearStaged = () => setStagedByKey(p => { const n = { ...p }; delete n[doc.key]; return n; });
           return (
             <div key={doc.key} className={`rounded-xl px-4 py-3 flex flex-col gap-2 ${isRejected ? 'bg-[#fff1f2] border border-[#fecaca]' : ok ? 'bg-[#f0faf6] border border-[#bbf7d0]' : doc.required ? 'bg-[#fffbeb] border border-[#fde68a]' : 'bg-[#f9f8f6] border border-[#e8e6e0]'}`}>
               <div className="flex items-center gap-3">
@@ -166,27 +153,9 @@ function DocSection({ title, subtitle, docs, uploading, onUpload }: {
               <label className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white ${busy ? 'opacity-50 pointer-events-none' : ''} ${isRejected ? 'bg-[#ef4444]' : ok ? 'bg-[#9b9890]' : 'bg-[#2e9f82]'}`}>
                 {busy ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
                 {isRejected ? 'Re-upload' : ok ? 'Replace' : 'Upload'}
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ''; }} />
+                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(doc, f); e.target.value = ''; }} />
               </label>
               </div>
-              {needsExpiry && staged ? (
-                <div className="ml-[30px] rounded-lg bg-[#fffbeb] border border-[#fde68a] p-2.5">
-                  <p className="text-xs font-semibold text-[#92400e]">“{staged.name}” selected — enter the document’s expiry date to finish uploading.</p>
-                  <div className="pl-0 mt-1.5"><DocExpiryField value={expiry} onChange={v => setExpiryByKey(p => ({ ...p, [doc.key]: v }))} className="" /></div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <button type="button" disabled={!expiry || busy}
-                      onClick={() => { onUpload(doc, staged, expiry || null); clearStaged(); }}
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white ${expiry ? 'bg-[#2e9f82] cursor-pointer' : 'bg-[#c5c3bc] cursor-not-allowed'} disabled:opacity-60`}>
-                      {busy ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Upload document
-                    </button>
-                    <button type="button" onClick={clearStaged} className="text-xs font-medium text-[#6b6860] hover:underline cursor-pointer">Cancel</button>
-                  </div>
-                </div>
-              ) : needsExpiry ? (
-                <div className="pl-[30px]">
-                  <DocExpiryField value={expiry} onChange={v => setExpiryByKey(p => ({ ...p, [doc.key]: v }))} className="" />
-                </div>
-              ) : null}
             </div>
           );
         })}
