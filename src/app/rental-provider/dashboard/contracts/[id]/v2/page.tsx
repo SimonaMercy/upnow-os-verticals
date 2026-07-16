@@ -110,6 +110,10 @@ interface ContractDetail {
   tenantChequesSubmittedAt: string | null;
   /** Renewal KYC re-verification: docs the customer must re-upload (expired/undated). */
   expiredKycDocKeys?: string[];
+  /** Subset of the above flagged ONLY because no expiry was ever captured. The copy on
+   *  file may well be current — a re-upload can't tell us, but the RP reading the date
+   *  off it can. These are the RP's to clear, not the customer's. */
+  kycExpiryMissingKeys?: string[];
   /** Durable "KYC re-verification was required" flag (snapshotted at accept-time). */
   renewalDocsRequiredAt?: string | null;
   /** RP has reviewed + accepted the re-uploaded KYC docs → cheques unlock. */
@@ -709,6 +713,10 @@ interface StepHandlers {
   onApproveDoc: (docId: number) => void;
   /** Reject a single KYC document → POST /documents/:id/reject (same as leads / new-lease). */
   onRejectDoc: (docId: number) => void;
+  /** Approve a KYC doc AND record the expiry the RP read off it → POST /documents/:id/verify
+   *  with a body. Rejects on failure so the caller can surface it (unlike onApproveDoc,
+   *  which is fire-and-forget). */
+  onApproveDocWithExpiry: (docId: number, expiryDate: string) => Promise<void>;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
   onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string }) => Promise<void>;
@@ -879,6 +887,11 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
 function RenewalDocReview({ h }: { h: StepHandlers }) {
   const canEdit = h.perms.renewals || h.perms.agreements;
   const remaining = h.contract.expiredKycDocKeys ?? [];
+  // Of the flagged bases, the ones stuck only for want of an expiry date. Splitting these
+  // out is what keeps the step from dead-ending: a copy nobody dated can't be fixed by the
+  // customer sending the same undated copy again, but the RP is looking right at the date.
+  const undated = h.contract.kycExpiryMissingKeys ?? [];
+  const awaitingCustomer = remaining.filter(b => !undated.includes(b));
   const LABELS: Record<string, string> = {
     emirates_id: 'Emirates ID', passport: 'Passport', visa: 'UAE Visa / Residency', trade_license: 'Trade License',
   };
@@ -913,6 +926,8 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
 
   const [accepting, setAccepting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [expiryDraft, setExpiryDraft] = useState<Record<string, string>>({});
+  const [savingBase, setSavingBase] = useState<string | null>(null);
   const allRefreshed = remaining.length === 0;
 
   const accept = async () => {
@@ -922,28 +937,51 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
     finally { setAccepting(false); }
   };
 
+  // Record the expiry the RP read off the copy. A future date drops the base out of
+  // `remaining` on reload; a past one keeps it flagged but flips the row to a truthful
+  // "expired — awaiting a fresh copy". Either way, entering the real date resolves it.
+  const saveExpiry = async (base: string, docId: number) => {
+    const date = expiryDraft[base];
+    if (!date) return;
+    setSavingBase(base); setErr(null);
+    try {
+      await h.onApproveDocWithExpiry(docId, date);
+      setExpiryDraft(d => { const n = { ...d }; delete n[base]; return n; });
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save expiry'); }
+    finally { setSavingBase(null); }
+  };
+
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    // minWidth:0 — grid items default to min-width:auto, which would let the widest doc row
+    // stretch the whole step panel past the card instead of wrapping inside it.
+    <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       {/* Same View / Approve / Reject row pattern as the lead + new-lease KYC review. */}
-      <div className="doclist">
+      <div className="doclist" style={{ minWidth: 0 }}>
         {bases.map(b => {
           const doc = freshestByBase.get(b);
           const allDocs = docsByBase.get(b) ?? [];
           const multi = allDocs.length > 1;
           const stillMissing = remaining.includes(b);
+          // Two very different reasons hide behind one flag: `needsExpiry` is the RP's to
+          // clear (type the date), `awaitingUpload` is genuinely the customer's.
+          const needsExpiry = undated.includes(b);
+          const awaitingUpload = stillMissing && !needsExpiry;
           const lbl = LABELS[b] ?? b;
           const ok = !!doc && ['processed', 'complete'].includes(doc.status ?? '');
           const rejected = !!doc && doc.status === 'rejected';
           const stt = stillMissing ? 'pending' : ok ? 'approved' : rejected ? 'rejected' : 'pending';
           return (
-            <div key={b} className={'docitem ' + stt}>
+            <div key={b} className={'docitem ' + stt + (canEdit && doc && needsExpiry ? ' needsexp' : '')}>
               <FileText size={14} />
               <div style={{ minWidth: 0 }}>
                 <div className="dn">{lbl}</div>
                 <div className="ds">
-                  {stillMissing ? 'Awaiting a fresh copy from the customer'
+                  {/* A dated copy that's still flagged here and isn't rejected can only be
+                      flagged for one reason — the backend found its expiry in the past. */}
+                  {needsExpiry ? 'No expiry date on file — add it to verify this copy'
+                    : rejected ? 'Rejected — awaiting a fresh copy'
+                    : awaitingUpload ? (doc!.expiryDate ? `Expired ${fmtDate(doc!.expiryDate)} — awaiting a fresh copy` : 'Awaiting a fresh copy from the customer')
                     : ok ? (doc!.expiryDate ? `Approved · expires ${fmtDate(doc!.expiryDate)}` : 'Approved')
-                    : rejected ? 'Rejected — re-upload requested'
                     : doc!.expiryDate ? `Pending review · expires ${fmtDate(doc!.expiryDate)}` : 'Pending review'}
                 </div>
               </div>
@@ -953,13 +991,31 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
                     <ExternalLink size={12} /> {multi ? `View ${allDocs.length}` : 'View'}
                   </button>
                 )}
+                {/* Undated copy: the date input IS the fix, so it sits in the row rather than
+                    behind a badge that leaves the RP nothing to press. */}
+                {canEdit && doc && needsExpiry && (
+                  <>
+                    <input
+                      type="date" className="dexp" aria-label={`${lbl} expiry date`}
+                      value={expiryDraft[b] ?? ''}
+                      onChange={e => setExpiryDraft(d => ({ ...d, [b]: e.target.value }))}
+                    />
+                    <button
+                      type="button" className="mini-btn ok cursor-pointer"
+                      disabled={!expiryDraft[b] || savingBase === b}
+                      onClick={() => void saveExpiry(b, doc.id)}
+                    >
+                      <Check size={12} /> {savingBase === b ? 'Saving…' : 'Approve'}
+                    </button>
+                  </>
+                )}
                 {canEdit && doc && !stillMissing && !ok && (
                   <button type="button" className="mini-btn ok cursor-pointer" onClick={() => h.onApproveDoc(doc.id)}><Check size={12} /> Approve</button>
                 )}
-                {canEdit && doc && !stillMissing && !rejected && (
+                {canEdit && doc && (needsExpiry || (!stillMissing && !rejected)) && (
                   <button type="button" className="mini-btn no cursor-pointer" onClick={() => h.onRejectDoc(doc.id)}><X size={12} /> Reject</button>
                 )}
-                {stillMissing && <span className="cstat bounced">Pending</span>}
+                {awaitingUpload && <span className="cstat bounced">Pending</span>}
               </div>
             </div>
           );
@@ -972,8 +1028,13 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
             <Check size={15} /> {accepting ? 'Accepting…' : 'Accept documents & unlock cheques'}
           </button>
         )
+      ) : awaitingCustomer.length === 0 ? (
+        // Every blocker is RP-side — don't tell them to wait on a customer who has nothing to send.
+        <p className="note">Add the missing expiry date{undated.length === 1 ? '' : 's'} above to unlock the cheques step.</p>
       ) : (
-        <p className="note">Waiting for {h.contract.tenant.name || 'the customer'} to re-upload the remaining document{remaining.length === 1 ? '' : 's'}. You can accept once every copy is refreshed.</p>
+        <p className="note">
+          Waiting for {h.contract.tenant.name || 'the customer'} to re-upload {awaitingCustomer.length === 1 ? 'a document' : `${awaitingCustomer.length} documents`}. You can accept once every copy is refreshed{undated.length ? ', including the expiry dates above' : ''}.
+        </p>
       )}
     </div>
   );
@@ -5375,6 +5436,20 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     fetch(`/api/documents/${id}/verify`, { method: 'POST', credentials: 'include' })
       .then(r => { if (r.ok) void reload(); }).catch(() => {});
   };
+  // Same endpoint, but the RP also records the expiry printed on the document. Expiry is
+  // captured RP-side at review time — /documents/:id/verify is role-guarded, so the date
+  // can only ever be set by someone who reviewed the copy.
+  const onApproveDocWithExpiry = async (id: number, expiryDate: string) => {
+    const res = await fetch(`/api/documents/${id}/verify`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiryDate }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
+    await reload();
+  };
   const onRejectDoc = (id: number) => {
     const reason = window.prompt('Reason for rejection (the customer will see this and be asked to re-upload):');
     if (reason === null) return; // cancelled
@@ -5613,7 +5688,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onUploadCheques, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onUploadCheques, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,
@@ -6543,8 +6618,16 @@ function GlobalStyle() {
       .quest-page .docitem.docmiss .dn { color: var(--mute); }
       .quest-page .docitem.docmiss.req { border-color: var(--brick-edge); }
       .quest-page .docitem.docmiss.req svg, .quest-page .docitem.docmiss.req .ds { color: var(--brick); }
-      .quest-page .docitem .dacts { margin-left: auto; display: flex; gap: 5px; flex-shrink: 0; }
+      .quest-page .docitem .dacts { margin-left: auto; display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
       .quest-page .docitem .mini-btn { padding: 3px 8px; }
+      .quest-page .docitem .mini-btn:disabled { opacity: .45; cursor: not-allowed; }
+      /* Inline expiry capture on an undated KYC copy. The date field + Approve don't fit
+         beside the status text in a narrow panel, so this row alone is allowed to wrap its
+         action strip onto a second line rather than overflow the card. */
+      .quest-page .docitem.needsexp { flex-wrap: wrap; row-gap: 6px; }
+      .quest-page .docitem.needsexp .dacts { margin-left: auto; }
+      .quest-page .docitem .dexp { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 7px; border: 1px solid var(--saffron-edge); background: #fff; color: var(--ink); font-family: inherit; }
+      .quest-page .docitem .dexp:focus { outline: 2px solid var(--saffron-deep); outline-offset: 1px; }
       .quest-page .mini-btn { font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 8px; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
       .quest-page .mini-btn.ok { background: var(--jade-soft); color: var(--jade-deep); }
       .quest-page .mini-btn.no { background: var(--brick-soft); color: var(--brick); }

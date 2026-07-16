@@ -81,34 +81,20 @@ function DocRow({
   docRecord,
   uploading,
   onUpload,
-  onSaveExpiry,
 }: {
   req: DocReq;
   docRecord: MyDoc | undefined;
   uploading: boolean;
-  onUpload: (req: DocReq, file: File, existingId?: number, expiryDate?: string | null) => void;
-  onSaveExpiry: (docId: number, expiryDate: string) => Promise<void>;
+  onUpload: (req: DocReq, file: File, existingId?: number) => void;
 }) {
   const uploaded   = !!docRecord && docRecord.status !== 'pending';
   const isRejected = docRecord?.status === 'rejected';
   const isApproved = docRecord?.status === 'complete' || docRecord?.status === 'processed';
   const isPending  = uploaded && !isRejected && !isApproved;
   const needsUpload = !uploaded || isRejected;
-  // Identity / licence docs carry an expiry the customer records here.
-  const needsExpiry = docNeedsExpiry(req.key);
-  const [expiry, setExpiry] = useState(toDateInput(docRecord?.expiryDate));
-  const [savingExpiry, setSavingExpiry] = useState(false);
-  // Hold a file picked before its expiry is entered so the upload can't go out
-  // without the date (identity / licence docs).
-  const [staged, setStaged] = useState<File | null>(null);
-  const onExpiryChange = async (v: string) => {
-    setExpiry(v);
-    if (docRecord?.id != null) { setSavingExpiry(true); try { await onSaveExpiry(docRecord.id, v); } finally { setSavingExpiry(false); } }
-  };
-  const onPick = (f: File) => {
-    if (!needsExpiry || expiry) { onUpload(req, f, docRecord?.id, needsExpiry ? (expiry || null) : undefined); return; }
-    setStaged(f);
-  };
+  // No expiry field: a customer uploads the copy, the rental provider reads the expiry
+  // off it and records it at review time.
+  const onPick = (f: File) => onUpload(req, f, docRecord?.id);
 
   return (
     <div className={[
@@ -147,22 +133,6 @@ function DocRow({
         {isPending  && <p className="text-xs text-[#6b6860] mt-0.5">Uploaded · awaiting review</p>}
         {isApproved && <p className="text-xs text-[#16a34a] font-medium mt-0.5">Approved ✓</p>}
         {needsUpload && !isRejected && req.hint && <p className="text-xs text-[#9b9890] mt-0.5">{req.hint}</p>}
-        {needsExpiry && staged ? (
-          <div className="mt-2 rounded-lg bg-[#fffbeb] border border-[#fde68a] p-2.5">
-            <p className="text-xs font-semibold text-[#92400e]">“{staged.name}” selected — enter the document’s expiry date to finish uploading.</p>
-            <DocExpiryField value={expiry} onChange={setExpiry} className="mt-1.5" />
-            <div className="flex items-center gap-2 mt-2">
-              <button type="button" disabled={!expiry || uploading}
-                onClick={() => { onUpload(req, staged, docRecord?.id, expiry || null); setStaged(null); }}
-                className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white ${expiry ? 'bg-[#2e9f82] hover:bg-[#267a65] cursor-pointer' : 'bg-[#c5c3bc] cursor-not-allowed'} disabled:opacity-60`}>
-                {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Upload document
-              </button>
-              <button type="button" onClick={() => setStaged(null)} className="text-xs font-medium text-[#6b6860] hover:underline cursor-pointer">Cancel</button>
-            </div>
-          </div>
-        ) : needsExpiry ? (
-          <DocExpiryField value={expiry} onChange={onExpiryChange} saving={savingExpiry} className="mt-1.5" />
-        ) : null}
       </div>
 
       {/* Actions */}
@@ -381,16 +351,7 @@ export default function CustomerDocumentsPage() {
 
   // ── Upload handler (required + landlord-requested docs) ───────────────────
 
-  async function saveDocExpiry(docId: number, expiryDate: string) {
-    await fetch(`/api/documents/${docId}`, {
-      method: 'PATCH', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expiryDate: expiryDate || null }),
-    });
-    reloadDocs();
-  }
-
-  async function handleUpload(req: DocReq, file: File, existingDocId?: number, expiryDate?: string | null) {
+  async function handleUpload(req: DocReq, file: File, existingDocId?: number) {
     if (!tenantProfileId) return;
     setDocUploading(req.key);
     setUploadError(null);
@@ -415,12 +376,13 @@ export default function CustomerDocumentsPage() {
       if (!putRes.ok) { setUploadError('File upload failed'); return; }
 
       let docRes: Response;
-      const expiryPatch = expiryDate !== undefined ? { expiryDate } : {};
+      // No expiryDate is sent — the RP records it at review. (The backend also clears any
+      // stale date when the file itself is replaced, so the new copy gets re-dated.)
       if (existingDocId) {
         docRes = await fetch(`/api/documents/${existingDocId}`, {
           method: 'PATCH', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileUrl, mimeType: file.type, s3Key: fileKey, ...expiryPatch }),
+          body: JSON.stringify({ fileUrl, mimeType: file.type, s3Key: fileKey }),
         });
       } else {
         docRes = await fetch('/api/documents', {
@@ -429,7 +391,7 @@ export default function CustomerDocumentsPage() {
           body: JSON.stringify({
             ownerType: 'customer', ownerId: tenantProfileId,
             documentKey: req.key, category: req.category,
-            displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey, ...expiryPatch,
+            displayName: req.label, fileUrl, mimeType: file.type, s3Key: fileKey,
           }),
         });
       }
@@ -587,7 +549,6 @@ export default function CustomerDocumentsPage() {
                 docRecord={docRecord}
                 uploading={docUploading === req.key}
                 onUpload={handleUpload}
-                onSaveExpiry={saveDocExpiry}
               />
             );
           })
@@ -615,7 +576,6 @@ export default function CustomerDocumentsPage() {
                 docRecord={docRecord}
                 uploading={docUploading === req.key}
                 onUpload={handleUpload}
-                onSaveExpiry={saveDocExpiry}
               />
             );
           })}
