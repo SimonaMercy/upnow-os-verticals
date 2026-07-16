@@ -19,6 +19,7 @@ interface EarningsJob {
   bookingId: number;
   serviceName: string | null;
   status: string;
+  disputed: boolean;
   gross: number;
   commission: number | null;
   net: number | null;
@@ -29,6 +30,7 @@ interface Earnings {
   summary: {
     netEarned: number; commissionPaid: number; grossEarned: number;
     pendingHeld: number; jobsCompleted: number; jobsPending: number;
+    disputedHeld: number; jobsDisputed: number;
   };
   jobs: EarningsJob[];
 }
@@ -40,7 +42,7 @@ interface PayoutRow {
   requestedAt: string; paidAt: string | null; notes: string | null;
 }
 interface PayoutMe {
-  balance: { currency: string; netEarned: number; paidOut: number; available: number };
+  balance: { currency: string; netEarned: number; paidOut: number; available: number; disputedHeld: number };
   bankAccount: BankAccount | null;
   payouts: PayoutRow[];
 }
@@ -56,7 +58,15 @@ function Tile({ label, value, sub, tint }: { label: string; value: string; sub?:
   );
 }
 
-function statusPill(status: string) {
+function statusPill(status: string, disputed = false) {
+  // A disputed job is released-but-withheld — never show it as paid out.
+  if (disputed) {
+    return (
+      <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', color: '#B42318', background: '#FEF2F2' }}>
+        In dispute
+      </span>
+    );
+  }
   const released = status === 'released';
   return (
     <span style={{
@@ -101,6 +111,14 @@ export default function ServiceProviderEarningsPage() {
         <Tile label="Commission paid" value={aed(s.commissionPaid)} sub="Platform fee" />
         <Tile label="Pending (held)" value={aed(s.pendingHeld)} sub={`${s.jobsPending} in progress`} tint={s.pendingHeld > 0 ? AMBER : undefined} />
         <Tile label="Gross billed" value={aed(s.grossEarned)} sub="Before commission" />
+        {s.disputedHeld > 0 && (
+          <Tile
+            label="In dispute (on hold)"
+            value={aed(s.disputedHeld)}
+            sub={`${s.jobsDisputed} job${s.jobsDisputed === 1 ? '' : 's'} — withheld until resolved`}
+            tint="#B42318"
+          />
+        )}
       </div>
 
       {pay && <PayoutSection pay={pay} onReload={loadPay} />}
@@ -131,7 +149,7 @@ export default function ServiceProviderEarningsPage() {
                   <tr key={j.bookingId} style={{ borderTop: i === 0 ? HAIRLINE : '1px solid #F4F6F3', color: INK }}>
                     <td style={{ padding: '12px 18px', fontWeight: 600 }}>{j.serviceName ?? '—'}</td>
                     <td style={{ padding: '12px 12px', color: FAINT }}>BK-{j.bookingId}</td>
-                    <td style={{ padding: '12px 12px' }}>{statusPill(j.status)}</td>
+                    <td style={{ padding: '12px 12px' }}>{statusPill(j.status, j.disputed)}</td>
                     <td style={{ padding: '12px 12px', textAlign: 'right' }}>{aed(j.gross)}</td>
                     <td style={{ padding: '12px 12px', textAlign: 'right', color: FAINT }}>{j.commission != null ? `− ${aed(j.commission)}` : '—'}</td>
                     <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 700, color: j.net != null ? GREEN : FAINT }}>{j.net != null ? aed(j.net) : '—'}</td>
@@ -184,6 +202,11 @@ function PayoutSection({ pay, onReload }: { pay: PayoutMe; onReload: () => Promi
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: FAINT }}>Available to pay out</div>
           <div style={{ fontSize: 30, fontWeight: 800, color: pay.balance.available > 0 ? GREEN : INK, marginTop: 4, letterSpacing: '-.02em' }}>{aed(pay.balance.available)}</div>
           <div style={{ fontSize: 12.5, color: FAINT, marginTop: 3 }}>{aed(pay.balance.paidOut)} paid out · settled manually during the pilot</div>
+          {pay.balance.disputedHeld > 0 && (
+            <div style={{ fontSize: 12.5, color: '#B42318', marginTop: 6, fontWeight: 600 }}>
+              {aed(pay.balance.disputedHeld)} withheld pending dispute resolution
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, minWidth: 260, maxWidth: 400 }}>

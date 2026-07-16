@@ -20,6 +20,7 @@ interface Row {
   businessName: string;
   currency: string;
   netEarned: number;
+  disputedHeld: number;
   paidOut: number;
   available: number;
   bankAccount: { holderName: string; bankName: string; iban: string; isVerified: boolean } | null;
@@ -96,7 +97,7 @@ export default function AdminPayoutsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
               <thead>
                 <tr style={{ color: FAINT, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                  {['Provider', 'Bank account', 'Net earned', 'Paid out', 'Available', ''].map((h) => (
+                  {['Provider', 'Bank account', 'Net earned', 'On hold', 'Paid out', 'Available', ''].map((h) => (
                     <th key={h} style={{ textAlign: h === 'Provider' || h === 'Bank account' ? 'left' : 'right', padding: '10px 18px', fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
@@ -114,6 +115,12 @@ export default function AdminPayoutsPage() {
                       ) : <span style={{ color: '#b45309' }}>No bank account</span>}
                     </td>
                     <td style={{ padding: '12px 18px', textAlign: 'right' }}>{aed(r.netEarned)}</td>
+                    <td
+                      style={{ padding: '12px 18px', textAlign: 'right', color: r.disputedHeld > 0 ? '#B42318' : FAINT, fontWeight: r.disputedHeld > 0 ? 600 : 400 }}
+                      title={r.disputedHeld > 0 ? 'Withheld from payout until the dispute is resolved' : undefined}
+                    >
+                      {r.disputedHeld > 0 ? aed(r.disputedHeld) : '—'}
+                    </td>
                     <td style={{ padding: '12px 18px', textAlign: 'right', color: FAINT }}>{aed(r.paidOut)}</td>
                     <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 700, color: r.available > 0 ? '#991b1b' : FAINT }}>{aed(r.available)}</td>
                     <td style={{ padding: '12px 18px', textAlign: 'right' }}>
