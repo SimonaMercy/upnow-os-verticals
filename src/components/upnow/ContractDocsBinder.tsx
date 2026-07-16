@@ -22,6 +22,8 @@ import { FileText } from 'lucide-react';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
+import { canRoleDownloadDocs } from '@/lib/docViewer';
+import { useAuth } from '@/contexts/AuthContext';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergePart } from '@/components/upnow/DownloadDocsPopup';
@@ -106,10 +108,31 @@ const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontW
 const chip: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: '#4a4742', cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto', lineHeight: 1.3 };
 const JUMP_OFFSET = 88;
 
-function SecurePreview({ url, caption, watermark }: { url: string; caption: string; watermark: string }) {
+function SecurePreview({ url, caption, watermark, docId, canDownload, portalToken }: {
+  url: string;
+  caption: string;
+  watermark: string;
+  /** documents-table id — enables the per-document Download control when allowed. */
+  docId?: number | null;
+  /** True for logged-in landlord / manager / admin (never the magic-link portal). */
+  canDownload?: boolean;
+  portalToken?: string | null;
+}) {
+  const downloadable = canDownload && docId != null;
   return (
     <div style={cardCss}>
-      <div style={capCss}>{caption}</div>
+      <div style={{ ...capCss, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{caption}</span>
+        {downloadable && (
+          <DownloadDocButton
+            documentId={docId!}
+            portalToken={portalToken}
+            label="Download"
+            title="Download this document"
+            style={{ ...linkBtnGhost, padding: '3px 10px', fontSize: 11.5, flex: '0 0 auto' }}
+          />
+        )}
+      </div>
       <SecureDocCanvas fileUrl={url} isImage={isImageUrl(url)} caption={caption} watermark={watermark} />
     </div>
   );
@@ -266,6 +289,12 @@ type Slot =
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, signatureCertificate, headerRight, signerName, signerDefaultName, landlordSigned, onSign } = props;
+  // Per-document download is offered to the logged-in landlord / manager / admin
+  // only — never on the no-login magic-link portal (KYC stays locked there). Each
+  // download streams the clean file via /documents/:id/download, which records the
+  // download in the audit log (rp.document.download).
+  const { user } = useAuth();
+  const canDownloadDocs = !portalToken && canRoleDownloadDocs(user?.role);
   const planRefNo = paymentRefs?.planRefNo ?? null;
   // Enrich the receipt contract so per-payment receipts print their real gapless
   // number and the plan number (see PaymentReceiptPdf).
@@ -425,7 +454,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
       <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6, gap: 10 }}>
         <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>All documents</span>
         <span style={{ fontSize: 12.5, color: '#9b9890' }}>{refLabel}</span>
-        <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>
+        {!canDownloadDocs && <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {!portalToken && downloadItems.length > 0 && (
             <DownloadDocsButton items={downloadItems} fileName={`Documents-${(refLabel || 'contract').replace(/[^\w.-]+/g, '-')}.pdf`} style={linkBtnGhost} />
@@ -443,14 +472,14 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           {primaryId.length === 0 ? <p style={{ fontSize: 13, color: '#9b9890' }}>No identity documents on file.</p>
             : primaryId.map(d => (
                 <div key={'id' + d.id} id={`l-${d.id}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
-                  <SecurePreview url={d.fileUrl} caption={idLabel(d)} watermark={watermark} />
+                  <SecurePreview url={d.fileUrl} caption={idLabel(d)} watermark={watermark} docId={d.id} canDownload={canDownloadDocs} portalToken={portalToken} />
                 </div>
               ))}
           {occGroups.map(g => (
             <div key={'occ' + g.n} id={`l-occ-${g.n}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
               <SectionTitle>{occGroups.length > 1 ? `Occupant ${g.n}` : 'Occupant'}</SectionTitle>
               {g.docs.map(d => (
-                <SecurePreview key={'occ' + d.id} url={d.fileUrl} caption={idLabel(d)} watermark={watermark} />
+                <SecurePreview key={'occ' + d.id} url={d.fileUrl} caption={idLabel(d)} watermark={watermark} docId={d.id} canDownload={canDownloadDocs} portalToken={portalToken} />
               ))}
             </div>
           ))}
@@ -475,7 +504,10 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
               } else {
                 // Generated artifacts (move-in/out report, settlement) → clean download
                 // of the stored snapshot; uploaded KYC/other docs stay view-only.
-                const previews = docs.map((d, i) => <SecurePreview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} watermark={watermark} />);
+                // Generated artifacts already get a single block-level Download PDF
+                // (below); everything else gets a per-document Download inline.
+                const perDocDownload = canDownloadDocs && !DOWNLOADABLE_ARTIFACT_KEYS.has(s.key);
+                const previews = docs.map((d, i) => <SecurePreview key={s.key + d.id} url={d.fileUrl} caption={`${s.label}${docs.length > 1 ? ` · ${i + 1} of ${docs.length}` : ''}`} watermark={watermark} docId={d.id} canDownload={perDocDownload} portalToken={portalToken} />);
                 inner = DOWNLOADABLE_ARTIFACT_KEYS.has(s.key)
                   ? <>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
@@ -491,7 +523,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           {leftover.length > 0 && (
             <div id="r-other" style={{ scrollMarginTop: JUMP_OFFSET }}>
               {leftover.map(d => (
-                <SecurePreview key={'x' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} watermark={watermark} />
+                <SecurePreview key={'x' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} watermark={watermark} docId={d.id} canDownload={canDownloadDocs} portalToken={portalToken} />
               ))}
             </div>
           )}

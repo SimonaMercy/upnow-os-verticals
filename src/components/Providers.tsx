@@ -5,18 +5,20 @@ import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { installApiFetchCoalescing } from "@/lib/fetchCoalescing";
-import { setDocViewerWatermark } from "@/lib/docViewer";
+import { setDocViewerWatermark, setDocViewerCanDownload, canRoleDownloadDocs } from "@/lib/docViewer";
 
 /**
- * Feeds the logged-in user's identity to the document viewer's watermark. Lives
- * inside <AuthProvider/> because <DocViewerHost/> is mounted outside it (at the
- * app root) and can't read the auth context itself. The tenant magic-link portal
- * has no auth user and sets its own watermark from the resolved tenant name.
+ * Feeds the logged-in user's identity to the document viewer's watermark, and
+ * whether their role may download documents. Lives inside <AuthProvider/> because
+ * <DocViewerHost/> is mounted outside it (at the app root) and can't read the auth
+ * context itself. The tenant magic-link portal has no auth user — it sets its own
+ * watermark from the resolved tenant name and never enables downloads.
  */
 function DocViewerIdentityBinder() {
   const { user } = useAuth();
   useEffect(() => {
     setDocViewerWatermark(user ? `${user.name} · #${user.id}` : null);
+    setDocViewerCanDownload(canRoleDownloadDocs(user?.role));
   }, [user]);
   return null;
 }

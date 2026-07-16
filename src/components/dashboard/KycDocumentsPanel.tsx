@@ -28,11 +28,15 @@ import {
   X,
   Eye,
   Files,
+  Download,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { SecureDocCanvas } from "@/components/upnow/SecureDocCanvas";
-import { currentDocWatermark } from "@/lib/docViewer";
+import { currentDocWatermark, canRoleDownloadDocs } from "@/lib/docViewer";
+import { downloadStoredDoc } from "@/lib/downloadDoc";
+import { useAuth } from "@/contexts/AuthContext";
 import { docNeedsExpiry } from "@/lib/docRequirements";
 import { DocExpiryField } from "@/components/upnow/DocExpiryField";
 
@@ -229,15 +233,33 @@ export function KycDocumentsPanel({
     Record<string, { url: string; mimeType: string }>
   >({});
   // In-screen document viewer (replaces opening a new browser tab). Holds the
-  // list of docs to render as a scrollable feed; null = closed.
+  // list of docs to render as a scrollable feed; null = closed. `documentId`
+  // enables the per-doc Download control for landlord / manager / admin.
   const [viewerDocs, setViewerDocs] = useState<
-    { name: string; url: string; mimeType: string }[] | null
+    { name: string; url: string; mimeType: string; documentId?: number | null }[] | null
   >(null);
   // Identity stamp captured when the viewer opens (stable while it's open).
   const [viewerWatermark, setViewerWatermark] = useState("");
   useEffect(() => {
     if (viewerDocs) setViewerWatermark(currentDocWatermark());
   }, [viewerDocs]);
+
+  // Landlords / managers / admins may download the clean file; customers and
+  // service providers stay view-only. The file streams watermark-free via
+  // /documents/:id/download (which also records the download in the audit log).
+  const { user } = useAuth();
+  const canDownload = canRoleDownloadDocs(user?.role);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const handleDownload = async (id: number) => {
+    setDownloadingId(id);
+    try {
+      await downloadStoredDoc(id);
+    } catch {
+      toast.error("Could not download the document. Please try again.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingKey = useRef<string | null>(null);
@@ -489,6 +511,7 @@ export function KycDocumentsPanel({
         name: c.displayName,
         url: local?.url ?? c.fileUrl ?? "",
         mimeType: local?.mimeType ?? c.mimeType ?? "",
+        documentId: c.documentId,
       };
     })
     .filter((d) => d.url);
@@ -699,7 +722,7 @@ export function KycDocumentsPanel({
                         <button
                           type="button"
                           onClick={() =>
-                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime, documentId: item.documentId }])
                           }
                           className="text-xs font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
                           style={{ color: "var(--color-primary)" }}
@@ -855,7 +878,7 @@ export function KycDocumentsPanel({
                         <button
                           type="button"
                           onClick={() =>
-                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime, documentId: item.documentId }])
                           }
                           className="block cursor-pointer"
                         >
@@ -875,7 +898,7 @@ export function KycDocumentsPanel({
                         <button
                           type="button"
                           onClick={() =>
-                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime, documentId: item.documentId }])
                           }
                           className="inline-flex items-center gap-1.5 text-xs font-medium underline underline-offset-2 cursor-pointer"
                           style={{ color: "var(--color-primary)" }}
@@ -1022,12 +1045,28 @@ export function KycDocumentsPanel({
             >
               {viewerDocs.map((d, i) => {
                 const isImg = d.mimeType.startsWith("image/");
+                const dlId = canDownload && typeof d.documentId === "number" && d.documentId > 0 ? d.documentId : null;
                 return (
                   <div key={`${d.url}-${i}`}>
-                    {viewerDocs.length > 1 && (
-                      <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--color-neutral-600)" }}>
-                        {d.name}
-                      </p>
+                    {(viewerDocs.length > 1 || dlId) && (
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <p className="text-xs font-semibold truncate" style={{ color: "var(--color-neutral-600)" }}>
+                          {viewerDocs.length > 1 ? d.name : ""}
+                        </p>
+                        {dlId && (
+                          <button
+                            type="button"
+                            onClick={() => handleDownload(dlId)}
+                            disabled={downloadingId === dlId}
+                            title="Download this document"
+                            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-white shrink-0 disabled:opacity-60"
+                            style={{ background: "var(--color-primary)" }}
+                          >
+                            {downloadingId === dlId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                            Download
+                          </button>
+                        )}
+                      </div>
                     )}
                     <div className="rounded-xl border overflow-hidden bg-white" style={{ borderColor: "var(--color-base-200)" }}>
                       <SecureDocCanvas

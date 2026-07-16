@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment, type Dispatch, type SetStateAction, type ReactNode } from 'react';
-import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Check, Home, Camera } from 'lucide-react';
+import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, FileText, Check, Home, Camera, UserRound, Plus } from 'lucide-react';
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
@@ -547,6 +547,31 @@ export interface PropertyFormData {
   isStandaloneUnit: boolean;
   // Google placeId — stored so backend can deduplicate building_cache entries
   googlePlaceId: string | null;
+  // ─── Property-management (leasingType === 'management') ──
+  // Who signs the tenancy contract, who receives the rent cheques, and the
+  // co-owner assignment. All null/empty for direct/sub properties.
+  landlordSignatory: 'owner' | 'managing_agent' | null;
+  chequeRecipient: 'owner' | 'rp' | null;
+  ownerLinks: OwnerLink[];
+}
+
+/** One co-owner assigned to a managed property. */
+export interface OwnerLink {
+  ownerId: number;
+  ownershipPct: number;
+  isPrimary: boolean;
+}
+
+/** An owner record as returned by GET /owners. */
+export interface OwnerOption {
+  id: number;
+  name: string;
+  ownerType: 'individual' | 'company';
+  email: string | null;
+  phone: string | null;
+  emiratesId: string | null;
+  tradeLicence: string | null;
+  propertyCount?: number;
 }
 
 const EMPTY: PropertyFormData = {
@@ -559,6 +584,7 @@ const EMPTY: PropertyFormData = {
   sharedAmenities: [],
   hasGym: false, hasPool: false, hasParking: false, isStandaloneUnit: false,
   googlePlaceId: null,
+  landlordSignatory: null, chequeRecipient: null, ownerLinks: [],
 };
 
 interface Props {
@@ -574,6 +600,9 @@ interface Props {
   propertyId?: number;
   /** Edit only — live unit count, shown read-only as "Number of units". */
   unitCount?: number;
+  /** Suffix for /owners API calls so a manager acts for a landlord (e.g.
+   *  "?rp=123"). Empty for RP owners. */
+  apiRpQuery?: string;
 }
 
 /** A property's already-uploaded document (title deed / building drawing). */
@@ -786,6 +815,231 @@ export function PropertyDocCard({
   );
 }
 
+/** Two-option pill radio used for the management signatory / cheque choices. */
+function ChoiceRow<T extends string>({
+  options, value, onChange,
+}: {
+  options: { id: T; label: string; desc: string }[];
+  value: T | null;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      {options.map(opt => {
+        const on = value === opt.id;
+        return (
+          <button key={opt.id} type="button" onClick={() => onChange(opt.id)}
+            className={cn('text-left rounded-lg border px-3 py-2.5 transition-colors cursor-pointer',
+              on ? 'border-[#2e9f82] bg-[#e6f7f1]' : 'border-[#e8e6e0] bg-white hover:border-[#c5c2bc]')}>
+            <span className="flex items-center gap-2">
+              <span className={cn('w-[16px] h-[16px] shrink-0 rounded-full border-2 flex items-center justify-center', on ? 'border-[#2e9f82]' : 'border-[#cdd5cf]')}>
+                <span className={cn('w-1.5 h-1.5 rounded-full', on ? 'bg-[#2e9f82]' : 'bg-transparent')} />
+              </span>
+              <span className={cn('text-[13px] font-bold', on ? 'text-[#1f6655]' : 'text-[#1a1916]')}>{opt.label}</span>
+            </span>
+            <span className="block text-[11px] text-[#7d8780] mt-1 leading-snug pl-6">{opt.desc}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * OwnerAssignmentSection — shown only for a MANAGED property (leasingType ===
+ * 'management'). Captures the two management choices (who signs, who receives
+ * cheques) and the co-owner assignment (reusable owners + ownership %). Owners
+ * are fetched from and created via /owners (scoped to the acting RP through
+ * apiRpQuery).
+ */
+function OwnerAssignmentSection({
+  value, setValue, apiRpQuery,
+}: {
+  value: PropertyFormData;
+  setValue: Dispatch<SetStateAction<PropertyFormData>>;
+  apiRpQuery: string;
+}) {
+  const [owners, setOwners] = useState<OwnerOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [nf, setNf] = useState<{ name: string; ownerType: 'individual' | 'company'; email: string; phone: string; emiratesId: string; tradeLicence: string }>(
+    { name: '', ownerType: 'individual', email: '', phone: '', emiratesId: '', tradeLicence: '' },
+  );
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiGet<OwnerOption[]>(`/owners${apiRpQuery}`)
+      .then(os => { setOwners(os); setErr(null); })
+      .catch(e => setErr(e instanceof Error ? e.message : 'Could not load owners'))
+      .finally(() => setLoading(false));
+  }, [apiRpQuery]);
+  useEffect(() => { load(); }, [load]);
+
+  const links = value.ownerLinks;
+  const setLinks = (next: OwnerLink[]) => setValue(prev => ({ ...prev, ownerLinks: next }));
+  const isAssigned = (id: number) => links.some(l => l.ownerId === id);
+  const toggle = (id: number) => {
+    if (isAssigned(id)) {
+      const next = links.filter(l => l.ownerId !== id);
+      // Keep exactly one primary when any remain.
+      if (next.length && !next.some(l => l.isPrimary)) next[0] = { ...next[0], isPrimary: true };
+      setLinks(next);
+    } else {
+      setLinks([...links, { ownerId: id, ownershipPct: links.length ? 0 : 100, isPrimary: links.length === 0 }]);
+    }
+  };
+  const setPct = (id: number, pct: number) => setLinks(links.map(l => (l.ownerId === id ? { ...l, ownershipPct: pct } : l)));
+  const setPrimary = (id: number) => setLinks(links.map(l => ({ ...l, isPrimary: l.ownerId === id })));
+  const pctSum = Math.round(links.reduce((s, l) => s + (Number(l.ownershipPct) || 0), 0) * 100) / 100;
+
+  const createOwner = async () => {
+    if (!nf.name.trim() || creating) return;
+    setCreating(true);
+    try {
+      const created = await apiPost<OwnerOption>(`/owners${apiRpQuery}`, {
+        name: nf.name.trim(), ownerType: nf.ownerType,
+        email: nf.email || undefined, phone: nf.phone || undefined,
+        emiratesId: nf.ownerType === 'individual' ? (nf.emiratesId || undefined) : undefined,
+        tradeLicence: nf.ownerType === 'company' ? (nf.tradeLicence || undefined) : undefined,
+      });
+      setOwners(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setLinks([...links, { ownerId: created.id, ownershipPct: links.length ? 0 : 100, isPrimary: links.length === 0 }]);
+      setNf({ name: '', ownerType: 'individual', email: '', phone: '', emiratesId: '', tradeLicence: '' });
+      setShowAdd(false);
+    } catch (e) {
+      alert(`Could not create owner: ${e instanceof Error ? e.message : 'error'}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-[#e8e6e0] bg-[#faf9f6] p-3.5 space-y-4">
+      <div className="flex items-center gap-2">
+        <UserRound size={15} className="text-[#8a6d2e]" />
+        <span className="text-[13px] font-bold text-[#1a1916]">Owner &amp; management</span>
+        <span className="text-[11px] text-[#9b9890]">— the property is managed on the owner&apos;s behalf</span>
+      </div>
+
+      {/* Who signs */}
+      <div>
+        <FieldLabel label="Who signs the tenancy contract?" />
+        <ChoiceRow<'owner' | 'managing_agent'>
+          value={value.landlordSignatory}
+          onChange={v => setValue(prev => ({ ...prev, landlordSignatory: v }))}
+          options={[
+            { id: 'owner', label: 'Owner signs', desc: 'The owner signs (e.g. via a secure signing link).' },
+            { id: 'managing_agent', label: 'You sign (managing agent)', desc: 'You sign on the owner’s behalf under the management POA.' },
+          ]}
+        />
+      </div>
+
+      {/* Who receives cheques */}
+      <div>
+        <FieldLabel label="Who receives the rent cheques?" />
+        <ChoiceRow<'owner' | 'rp'>
+          value={value.chequeRecipient}
+          onChange={v => setValue(prev => ({ ...prev, chequeRecipient: v }))}
+          options={[
+            { id: 'rp', label: 'You collect', desc: 'Cheques are collected by you, then remitted to the owner.' },
+            { id: 'owner', label: 'Owner receives', desc: 'Cheques are made payable to the owner directly.' },
+          ]}
+        />
+      </div>
+
+      {/* Owners */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <FieldLabel label="Property owner(s)" />
+          {links.length > 0 && (
+            <span className={cn('text-[11px] font-semibold', pctSum === 100 ? 'text-[#1a7a5a]' : 'text-[#b45309]')}>
+              Ownership total: {pctSum}%{pctSum !== 100 ? ' (should be 100%)' : ''}
+            </span>
+          )}
+        </div>
+
+        {loading ? (
+          <p className="text-xs text-[#9b9890] py-2">Loading owners…</p>
+        ) : err ? (
+          <p className="text-xs text-red-500 py-2">{err}</p>
+        ) : (
+          <div className="space-y-1.5">
+            {owners.length === 0 && (
+              <p className="text-xs text-[#9b9890]">No owners yet — add the property&apos;s owner below.</p>
+            )}
+            {owners.map(o => {
+              const link = links.find(l => l.ownerId === o.id);
+              const on = !!link;
+              return (
+                <div key={o.id} className={cn('rounded-lg border px-3 py-2', on ? 'border-[#2e9f82] bg-white' : 'border-[#e8e6e0] bg-white')}>
+                  <div className="flex items-center gap-2.5">
+                    <button type="button" onClick={() => toggle(o.id)}
+                      className={cn('w-[18px] h-[18px] shrink-0 rounded border-2 flex items-center justify-center', on ? 'border-[#2e9f82] bg-[#2e9f82]' : 'border-[#cdd5cf] bg-white')}>
+                      {on && <Check size={12} className="text-white" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[13px] font-semibold text-[#1a1916] truncate">{o.name}</span>
+                      <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">{o.ownerType}</span>
+                    </div>
+                    {on && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <label className="flex items-center gap-1 text-[11px] text-[#6b6860]">
+                          <input type="number" min={0} max={100} step={0.01} value={link!.ownershipPct}
+                            onChange={e => setPct(o.id, Number(e.target.value))}
+                            className="w-16 border border-[#e8e6e0] rounded px-2 py-1 text-xs text-right" /> %
+                        </label>
+                        <button type="button" onClick={() => setPrimary(o.id)} title="Primary owner (lead contact / signer)"
+                          className={cn('text-[11px] font-semibold px-2 py-1 rounded-full', link!.isPrimary ? 'bg-[#e6f7f1] text-[#1f6655]' : 'bg-[#f4f3ef] text-[#9b9890] hover:text-[#6b6860]')}>
+                          {link!.isPrimary ? '★ Primary' : 'Set primary'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add new owner */}
+        {showAdd ? (
+          <div className="mt-2 rounded-lg border border-[#e8e6e0] bg-white p-3 space-y-2">
+            <div className="flex gap-2">
+              {(['individual', 'company'] as const).map(t => (
+                <button key={t} type="button" onClick={() => setNf(s => ({ ...s, ownerType: t }))}
+                  className={cn('text-[12px] font-semibold px-3 py-1 rounded-full border', nf.ownerType === t ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860]')}>
+                  {t === 'individual' ? 'Individual' : 'Company'}
+                </button>
+              ))}
+            </div>
+            <input className={INPUT} placeholder={nf.ownerType === 'company' ? 'Company name *' : 'Owner full name *'}
+              value={nf.name} onChange={e => setNf(s => ({ ...s, name: e.target.value }))} />
+            <p className="text-[11px] text-[#9b9890]">Quick-add a landlord to link now. Add full details (ID, bank, POA) later in the <b>Landlords</b> section.</p>
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={() => setShowAdd(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg text-[#6b6860] hover:bg-[#f4f3ef]">Cancel</button>
+              <button type="button" onClick={createOwner} disabled={!nf.name.trim() || creating}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white disabled:opacity-50">
+                {creating ? 'Saving…' : 'Add landlord'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 flex items-center gap-3">
+            <button type="button" onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#2e9f82] hover:underline">
+              <Plus size={14} /> Quick-add landlord
+            </button>
+            <a href="/rental-provider/dashboard/landlords" target="_blank" rel="noreferrer"
+              className="text-[12px] text-[#8a6d2e] hover:underline">Manage landlords ↗</a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Shared, controlled property form body ──────────────────────────────────
 // Single source of truth for BOTH the Edit modal and the Add wizard (RP +
 // manager), so the two can never drift. Owns the location cascade + building
@@ -799,6 +1053,7 @@ export function PropertyFields({
   unitCount,
   extraDocs = {}, setExtraDocs,
   sectioned = false, registerSection,
+  apiRpQuery = '',
 }: {
   value: PropertyFormData;
   setValue: Dispatch<SetStateAction<PropertyFormData>>;
@@ -821,6 +1076,9 @@ export function PropertyFields({
    *  flat inline layout used by the units/add wizard. */
   sectioned?: boolean;
   registerSection?: (id: PropSectionId, el: HTMLElement | null) => void;
+  /** Suffix appended to /owners API calls so a manager acts for a landlord
+   *  (e.g. "?rp=123"). Empty for RP owners. */
+  apiRpQuery?: string;
 }) {
   const [autoFilled, setAutoFilled] = useState(false);
   const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
@@ -1230,6 +1488,12 @@ export function PropertyFields({
               />
             )}
           </div>
+
+          {/* Owner & management — signatory, cheque recipient, co-owner
+              assignment. Only for a managed property. */}
+          {value.leasingType === 'management' && (
+            <OwnerAssignmentSection value={value} setValue={setValue} apiRpQuery={apiRpQuery} />
+          )}
         </div>
       </>)}
 
@@ -1516,7 +1780,7 @@ export function PropertyFields({
 // both the form and the detail preview swipe out for the same length of time.
 export const SLIDEOVER_MS = 380;
 
-export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId, unitCount }: Props) {
+export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId, unitCount, apiRpQuery = '' }: Props) {
   const isEdit = !!initial?.spaceCategory;
   const [form, setForm] = useState<PropertyFormData>({ ...EMPTY, ...initial });
   const [errors, setErrors] = useState<Partial<Record<keyof PropertyFormData, string>>>({});
@@ -1602,6 +1866,22 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
       apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
         .then(ds => setExistingDocs(ds.filter(d => d.documentKey === 'title_deed' || d.documentKey.startsWith('building_drawing') || isExtraSlotDoc(d.documentKey))))
         .catch(() => setExistingDocs([]));
+      // Prefill the management assignment (owners + signatory + cheque
+      // recipient) from the saved property so Edit shows what's on file.
+      apiGet<{
+        landlordSignatory: 'owner' | 'managing_agent' | null;
+        chequeRecipient: 'owner' | 'rp' | null;
+        owners?: { ownerId: number; ownershipPct: number; isPrimary: boolean }[];
+      }>(`/properties/${propertyId}`)
+        .then(p => setForm(prev => ({
+          ...prev,
+          landlordSignatory: p.landlordSignatory ?? prev.landlordSignatory,
+          chequeRecipient: p.chequeRecipient ?? prev.chequeRecipient,
+          ownerLinks: (p.owners ?? []).map(o => ({
+            ownerId: o.ownerId, ownershipPct: Number(o.ownershipPct), isPrimary: o.isPrimary,
+          })),
+        })))
+        .catch(() => {});
     } else {
       setExistingDocs([]);
     }
@@ -1719,6 +1999,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
                   existingDocs={existingDocs} onRemoveExisting={removeExisting}
                   unitCount={unitCount}
                   extraDocs={extraDocs} setExtraDocs={setExtraDocs}
+                  apiRpQuery={apiRpQuery}
                 />
 
                 <div className="h-px bg-[#eef1ec] my-7" />

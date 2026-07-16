@@ -10,8 +10,10 @@
  * control — customer documents are viewable only inside the portal.
  */
 import { useEffect, useState } from 'react';
-import { X, FileText, Files, RotateCw } from 'lucide-react';
+import { X, FileText, Files, RotateCw, Download, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useDocViewerState, closeDocViewer, type DocViewerDoc } from '@/lib/docViewer';
+import { downloadStoredDoc } from '@/lib/downloadDoc';
 import { SecureDocCanvas } from './SecureDocCanvas';
 
 const captionOf = (d: DocViewerDoc) =>
@@ -27,6 +29,19 @@ export function DocViewerHost() {
   // opens (keyed on the docs array identity).
   const [rotation, setRotation] = useState(0);
   useEffect(() => { setRotation(0); }, [state?.docs]);
+  // Id of the document currently being fetched for download (spinner state).
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+
+  const handleDownload = async (id: number) => {
+    setDownloadingId(id);
+    try {
+      await downloadStoredDoc(id);
+    } catch {
+      toast.error('Could not download the document. Please try again.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   useEffect(() => {
     if (!state) return;
@@ -41,7 +56,7 @@ export function DocViewerHost() {
   }, [state]);
 
   if (!state) return null;
-  const { docs, title, watermark } = state;
+  const { docs, title, watermark, canDownload } = state;
   const multi = docs.length > 1;
   const heading = multi ? `${title} (${docs.length})` : (captionOf(docs[0]) ?? title);
 
@@ -75,10 +90,26 @@ export function DocViewerHost() {
         >
           {docs.map((d, i) => {
             const cap = captionOf(d);
+            const downloadable = canDownload && typeof d.id === 'number' && d.id > 0;
+            const showBar = (multi && cap) || downloadable;
             return (
               <figure key={`${d.fileUrl}-${i}`} className="bg-white rounded-xl border border-[#e8e6e0] overflow-hidden m-0">
-                {multi && cap && (
-                  <figcaption className="px-4 py-2 text-xs font-semibold text-[#3d3b35] border-b border-[#efeee9]">{cap}</figcaption>
+                {showBar && (
+                  <figcaption className="flex items-center justify-between gap-2 px-4 py-2 border-b border-[#efeee9]">
+                    <span className="text-xs font-semibold text-[#3d3b35] truncate">{multi ? cap : ''}</span>
+                    {downloadable && (
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(d.id!)}
+                        disabled={downloadingId === d.id}
+                        title="Download this document"
+                        className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:text-[#1a7a5a] cursor-pointer px-2 py-1 rounded-md hover:bg-[#eef9f4] disabled:opacity-60 shrink-0"
+                      >
+                        {downloadingId === d.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                        Download
+                      </button>
+                    )}
+                  </figcaption>
                 )}
                 <SecureDocCanvas
                   fileUrl={d.fileUrl!}
