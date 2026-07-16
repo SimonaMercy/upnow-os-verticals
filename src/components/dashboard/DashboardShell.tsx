@@ -97,10 +97,11 @@ const NAV: Record<UserRole, NavItem[]> = {
   service_provider: [
     // Onboarding, Team and Documents intentionally have no nav entries:
     // onboarding is where the gate sends unapproved accounts, Team lives in
-    // Settings → Team, Documents in Settings → Profile.
+    // Settings → Team, Documents in Settings → Profile. Jobs has none either:
+    // Operations IS the job board; /jobs now redirects there and /jobs/[id]
+    // (the job detail) is reached by opening a card.
     { label: 'Overview',         href: '/dashboard/service-provider',            icon: LayoutDashboard },
-    { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList },
-    { label: 'Jobs',             href: '/dashboard/service-provider/jobs',       icon: CalendarCheck },
+    { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList, match: ['/dashboard/service-provider/jobs'] },
     { label: 'My Services',      href: '/dashboard/service-provider/services',   icon: Briefcase },
     { label: 'Reviews',          href: '/dashboard/service-provider/reviews',    icon: Star },
     { divider: true },
