@@ -9,7 +9,7 @@ import {
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart,
+  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
@@ -136,6 +136,7 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
   admin: [
     { label: 'Overview',         href: '/dashboard/admin',                     icon: LayoutDashboard },
+    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity },
     { label: 'Users',            href: '/dashboard/admin/users',               icon: Users },
     { label: 'KYC Queue',        href: '/dashboard/admin/kyc',                 icon: ShieldCheck },
     { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList },
@@ -155,6 +156,7 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
   super_admin: [
     { label: 'Overview',         href: '/dashboard/admin',                     icon: LayoutDashboard },
+    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity },
     { label: 'Users',            href: '/dashboard/admin/users',               icon: Users },
     { label: 'KYC Queue',        href: '/dashboard/admin/kyc',                 icon: ShieldCheck },
     { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList },
