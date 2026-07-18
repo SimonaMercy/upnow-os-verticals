@@ -1040,7 +1040,8 @@ export function ManagerOperationsReport({
                       );
                     }) : (
                       <div className="px-5 py-2.5 text-sm text-[#6b6860]">
-                        Worked at {r.times.map(t2 => fmtStamp(t2)).join(' · ')} — open the record for its full history.
+                        Worked at {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
+                        {(r.contractId ?? r.leadId) != null ? ' — open the record for its full history.' : '.'}
                       </div>
                     )}
                   </div>
