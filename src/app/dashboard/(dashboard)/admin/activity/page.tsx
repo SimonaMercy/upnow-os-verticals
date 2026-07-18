@@ -20,6 +20,10 @@ interface SeriesPoint { d: string; v: number; n?: number }
 interface Board {
   range: { from: string; to: string };
   generatedAt: string;
+  listings: {
+    total: number; visitors: number;
+    top: { unit_id: number; unit: string; property: string; views: number; visitors: number; leads: number }[];
+  };
   usage: {
     pageViews: { total: number; users: number };
     actions: { total: number; users: number };
@@ -959,8 +963,8 @@ export default function AdminActivityPage() {
             </div>
           </div>
 
-          {/* top areas + top actors */}
-          <div className="grid gap-4 lg:grid-cols-2">
+          {/* top areas + most-viewed listings + top actors */}
+          <div className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
               <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-[#6b6963]">Top Areas · by active rentals</h2>
               {board.executive.topAreas.map((a, i) => (
@@ -975,6 +979,33 @@ export default function AdminActivityPage() {
               ))}
               {board.executive.topAreas.length === 0 && (
                 <div className="py-4 text-center text-[12px] text-[#9b9890]">No mapped areas yet</div>
+              )}
+            </div>
+            <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
+              <div className="mb-2 flex items-baseline gap-2">
+                <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#6b6963]">Most-Viewed Listings · public</h2>
+                <span className="ml-auto font-mono text-[10.5px] text-[#9b9890]">
+                  {fmtN(board.listings.total)} views · {fmtN(board.listings.visitors)} visitors
+                </span>
+              </div>
+              {board.listings.top.map((l, i) => (
+                <div key={l.unit_id} className="flex items-baseline justify-between gap-3 border-b border-[#f2f0eb] py-1.5 text-[12.5px] last:border-0">
+                  <span className="truncate text-[#1a1916]">
+                    <span className="mr-2 inline-block w-4 font-mono text-[10px] text-[#9b9890]">{i + 1}</span>
+                    <Link href={`/listings/units/${l.unit_id}`} className="hover:text-[#2a78d6] hover:underline">{l.unit}</Link>
+                    <span className="ml-1.5 text-[11px] text-[#9b9890]">{l.property}</span>
+                  </span>
+                  <span className="whitespace-nowrap font-mono text-[12px] font-bold text-[#1a1916]">
+                    {fmtN(l.views)}
+                    <span className="font-normal text-[#9b9890]"> · {fmtN(l.visitors)} vis</span>
+                    {l.leads > 0
+                      ? <span className="text-emerald-700"> · {fmtN(l.leads)} leads</span>
+                      : <span className="text-amber-700"> · 0 leads</span>}
+                  </span>
+                </div>
+              ))}
+              {board.listings.top.length === 0 && (
+                <div className="py-4 text-center text-[12px] text-[#9b9890]">No public listing views in this period — tracking is live from today</div>
               )}
             </div>
             <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">

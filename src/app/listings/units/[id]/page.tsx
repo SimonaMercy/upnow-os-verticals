@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import ListingPageClient, { type PublicUnit, type PublicProperty, type UnitMediaItem } from './ListingPageClient';
+import ListingViewBeacon from '@/components/upnow/ListingViewBeacon';
 
 const BACKEND = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
@@ -48,5 +49,10 @@ export default async function PublicUnitListingPage({
     return notFound();
   }
 
-  return <ListingPageClient unit={payload.unit} property={payload.property} media={payload.media ?? []} preferredStartDays={payload.preferredStartDays ?? []} allowedInstallments={payload.allowedInstallments ?? []} />;
+  return (
+    <>
+      <ListingViewBeacon unitId={Number(id)} />
+      <ListingPageClient unit={payload.unit} property={payload.property} media={payload.media ?? []} preferredStartDays={payload.preferredStartDays ?? []} allowedInstallments={payload.allowedInstallments ?? []} />
+    </>
+  );
 }
