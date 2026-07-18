@@ -152,6 +152,11 @@ export default function CustomerDetailPage() {
   const editUrl = isManager
     ? `/api/manager/tenants/${params?.id}?rp=${rpParam ?? ''}`
     : `/api/contracts/tenants/${params?.id}`;
+  // Contract "View" links must stay inside whichever portal we're rendered in.
+  // Managers scope the (RP-only) contract page via /manager + ?rp=<landlord>.
+  const contractHref = (leaseId: number | string) => isManager
+    ? `/dashboard/manager/contracts/${leaseId}/v2?rp=${rpParam ?? ''}`
+    : `/rental-provider/dashboard/contracts/${leaseId}/v2`;
   const [data, setData] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -520,7 +525,7 @@ export default function CustomerDetailPage() {
         </td>
         <td className="px-4 py-3.5"><span className={`inline-flex rounded-full text-xs font-medium px-2.5 py-0.5 ${badge.cls}`}>{badge.label}</span></td>
         <td className="px-4 py-3.5">
-          <Link href={`/rental-provider/dashboard/contracts/${l.id}/v2`} className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">View <ExternalLink size={12} /></Link>
+          <Link href={contractHref(l.id)} className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">View <ExternalLink size={12} /></Link>
         </td>
       </tr>
     );
@@ -665,7 +670,7 @@ export default function CustomerDetailPage() {
                       )) : (
                         <span className="text-[11px] font-medium text-[#9a6b00]">No cheque / transfer receipt on file</span>
                       )}
-                      <Link href={`/rental-provider/dashboard/contracts/${l.id}/v2`} className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
+                      <Link href={contractHref(l.id)} className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
                         View lease <ExternalLink size={11} />
                       </Link>
                     </div>
@@ -1077,7 +1082,7 @@ export default function CustomerDetailPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-[#1a1916]">{n.authorName ?? 'Unknown'}</span>
                       {isMgr && <span className="inline-flex rounded text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 bg-[#eef2fb] text-[#3b5bb5]">Manager</span>}
-                      <Link href={`/rental-provider/dashboard/contracts/${n.leaseId}/v2`}
+                      <Link href={contractHref(n.leaseId)}
                         className="inline-flex items-center gap-1 text-[11px] font-medium text-[#6b6860] bg-[#f4f3ef] hover:bg-[#eceae4] rounded px-1.5 py-0.5">
                         {n.unitLabel ? `${n.unitLabel} · ` : ''}{n.leaseRef}
                       </Link>
