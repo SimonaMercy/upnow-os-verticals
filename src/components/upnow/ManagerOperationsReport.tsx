@@ -23,7 +23,7 @@
  */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer, Loader2, AlertCircle, Download, ExternalLink, X } from 'lucide-react';
 import {
@@ -668,74 +668,90 @@ export function ManagerOperationsReport({
             </div>
           </section>
 
-          {/* ── 5. Operations by stage — one full row per person ── */}
+          {/* ── 5. Operations by stage — stages down, managers across. Transposed
+                 so the whole matrix fits on screen without horizontal scroll:
+                 the long axis (14 stages) runs vertically, the short axis (a
+                 few people) horizontally — same reading direction as the
+                 stage-timing table below. ── */}
           <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
             <div className="px-5 py-3.5 border-b border-[#f0ede8]">
               <h2 className="text-sm font-bold text-[#1a1916]">Operations by stage — records each manager progressed</h2>
               <p className="text-xs text-[#6b6860] mt-0.5">
-                Stages grouped under their pipeline (KYC → Payment Advice serve both the Lead intake and
-                lease setup); customer and landlord signatures kept separate. Click any number to see the
-                records behind it with their history.
+                Stages down the side grouped by pipeline (KYC → Payment Advice serve both the Lead intake
+                and lease setup); customer and landlord signatures kept separate. Click any number to see
+                the records behind it with their history.
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="text-sm min-w-full">
+              <table className="w-full text-sm">
                 <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
-                  {grouped14 && (
-                    <tr className="border-b border-[#e8e6e0]">
-                      <th className="sticky left-0 z-10 bg-[#fafaf8]" />
-                      <th colSpan={4} className="px-3 pt-2.5 pb-1 text-center font-bold text-[#0369a1]">Lead intake</th>
-                      <th colSpan={5} className="px-3 pt-2.5 pb-1 text-center font-bold text-[#5b21b6] border-l border-[#e8e6e0]">New lease & renewal</th>
-                      <th colSpan={5} className="px-3 pt-2.5 pb-1 text-center font-bold text-[#b91c1c] border-l border-[#e8e6e0]">Termination</th>
-                      <th className="px-3 pt-2.5 pb-1 text-center font-bold text-[#1a7a5a] border-l border-[#e8e6e0]">Delivered</th>
-                    </tr>
-                  )}
                   <tr>
-                    <th className="sticky left-0 z-10 bg-[#fafaf8] px-5 py-2.5 text-left font-semibold min-w-[170px]">Manager</th>
-                    {data.stageMatrix.stages.map((s, i) => (
-                      <th key={s} className={`px-3 py-2.5 text-right font-semibold whitespace-nowrap ${grouped14 && (i === 4 || i === 9) ? 'border-l border-[#e8e6e0]' : ''}`}>{s}</th>
+                    <th className="px-5 py-2.5 text-left font-semibold min-w-[210px]">Stage</th>
+                    {people.map((p, i) => (
+                      <th key={p.userId} className="px-4 py-2.5 text-right font-semibold whitespace-nowrap">
+                        <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: colorOf(i) }} />
+                        {p.name}
+                      </th>
                     ))}
-                    <th className="px-3 py-2.5 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Leases Activated</th>
+                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e8e6e0]">Team</th>
                   </tr>
                 </thead>
                 <tbody className="text-[#1a1916]">
-                  {data.stageMatrix.rows.map(r => (
-                    <tr key={r.userId} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
-                      <td className="sticky left-0 z-10 bg-white px-5 py-2.5 font-semibold whitespace-nowrap">{r.name}</td>
-                      {r.cells.map((v, i) => (
-                        <td key={i} className={`px-3 py-2.5 text-right tabular-nums ${grouped14 && (i === 4 || i === 9) ? 'border-l border-[#f0ede8]' : ''} ${v ? '' : 'text-[#c8c6c0]'}`}>
-                          {v == null ? '—' : v === 0 ? 0 : (
-                            <button
-                              onClick={() => setDrill({ userId: r.userId, who: r.name, stage: data.stageMatrix.stages[i], count: v })}
-                              className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
-                              title="See the records behind this number">
-                              {v}
-                            </button>
-                          )}
-                        </td>
-                      ))}
-                      <td className={`px-3 py-2.5 text-right tabular-nums font-bold border-l border-[#f0ede8] ${deliveredBy.get(r.userId) ? 'text-[#1a7a5a]' : 'text-[#c8c6c0]'}`}>
-                        {deliveredBy.get(r.userId) ?? 0}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
-                  <tr>
-                    <td className="sticky left-0 z-10 bg-[#fafaf8] px-5 py-2.5">Team total</td>
-                    {data.stageMatrix.totals.map((v, i) => (
-                      <td key={i} className={`px-3 py-2.5 text-right tabular-nums ${grouped14 && (i === 4 || i === 9) ? 'border-l border-[#f0ede8]' : ''} ${v ? '' : 'text-[#c8c6c0]'}`}>
-                        {v == null ? '—' : v === 0 ? 0 : (
-                          <button
-                            onClick={() => setDrill({ userId: null, who: 'Team', stage: data.stageMatrix.stages[i], count: v })}
-                            className="underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
-                            title="See the records behind this number">
-                            {v}
-                          </button>
+                  {data.stageMatrix.stages.map((stage, i) => {
+                    const band = grouped14
+                      ? (i === 0 ? { label: 'Lead intake', cls: 'text-[#0369a1] bg-[#f0f9ff]' }
+                        : i === 4 ? { label: 'New lease & renewal', cls: 'text-[#5b21b6] bg-[#f5f3ff]' }
+                          : i === 9 ? { label: 'Termination', cls: 'text-[#b91c1c] bg-[#fef2f2]' } : null)
+                      : null;
+                    const total = data.stageMatrix.totals[i];
+                    return (
+                      <Fragment key={stage}>
+                        {band && (
+                          <tr>
+                            <td colSpan={people.length + 2} className={`px-5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${band.cls}`}>{band.label}</td>
+                          </tr>
                         )}
+                        <tr className="border-t border-[#f7f5f1] hover:bg-[#fafaf8]">
+                          <td className="px-5 py-2 font-medium">{stage}</td>
+                          {people.map(p => {
+                            const v = p.cells[i];
+                            return (
+                              <td key={p.userId} className={`px-4 py-2 text-right tabular-nums ${v ? '' : 'text-[#c8c6c0]'}`}>
+                                {v == null ? '—' : v === 0 ? 0 : (
+                                  <button
+                                    onClick={() => setDrill({ userId: p.userId, who: p.name, stage, count: v })}
+                                    className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
+                                    title="See the records behind this number">
+                                    {v}
+                                  </button>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className={`px-4 py-2 text-right tabular-nums font-bold border-l border-[#f0ede8] ${total ? '' : 'text-[#c8c6c0]'}`}>
+                            {total == null ? '—' : total === 0 ? 0 : (
+                              <button
+                                onClick={() => setDrill({ userId: null, who: 'Team', stage, count: total })}
+                                className="underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
+                                title="See the records behind this number">
+                                {total}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-[#f0faf6] border-t-2 border-[#e8e6e0] font-bold text-[#1a7a5a]">
+                  <tr>
+                    <td className="px-5 py-2.5">Leases Activated (delivered)</td>
+                    {people.map(p => (
+                      <td key={p.userId} className={`px-4 py-2.5 text-right tabular-nums ${deliveredBy.get(p.userId) ? '' : 'text-[#9fcfbf]'}`}>
+                        {deliveredBy.get(p.userId) ?? 0}
                       </td>
                     ))}
-                    <td className="px-3 py-2.5 text-right tabular-nums border-l border-[#f0ede8] text-[#1a7a5a]">
+                    <td className="px-4 py-2.5 text-right tabular-nums border-l border-[#e8e6e0]">
                       {completions.totals.newLeases + completions.totals.renewals}
                     </td>
                   </tr>
