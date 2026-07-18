@@ -574,7 +574,7 @@ export function ManagerOperationsReport({
             <Tile
               label="Idle manager-days"
               value={String(idleDays)}
-              sub="manager-days with no in-system activity"
+              sub="days with no in-system activity · Fridays don't count"
               delta={<Delta cur={idleDays} prev={idleOf(prevData)} vsLabel={vsLabel} goodDown />}
               onClick={() => setTileDrill('idle')}
             />
@@ -1107,7 +1107,7 @@ export function ManagerOperationsReport({
                       {tileDrill === 'steps' ? 'Where the steps happened — click a stage for the records behind it.'
                         : tileDrill === 'delivered' ? 'The leases activated in this period, and who activated them.'
                           : tileDrill === 'settlements' ? 'The deposit settlements paid out in this period.'
-                            : 'Days with no in-system activity, per manager.'}
+                            : 'Days with no in-system activity, per manager. Fridays are the day off and never count.'}
                     </p>
                   </div>
                   <button onClick={() => setTileDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
@@ -1165,7 +1165,10 @@ export function ManagerOperationsReport({
                           const end = data.window!.to > today ? today : data.window!.to;
                           const active = new Set(d.activeDayList);
                           const out: string[] = [];
-                          for (let x = data.window!.from; x <= end; x = addDays(x, 1)) if (!active.has(x)) out.push(x);
+                          for (let x = data.window!.from; x <= end; x = addDays(x, 1)) {
+                            if (new Date(`${x}T00:00:00Z`).getUTCDay() === 5) continue; // Friday = day off
+                            if (!active.has(x)) out.push(x);
+                          }
                           return out;
                         })()
                       : null;
