@@ -1,30 +1,35 @@
 /**
- * Manager Operations Report — manager evaluation in the merged-stage format:
+ * Manager Operations Report — the CEO view of manager performance across the
+ * four operations pipelines (Lead · New Lease · Renewal · Terminated):
  *
- *   1. Operations by stage — manager-performance-style table: one row per
- *      manager (plus the landlord's own account), one column per merged
- *      workflow stage (Lead Attended → KYC → Payment Plan → Payment Advice →
- *      Customer/Landlord Signature → Registration → Utility → Move-in →
- *      Termination → Move-out → Bill Clearance → Settlement Issued/Accepted),
- *      cells = records progressed. Every number CLICKS THROUGH to the records
- *      behind it with their full history and step durations.
- *   2. Average working day — per-manager daily output/presence scorecard.
- *   3. Stage timing — avg days to close each stage, managers side by side,
- *      customer wait separated.
- *   4. Manager actions, date by date — each person's individual operations
- *      actions grouped per day, each linking to the record.
+ *   1. Bottom line — plain-English conclusions for the chosen period.
+ *   2. Scoreboard — output + delivered outcomes, each compared against the
+ *      previous period (this week vs last week, this month vs last month…).
+ *   3. Where the time goes — manager vs customer vs landlord days, compared.
+ *   4. Daily progress — records progressed per day per person (chart + a
+ *      day-by-day table; a zero is an idle day and is shown, not hidden).
+ *   5. Operations by stage — one row per person, stages grouped under their
+ *      pipeline, plus leases delivered. Every number clicks through to the
+ *      records behind it with their full history and step durations.
+ *   6. Waiting too long right now — live stuck records with who's holding
+ *      them (manager / customer / landlord).
+ *   7. Stage timing, average working day, and each person's actions date by
+ *      date (unchanged evaluation sections).
  *
- * Data: GET /api/reports/manager-operations (landlord-only). Signatures marked
- * "on file" are never counted. Custom component (not ReportDetailView) because
- * the manager columns are dynamic.
+ * Data: GET /api/reports/manager-operations for the current AND previous
+ * period (deltas are computed client-side), plus GET
+ * /api/reports/operations-pipeline for the live stuck list. Signatures marked
+ * "on file" are never counted. Landlord-only report.
  */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer, Loader2, AlertCircle, Download, ExternalLink, X } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from 'recharts';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
-import { getReportsYear, yearToRange } from '@/components/upnow/reportsYear';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /* ── payload types (mirror ReportsService.ManagerOperationsReport) ─────────── */
@@ -51,15 +56,70 @@ interface RecordLog {
   firstAt: string; lastAt: string; spanDays: number;
   actorUserIds: number[]; events: RecordEvent[];
 }
+interface DayMatrixRow { day: string; rows: Array<{ userId: number; cells: number[] }> }
+interface CompletionRow { userId: number | null; name: string; newLeases: number; renewals: number; settlements: number; refunds: number }
+interface Completions { rows: CompletionRow[]; totals: { newLeases: number; renewals: number; settlements: number; refunds: number } }
 interface Payload {
   generatedAt: string; from: string | null; to: string | null; attributionSince: string;
   managers: Array<{ userId: number; name: string }>;
   stageMatrix: StageMatrix;
   managerActions: ManagerAction[]; managerActionsCapped: boolean;
-  daily: DailyRow[]; rows: StageRow[];
+  daily: DailyRow[]; dayMatrix?: DayMatrixRow[]; completions?: Completions;
+  rows: StageRow[];
   records: RecordLog[]; recordsCapped: boolean;
   totals: { stagesMeasured: number; managerAvgDays: number; customerAvgDays: number; landlordAvgDays: number };
 }
+/* live stuck list — subset of the operations-pipeline report payload */
+interface PipeItem {
+  contractId: number | null; ref: string | null; tenantName: string | null; unitLabel: string | null;
+  buildingName: string | null; annualRentFils: number;
+  tenantSignature: 'signed' | 'pending' | 'on_file' | null;
+  landlordSignature: 'signed' | 'pending' | 'on_file' | null;
+  progress: string; ageDays: number | null;
+}
+interface PipePayload { rows: Array<{ stageLabel: string; records: number; items: PipeItem[] }> }
+
+/* ── period presets — Dubai calendar, compared against the previous period ── */
+type Preset = 'today' | 'week' | 'month' | 'custom';
+const PRESETS: Array<{ key: Preset; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This week' },
+  { key: 'month', label: 'This month' },
+  { key: 'custom', label: 'Custom' },
+];
+const dubaiToday = () => new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+const addDays = (d: string, n: number) =>
+  new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const mondayOf = (d: string) => addDays(d, -((new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7));
+const daySpan = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
+interface Range { from: string; to: string }
+/** Current period + the like-for-like previous period (same span, aligned). */
+function rangesFor(preset: Preset, customFrom: string, customTo: string): { cur: Range; prev: Range; vsLabel: string } {
+  const today = dubaiToday();
+  if (preset === 'today') {
+    return { cur: { from: today, to: today }, prev: { from: addDays(today, -1), to: addDays(today, -1) }, vsLabel: 'yesterday' };
+  }
+  if (preset === 'week') {
+    const start = mondayOf(today);
+    return { cur: { from: start, to: today }, prev: { from: addDays(start, -7), to: addDays(today, -7) }, vsLabel: 'last week' };
+  }
+  if (preset === 'month') {
+    const start = `${today.slice(0, 8)}01`;
+    const pmEnd = addDays(start, -1);
+    const pmStart = `${pmEnd.slice(0, 8)}01`;
+    const dom = Math.min(Number(today.slice(8, 10)), Number(pmEnd.slice(8, 10)));
+    return { cur: { from: start, to: today }, prev: { from: pmStart, to: `${pmStart.slice(0, 8)}${String(dom).padStart(2, '0')}` }, vsLabel: 'last month' };
+  }
+  const len = Math.max(1, daySpan(customFrom, customTo));
+  const prevTo = addDays(customFrom, -1);
+  return { cur: { from: customFrom, to: customTo }, prev: { from: addDays(prevTo, -(len - 1)), to: prevTo }, vsLabel: 'the previous period' };
+}
+
+/* ── house palette (validated in ReportCharts) — fixed order per person ───── */
+const PALETTE = ['#2e9f82', '#1e5fae', '#b45309', '#8250df'];
+const OTHERS = '#9b9890';
+const GRID = '#f0ede8';
+const TICK = { fontSize: 11, fill: '#9b9890' } as const;
 
 const SIDE_STYLE: Record<StageRow['side'], string> = {
   manager: 'bg-[#e0f2fe] text-[#0369a1]',
@@ -83,6 +143,21 @@ const actorChip = (name: string) =>
       : name === '—' ? 'bg-[#f4f3ef] text-[#9b9890]'
         : 'bg-[#e0f2fe] text-[#0369a1]';
 
+/** Who a stuck record is waiting on — same sides the stage-timing table uses. */
+const blameOf = (stageLabel: string): 'Customer' | 'Landlord' | 'Manager' => {
+  if (stageLabel.includes('Signature by Customer')) return 'Customer';
+  if (stageLabel.includes('Signature by Landlord')) return 'Landlord';
+  if (stageLabel.includes('Utility')) return 'Customer';
+  if (stageLabel.startsWith('Lead') && stageLabel.includes('Payment plan')) return 'Customer';
+  return 'Manager';
+};
+const BLAME_STYLE: Record<'Customer' | 'Landlord' | 'Manager', string> = {
+  Customer: 'bg-[#fef3c7] text-[#854d0e]',
+  Landlord: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  Manager: 'bg-[#e0f2fe] text-[#0369a1]',
+};
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
 const fmtDays = (v: number | null | undefined) => (v == null ? '—' : `${v}d`);
 const fmtSpan = (min: number | null | undefined) => {
   if (min == null) return '—';
@@ -97,6 +172,12 @@ const fmtDay = (iso: string) =>
   new Date(iso).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
+/** 'YYYY-MM-DD' → '14 Jul' (the string is already a Dubai calendar day). */
+const fmtDayShort = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString('en-AE', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+const fmtDayMed = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString('en-AE', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+const dubaiDayOf = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
 
 function toCsvCell(v: unknown): string {
   if (v === null || v === undefined) return '';
@@ -104,34 +185,188 @@ function toCsvCell(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/* ── comparison chip — colored by whether the move is good ─────────────────── */
+function Delta({ cur, prev, vsLabel, goodDown = false, unit = '' }: {
+  cur: number; prev: number | null; vsLabel: string; goodDown?: boolean; unit?: string;
+}) {
+  if (prev == null) return null;
+  const diff = round1(cur - prev);
+  if (diff === 0) {
+    return <span className="text-[11px] font-medium text-[#9b9890]">same as {vsLabel} ({round1(prev)}{unit})</span>;
+  }
+  const up = diff > 0;
+  const good = goodDown ? !up : up;
+  return (
+    <span className={`text-[11px] font-semibold ${good ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'}`}>
+      {up ? '▲' : '▼'} {round1(Math.abs(diff))}{unit} vs {vsLabel} ({round1(prev)}{unit})
+    </span>
+  );
+}
+
+function Tile({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4">
+      <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{label}</p>
+      <p className="text-2xl font-bold text-[#1a1916] mt-1 tabular-nums">{value}</p>
+      {sub && <p className="text-xs text-[#6b6860] mt-0.5">{sub}</p>}
+      {delta && <p className="mt-1">{delta}</p>}
+    </div>
+  );
+}
+
+const EMPTY_COMPLETIONS: Completions = { rows: [], totals: { newLeases: 0, renewals: 0, settlements: 0, refunds: 0 } };
+
 export function ManagerOperationsReport({
   backHref = '/rental-provider/dashboard/reports',
   contractsBase = '/rental-provider/dashboard/contracts',
   leadsBase = '/rental-provider/dashboard/leads',
 }: { backHref?: string; contractsBase?: string; leadsBase?: string }) {
-  const initial = yearToRange(getReportsYear());
-  const [from, setFrom] = useState(initial.from);
-  const [to, setTo] = useState(initial.to);
+  const [preset, setPreset] = useState<Preset>('week');
+  const [customFrom, setCustomFrom] = useState(() => addDays(dubaiToday(), -29));
+  const [customTo, setCustomTo] = useState(() => dubaiToday());
   const [data, setData] = useState<Payload | null>(null);
+  const [prevData, setPrevData] = useState<Payload | null>(null);
+  const [pipe, setPipe] = useState<PipePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /** Cell drill-down: which manager × stage the user clicked (null userId = team total). */
   const [drill, setDrill] = useState<{ userId: number | null; who: string; stage: string; count: number } | null>(null);
+  /** Day drill-down: what one person did on one day. */
+  const [dayDrill, setDayDrill] = useState<{ day: string; userId: number | null; who: string } | null>(null);
+
+  const { cur, prev, vsLabel } = useMemo(
+    () => rangesFor(preset, customFrom, customTo),
+    [preset, customFrom, customTo],
+  );
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setError(null);
-    const q = new URLSearchParams();
-    if (from) q.set('from', from);
-    if (to) q.set('to', to);
-    fetch(`/api/reports/manager-operations${q.size ? `?${q}` : ''}`)
-      .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => null))?.message ?? `HTTP ${r.status}`); return r.json(); })
-      .then(d => { if (alive) setData(d); })
+    const get = async (r: Range): Promise<Payload> => {
+      const res = await fetch(`/api/reports/manager-operations?from=${r.from}&to=${r.to}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? `HTTP ${res.status}`);
+      return res.json();
+    };
+    Promise.all([
+      get(cur),
+      get(prev).catch(() => null),                                   // deltas are optional
+      fetch('/api/reports/operations-pipeline').then(r => (r.ok ? r.json() : null)).catch(() => null),
+    ])
+      .then(([d, p, pl]) => { if (alive) { setData(d); setPrevData(p); setPipe(pl); } })
       .catch(e => { if (alive) setError(String(e.message ?? e)); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [from, to]);
+  }, [cur.from, cur.to, prev.from, prev.to]);
+
+  /* ── derived: scoreboard, daily figures, stuck list ─────────────────────── */
+  const completions = data?.completions ?? EMPTY_COMPLETIONS;
+  const prevCompletions = prevData?.completions ?? null;
+  const progressedOf = (p: Payload | null) =>
+    p ? p.stageMatrix.totals.reduce<number>((s, v) => s + (v ?? 0), 0) : null;
+  const progressed = progressedOf(data) ?? 0;
+  const prevProgressed = progressedOf(prevData);
+  const idleOf = (p: Payload | null) => (p ? p.daily.reduce((s, d) => s + d.idleDays, 0) : null);
+  const idleDays = idleOf(data) ?? 0;
+
+  /** People in matrix-row order (managers, then the landlord) — colors and
+   *  columns follow this order everywhere so a person keeps their hue. */
+  const people = data?.stageMatrix.rows ?? [];
+  const colorOf = (idx: number) => (idx < PALETTE.length ? PALETTE[idx] : OTHERS);
+
+  /** day → userId → records progressed that day (Σ stage cells). */
+  const dayTotals = useMemo(() => {
+    const m = new Map<string, Map<number, number>>();
+    for (const d of data?.dayMatrix ?? []) {
+      const byUid = new Map<number, number>();
+      for (const r of d.rows) byUid.set(r.userId, r.cells.reduce((s, v) => s + v, 0));
+      m.set(d.day, byUid);
+    }
+    return m;
+  }, [data]);
+
+  /** The period's day list (capped to the most recent 31 for chart + table). */
+  const dayList = useMemo(() => {
+    const today = dubaiToday();
+    const to = cur.to > today ? today : cur.to;
+    const all: string[] = [];
+    for (let d = cur.from; d <= to; d = addDays(d, 1)) all.push(d);
+    return { days: all.slice(-31), truncated: all.length > 31 };
+  }, [cur.from, cur.to]);
+
+  const chartData = useMemo(() =>
+    dayList.days.map(d => {
+      const byUid = dayTotals.get(d);
+      const row: Record<string, number | string> = { day: fmtDayShort(d) };
+      people.forEach((p, i) => {
+        const v = byUid?.get(p.userId) ?? 0;
+        const key = i < PALETTE.length ? p.name : 'Others';
+        row[key] = ((row[key] as number) ?? 0) + v;
+      });
+      return row;
+    }), [dayList, dayTotals, people]);
+  const chartSeries = useMemo(() => {
+    const named = people.slice(0, PALETTE.length).map((p, i) => ({ key: p.name, color: colorOf(i) }));
+    return people.length > PALETTE.length ? [...named, { key: 'Others', color: OTHERS }] : named;
+  }, [people]);
+  const chartHasData = chartData.some(r => chartSeries.some(s => (r[s.key] as number) > 0));
+
+  const deliveredOf = (c: Completions | null) => (c ? c.totals.newLeases + c.totals.renewals : null);
+  const delivered = deliveredOf(completions) ?? 0;
+
+  /** Live stuck records — in the pipeline, no movement for 7+ days. */
+  const stuck = useMemo(() => {
+    if (!pipe) return null;
+    const items = pipe.rows.flatMap(r =>
+      r.items
+        .filter(i => (i.ageDays ?? 0) >= 7)
+        .map(i => ({ ...i, stageLabel: r.stageLabel, blame: blameOf(r.stageLabel) })));
+    items.sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0));
+    return items;
+  }, [pipe]);
+
+  /* ── bottom line — the sentences the CEO reads first ────────────────────── */
+  const bottomLine = useMemo(() => {
+    if (!data) return [];
+    const out: React.ReactNode[] = [];
+    const cmp = (curV: number, prevV: number | null) =>
+      prevV == null ? '' : curV === prevV ? ` — same as ${vsLabel}` : curV > prevV ? ` — up from ${prevV} ${vsLabel}` : ` — down from ${prevV} ${vsLabel}`;
+    out.push(<>The team moved <b>{progressed}</b> pipeline step{progressed === 1 ? '' : 's'}{cmp(progressed, prevProgressed)}.</>);
+    const prevDelivered = prevCompletions ? deliveredOf(prevCompletions) : null;
+    out.push(
+      <>
+        Delivered: <b>{completions.totals.newLeases}</b> new lease{completions.totals.newLeases === 1 ? '' : 's'} and{' '}
+        <b>{completions.totals.renewals}</b> renewal{completions.totals.renewals === 1 ? '' : 's'} activated
+        {cmp(delivered, prevDelivered)}; <b>{completions.totals.settlements}</b> deposit settlement
+        {completions.totals.settlements === 1 ? '' : 's'} paid
+        {completions.totals.refunds ? <> ({completions.totals.refunds} with a refund back to the customer)</> : null}.
+      </>,
+    );
+    const slowest = [...data.rows].filter(r => r.completed > 0 && r.avgDays != null).sort((a, b) => (b.avgDays ?? 0) - (a.avgDays ?? 0))[0];
+    if (slowest) {
+      out.push(<>Slowest stage this period: <b>{slowest.stageLabel}</b> — avg <b>{slowest.avgDays}d</b>, and that clock is on the <b>{slowest.side}</b>&apos;s side.</>);
+    }
+    if (stuck) {
+      if (stuck.length === 0) {
+        out.push(<>Nothing in the pipeline has been sitting for more than 7 days right now.</>);
+      } else {
+        const n = (w: 'Customer' | 'Landlord' | 'Manager') => stuck.filter(s => s.blame === w).length;
+        out.push(
+          <>
+            <b>{stuck.length}</b> record{stuck.length === 1 ? ' is' : 's are'} waiting 7+ days right now —{' '}
+            {n('Customer')} on customers, {n('Landlord')} on the landlord signature, {n('Manager')} on managers.
+          </>,
+        );
+      }
+    }
+    if (preset !== 'today') {
+      const worstIdle = [...data.daily].sort((a, b) => b.idleDays - a.idleDays)[0];
+      if (worstIdle && worstIdle.idleDays > 0) {
+        out.push(<><b>{worstIdle.name}</b> had <b>{worstIdle.idleDays}</b> idle day{worstIdle.idleDays === 1 ? '' : 's'} (no in-system activity) out of {worstIdle.daysInPeriod} tracked.</>);
+      }
+    }
+    return out;
+  }, [data, progressed, prevProgressed, completions, prevCompletions, delivered, stuck, vsLabel, preset]);
 
   /* Stage-timing matrix columns: managers + extra actors, Customer kept
      separate so customer wait never colours a manager. */
@@ -150,6 +385,13 @@ export function ManagerOperationsReport({
 
   const cellOf = (r: StageRow, actor: string): ActorRow | null =>
     r.items.find(i => i.actor === actor) ?? null;
+
+  /** Leases delivered per person (new + renewals), for the matrix column. */
+  const deliveredBy = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const r of completions.rows) if (r.userId != null) m.set(r.userId, r.newLeases + r.renewals);
+    return m;
+  }, [completions]);
 
   /* Date-wise log: person → day → actions (newest first). Uses the matrix
      rows so the landlord's own operations work shows too. */
@@ -189,22 +431,32 @@ export function ManagerOperationsReport({
     }));
   }, [drill, data]);
 
+  /* Day drill-down: everything one person did on one Dubai day. */
+  const dayDrillActions = useMemo(() => {
+    if (!dayDrill || !data) return null;
+    return data.managerActions
+      .filter(a => (dayDrill.userId == null || a.actorUserId === dayDrill.userId) && dubaiDayOf(a.at) === dayDrill.day)
+      .sort((a, b) => a.at.localeCompare(b.at));
+  }, [dayDrill, data]);
+
   const downloadCsv = () => {
     if (!data) return;
-    // Their format: managers down, the merged stages across.
-    const headers = ['Manager', ...data.stageMatrix.stages];
+    // Their format: managers down, the merged stages across, delivered last.
+    const headers = ['Manager', ...data.stageMatrix.stages, 'Leases Activated'];
     const lines = [
-      ['Team total', ...data.stageMatrix.totals.map(v => v ?? '—')],
-      ...data.stageMatrix.rows.map(r => [r.name, ...r.cells.map(v => v ?? '—')]),
+      ['Team total', ...data.stageMatrix.totals.map(v => v ?? '—'), completions.totals.newLeases + completions.totals.renewals],
+      ...data.stageMatrix.rows.map(r => [r.name, ...r.cells.map(v => v ?? '—'), deliveredBy.get(r.userId) ?? 0]),
     ];
     const csv = [headers, ...lines].map(row => row.map(toCsvCell).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `manager-operations-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `manager-operations-${cur.from}-to-${cur.to}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  const grouped14 = data?.stageMatrix.stages.length === 14;
 
   return (
     <div className="p-6 print:p-0 max-w-[1250px]">
@@ -216,8 +468,9 @@ export function ManagerOperationsReport({
           </Link>
           <h1 className="text-2xl font-bold text-[#1a1916] mt-1.5">Manager Operations Report</h1>
           <p className="text-sm text-[#6b6860] mt-0.5 max-w-[72ch]">
-            One row per manager across every operations stage, their average working day, stage timing —
-            and each manager’s actions date by date. Signatures marked “on file” are never counted.
+            What each manager moved through the Lead, New Lease, Renewal and Terminated pipelines —
+            compared against {vsLabel}, day by day, with every delay attributed to the manager, the
+            customer or the landlord. Signatures marked “on file” are never counted.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
@@ -230,16 +483,32 @@ export function ManagerOperationsReport({
         </div>
       </div>
 
-      {/* ── period ── */}
-      <div className="flex items-center gap-3 mt-4 flex-wrap print:hidden">
-        <span className="text-sm text-[#6b6860] font-medium">Period:</span>
-        <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
-        {data && (
-          <span className="text-xs text-[#9b9890]">
-            Detailed tracking since {fmtDate(data.attributionSince)} — in-system work only.
-          </span>
+      {/* ── period presets ── */}
+      <div className="flex items-center gap-2 mt-4 flex-wrap print:hidden">
+        {PRESETS.map(p => (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => setPreset(p.key)}
+            aria-pressed={preset === p.key}
+            className={`px-3.5 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
+              preset === p.key
+                ? 'bg-[#1a1916] text-white border-[#1a1916]'
+                : 'bg-white text-[#3d3b35] border-[#e8e6e0] hover:border-[#2e9f82]'
+            }`}>
+            {p.label}
+          </button>
+        ))}
+        {preset === 'custom' && (
+          <DateRangePicker from={customFrom} to={customTo} onChange={(f, t) => { if (f && t) { setCustomFrom(f); setCustomTo(t); } }} />
         )}
+        <span className="text-xs text-[#9b9890]">
+          {fmtDate(cur.from)} – {fmtDate(cur.to)} · compared to {fmtDate(prev.from)} – {fmtDate(prev.to)}
+        </span>
       </div>
+      <p className="hidden print:block text-xs text-[#6b6860] mt-2">
+        Period {fmtDate(cur.from)} – {fmtDate(cur.to)}, compared to {fmtDate(prev.from)} – {fmtDate(prev.to)}.
+      </p>
 
       {loading ? (
         <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>
@@ -247,24 +516,186 @@ export function ManagerOperationsReport({
         <div className="flex items-center gap-2 text-red-700 py-16 justify-center"><AlertCircle size={16} /> {error}</div>
       ) : !data ? null : (
         <>
-          {/* ── 1. Operations by stage — one full row per person ── */}
-          <section className="mt-6 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+          {/* ── 1. Bottom line ── */}
+          <section className="mt-5 bg-[#1a1916] text-white rounded-2xl px-5 py-4 print:break-inside-avoid">
+            <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#c8c6c0]">Bottom line</h2>
+            <ul className="mt-2 space-y-1.5">
+              {bottomLine.map((b, i) => (
+                <li key={i} className="text-sm leading-relaxed flex gap-2">
+                  <span className="text-[#2e9f82] shrink-0">•</span>
+                  <span className="[&>b]:font-bold [&>b]:text-white text-[#e8e6e0]">{b}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* ── 2. Scoreboard vs previous period ── */}
+          <section className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3 print:break-inside-avoid">
+            <Tile
+              label="Pipeline steps moved"
+              value={String(progressed)}
+              sub="records progressed across all stages"
+              delta={<Delta cur={progressed} prev={prevProgressed} vsLabel={vsLabel} />}
+            />
+            <Tile
+              label="Leases delivered"
+              value={String(delivered)}
+              sub={`${completions.totals.newLeases} new · ${completions.totals.renewals} renewal${completions.totals.renewals === 1 ? '' : 's'} activated`}
+              delta={<Delta cur={delivered} prev={prevCompletions ? deliveredOf(prevCompletions) : null} vsLabel={vsLabel} />}
+            />
+            <Tile
+              label="Settlements paid"
+              value={String(completions.totals.settlements)}
+              sub={completions.totals.refunds ? `${completions.totals.refunds} refund${completions.totals.refunds === 1 ? '' : 's'} issued to customers` : 'terminations closed out'}
+              delta={<Delta cur={completions.totals.settlements} prev={prevCompletions?.totals.settlements ?? null} vsLabel={vsLabel} />}
+            />
+            <Tile
+              label="Idle manager-days"
+              value={String(idleDays)}
+              sub="manager-days with no in-system activity"
+              delta={<Delta cur={idleDays} prev={idleOf(prevData)} vsLabel={vsLabel} goodDown />}
+            />
+          </section>
+
+          {/* ── 3. Where the time goes ── */}
+          <section className="mt-3 bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4 print:break-inside-avoid">
+            <div className="flex items-baseline justify-between flex-wrap gap-2">
+              <h2 className="text-sm font-bold text-[#1a1916]">Where the waiting time goes</h2>
+              <span className="text-[11px] text-[#9b9890]">sum of average stage waits — lower is better</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mt-3">
+              {([
+                ['Managers', data.totals.managerAvgDays, prevData?.totals.managerAvgDays ?? null, SIDE_STYLE.manager],
+                ['Customers', data.totals.customerAvgDays, prevData?.totals.customerAvgDays ?? null, SIDE_STYLE.customer],
+                ['Landlord', data.totals.landlordAvgDays, prevData?.totals.landlordAvgDays ?? null, SIDE_STYLE.landlord],
+              ] as Array<[string, number, number | null, string]>).map(([who, v, pv, chip]) => (
+                <div key={who} className="rounded-xl border border-[#f0ede8] px-4 py-3">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${chip}`}>{who}</span>
+                  <p className="text-xl font-bold text-[#1a1916] mt-1.5 tabular-nums">{round1(v)}d</p>
+                  <p className="mt-0.5"><Delta cur={v} prev={pv} vsLabel={vsLabel} goodDown unit="d" /></p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* ── 4. Daily progress ── */}
+          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+            <div className="px-5 py-3.5 border-b border-[#f0ede8]">
+              <h2 className="text-sm font-bold text-[#1a1916]">Daily progress — records progressed per day, per person</h2>
+              <p className="text-xs text-[#6b6860] mt-0.5">
+                Each number is how many records that person moved forward that day (any stage). A zero is
+                an idle day — click any number for the exact actions behind it.
+                {dayList.truncated ? ' Showing the most recent 31 days of the period.' : ''}
+              </p>
+            </div>
+            {chartHasData ? (
+              <div className="px-3 pt-3">
+                <ResponsiveContainer width="100%" height={230}>
+                  <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke={GRID} vertical={false} />
+                    <XAxis dataKey="day" tick={TICK} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} width={30} />
+                    <Tooltip cursor={{ fill: '#fafaf8' }} contentStyle={{ fontSize: 12, borderRadius: 12, border: `1px solid ${GRID}` }} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    {chartSeries.map((s, i) => (
+                      <Bar
+                        key={s.key}
+                        dataKey={s.key}
+                        stackId="team"
+                        fill={s.color}
+                        stroke="#fff"
+                        strokeWidth={1}
+                        maxBarSize={28}
+                        radius={i === chartSeries.length - 1 ? [3, 3, 0, 0] : 0}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="px-5 py-6 text-sm text-[#9b9890]">No stage activity recorded in this period.</p>
+            )}
+            <div className="overflow-x-auto border-t border-[#f0ede8]">
+              <table className="text-sm min-w-full">
+                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                  <tr>
+                    <th className="sticky left-0 z-10 bg-[#fafaf8] px-5 py-2.5 text-left font-semibold min-w-[130px]">Day</th>
+                    {people.map((p, i) => (
+                      <th key={p.userId} className="px-4 py-2.5 text-right font-semibold whitespace-nowrap">
+                        <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: colorOf(i) }} />
+                        {p.name}
+                      </th>
+                    ))}
+                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e8e6e0]">Team</th>
+                  </tr>
+                </thead>
+                <tbody className="text-[#1a1916]">
+                  {[...dayList.days].reverse().map(d => {
+                    const byUid = dayTotals.get(d);
+                    const teamTotal = people.reduce((s, p) => s + (byUid?.get(p.userId) ?? 0), 0);
+                    return (
+                      <tr key={d} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        <td className="sticky left-0 z-10 bg-white px-5 py-2 font-semibold whitespace-nowrap">{fmtDayMed(d)}</td>
+                        {people.map(p => {
+                          const v = byUid?.get(p.userId) ?? 0;
+                          return (
+                            <td key={p.userId} className={`px-4 py-2 text-right tabular-nums ${v ? '' : 'text-[#c8c6c0]'}`}>
+                              {v ? (
+                                <button
+                                  onClick={() => setDayDrill({ day: d, userId: p.userId, who: p.name })}
+                                  className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
+                                  title="See what they did that day">
+                                  {v}
+                                </button>
+                              ) : 0}
+                            </td>
+                          );
+                        })}
+                        <td className={`px-4 py-2 text-right tabular-nums font-bold border-l border-[#f0ede8] ${teamTotal ? '' : 'text-[#c8c6c0]'}`}>
+                          {teamTotal ? (
+                            <button
+                              onClick={() => setDayDrill({ day: d, userId: null, who: 'Team' })}
+                              className="underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer">
+                              {teamTotal}
+                            </button>
+                          ) : 0}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* ── 5. Operations by stage — one full row per person ── */}
+          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
             <div className="px-5 py-3.5 border-b border-[#f0ede8]">
               <h2 className="text-sm font-bold text-[#1a1916]">Operations by stage — records each manager progressed</h2>
               <p className="text-xs text-[#6b6860] mt-0.5">
-                Common stages merged across pipelines; customer and landlord signatures kept separate.
-                Every stage is now individually logged (bill clearance from 15 Jul 2026 onward). Click any
-                number to see the records behind it with their history.
+                Stages grouped under their pipeline (KYC → Payment Advice serve both the Lead intake and
+                lease setup); customer and landlord signatures kept separate. Click any number to see the
+                records behind it with their history.
               </p>
             </div>
             <div className="overflow-x-auto">
               <table className="text-sm min-w-full">
                 <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                  {grouped14 && (
+                    <tr className="border-b border-[#e8e6e0]">
+                      <th className="sticky left-0 z-10 bg-[#fafaf8]" />
+                      <th colSpan={4} className="px-3 pt-2.5 pb-1 text-center font-bold text-[#0369a1]">Lead intake</th>
+                      <th colSpan={5} className="px-3 pt-2.5 pb-1 text-center font-bold text-[#5b21b6] border-l border-[#e8e6e0]">New lease & renewal</th>
+                      <th colSpan={5} className="px-3 pt-2.5 pb-1 text-center font-bold text-[#b91c1c] border-l border-[#e8e6e0]">Termination</th>
+                      <th className="px-3 pt-2.5 pb-1 text-center font-bold text-[#1a7a5a] border-l border-[#e8e6e0]">Delivered</th>
+                    </tr>
+                  )}
                   <tr>
                     <th className="sticky left-0 z-10 bg-[#fafaf8] px-5 py-2.5 text-left font-semibold min-w-[170px]">Manager</th>
-                    {data.stageMatrix.stages.map(s => (
-                      <th key={s} className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{s}</th>
+                    {data.stageMatrix.stages.map((s, i) => (
+                      <th key={s} className={`px-3 py-2.5 text-right font-semibold whitespace-nowrap ${grouped14 && (i === 4 || i === 9) ? 'border-l border-[#e8e6e0]' : ''}`}>{s}</th>
                     ))}
+                    <th className="px-3 py-2.5 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Leases Activated</th>
                   </tr>
                 </thead>
                 <tbody className="text-[#1a1916]">
@@ -272,7 +703,7 @@ export function ManagerOperationsReport({
                     <tr key={r.userId} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                       <td className="sticky left-0 z-10 bg-white px-5 py-2.5 font-semibold whitespace-nowrap">{r.name}</td>
                       {r.cells.map((v, i) => (
-                        <td key={i} className={`px-3 py-2.5 text-right tabular-nums ${v ? '' : 'text-[#c8c6c0]'}`}>
+                        <td key={i} className={`px-3 py-2.5 text-right tabular-nums ${grouped14 && (i === 4 || i === 9) ? 'border-l border-[#f0ede8]' : ''} ${v ? '' : 'text-[#c8c6c0]'}`}>
                           {v == null ? '—' : v === 0 ? 0 : (
                             <button
                               onClick={() => setDrill({ userId: r.userId, who: r.name, stage: data.stageMatrix.stages[i], count: v })}
@@ -283,6 +714,9 @@ export function ManagerOperationsReport({
                           )}
                         </td>
                       ))}
+                      <td className={`px-3 py-2.5 text-right tabular-nums font-bold border-l border-[#f0ede8] ${deliveredBy.get(r.userId) ? 'text-[#1a7a5a]' : 'text-[#c8c6c0]'}`}>
+                        {deliveredBy.get(r.userId) ?? 0}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -290,7 +724,7 @@ export function ManagerOperationsReport({
                   <tr>
                     <td className="sticky left-0 z-10 bg-[#fafaf8] px-5 py-2.5">Team total</td>
                     {data.stageMatrix.totals.map((v, i) => (
-                      <td key={i} className={`px-3 py-2.5 text-right tabular-nums ${v ? '' : 'text-[#c8c6c0]'}`}>
+                      <td key={i} className={`px-3 py-2.5 text-right tabular-nums ${grouped14 && (i === 4 || i === 9) ? 'border-l border-[#f0ede8]' : ''} ${v ? '' : 'text-[#c8c6c0]'}`}>
                         {v == null ? '—' : v === 0 ? 0 : (
                           <button
                             onClick={() => setDrill({ userId: null, who: 'Team', stage: data.stageMatrix.stages[i], count: v })}
@@ -301,49 +735,69 @@ export function ManagerOperationsReport({
                         )}
                       </td>
                     ))}
+                    <td className="px-3 py-2.5 text-right tabular-nums border-l border-[#f0ede8] text-[#1a7a5a]">
+                      {completions.totals.newLeases + completions.totals.renewals}
+                    </td>
                   </tr>
                 </tfoot>
               </table>
             </div>
           </section>
 
-          {/* ── 2. Average working day ── */}
-          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
-            <div className="px-5 py-3.5 border-b border-[#f0ede8]">
-              <h2 className="text-sm font-bold text-[#1a1916]">Average working day</h2>
-              <p className="text-xs text-[#6b6860] mt-0.5">Everything each manager does in the system per day — output, breadth, presence.</p>
-            </div>
-            <div className="overflow-x-auto">
+          {/* ── 6. Waiting too long right now (live, not period-scoped) ── */}
+          {stuck && stuck.length > 0 && (
+            <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+              <div className="px-5 py-3.5 border-b border-[#f0ede8]">
+                <h2 className="text-sm font-bold text-[#1a1916]">Waiting too long right now — 7+ days without movement</h2>
+                <p className="text-xs text-[#6b6860] mt-0.5">
+                  Live snapshot of the pipelines (not limited to the period above). “Waiting on” follows the
+                  same rules as stage timing — a customer or landlord wait is not the manager&apos;s clock.
+                </p>
+              </div>
               <table className="w-full text-sm">
                 <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                   <tr>
-                    <th className="px-5 py-2.5 text-left font-semibold w-56">Metric</th>
-                    {data.daily.map(d => <th key={d.userId} className="px-4 py-2.5 text-right font-semibold">{d.name}</th>)}
+                    <th className="px-5 py-2.5 text-left font-semibold">Record</th>
+                    <th className="px-3 py-2.5 text-left font-semibold">Pipeline · stage</th>
+                    <th className="px-3 py-2.5 text-left font-semibold">Waiting on</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Stuck for</th>
+                    <th className="px-3 py-2.5 print:hidden" />
                   </tr>
                 </thead>
                 <tbody className="text-[#1a1916]">
-                  {([
-                    ['Days active', (d: DailyRow) => `${d.activeDays} of ${d.daysInPeriod}`],
-                    ['Idle days (no activity)', (d: DailyRow) => String(d.idleDays)],
-                    ['Avg actions / working day', (d: DailyRow) => d.avgActionsPerDay == null ? '—' : String(d.avgActionsPerDay)],
-                    ['Avg records touched / day', (d: DailyRow) => d.avgTasksPerDay == null ? '—' : String(d.avgTasksPerDay)],
-                    ['Avg time in system / day', (d: DailyRow) => fmtSpan(d.avgSpanMinutes)],
-                    ['Work mix (actions)', (d: DailyRow) =>
-                      `${d.mix.leads} leads · ${d.mix.leases} leases · ${d.mix.documents} docs · ${d.mix.reports} report checks`],
-                  ] as Array<[string, (d: DailyRow) => string]>).map(([label, pick]) => (
-                    <tr key={label} className="border-t border-[#f0ede8]">
-                      <td className="px-5 py-2.5 text-[#6b6860] font-medium">{label}</td>
-                      {data.daily.map(d => (
-                        <td key={d.userId} className="px-4 py-2.5 text-right tabular-nums font-semibold">{pick(d)}</td>
-                      ))}
+                  {stuck.slice(0, 12).map((s, i) => (
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                      <td className="px-5 py-2.5 font-semibold">
+                        {s.tenantName ?? '—'}
+                        <span className="text-[#9b9890] font-normal"> {s.unitLabel ? `· ${s.unitLabel}` : ''}{s.buildingName ? ` · ${s.buildingName}` : ''}</span>
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{s.stageLabel}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${BLAME_STYLE[s.blame]}`}>{s.blame}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${gapTone(s.ageDays)}`}>{s.ageDays}d</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right print:hidden">
+                        {s.contractId != null && (
+                          <Link href={`${contractsBase}/${s.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+                            Open <ExternalLink size={11} />
+                          </Link>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          </section>
+              {stuck.length > 12 && (
+                <p className="px-5 py-2.5 text-xs text-[#9b9890] border-t border-[#f0ede8]">
+                  +{stuck.length - 12} more — see the Operations page for the full pipeline.
+                </p>
+              )}
+            </section>
+          )}
 
-          {/* ── 3. Stage timing — managers side by side ── */}
+          {/* ── 7. Stage timing — managers side by side ── */}
           <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
             <div className="px-5 py-3.5 border-b border-[#f0ede8] flex items-baseline justify-between flex-wrap gap-2">
               <div>
@@ -398,7 +852,43 @@ export function ManagerOperationsReport({
             </div>
           </section>
 
-          {/* ── 4. Manager actions, date by date ── */}
+          {/* ── 8. Average working day ── */}
+          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+            <div className="px-5 py-3.5 border-b border-[#f0ede8]">
+              <h2 className="text-sm font-bold text-[#1a1916]">Average working day</h2>
+              <p className="text-xs text-[#6b6860] mt-0.5">Everything each manager does in the system per day — output, breadth, presence.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                  <tr>
+                    <th className="px-5 py-2.5 text-left font-semibold w-56">Metric</th>
+                    {data.daily.map(d => <th key={d.userId} className="px-4 py-2.5 text-right font-semibold">{d.name}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="text-[#1a1916]">
+                  {([
+                    ['Days active', (d: DailyRow) => `${d.activeDays} of ${d.daysInPeriod}`],
+                    ['Idle days (no activity)', (d: DailyRow) => String(d.idleDays)],
+                    ['Avg actions / working day', (d: DailyRow) => d.avgActionsPerDay == null ? '—' : String(d.avgActionsPerDay)],
+                    ['Avg records touched / day', (d: DailyRow) => d.avgTasksPerDay == null ? '—' : String(d.avgTasksPerDay)],
+                    ['Avg time in system / day', (d: DailyRow) => fmtSpan(d.avgSpanMinutes)],
+                    ['Work mix (actions)', (d: DailyRow) =>
+                      `${d.mix.leads} leads · ${d.mix.leases} leases · ${d.mix.documents} docs · ${d.mix.reports} report checks`],
+                  ] as Array<[string, (d: DailyRow) => string]>).map(([label, pick]) => (
+                    <tr key={label} className="border-t border-[#f0ede8]">
+                      <td className="px-5 py-2.5 text-[#6b6860] font-medium">{label}</td>
+                      {data.daily.map(d => (
+                        <td key={d.userId} className="px-4 py-2.5 text-right tabular-nums font-semibold">{pick(d)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* ── 9. Manager actions, date by date ── */}
           <section className="mt-5">
             <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-3.5">
               <h2 className="text-sm font-bold text-[#1a1916]">Manager actions — date by date</h2>
@@ -442,8 +932,9 @@ export function ManagerOperationsReport({
           </section>
 
           <p className="text-[11px] text-[#9b9890] mt-3">
-            Generated {new Date(data.generatedAt).toLocaleString('en-AE', { timeZone: APP_TIME_ZONE })}. Only in-system work is measurable —
-            calls and site visits leave no trace. Landlord-only report.
+            Generated {new Date(data.generatedAt).toLocaleString('en-AE', { timeZone: APP_TIME_ZONE })}. Detailed stage
+            tracking since {fmtDate(data.attributionSince)} — periods before that under-count. Only in-system work is
+            measurable — calls and site visits leave no trace. Landlord-only report.
           </p>
 
           {/* ── cell drill-down: the records behind a number + their history ── */}
@@ -500,6 +991,45 @@ export function ManagerOperationsReport({
                       <div className="px-5 py-2.5 text-sm text-[#6b6860]">
                         Worked at {r.times.map(t2 => fmtStamp(t2)).join(' · ')} — open the record for its full history.
                       </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── day drill-down: what one person did on one day ── */}
+          {dayDrill && dayDrillActions && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 sm:p-8 print:hidden" onClick={() => setDayDrill(null)}>
+              <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}>
+                <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#1a1916]">{dayDrill.who} — {fmtDayMed(dayDrill.day)}</h3>
+                    <p className="text-xs text-[#6b6860] mt-0.5">
+                      {dayDrillActions.length} stage action{dayDrillActions.length === 1 ? '' : 's'} that day, in order
+                    </p>
+                  </div>
+                  <button onClick={() => setDayDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+                    <X size={15} />
+                  </button>
+                </div>
+                {dayDrillActions.length === 0 ? (
+                  <p className="px-5 py-10 text-sm text-[#9b9890] text-center">
+                    The individual actions behind this number are older than the loaded log — narrow the period to see them.
+                  </p>
+                ) : dayDrillActions.map((a, i) => (
+                  <div key={i} className="px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm">
+                    <span className="text-[11px] text-[#9b9890] tabular-nums w-16 shrink-0">{fmtTime(a.at)}</span>
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${stageTint(a.stage)}`}>{a.stage}</span>
+                    <span className="text-[#1a1916] truncate">{a.record ?? '—'}</span>
+                    {(a.contractId ?? a.leadId) != null && (
+                      <Link
+                        href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
+                        className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline shrink-0">
+                        Open <ExternalLink size={11} />
+                      </Link>
                     )}
                   </div>
                 ))}

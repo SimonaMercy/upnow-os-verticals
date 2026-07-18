@@ -26,6 +26,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
   Search, X, RefreshCw, Calendar, ClipboardList, CheckCircle2, ArrowRight,
   UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
+  BarChart3,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -60,6 +61,8 @@ interface Props {
   leadHref?: (id: number) => string;
   /** Manager scope: keep only leads whose unit belongs to this RP. */
   rpFilter?: number;
+  /** Link to the manager-performance report (landlord-only) — omitted → no button. */
+  performanceHref?: string;
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
@@ -214,7 +217,7 @@ function leadToCard(l: OpsLead, href: string | null, nowMs: number): CardVM | nu
   };
 }
 
-export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, rpFilter }: Props) {
+export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, rpFilter, performanceHref }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -433,6 +436,11 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
+            {performanceHref && (
+              <Link href={performanceHref} className="btn btn-ghost" title="How the team is performing, stage by stage">
+                <BarChart3 size={14} /> Manager performance
+              </Link>
+            )}
             <button type="button" className="btn btn-ghost" onClick={() => { setLoading(true); load().finally(() => setLoading(false)); }}>
               <RefreshCw size={14} /> Refresh
             </button>

@@ -21,6 +21,7 @@ export default function RpOperationsPage() {
         leadsPath="/leads"
         contractHref={contractHref}
         leadHref={leadHref}
+        performanceHref="/rental-provider/dashboard/reports/manager-operations"
       />
     </Suspense>
   );
