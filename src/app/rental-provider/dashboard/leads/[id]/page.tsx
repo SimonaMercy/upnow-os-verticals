@@ -1817,10 +1817,12 @@ function ChequesSection({
       {plan && sortedItems.length > 0 && (
         <div className="paygrid">
           <div className="payhead">
-            <span>Instalment</span><span>Method</span><span>Reference</span>
+            <span>Instalment</span><span>Method</span><span>Reference</span><span>Record</span>
           </div>
           {sortedItems.map((item, i) => {
             const method = itemMethods[item.index] ?? item.paymentMethod ?? 'cheque';
+            const desc = item.description ?? `Payment ${i + 1}`;
+            const recorded = chequeByDesc.get(desc);
             return (
               <div key={`m-${item.index}`} className="payrow">
                 <div className="payrow-info">
@@ -1856,6 +1858,27 @@ function ChequesSection({
                       }
                     } catch (err) { setError(err instanceof Error ? err.message : 'Failed'); }
                   }} />
+                <div className="payrow-rec">
+                  {recorded ? (
+                    <>
+                      <select className="qinput" style={{ width: 92 }} value={(recorded.status as ChequeRowStatus) || 'pending'}
+                        onChange={e => onSetChequeStatus(recorded.id, e.target.value as ChequeRowStatus)}>
+                        {CHEQUE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                      </select>
+                      <button type="button" className="mini-btn no" title="Remove" disabled={busy}
+                        onClick={() => onDeleteCheque(recorded.id)}><Trash2 size={12} /></button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-jade btn-sm" disabled={busy}
+                      onClick={async () => {
+                        const serial = (itemRefs[item.index] ?? item.reference ?? '').trim();
+                        if (!serial) { setError(`Type the cheque # in Reference for #${i + 1} first`); return; }
+                        setError(null);
+                        try { await onRecordCheque({ chequeSerial: serial, bankName: 'N/A', amountFils: item.amountFils, dueDate: item.dueDate, notes: desc }); }
+                        catch (err) { setError(err instanceof Error ? err.message : 'Failed to record'); }
+                      }}>Record</button>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -1915,30 +1938,6 @@ function ChequesSection({
         </div>
       )}
 
-      {/* RP-recorded path — one record row per plan item when no customer uploads */}
-      {plan && !hasCustomerUploads && sortedItems.length > 0 && (
-        <div className="doclist">
-          {sortedItems.map((it, i) => {
-            const desc = it.description ?? `Cheque ${i + 1}`;
-            const recorded = chequeByDesc.get(desc);
-            return (
-              <RecordChequeRow
-                key={`${it.index}-${desc}`} seq={i + 1} description={desc} amountFils={it.amountFils} dueDate={it.dueDate}
-                recorded={recorded} busy={busy}
-                onRecord={async serial => {
-                  if (!serial.trim()) { setError('Cheque number is required'); return; }
-                  setError(null);
-                  try { await onRecordCheque({ chequeSerial: serial.trim(), bankName: 'N/A', amountFils: it.amountFils, dueDate: it.dueDate, notes: desc }); }
-                  catch (err) { setError(err instanceof Error ? err.message : 'Failed to record'); }
-                }}
-                onDelete={() => recorded && onDeleteCheque(recorded.id)}
-                onStatusChange={status => recorded && onSetChequeStatus(recorded.id, status)}
-              />
-            );
-          })}
-        </div>
-      )}
-
       {/* Orphan RP cheques not matching any plan item */}
       {plan && (() => {
         const planDescs = new Set(sortedItems.map(it => it.description ?? ''));
@@ -1958,44 +1957,6 @@ function ChequesSection({
       })()}
 
       {!plan && <div className="note">Issue the payment plan first — the cheque series appears here once payments are scheduled.</div>}
-    </div>
-  );
-}
-
-/* RecordChequeRow — record / edit-status one plan-item cheque (quest-page style). */
-function RecordChequeRow({
-  seq, description, amountFils, dueDate, recorded, busy, onRecord, onDelete, onStatusChange,
-}: {
-  seq: number; description: string; amountFils: number; dueDate: string;
-  recorded?: LeadChequeRecord; busy: boolean;
-  onRecord: (serial: string) => void | Promise<void>;
-  onDelete: () => void | Promise<void>;
-  onStatusChange: (status: ChequeRowStatus) => void | Promise<void>;
-}) {
-  const [serial, setSerial] = useState('');
-  const [saving, setSaving] = useState(false);
-  if (recorded) {
-    const status = (recorded.status as ChequeRowStatus) || 'pending';
-    return (
-      <div className="schedrow">
-        <span className="sq">#{seq}</span>
-        <span className="sl">{description} · <b>{recorded.chequeSerial}</b> · {aed(amountFils)} · due {fmtDateOnly(dueDate)}</span>
-        <select className="qinput" style={{ width: 110 }} value={status} onChange={e => onStatusChange(e.target.value as ChequeRowStatus)}>
-          {CHEQUE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
-        </select>
-        <button className="mini-btn no" onClick={onDelete} title="Remove"><Trash2 size={12} /></button>
-      </div>
-    );
-  }
-  return (
-    <div className="schedrow">
-      <span className="sq">#{seq}</span>
-      <span className="sl">{description} · {aed(amountFils)} · due {fmtDateOnly(dueDate)}</span>
-      <input className="qinput" style={{ width: 130 }} type="text" value={serial} onChange={e => setSerial(e.target.value)} placeholder="Cheque #" />
-      <button className="btn btn-jade btn-sm" disabled={saving || busy || !serial.trim()}
-        onClick={async () => { setSaving(true); try { await onRecord(serial); setSerial(''); } finally { setSaving(false); } }}>
-        {saving ? '…' : 'Record'}
-      </button>
     </div>
   );
 }
@@ -2159,9 +2120,10 @@ function GlobalStyle() {
 
       /* Record-payment grid (method + reference per instalment) */
       .quest-page .paygrid { display: grid; gap: 6px; margin-bottom: 10px; }
-      .quest-page .payhead { display: grid; grid-template-columns: 1fr 132px 172px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
-      .quest-page .payhead span:nth-child(2), .quest-page .payhead span:nth-child(3) { text-align: left; }
-      .quest-page .payrow { display: grid; grid-template-columns: 1fr 132px 172px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
+      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 96px 122px 86px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+      .quest-page .payhead span:nth-child(2), .quest-page .payhead span:nth-child(3), .quest-page .payhead span:nth-child(4) { text-align: left; }
+      .quest-page .payrow-rec { display: flex; align-items: center; gap: 6px; }
+      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 122px 86px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
       .quest-page .payrow-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
       .quest-page .payrow-n { font-size: 10px; font-weight: 800; color: var(--jade-deep); background: var(--jade-soft); border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
       .quest-page .payrow-lbl { min-width: 0; display: flex; flex-direction: column; gap: 1px; }

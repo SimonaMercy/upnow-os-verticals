@@ -2246,7 +2246,13 @@ function DetailsDrawer({
     .filter(p => (p.paymentType ?? '') === 'other')
     .slice()
     .sort((a, b) => (a.amount ?? 0) - (b.amount ?? 0));
-  const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other');
+  // "Fees VAT" — the combined VAT cheque on admin/commission fees — is a
+  // pass-through tax: it belongs under Third Party with the registration fee,
+  // never inside the rent schedule (only rent + Rental VAT live there).
+  const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
+    (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
+  const feesVatPaymentRows = rentRows.filter(p => isFeesVat(p));
+  const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other' && !isFeesVat(p));
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
   // Fees split into the two segregation groups so the working table reads in the SAME
   // four sections as the plan/receipts: Admin + Commission → Management Fee; Ejari
@@ -2255,7 +2261,10 @@ function DetailsDrawer({
   // (Ejari / VAT / sub-lease / service charges stay Third Party — pass-through.)
   const MGMT_FEE_TYPES = new Set<string>(['admin_fee', 'commission', ...RULE_FEE_DEFS.map(d => d.pt)]);
   const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
-  const thirdPartyFeeRows = feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? ''));
+  const thirdPartyFeeRows = [
+    ...feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? '')),
+    ...(feesVatPaymentRows as typeof feeRows),
+  ];
   // Bounced / cancelled cheques are void — excluded from every section total and the
   // grand total, exactly as the header's Total payable does, so the two never diverge.
   const feeActive = (p: { chequeStatus?: string | null }) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
