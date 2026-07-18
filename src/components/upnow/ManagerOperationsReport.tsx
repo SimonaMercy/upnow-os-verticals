@@ -158,7 +158,7 @@ const BLAME_STYLE: Record<'Customer' | 'Landlord' | 'Manager', string> = {
 };
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
-const fmtDays = (v: number | null | undefined) => (v == null ? '—' : `${v}d`);
+const fmtDays = (v: number | null | undefined) => (v == null ? '—' : v === 0 ? 'same day' : `${v}d`);
 const fmtSpan = (min: number | null | undefined) => {
   if (min == null) return '—';
   const h = Math.floor(min / 60), m = Math.round(min % 60);
@@ -818,7 +818,11 @@ export function ManagerOperationsReport({
             <div className="px-5 py-3.5 border-b border-[#f0ede8] flex items-baseline justify-between flex-wrap gap-2">
               <div>
                 <h2 className="text-sm font-bold text-[#1a1916]">Stage timing — managers side by side</h2>
-                <p className="text-xs text-[#6b6860] mt-0.5">Average days to close each workflow stage (count in brackets). A manager is only measured on stages whose clock is theirs.</p>
+                <p className="text-xs text-[#6b6860] mt-0.5">
+                  Average time to close each stage; the bracket is how many records that average comes
+                  from — “2.5d (4)” = 4 records closed, 2.5 days each on average. Hover for median and
+                  slowest. A manager is only measured on stages whose clock is theirs.
+                </p>
               </div>
               <span className="text-xs text-[#6b6860]">
                 Σ stage avgs — Manager <b>{data.totals.managerAvgDays}d</b> · Customer <b>{data.totals.customerAvgDays}d</b> · Landlord <b>{data.totals.landlordAvgDays}d</b>
@@ -848,13 +852,13 @@ export function ManagerOperationsReport({
                           const c = cellOf(r, a);
                           return (
                             <td key={a} className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap"
-                              title={c ? `median ${fmtDays(c.medianDays)} · slowest ${fmtDays(c.slowestDays)}` : undefined}>
+                              title={c ? `average of ${c.completed} record${c.completed === 1 ? '' : 's'} · median ${fmtDays(c.medianDays)} · slowest ${fmtDays(c.slowestDays)}` : undefined}>
                               {c ? <><b>{fmtDays(c.avgDays)}</b> <span className="text-[#9b9890] text-xs">({c.completed})</span></> : <span className="text-[#d4d2cc]">·</span>}
                             </td>
                           );
                         })}
                         <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap"
-                          title={cust ? `median ${fmtDays(cust.medianDays)} · slowest ${fmtDays(cust.slowestDays)}` : undefined}>
+                          title={cust ? `average of ${cust.completed} record${cust.completed === 1 ? '' : 's'} · median ${fmtDays(cust.medianDays)} · slowest ${fmtDays(cust.slowestDays)}` : undefined}>
                           {cust ? <><b>{fmtDays(cust.avgDays)}</b> <span className="text-[#9b9890] text-xs">({cust.completed})</span></> : <span className="text-[#d4d2cc]">·</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8]">
