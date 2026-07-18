@@ -36,7 +36,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 interface ActorRow { actor: string; completed: number; avgDays: number | null; medianDays: number | null; slowestDays: number | null }
 interface StageRow { stageLabel: string; side: 'manager' | 'customer' | 'landlord'; completed: number; avgDays: number | null; medianDays: number | null; items: ActorRow[] }
 interface DailyRow {
-  userId: number; name: string; daysInPeriod: number; activeDays: number; idleDays: number;
+  userId: number; name: string; daysInPeriod: number; activeDays: number; activeDayList?: string[]; idleDays: number;
   avgActionsPerDay: number | null; avgTasksPerDay: number | null; avgSpanMinutes: number | null;
   mix: { leads: number; leases: number; documents: number; reports: number; other: number };
 }
@@ -58,13 +58,18 @@ interface RecordLog {
 }
 interface DayMatrixRow { day: string; rows: Array<{ userId: number; cells: number[] }> }
 interface CompletionRow { userId: number | null; name: string; newLeases: number; renewals: number; settlements: number; refunds: number }
-interface Completions { rows: CompletionRow[]; totals: { newLeases: number; renewals: number; settlements: number; refunds: number } }
+interface CompletionItem {
+  kind: 'new' | 'renewal' | 'settlement'; contractId: number; label: string;
+  at: string; actorUserId: number; actor: string; refund: boolean;
+}
+interface Completions { rows: CompletionRow[]; items?: CompletionItem[]; totals: { newLeases: number; renewals: number; settlements: number; refunds: number } }
 interface Payload {
   generatedAt: string; from: string | null; to: string | null; attributionSince: string;
   managers: Array<{ userId: number; name: string }>;
   stageMatrix: StageMatrix;
   managerActions: ManagerAction[]; managerActionsCapped: boolean;
   daily: DailyRow[]; dayMatrix?: DayMatrixRow[]; completions?: Completions;
+  window?: { from: string; to: string };
   rows: StageRow[];
   records: RecordLog[]; recordsCapped: boolean;
   totals: { stagesMeasured: number; managerAvgDays: number; customerAvgDays: number; landlordAvgDays: number };
@@ -203,18 +208,30 @@ function Delta({ cur, prev, vsLabel, goodDown = false, unit = '' }: {
   );
 }
 
-function Tile({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4">
+function Tile({ label, value, sub, delta, onClick }: {
+  label: string; value: string; sub?: string; delta?: React.ReactNode; onClick?: () => void;
+}) {
+  const body = (
+    <>
       <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{label}</p>
       <p className="text-2xl font-bold text-[#1a1916] mt-1 tabular-nums">{value}</p>
       {sub && <p className="text-xs text-[#6b6860] mt-0.5">{sub}</p>}
       {delta && <p className="mt-1">{delta}</p>}
-    </div>
+    </>
+  );
+  if (!onClick) return <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4">{body}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="See the details behind this number"
+      className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4 text-left cursor-pointer transition-colors hover:border-[#2e9f82] focus:outline-none focus:border-[#2e9f82]">
+      {body}
+    </button>
   );
 }
 
-const EMPTY_COMPLETIONS: Completions = { rows: [], totals: { newLeases: 0, renewals: 0, settlements: 0, refunds: 0 } };
+const EMPTY_COMPLETIONS: Completions = { rows: [], items: [], totals: { newLeases: 0, renewals: 0, settlements: 0, refunds: 0 } };
 
 export function ManagerOperationsReport({
   backHref = '/rental-provider/dashboard/reports',
@@ -233,6 +250,8 @@ export function ManagerOperationsReport({
   const [drill, setDrill] = useState<{ userId: number | null; who: string; stage: string; count: number } | null>(null);
   /** Day drill-down: what one person did on one day. */
   const [dayDrill, setDayDrill] = useState<{ day: string; userId: number | null; who: string } | null>(null);
+  /** Scoreboard tile drill-down: the details behind each headline number. */
+  const [tileDrill, setTileDrill] = useState<'steps' | 'delivered' | 'settlements' | 'idle' | null>(null);
 
   const { cur, prev, vsLabel } = useMemo(
     () => rangesFor(preset, customFrom, customTo),
@@ -529,31 +548,35 @@ export function ManagerOperationsReport({
             </ul>
           </section>
 
-          {/* ── 2. Scoreboard vs previous period ── */}
+          {/* ── 2. Scoreboard vs previous period — every tile clicks into its details ── */}
           <section className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3 print:break-inside-avoid">
             <Tile
               label="Pipeline steps moved"
               value={String(progressed)}
               sub="records progressed across all stages"
               delta={<Delta cur={progressed} prev={prevProgressed} vsLabel={vsLabel} />}
+              onClick={() => setTileDrill('steps')}
             />
             <Tile
               label="Leases delivered"
               value={String(delivered)}
               sub={`${completions.totals.newLeases} new · ${completions.totals.renewals} renewal${completions.totals.renewals === 1 ? '' : 's'} activated`}
               delta={<Delta cur={delivered} prev={prevCompletions ? deliveredOf(prevCompletions) : null} vsLabel={vsLabel} />}
+              onClick={() => setTileDrill('delivered')}
             />
             <Tile
               label="Settlements paid"
               value={String(completions.totals.settlements)}
               sub={completions.totals.refunds ? `${completions.totals.refunds} refund${completions.totals.refunds === 1 ? '' : 's'} issued to customers` : 'terminations closed out'}
               delta={<Delta cur={completions.totals.settlements} prev={prevCompletions?.totals.settlements ?? null} vsLabel={vsLabel} />}
+              onClick={() => setTileDrill('settlements')}
             />
             <Tile
               label="Idle manager-days"
               value={String(idleDays)}
               sub="manager-days with no in-system activity"
               delta={<Delta cur={idleDays} prev={idleOf(prevData)} vsLabel={vsLabel} goodDown />}
+              onClick={() => setTileDrill('idle')}
             />
           </section>
 
@@ -992,6 +1015,14 @@ export function ManagerOperationsReport({
                         </Link>
                       )}
                     </div>
+                    {/* Why this record counts: the person's own action time(s) at this
+                        stage — visible even when the journey milestones are other
+                        people's (in-progress work has no milestone yet). */}
+                    {drill.userId != null && r.times.length > 0 && (
+                      <div className="px-5 py-1.5 text-[11px] bg-[#f0faf6] text-[#1a7a5a] border-t border-[#f7f5f1]">
+                        Counted for {drill.who} — worked this stage {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
+                      </div>
+                    )}
                     {r.journey ? r.journey.events.map((e, i) => {
                       const mine = r.times.some(t2 => Math.abs(new Date(t2).getTime() - new Date(e.at).getTime()) < 60_000);
                       return (
@@ -1053,6 +1084,110 @@ export function ManagerOperationsReport({
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── tile drill-down: the details behind each scoreboard number ── */}
+          {tileDrill && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 sm:p-8 print:hidden" onClick={() => setTileDrill(null)}>
+              <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}>
+                <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#1a1916]">
+                      {tileDrill === 'steps' ? `Pipeline steps moved — ${progressed}`
+                        : tileDrill === 'delivered' ? `Leases delivered — ${delivered}`
+                          : tileDrill === 'settlements' ? `Settlements paid — ${completions.totals.settlements}`
+                            : `Idle manager-days — ${idleDays}`}
+                    </h3>
+                    <p className="text-xs text-[#6b6860] mt-0.5">
+                      {tileDrill === 'steps' ? 'Where the steps happened — click a stage for the records behind it.'
+                        : tileDrill === 'delivered' ? 'The leases activated in this period, and who activated them.'
+                          : tileDrill === 'settlements' ? 'The deposit settlements paid out in this period.'
+                            : 'Days with no in-system activity, per manager.'}
+                    </p>
+                  </div>
+                  <button onClick={() => setTileDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+                    <X size={15} />
+                  </button>
+                </div>
+
+                {tileDrill === 'steps' && (
+                  data.stageMatrix.stages.every((_, i) => !(data.stageMatrix.totals[i])) ? (
+                    <p className="px-5 py-8 text-sm text-[#9b9890] text-center">No stage activity in this period.</p>
+                  ) : data.stageMatrix.stages.map((stage, i) => {
+                    const total = data.stageMatrix.totals[i];
+                    if (!total) return null;
+                    return (
+                      <button
+                        key={stage}
+                        type="button"
+                        onClick={() => { setTileDrill(null); setDrill({ userId: null, who: 'Team', stage, count: total }); }}
+                        className="w-full px-5 py-2.5 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm hover:bg-[#fafaf8] cursor-pointer text-left">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${stageTint(stage)}`}>{stage}</span>
+                        <span className="ml-auto font-bold tabular-nums text-[#1a7a5a]">{total}</span>
+                      </button>
+                    );
+                  })
+                )}
+
+                {(tileDrill === 'delivered' || tileDrill === 'settlements') && (() => {
+                  const items = (completions.items ?? []).filter(i =>
+                    tileDrill === 'delivered' ? i.kind !== 'settlement' : i.kind === 'settlement');
+                  if (!items.length) {
+                    return <p className="px-5 py-8 text-sm text-[#9b9890] text-center">None in this period.</p>;
+                  }
+                  return items.map((it, i) => (
+                    <div key={i} className="px-5 py-2.5 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
+                        it.kind === 'new' ? 'bg-[#d8f2e8] text-[#1a7a5a]' : it.kind === 'renewal' ? 'bg-[#e0f2fe] text-[#0369a1]' : 'bg-[#fee2e2] text-[#b91c1c]'}`}>
+                        {it.kind === 'new' ? 'New lease' : it.kind === 'renewal' ? 'Renewal' : it.refund ? 'Settled · refund issued' : 'Settled'}
+                      </span>
+                      <span className="text-[#1a1916] truncate">{it.label}</span>
+                      <span className="text-[11px] text-[#9b9890] whitespace-nowrap ml-auto">{it.actor} · {fmtStamp(it.at)}</span>
+                      <Link href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline shrink-0">
+                        Open <ExternalLink size={11} />
+                      </Link>
+                    </div>
+                  ));
+                })()}
+
+                {tileDrill === 'idle' && (
+                  data.daily.length === 0 ? (
+                    <p className="px-5 py-8 text-sm text-[#9b9890] text-center">No managers on this account.</p>
+                  ) : data.daily.map(d => {
+                    const idle: string[] | null = d.activeDayList && data.window
+                      ? (() => {
+                          const today = dubaiToday();
+                          const end = data.window!.to > today ? today : data.window!.to;
+                          const active = new Set(d.activeDayList);
+                          const out: string[] = [];
+                          for (let x = data.window!.from; x <= end; x = addDays(x, 1)) if (!active.has(x)) out.push(x);
+                          return out;
+                        })()
+                      : null;
+                    return (
+                      <div key={d.userId} className="px-5 py-3 border-t border-[#f7f5f1] first:border-t-0">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <span className="text-sm font-bold text-[#1a1916]">{d.name}</span>
+                          <span className="text-xs text-[#6b6860]">{d.idleDays} idle of {d.daysInPeriod} tracked day{d.daysInPeriod === 1 ? '' : 's'}</span>
+                        </div>
+                        {idle && idle.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {idle.map(x => (
+                              <span key={x} className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#fee2e2] text-[#b91c1c]">{fmtDayShort(x)}</span>
+                            ))}
+                          </div>
+                        )}
+                        {idle && idle.length === 0 && (
+                          <p className="text-xs text-[#1a7a5a] mt-1.5">Active every tracked day.</p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
