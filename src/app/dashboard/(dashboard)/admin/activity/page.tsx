@@ -559,7 +559,10 @@ export default function AdminActivityPage() {
           {rangeLabel}{refreshedAt ? ` · refreshed ${refreshedAt.toLocaleTimeString('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })}` : ''}
           {liveOn && live ? ' · pause to change period' : ''}
         </span>
-        <button onClick={() => void refresh()} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1 text-[12px] text-[#6b6963] hover:border-[#d4d2cc]">
+        <Link href="/dashboard/admin/analytics" className="ml-auto text-[12px] font-semibold text-[#2a78d6] hover:underline">
+          Analytics dashboard →
+        </Link>
+        <button onClick={() => void refresh()} className="inline-flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1 text-[12px] text-[#6b6963] hover:border-[#d4d2cc]">
           <RefreshCw className={`h-3.5 w-3.5 ${feedLoading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
