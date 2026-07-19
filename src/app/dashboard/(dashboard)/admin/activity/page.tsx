@@ -68,6 +68,10 @@ interface Board {
     listings: number; bookings: number; quotes: number;
     leads: number; leads_converted: number; viewings: number; viewings_upcoming: number;
   };
+  leadsActivity: {
+    funnel: { stage: string; count: number }[];
+    viewings: { status: string; count: number }[];
+  };
   entities: {
     rp_total: number; rp_added: number;
     properties_total: number; properties_added: number;
@@ -964,6 +968,51 @@ export default function AdminActivityPage() {
                 </div>
               ))}
               {topPagesNamed.length === 0 && <div className="py-4 text-center text-[12px] text-[#9b9890]">No page views in this period</div>}
+            </div>
+          </div>
+
+          {/* leads activity */}
+          <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
+            <div className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+              <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#6b6963]">Leads Activity</h2>
+              <span className="ml-auto flex flex-wrap gap-x-5 font-mono text-[11.5px] text-[#6b6963]">
+                <span>NEW LEADS <b className="text-[#1a1916]">{fmtN(board.marketplace.leads)}</b></span>
+                <span>VIEWINGS <b className="text-[#1a1916]">{fmtN(board.marketplace.viewings)}</b></span>
+                <span>BOOKED AHEAD <b className={board.marketplace.viewings_upcoming > 0 ? 'text-[#1a1916]' : 'text-amber-700'}>{fmtN(board.marketplace.viewings_upcoming)}</b></span>
+                <span>CONVERTED (ALL) <b className="text-emerald-700">{fmtN(board.marketplace.leads_converted)}</b></span>
+              </span>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div>
+                <h3 className="mb-1 text-[12px] font-semibold text-[#6b6963]">Lead funnel · by stage (period)</h3>
+                {board.leadsActivity.funnel.map((f) => {
+                  const maxV = board.leadsActivity.funnel[0]?.count ?? 1;
+                  return (
+                    <div key={f.stage} className="py-0.5">
+                      <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
+                        <span className="text-[#6b6963]">{f.stage.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+                        <span className="font-mono text-[12px] font-bold text-[#1a1916]">{fmtN(f.count)}</span>
+                      </div>
+                      <div className="h-1 rounded bg-[#2a78d6] opacity-70" style={{ width: `${Math.max(4, (f.count / maxV) * 100)}%` }} />
+                    </div>
+                  );
+                })}
+                {board.leadsActivity.funnel.length === 0 && (
+                  <div className="py-4 text-center text-[12px] text-[#9b9890]">No leads in this period</div>
+                )}
+              </div>
+              <div>
+                <h3 className="mb-1 text-[12px] font-semibold text-[#6b6963]">Viewings · by status (period)</h3>
+                {board.leadsActivity.viewings.map((v) => (
+                  <div key={v.status} className="flex items-baseline justify-between gap-3 border-b border-[#f2f0eb] py-1.5 text-[12.5px] last:border-0">
+                    <span className="text-[#6b6963]">{v.status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+                    <span className="font-mono text-[12px] font-bold text-[#1a1916]">{fmtN(v.count)}</span>
+                  </div>
+                ))}
+                {board.leadsActivity.viewings.length === 0 && (
+                  <div className="py-4 text-center text-[12px] text-[#9b9890]">No viewings in this period</div>
+                )}
+              </div>
             </div>
           </div>
 
