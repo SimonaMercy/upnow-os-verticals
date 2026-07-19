@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
 
@@ -28,7 +28,7 @@ interface Technician { id: number; name: string; jobStatus: string }
 interface TeamMember { id: number; name: string; isLeadCapable: boolean }
 interface QuoteItem { itemName: string; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
 interface Quote { id: number; status: string; totalAmount: number | string; laborAmount?: number | string | null; materialsAmount?: number | string | null; summary?: string | null; validUntil?: string | null; rejectionReason?: string | null; items: QuoteItem[] }
-interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null }
+interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null; accepted?: boolean }
 interface Dispute {
   id: number; status: string; title: string; description: string | null;
   resolutionSummary: string | null; providerResponse: string | null; bookingId: number;
@@ -58,6 +58,7 @@ const emptyRow = () => ({ itemName: '', quantity: '1', unitPrice: '', itemType: 
 
 export default function ProviderJobPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [data, setData] = useState<JobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,6 +67,8 @@ export default function ProviderJobPage() {
   const [summary, setSummary] = useState('');
   const [dispute, setDispute] = useState<Dispute | null>(null);
   const [respondText, setRespondText] = useState('');
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -103,6 +106,23 @@ export default function ProviderJobPage() {
     catch (e) { setError(e instanceof Error ? e.message : 'Could not update status'); }
     finally { setBusy(false); }
   };
+  const accept = async () => {
+    setBusy(true);
+    try { await apiPost(`/bookings/${id}/accept`, {}); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not accept'); }
+    finally { setBusy(false); }
+  };
+  const decline = async () => {
+    setBusy(true);
+    try {
+      await apiPost(`/bookings/${id}/decline`, { reason: declineReason.trim() || undefined });
+      // Declining hands the job to another provider (or Ops) — it is no longer ours.
+      router.push('/dashboard/service-provider/operations');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not decline');
+      setBusy(false);
+    }
+  };
   const submitQuote = async () => {
     const items = rows
       .filter((r) => r.itemName.trim() && Number(r.unitPrice) > 0)
@@ -118,7 +138,7 @@ export default function ProviderJobPage() {
   if (error && !data) return <div style={{ padding: 24, color: '#B42318' }}>{error}</div>;
   if (!data) return null;
 
-  const { booking: b, technician, team, quote } = data;
+  const { booking: b, technician, team, quote, accepted } = data;
   const st = STATUS[b.status] ?? STATUS.booked;
   const isQuote = b.pricingMode === 'quote';
   const next = NEXT[b.status];
@@ -313,6 +333,28 @@ export default function ProviderJobPage() {
         <div style={lbl}>Job progress</div>
         {b.status === 'booked' && isQuote ? (
           <p style={{ fontSize: 14, color: MUTE, marginTop: 8 }}>Waiting for the customer to approve your quote. You&apos;ll be able to start once they pay.</p>
+        ) : b.status === 'assigned' ? (
+          <div style={{ marginTop: 10 }}>
+            {accepted && <div style={{ fontSize: 13, fontWeight: 600, color: GREEN, marginBottom: 10 }}>✓ You accepted this job</div>}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {!accepted ? (
+                <button disabled={busy} onClick={accept}
+                  style={{ flex: 1, minWidth: 160, background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                  {busy ? 'Working…' : 'Accept job'}
+                </button>
+              ) : next ? (
+                <button disabled={busy} onClick={() => advance(next.to)}
+                  style={{ flex: 1, minWidth: 160, background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                  {busy ? 'Updating…' : next.label}
+                </button>
+              ) : null}
+              <button disabled={busy} onClick={() => { setDeclineReason(''); setDeclineOpen(true); }}
+                style={{ background: '#fff', color: '#B42318', border: '1px solid #FECDCA', borderRadius: 11, padding: '12px 18px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                Decline
+              </button>
+            </div>
+            {!accepted && <p style={{ fontSize: 12.5, color: FAINT, marginTop: 8 }}>Accept to confirm you&apos;ll take this job — the customer is told you&apos;re confirmed. Can&apos;t make it? Decline and we&apos;ll reassign it.</p>}
+          </div>
         ) : next ? (
           <button disabled={busy} onClick={() => advance(next.to)}
             style={{ marginTop: 10, width: '100%', background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
@@ -332,6 +374,23 @@ export default function ProviderJobPage() {
           </div>
         )}
       </div>
+
+      {/* Decline confirmation */}
+      {declineOpen && (
+        <div onClick={() => setDeclineOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,18,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={card({ width: 440, maxWidth: '100%', padding: 22 })}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: INK }}>Decline this job?</div>
+            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>We&apos;ll reassign BK-{b.id} to another provider (or hand it to Ops). A reason helps us dispatch better.</p>
+            <textarea value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} rows={3}
+              placeholder="Reason (optional) — e.g. fully booked at that time"
+              style={{ width: '100%', marginTop: 12, border: BORDER, borderRadius: 10, padding: '9px 11px', fontSize: 13, color: INK, resize: 'vertical', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+              <button onClick={() => setDeclineOpen(false)} style={{ background: 'none', border: BORDER, borderRadius: 9, padding: '9px 15px', fontSize: 13, fontWeight: 600, color: MUTE, cursor: 'pointer' }}>Keep job</button>
+              <button disabled={busy} onClick={decline} style={{ background: '#B42318', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 17px', fontSize: 13, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>{busy ? 'Declining…' : 'Decline & reassign'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
