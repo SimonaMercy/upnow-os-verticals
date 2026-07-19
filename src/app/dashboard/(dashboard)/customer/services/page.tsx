@@ -25,6 +25,7 @@ interface BookingRow {
   addressText: string | null;
   serviceName?: string | null;
   packageName?: string | null;
+  customerSignedOff?: boolean;
   template?: { name?: string | null } | null;
   variant?: { name?: string | null } | null;
 }
@@ -66,6 +67,7 @@ export default function CustomerServicesPage() {
   const [reviewHover, setReviewHover] = useState(0);
   const [reviewBody, setReviewBody] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  const [signingOff, setSigningOff] = useState<number | null>(null);
 
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
@@ -186,6 +188,23 @@ export default function CustomerServicesPage() {
       setError(e instanceof Error ? e.message : 'Could not submit your report');
     } finally {
       setReporting(false);
+    }
+  };
+
+  const signOff = async (id: number) => {
+    setSigningOff(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/bookings/${id}/sign-off`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not confirm');
+      await load(); // customerSignedOff flips on the refreshed row
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not confirm the job');
+    } finally {
+      setSigningOff(null);
     }
   };
 
@@ -388,6 +407,21 @@ export default function CustomerServicesPage() {
                     )}
                     {b.status === 'completed' && (
                       <div className="mt-4 flex items-center gap-2 flex-wrap">
+                        {b.customerSignedOff ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#1a7a5a' }}>
+                            <CheckCircle2 size={14} /> You confirmed this job
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={signingOff === b.id}
+                            onClick={() => signOff(b.id)}
+                            className="text-xs font-semibold px-3.5 py-2 rounded-lg text-white"
+                            style={{ background: 'var(--color-primary)', opacity: signingOff === b.id ? 0.6 : 1 }}
+                          >
+                            {signingOff === b.id ? 'Confirming…' : 'Confirm job done'}
+                          </button>
+                        )}
                         {reviews[b.id] ? (
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#1a7a5a' }}>
                             <span style={{ color: '#f59e0b', letterSpacing: '1px' }}>{'★'.repeat(reviews[b.id].rating)}{'☆'.repeat(5 - reviews[b.id].rating)}</span>
@@ -397,8 +431,8 @@ export default function CustomerServicesPage() {
                           <button
                             type="button"
                             onClick={() => { setReviewFor(b.id); setReviewRating(0); setReviewHover(0); setReviewBody(''); }}
-                            className="text-xs font-semibold px-3.5 py-2 rounded-lg text-white"
-                            style={{ background: 'var(--color-primary)' }}
+                            className="text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                            style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-primary)' }}
                           >
                             Leave a review
                           </button>
