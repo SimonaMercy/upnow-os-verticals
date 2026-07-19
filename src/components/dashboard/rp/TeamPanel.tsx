@@ -11,9 +11,14 @@ import {
 import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
 import { REPORT_TILES } from '@/components/upnow/reportCatalog';
+import { SHEET_SLUGS } from '@/components/upnow/ReportSheetView';
 
-/** Reports a manager can be granted access to (the live, available ones). */
-const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available).map((r) => ({ slug: r.slug, title: r.title }));
+/** Reports a manager can be granted access to — the live ones a manager can
+ *  actually open (rpOnly reports 403 in the manager portal, so granting them
+ *  is dead UI). The two headline sheets are pinned first. */
+const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available && !r.rpOnly)
+  .map((r) => ({ slug: r.slug, title: r.title }))
+  .sort((a, b) => Number((SHEET_SLUGS as string[]).includes(b.slug)) - Number((SHEET_SLUGS as string[]).includes(a.slug)));
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -304,7 +309,7 @@ function ReportAccessChecklist({
           ? 'All reports — leave unchecked for full access, or pick specific reports.'
           : `${selected.length} of ${AVAILABLE_REPORTS.length} reports selected.`}
       </p>
-      <div className="grid grid-cols-1 gap-1.5 max-h-52 overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 gap-1.5 max-h-80 overflow-y-auto pr-1">
         {AVAILABLE_REPORTS.map((r) => (
           <label key={r.slug} className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-neutral-700)' }}>
             <input

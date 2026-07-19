@@ -18,14 +18,27 @@
 import { useState } from 'react';
 import { Info } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, LineChart, Line,
+  ResponsiveContainer, BarChart, Bar, LineChart, Line, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 
 const PALETTE = ['#2e9f82', '#1e5fae', '#b45309', '#8250df'];
 const [JADE, BLUE, AMBER, PURPLE] = PALETTE;
+const RED = '#dc2626';
 const GRID = '#f0ede8';
 const TICK = { fontSize: 11, fill: '#9b9890' } as const;
+
+/** Compact AED from fils for chart axes: 7.5M, 689K, 950. */
+const fmtAedShort = (fils: number | null | undefined) => {
+  const v = Number(fils ?? 0) / 100;
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (a >= 1_000) return `${Math.round(v / 1_000)}K`;
+  return String(Math.round(v));
+};
+/** Full AED from fils for tooltips. */
+const fmtAed = (fils: number | null | undefined) =>
+  new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(Number(fils ?? 0) / 100);
 
 /** Chart card — the explanation lives behind the ⓘ so the page stays clean. */
 function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -222,6 +235,60 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
             <Bar dataKey="ejariRegistered" name="Contract Registration completed" stackId="e" fill={JADE} stroke="#fff" strokeWidth={2} />
             <Bar dataKey="ejariPending" name="Awaiting Contract Registration" stackId="e" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[3, 3, 0, 0]} />
           </BarChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Executive Cashflow ───────────────────────────────────────────────────────
+
+interface CashflowRow {
+  label: string;
+  expectedFils: number;
+  receivedFils: number;
+  pendingFils: number;
+  bouncedFils: number;
+  penaltyFils: number;
+  netIncomeFils: number;
+  collectionRate: number;
+  [k: string]: unknown;
+}
+
+export function ExecutiveCashflowCharts({ rows }: { rows: CashflowRow[] }) {
+  const any = rows.some(r => r.expectedFils + r.receivedFils + r.penaltyFils > 0);
+  if (!any) return null;
+  // recharts passes value/name wide — format money series full, the % series as a rate.
+  const tip = (value: unknown, name: unknown) =>
+    [name === 'Collection %' ? `${Number(value).toFixed(1)}%` : fmtAed(Number(value)), String(name)] as [string, string];
+  return (
+    <div className="grid lg:grid-cols-2 gap-3 mb-6">
+      <Card title="Rent cashflow by month" hint="Where each month's rent stands: collected (green), still pending (amber) and bounced (red). The three stack to the rent Expected that month.">
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -6 }} barSize={16}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+            <XAxis dataKey="label" tick={TICK} axisLine={false} tickLine={false} />
+            <YAxis tickFormatter={fmtAedShort} tick={TICK} axisLine={false} tickLine={false} width={44} />
+            <Tooltip cursor={{ fill: '#fafaf8' }} formatter={tip} />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+            <Bar dataKey="receivedFils" name="Received" stackId="c" fill={JADE} stroke="#fff" strokeWidth={1} />
+            <Bar dataKey="pendingFils" name="Pending" stackId="c" fill={AMBER} stroke="#fff" strokeWidth={1} />
+            <Bar dataKey="bouncedFils" name="Bounced" stackId="c" fill={RED} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+      <Card title="Net Income &amp; collection rate" hint="Net Income each month (received rent + penalties, green bars) against the collection rate — the share of that month's expected rent already received (blue line).">
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -6 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+            <XAxis dataKey="label" tick={TICK} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="money" tickFormatter={fmtAedShort} tick={TICK} axisLine={false} tickLine={false} width={44} />
+            <YAxis yAxisId="rate" orientation="right" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={TICK} axisLine={false} tickLine={false} width={40} />
+            <Tooltip cursor={{ fill: '#fafaf8' }} formatter={tip} />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+            <Bar yAxisId="money" dataKey="netIncomeFils" name="Net Income" fill={JADE} barSize={18} radius={[3, 3, 0, 0]} />
+            <Line yAxisId="rate" type="monotone" dataKey="collectionRate" name="Collection %" stroke={BLUE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+          </ComposedChart>
         </ResponsiveContainer>
       </Card>
     </div>

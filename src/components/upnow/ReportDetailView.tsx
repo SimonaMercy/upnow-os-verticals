@@ -18,11 +18,11 @@ import {
 } from 'lucide-react';
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
-import { ManagerPerformanceCharts, LeaseActivityCharts } from '@/components/upnow/ReportCharts';
+import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts } from '@/components/upnow/ReportCharts';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market' | 'operations-pipeline';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'executive-cashflow' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market' | 'operations-pipeline';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -494,6 +494,37 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     ],
   },
 
+  'executive-cashflow': {
+    title: 'Executive Cashflow',
+    tagline: 'Your rent cashflow, month by month — expected vs received, what’s pending or bounced, and Net Income.',
+    description: 'For each month of the selected year: the rent Expected (every cheque due, cancelled ones excluded), how much was Received (cleared), what is still Pending, what Bounced, the Penalty income collected, and Net Income (received rent + penalties). Anchored on the cheque date; the totals up top are the year-to-date figures. Pick the year above.',
+    endpoint: '/api/reports/executive-cashflow',
+    dataNote: NEEDS_CHEQUE_DATA + ' Penalty income is penalty / late-fee cheques cleared in the month (bounced-cheque, replacement, deferral and the late/early lifecycle penalties) — admin, Contract Registration and commission fees are in the Fee & VAT report. Net Income = received rent + penalties.',
+    controlKey: 'year',
+    columns: [
+      { key: 'label', label: 'Month' },
+      { key: 'expectedFils', label: 'Expected', align: 'right', type: 'aed' },
+      { key: 'receivedFils', label: 'Received', align: 'right', type: 'aed' },
+      { key: 'pendingFils', label: 'Pending', align: 'right', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
+      { key: 'penaltyFils', label: 'Penalty', align: 'right', type: 'aed' },
+      { key: 'netIncomeFils', label: 'Net Income', align: 'right', type: 'aed' },
+      { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
+      { key: 'clearedCount', label: 'Cleared #', align: 'right', type: 'number' },
+      { key: 'pendingCount', label: 'Pending #', align: 'right', type: 'number' },
+      { key: 'bouncedCount', label: 'Bounced #', align: 'right', type: 'number' },
+    ],
+    totals: [
+      { key: 'expectedFils', label: 'Expected', type: 'aed', keep: true },
+      { key: 'receivedFils', label: 'Received', type: 'aed', keep: true },
+      { key: 'pendingFils', label: 'Pending', type: 'aed' },
+      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
+      { key: 'penaltyFils', label: 'Penalty', type: 'aed' },
+      { key: 'netIncomeFils', label: 'Net Income', type: 'aed', keep: true },
+      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
   'collection-rate': {
     title: 'Collection Rate Report',
     description: 'Monthly rent collection performance — cheques due each month, how much cleared (collected), what is still pending, what bounced, and the collection rate. Anchored on the cheque date; use the date range to scope the period.',
@@ -737,8 +768,8 @@ const FEE_DETAIL_COLUMNS: Column[] = [
 // Inventory / occupancy reports aren't listed — they have no ended-tenant noise.
 const TENANT_SCOPED = new Set<ReportSlug>([
   'receivables', 'security-deposits', 'cheque-register', 'collection-rate',
-  'tenant-ledger', 'rent-collection', 'leasing-activity', 'fee-taxation',
-  'cashflow-forecast',
+  'executive-cashflow', 'tenant-ledger', 'rent-collection', 'leasing-activity',
+  'fee-taxation', 'cashflow-forecast',
 ]);
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
@@ -1639,6 +1670,9 @@ export function ReportDetailView({
       )}
       {!loading && !error && data && slug === 'lease-activity' && (
         <LeaseActivityCharts rows={(data.rows ?? []) as never} />
+      )}
+      {!loading && !error && data && slug === 'executive-cashflow' && (
+        <ExecutiveCashflowCharts rows={(data.rows ?? []) as never} />
       )}
 
       {/* Search */}
