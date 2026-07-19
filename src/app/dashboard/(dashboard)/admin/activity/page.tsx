@@ -71,6 +71,8 @@ interface Board {
   leadsActivity: {
     funnel: { stage: string; count: number }[];
     viewings: { status: string; count: number }[];
+    seriesLeads: SeriesPoint[];
+    seriesViewings: SeriesPoint[];
   };
   entities: {
     rp_total: number; rp_added: number;
@@ -266,7 +268,7 @@ const feedTime = new Intl.DateTimeFormat('en-GB', {
 
 /* ── Tiny SVG bar chart (bars + optional overlay line, hover tooltip) ── */
 function BarChart({
-  bars, line, height = 200, width = 900, color = '#2a78d6', lineColor = '#0a8754', yFmt, tipFmt, xLabel, tipExtra,
+  bars, line, height = 200, width = 900, color = '#2a78d6', lineColor = '#0a8754', lineLabel = 'views', yFmt, tipFmt, xLabel, tipExtra,
 }: {
   bars: SeriesPoint[];
   line?: Map<string, number>;
@@ -274,6 +276,7 @@ function BarChart({
   width?: number;
   color?: string;
   lineColor?: string;
+  lineLabel?: string;
   yFmt?: (v: number) => string;
   tipFmt?: (v: number) => string;
   xLabel?: (d: string) => string;
@@ -341,7 +344,7 @@ function BarChart({
             const b = bars[i];
             if (!b) return;
             let text = `${(xLabel ?? dayLabel)(b.d)} · ${fmt(b.v)}`;
-            if (line?.has(b.d)) text += ` · ${fmtN(line.get(b.d)!)} views`;
+            if (line?.has(b.d)) text += ` · ${fmtN(line.get(b.d)!)} ${lineLabel}`;
             if (tipExtra) text += ` · ${tipExtra(b.d)}`;
             setTip({ x: e.clientX - box.left, y: e.clientY - box.top, text });
           }}
@@ -472,7 +475,7 @@ export default function AdminActivityPage() {
 
   /* derived */
   const filledSeries = useMemo(() => {
-    if (!board) return { actions: [] as SeriesPoint[], money: [] as SeriesPoint[], viewsMap: new Map<string, number>() };
+    if (!board) return { actions: [] as SeriesPoint[], money: [] as SeriesPoint[], viewsMap: new Map<string, number>(), leads: [] as SeriesPoint[], viewingsMap: new Map<string, number>() };
     const days: string[] = [];
     const start = new Date(`${board.range.from}T00:00:00Z`);
     const end = new Date(`${board.range.to}T00:00:00Z`);
@@ -481,10 +484,13 @@ export default function AdminActivityPage() {
     const cap = days.length > 92 ? days.slice(days.length - 92) : days; // chart caps at ~3 months of daily bars
     const aMap = new Map(board.series.actions.map((p) => [p.d, p.v]));
     const mMap = new Map(board.series.moneyAed.map((p) => [p.d, p.v]));
+    const lMap = new Map((board.leadsActivity?.seriesLeads ?? []).map((p) => [p.d, p.v]));
     return {
       actions: cap.map((d) => ({ d, v: aMap.get(d) ?? 0 })),
       money: cap.map((d) => ({ d, v: mMap.get(d) ?? 0 })),
       viewsMap: new Map(board.series.pageViews.map((p) => [p.d, p.v])),
+      leads: cap.map((d) => ({ d, v: lMap.get(d) ?? 0 })),
+      viewingsMap: new Map((board.leadsActivity?.seriesViewings ?? []).map((p) => [p.d, p.v])),
     };
   }, [board]);
 
@@ -830,6 +836,61 @@ export default function AdminActivityPage() {
             ))}
           </div>
 
+          {/* leads activity */}
+          <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
+            <div className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+              <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#6b6963]">Leads Activity</h2>
+              <span className="ml-auto flex flex-wrap gap-x-5 font-mono text-[11.5px] text-[#6b6963]">
+                <span>NEW LEADS <b className="text-[#1a1916]">{fmtN(board.marketplace.leads)}</b></span>
+                <span>VIEWINGS <b className="text-[#1a1916]">{fmtN(board.marketplace.viewings)}</b></span>
+                <span>BOOKED AHEAD <b className={board.marketplace.viewings_upcoming > 0 ? 'text-[#1a1916]' : 'text-amber-700'}>{fmtN(board.marketplace.viewings_upcoming)}</b></span>
+                <span>CONVERTED (ALL) <b className="text-emerald-700">{fmtN(board.marketplace.leads_converted)}</b></span>
+              </span>
+            </div>
+            <div className="mb-4">
+              <div className="mb-1 flex flex-wrap items-baseline gap-3">
+                <h3 className="text-[12px] font-semibold text-[#6b6963]">Leads & viewings per day</h3>
+                <span className="ml-auto flex gap-4 font-mono text-[11px] text-[#6b6963]">
+                  <span><span className="mr-1.5 inline-block h-2 w-2 rounded-sm bg-[#2a78d6]" />New leads</span>
+                  <span><span className="mr-1.5 mb-0.5 inline-block h-0.5 w-3.5 bg-[#0a8754]" />Viewings</span>
+                </span>
+              </div>
+              <BarChart bars={filledSeries.leads} line={filledSeries.viewingsMap} height={150} lineLabel="viewings" />
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div>
+                <h3 className="mb-1 text-[12px] font-semibold text-[#6b6963]">Lead funnel · by stage (period)</h3>
+                {board.leadsActivity.funnel.map((f) => {
+                  const maxV = board.leadsActivity.funnel[0]?.count ?? 1;
+                  return (
+                    <div key={f.stage} className="py-0.5">
+                      <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
+                        <span className="text-[#6b6963]">{f.stage.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+                        <span className="font-mono text-[12px] font-bold text-[#1a1916]">{fmtN(f.count)}</span>
+                      </div>
+                      <div className="h-1 rounded bg-[#2a78d6] opacity-70" style={{ width: `${Math.max(4, (f.count / maxV) * 100)}%` }} />
+                    </div>
+                  );
+                })}
+                {board.leadsActivity.funnel.length === 0 && (
+                  <div className="py-4 text-center text-[12px] text-[#9b9890]">No leads in this period</div>
+                )}
+              </div>
+              <div>
+                <h3 className="mb-1 text-[12px] font-semibold text-[#6b6963]">Viewings · by status (period)</h3>
+                {board.leadsActivity.viewings.map((v) => (
+                  <div key={v.status} className="flex items-baseline justify-between gap-3 border-b border-[#f2f0eb] py-1.5 text-[12.5px] last:border-0">
+                    <span className="text-[#6b6963]">{v.status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</span>
+                    <span className="font-mono text-[12px] font-bold text-[#1a1916]">{fmtN(v.count)}</span>
+                  </div>
+                ))}
+                {board.leadsActivity.viewings.length === 0 && (
+                  <div className="py-4 text-center text-[12px] text-[#9b9890]">No viewings in this period</div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* activity chart */}
           <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
             <div className="mb-2 flex flex-wrap items-baseline gap-3">
@@ -968,51 +1029,6 @@ export default function AdminActivityPage() {
                 </div>
               ))}
               {topPagesNamed.length === 0 && <div className="py-4 text-center text-[12px] text-[#9b9890]">No page views in this period</div>}
-            </div>
-          </div>
-
-          {/* leads activity */}
-          <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
-            <div className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1">
-              <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#6b6963]">Leads Activity</h2>
-              <span className="ml-auto flex flex-wrap gap-x-5 font-mono text-[11.5px] text-[#6b6963]">
-                <span>NEW LEADS <b className="text-[#1a1916]">{fmtN(board.marketplace.leads)}</b></span>
-                <span>VIEWINGS <b className="text-[#1a1916]">{fmtN(board.marketplace.viewings)}</b></span>
-                <span>BOOKED AHEAD <b className={board.marketplace.viewings_upcoming > 0 ? 'text-[#1a1916]' : 'text-amber-700'}>{fmtN(board.marketplace.viewings_upcoming)}</b></span>
-                <span>CONVERTED (ALL) <b className="text-emerald-700">{fmtN(board.marketplace.leads_converted)}</b></span>
-              </span>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div>
-                <h3 className="mb-1 text-[12px] font-semibold text-[#6b6963]">Lead funnel · by stage (period)</h3>
-                {board.leadsActivity.funnel.map((f) => {
-                  const maxV = board.leadsActivity.funnel[0]?.count ?? 1;
-                  return (
-                    <div key={f.stage} className="py-0.5">
-                      <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
-                        <span className="text-[#6b6963]">{f.stage.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-                        <span className="font-mono text-[12px] font-bold text-[#1a1916]">{fmtN(f.count)}</span>
-                      </div>
-                      <div className="h-1 rounded bg-[#2a78d6] opacity-70" style={{ width: `${Math.max(4, (f.count / maxV) * 100)}%` }} />
-                    </div>
-                  );
-                })}
-                {board.leadsActivity.funnel.length === 0 && (
-                  <div className="py-4 text-center text-[12px] text-[#9b9890]">No leads in this period</div>
-                )}
-              </div>
-              <div>
-                <h3 className="mb-1 text-[12px] font-semibold text-[#6b6963]">Viewings · by status (period)</h3>
-                {board.leadsActivity.viewings.map((v) => (
-                  <div key={v.status} className="flex items-baseline justify-between gap-3 border-b border-[#f2f0eb] py-1.5 text-[12.5px] last:border-0">
-                    <span className="text-[#6b6963]">{v.status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-                    <span className="font-mono text-[12px] font-bold text-[#1a1916]">{fmtN(v.count)}</span>
-                  </div>
-                ))}
-                {board.leadsActivity.viewings.length === 0 && (
-                  <div className="py-4 text-center text-[12px] text-[#9b9890]">No viewings in this period</div>
-                )}
-              </div>
             </div>
           </div>
 
