@@ -10,7 +10,7 @@ import Link from 'next/link';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
-import { Users, Home, Building2, Wrench, Star, MapPin, TrendingUp, ChevronRight } from 'lucide-react';
+import { Users, Home, Building2, Wrench, Star, MapPin, TrendingUp, ChevronRight, Activity, Eye } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { BackLink } from '@/components/dashboard/DashboardWidgets';
 
@@ -28,6 +28,24 @@ interface SpAnalytics {
   zones: NV[]; providers: number;
 }
 interface Manager { id: number; name: string; email: string; landlordCount: number; status: string }
+/** Subset of /admin/activity/board (default window = last 30 days). */
+interface ActivityBoard {
+  usage: {
+    pageViews: { total: number; users: number };
+    actions: { total: number; users: number };
+    logins: { total: number };
+    activeUsers: number;
+  };
+  listings: {
+    total: number; visitors: number;
+    top: { unit_id: number; unit: string; property: string; views: number; visitors: number; leads: number }[];
+  };
+  roleActivity: { role: string; action_key: string; count: number }[];
+}
+const ROLE_LABELS: Record<string, string> = {
+  manager: 'Managers', rental_provider: 'Rental Providers', customer: 'Customers',
+  service_provider: 'Service Providers', super_admin: 'Internal',
+};
 
 const tip = { borderRadius: 10, border: '1px solid #e8e6e0', fontSize: 12 };
 const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -71,16 +89,65 @@ export default function AdminAnalyticsPage() {
   const [rp, setRp] = useState<RpAnalytics | null>(null);
   const [sp, setSp] = useState<SpAnalytics | null>(null);
   const [managers, setManagers] = useState<Manager[]>([]);
+  const [act, setAct] = useState<ActivityBoard | null>(null);
 
   useEffect(() => {
     apiGet<RpAnalytics>('/admin/analytics/rp').then(setRp).catch(() => undefined);
     apiGet<SpAnalytics>('/admin/analytics/sp').then(setSp).catch(() => undefined);
     apiGet<Manager[]>('/admin/team/managers').then((m) => setManagers(Array.isArray(m) ? m : [])).catch(() => undefined);
+    apiGet<ActivityBoard>('/admin/activity/board').then(setAct).catch(() => undefined);
   }, []);
+
+  const roleTotals = (act?.roleActivity ?? []).reduce<Record<string, number>>((acc, r) => {
+    const k = ROLE_LABELS[r.role] ?? titleCase(r.role);
+    acc[k] = (acc[k] ?? 0) + r.count;
+    return acc;
+  }, {});
+  const roleData: NV[] = Object.entries(roleTotals).map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8">
       <BackLink />
+      {/* ── Platform activity (from the Activity board, last 30 days) ── */}
+      <section>
+        <div className="mb-3 flex items-baseline gap-3">
+          <h2 className="text-lg font-bold text-[#1a1916]">Platform activity · last 30 days</h2>
+          <Link href="/dashboard/admin/activity" className="text-sm font-semibold text-[#2a78d6] hover:underline">
+            Open live Activity board →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          <Kpi icon={<Users size={12} />} label="Active users" value={act?.usage.activeUsers ?? '—'} sub={act ? `${act.usage.logins.total.toLocaleString('en-US')} logins` : ''} />
+          <Kpi icon={<Activity size={12} />} label="Actions" value={act?.usage.actions.total.toLocaleString('en-US') ?? '—'} sub={act ? `${act.usage.actions.users} actors` : ''} />
+          <Kpi icon={<TrendingUp size={12} />} label="Portal page views" value={act?.usage.pageViews.total.toLocaleString('en-US') ?? '—'} sub="Manager + RP portals" />
+          <Kpi icon={<Eye size={12} />} label="Public listing views" value={act?.listings.total.toLocaleString('en-US') ?? '—'} sub={act ? `${act.listings.visitors.toLocaleString('en-US')} unique visitors` : ''} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card title="Most-viewed listings" sub="Anonymous views on public listing pages · click to open the listing">
+            {(act?.listings.top ?? []).length === 0 ? (
+              <Empty msg="No public listing views yet — tracking is live, data accumulates from 19 Jul" />
+            ) : (
+              <div className="divide-y divide-[#f0ede8] -mx-1 max-h-[240px] overflow-auto">
+                {act!.listings.top.map((l, i) => (
+                  <Link key={l.unit_id} href={`/listings/units/${l.unit_id}`} className="flex items-center gap-2 px-1 py-2 hover:bg-[#faf9f7] rounded transition">
+                    <span className="w-5 text-xs font-bold text-[#c4c2bc] shrink-0 tabular-nums">{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-[#3f3d39] truncate">{l.unit}</div>
+                      <div className="text-xs text-[#9b9890] truncate">{l.property}</div>
+                    </div>
+                    <span className="text-xs text-[#6b6860] shrink-0 tabular-nums">{l.views.toLocaleString('en-US')} views · {l.visitors} vis</span>
+                    <span className={`text-xs font-semibold shrink-0 tabular-nums ${l.leads > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{l.leads} leads</span>
+                    <ChevronRight size={14} className="text-[#c4c2bc] shrink-0" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </Card>
+          <Card title="Activity by role" sub="Audit-log events, last 30 days"><HBar data={roleData} color="#2a78d6" /></Card>
+        </div>
+      </section>
+
       {/* ── RP analytics ── */}
       <section>
         <h2 className="text-lg font-bold text-[#1a1916] mb-3">Rental Provider analytics</h2>
