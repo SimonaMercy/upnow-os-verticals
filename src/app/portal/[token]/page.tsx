@@ -101,9 +101,9 @@ export default function TenantPortalPage() {
           <DocSection title="Requested by your rental provider" subtitle="Specific documents your landlord asked you to provide" docs={data.requestedDocuments!} uploading={uploading} onUpload={upload} />
         )}
         <DocSection title="Identity documents (KYC)" subtitle="Your Emirates ID, passport and visa" docs={data.kycDocuments} uploading={uploading} onUpload={upload} />
-        {data.otherDocuments.length > 0 && (
-          <DocSection title="Rental documents" subtitle="Supporting documents for your tenancy" docs={data.otherDocuments} uploading={uploading} onUpload={upload} />
-        )}
+        {/* Always render so the customer sees the full document set (mandatory
+            and optional), not only what was explicitly requested. */}
+        <DocSection title="Rental documents" subtitle="Supporting documents for your tenancy" docs={data.otherDocuments} uploading={uploading} onUpload={upload} />
 
         <p className="text-xs text-[#9b9890] text-center mt-6">Link expires {new Date(data.expiresAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}. Powered by UpNow.</p>
       </div>
