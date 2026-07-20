@@ -15,7 +15,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { serviceImg } from '@/lib/serviceImages';
-import { Navbar } from '@/components/upnow/Navbar';
+import { SiteHeader } from '@/components/upnow/SiteHeader';
+import { Footer } from '@/components/upnow/Footer';
 import {
   Sparkles, Wind, Droplets, Zap, Hammer, PaintRoller, Bug, Car, Trees,
   Building2, Wrench, Loader2, Search, X, LayoutGrid, AlarmClockCheck, Clock,
@@ -323,7 +324,7 @@ export default function ServicesCatalogClient() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#fff' }}>
-      <Navbar />
+      <SiteHeader />
 
       {/* ── Hero — same pattern as /listings ── */}
       <section className="lst-hero">
@@ -495,6 +496,7 @@ export default function ServicesCatalogClient() {
           </div>
         </>
       )}
+      <Footer />
     </div>
   );
 }

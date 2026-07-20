@@ -3,7 +3,9 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useAuth, dashboardPath, type UserRole } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { SiteHeader } from '@/components/upnow/SiteHeader';
+import { Footer } from '@/components/upnow/Footer';
 import {
   MapPin, X, ChevronLeft, ChevronRight, BedDouble, Bath, Maximize2,
   Layers, Wind, CheckCircle2, Check, Shield, Clock,
@@ -1353,42 +1355,6 @@ function ModalShell({ children, onClose }: { children: React.ReactNode; onClose:
   );
 }
 
-/* ── Header auth section ──────────────────────────────────────────────────── */
-function HeaderAuthSection() {
-  const { isAuthenticated, user, signOut } = useAuth();
-
-  if (isAuthenticated && user) {
-    const displayName = user.name ?? [user.firstName, user.lastName].filter(Boolean).join(' ');
-    const initials = (displayName?.charAt(0) ?? 'U').toUpperCase();
-    const dest = dashboardPath(user.role as UserRole);
-    return (
-      <div className="flex items-center gap-3">
-        <Link href={dest} className="text-sm font-medium hover:text-[#1a1916] transition-colors">
-          Dashboard
-        </Link>
-        <button
-          onClick={() => { signOut(); }}
-          className="text-sm hover:text-[#1a1916] transition-colors"
-        >
-          Sign Out
-        </button>
-        <Link href={dest} className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: '#2e9f82' }}>
-          {initials}
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <Link href="/login" className="hover:text-[#1a1916] transition-colors">Sign In</Link>
-      <Link href="/register" className="py-2 px-4 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90" style={{ backgroundColor: '#2e9f82' }}>
-        Register
-      </Link>
-    </>
-  );
-}
-
 /* ── Main page component ─────────────────────────────────────────────────── */
 export default function ListingPageClient({ unit, property, media = [], preferredStartDays = [], allowedInstallments = [] }: { unit: PublicUnit; property: PublicProperty; media?: UnitMediaItem[]; preferredStartDays?: number[]; allowedInstallments?: number[] }) {
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -1466,24 +1432,7 @@ export default function ListingPageClient({ unit, property, media = [], preferre
 
   return (
     <div className="min-h-screen bg-white">
-      {/* ── Navbar ─────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-[#e8e6e0]">
-        <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
-          <Link href="/listings" className="flex items-center gap-2.5">
-            <span style={{
-              width: 24, height: 24, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg, #1f8a6e 0%, #34c79f 100%)',
-              color: '#fff', display: 'grid', placeItems: 'center',
-              fontSize: 13, fontWeight: 800,
-            }}>U</span>
-            <span className="font-extrabold text-lg text-[#1a1916] tracking-tight">UpNow</span>
-          </Link>
-          <div className="hidden sm:flex items-center gap-4 text-sm text-[#6b6860]">
-            <Link href="/listings" className="hover:text-[#1a1916] transition-colors">Browse Listings</Link>
-            <HeaderAuthSection />
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
       <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-10 pt-4 pb-24">
         {/* ── Breadcrumb ──────────────────────────────────────────────────── */}
@@ -1707,6 +1656,7 @@ export default function ListingPageClient({ unit, property, media = [], preferre
       {/* Modals */}
       {modal === 'book' && <BookModal unit={unit} property={property} onClose={() => setModal(null)} />}
       {modal === 'inquire' && <InquireModal unit={unit} property={property} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} onClose={() => setModal(null)} />}
+      <Footer />
     </div>
   );
 }
