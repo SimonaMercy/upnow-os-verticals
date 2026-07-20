@@ -42,10 +42,17 @@ export function DocsLinkButton({
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Tracks which documents were already turned into request rows, so an
+  // error-then-retry (or a mid-loop failure) never inserts DUPLICATES — the keys
+  // embed a timestamp, so the DB's unique (owner,key) index can't dedup them and
+  // requestDocument() does a plain insert (no upsert).
+  const requestedRef = useRef<Set<string>>(new Set());
+
   const reset = () => {
     setSelected([]); setQuery(''); setMenuOpen(false); setNotes('');
     setPhase('pick'); setBusy(false); setLink(''); setEmail(null);
     setEmailedTo(null); setCopied(false); setErr(null);
+    requestedRef.current = new Set();
   };
   const close = () => { setOpen(false); reset(); };
 
@@ -57,11 +64,15 @@ export function DocsLinkButton({
   };
   const removeDoc = (name: string) => setSelected(prev => prev.filter(x => x !== name));
 
-  /** Create one request row per picked document. */
+  /** Create one request row per NOT-yet-requested document. Idempotent: a doc
+   *  already sent this session is skipped, so retrying after a link-generation
+   *  failure (or a mid-loop error) never duplicates rows. */
   const requestAll = async (labels: string[]) => {
     for (let i = 0; i < labels.length; i++) {
       const name = labels[i];
-      const documentKey = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + Date.now() + '_' + i;
+      const dedup = name.trim().toLowerCase();
+      if (!dedup || requestedRef.current.has(dedup)) continue;
+      const documentKey = dedup.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + Date.now() + '_' + i;
       const res = await fetch('/api/documents/request', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -73,6 +84,7 @@ export function DocsLinkButton({
         const b = await res.json().catch(() => ({})) as { message?: string | string[] };
         throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Error ${res.status}`));
       }
+      requestedRef.current.add(dedup);
     }
   };
 
