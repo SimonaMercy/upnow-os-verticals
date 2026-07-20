@@ -5,7 +5,7 @@ import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle, AlertTriangle, Info,
-  Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw, Paperclip, X,
+  Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw, Paperclip, X, ExternalLink,
 } from 'lucide-react';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
 import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
@@ -27,13 +27,14 @@ interface ApiLine {
   id?: number; label: string; amount: number; type: LineType;
   category?: LineCategory; source?: string; discountAmount?: number; discountReason?: string | null;
   paymentId?: number | null; net?: number; meta?: Record<string, unknown> | null;
+  sourceContractId?: number; sourceContractNo?: string;
 }
 interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null }
 interface StatementPayRow { description: string; date?: string | null; amount?: number; method?: string | null; chequeNumber?: string | null; mode?: string; status?: string; penalty?: number | null; kind?: string }
 interface ApiStatement {
   contract: TFSContract & { landlordName?: string; rpSignatoryName?: string; propertyType?: string | null; contractNo?: string; actualMoveOutDate?: string | null };
   contractSummary: StatementPayRow[];
-  paymentHistory?: { label: string; rows: StatementPayRow[] }[];
+  paymentHistory?: { label: string; band?: string; contractId?: number; contractNo?: string; startDate?: string | null; endDate?: string | null; rows: StatementPayRow[] }[];
   rent: TFSRent;
 }
 interface ApiGap { id: string; section: string; severity: GapSeverity; title: string; message: string; amount: number | null; amountKnown: string; heuristic?: boolean }
@@ -55,7 +56,7 @@ interface LineAttachment { name: string; fileUrl?: string; s3Key?: string; docId
 interface Row {
   key: string; label: string; amount: string; type: LineType; category: LineCategory;
   source?: string; discount: string; discountReason: string; paymentId?: number | null; meta?: Record<string, unknown> | null;
-  prefill?: boolean; attachments?: LineAttachment[];
+  prefill?: boolean; attachments?: LineAttachment[]; sourceContractId?: number; sourceContractNo?: string;
 }
 
 // Standard utility rows prefilled under §3 so the RP just fills the amounts.
@@ -105,6 +106,10 @@ export default function SettlementPage() {
   const pathname = usePathname();
   const contractId = params?.id;
   const backHref = (pathname ?? '').replace(/\/settlement\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${contractId}/v2`;
+  // Link any lease in this dashboard context (RP or manager) — e.g. the lease that
+  // holds a bounced cheque behind a penalty line.
+  const dashBase = (pathname ?? '/rental-provider/dashboard/contracts').replace(/\/contracts\/[^/]+\/settlement.*$/, '');
+  const contractHref = (id: number) => `${dashBase}/contracts/${id}/v2`;
 
   const [meta, setMeta] = useState<ContractMeta | null>(null);
   const [view, setView] = useState<'worksheet' | 'statement'>('worksheet');
@@ -148,6 +153,8 @@ export default function SettlementPage() {
         paymentId: l.paymentId ?? null,
         meta: Object.keys(restMeta).length ? restMeta : null,
         attachments: Array.isArray(attachments) ? attachments : undefined,
+        sourceContractId: l.sourceContractId,
+        sourceContractNo: l.sourceContractNo,
       };
     });
     // Prefill the standard utility list when §3 is still empty (editable drafts only).
@@ -551,57 +558,52 @@ export default function SettlementPage() {
             <p className="text-[11px] text-[#9b9890] -mt-1">{sec.hint}</p>
 
             {secRows.length > 0 && (
-              <div className="space-y-2">
+              <div>
+                {/* Inline line items — one row each: description · amount · discount · attach · remove */}
                 {secRows.map(r => {
                   const gross = Math.max(0, Number(r.amount) || 0);
                   const disc = Math.max(0, Number(r.discount) || 0);
                   return (
-                    <div key={r.key} className="rounded-xl border border-[#eceae4] p-2.5 space-y-1.5">
-                      <div className="grid grid-cols-[1fr_130px_auto] gap-2 items-center">
+                    <div key={r.key} className="border-b border-[#f4f2ee] last:border-b-0 py-1.5">
+                      <div className="flex items-center gap-1.5">
                         <input type="text" value={r.label} disabled={locked} placeholder="Description"
                           onChange={e => updateRow(r.key, { label: e.target.value })}
-                          className="text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] text-[#9b9890]">AED</span>
-                          <input type="number" min={0} step="0.01" value={r.amount} disabled={locked} placeholder="0"
-                            onChange={e => updateRow(r.key, { amount: e.target.value })}
-                            className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
-                        </div>
-                        {!locked
-                          ? <button type="button" onClick={() => removeRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={15} /></button>
-                          : <span className="w-[15px]" />}
-                      </div>
-                      {/* Discount (only offered while editable and cap > 0) */}
-                      {!locked && cap > 0 && (
-                        <div className="flex items-center gap-1.5 pl-0.5">
-                          <span className="text-[11px] text-[#9b9890]">− discount</span>
-                          <span className="text-[11px] text-[#9b9890]">AED</span>
-                          <input type="number" min={0} step="0.01" value={r.discount} placeholder="0"
+                          className="flex-1 min-w-0 text-[13px] text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:border-transparent disabled:bg-transparent disabled:px-0" />
+                        <span className="text-[10px] text-[#9b9890]">AED</span>
+                        <input type="number" min={0} step="0.01" value={r.amount} disabled={locked} placeholder="0"
+                          onChange={e => updateRow(r.key, { amount: e.target.value })}
+                          className="w-[80px] text-[13px] text-right text-[#1a1916] border border-[#e8e6e0] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[#2e9f82] disabled:border-transparent disabled:bg-transparent" />
+                        {!locked && cap > 0 && (
+                          <input type="number" min={0} step="0.01" value={r.discount} placeholder="disc" title="Discount (AED)"
                             onChange={e => updateRow(r.key, { discount: e.target.value })}
-                            className="w-[110px] text-xs text-[#b45309] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82]" />
-                        </div>
-                      )}
-                      {disc > 0 && (
-                        <p className="text-[11px] text-[#6b6860] pl-0.5">Net charged <span className="font-semibold tabular-nums">{aed(Math.max(0, gross - disc))}</span></p>
-                      )}
-                      {/* Per-line supporting documents (invoice / receipt / photo) */}
-                      {((r.attachments?.length ?? 0) > 0 || !locked) && (
-                        <div className="flex items-center gap-1.5 flex-wrap pl-0.5 pt-0.5">
+                            className="w-[58px] text-xs text-right text-[#b45309] border border-[#e8e6e0] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[#2e9f82]" />
+                        )}
+                        {!locked && (
+                          <label className="text-[#9b9890] hover:text-[#2e9f82] cursor-pointer shrink-0" title="Attach document">
+                            <Paperclip size={14} />
+                            <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToLine(r.key, f); e.currentTarget.value = ''; }} />
+                          </label>
+                        )}
+                        {!locked && <button type="button" onClick={() => removeRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] shrink-0" title="Remove"><Trash2 size={14} /></button>}
+                      </div>
+                      {(disc > 0 || (r.attachments?.length ?? 0) > 0 || !!r.sourceContractId) && (
+                        <div className="flex items-center gap-2 flex-wrap pl-1 pt-1">
+                          {disc > 0 && <span className="text-[11px] text-[#6b6860]">Net <span className="font-semibold tabular-nums">{aed(Math.max(0, gross - disc))}</span></span>}
+                          {r.sourceContractId && (
+                            <a href={contractHref(r.sourceContractId)} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] hover:underline" title="Open the lease that holds this cheque">
+                              <ExternalLink size={10} /> {r.sourceContractNo ?? `contract #${r.sourceContractId}`}
+                            </a>
+                          )}
                           {(r.attachments ?? []).map((a, i) => (
                             <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
                               <Paperclip size={10} className="text-[#9b9890]" />
                               {a.docId
-                                ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[130px] truncate hover:underline">{a.name}</a>
-                                : <span className="max-w-[130px] truncate">{a.name}</span>}
+                                ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[120px] truncate hover:underline">{a.name}</a>
+                                : <span className="max-w-[120px] truncate">{a.name}</span>}
                               {!locked && <button type="button" onClick={() => removeAttachment(r.key, i)} className="text-[#c8c6be] hover:text-[#ef4444]"><X size={11} /></button>}
                             </span>
                           ))}
-                          {!locked && (
-                            <label className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] cursor-pointer hover:opacity-75">
-                              <Paperclip size={11} /> Attach
-                              <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToLine(r.key, f); e.currentTarget.value = ''; }} />
-                            </label>
-                          )}
                         </div>
                       )}
                     </div>
@@ -810,7 +812,7 @@ export default function SettlementPage() {
             otherAdjustments: 0,
             settlementDate: stamps.paidAt,
             supportingDocs: { inspectionReport: false, utilityBills: true, invoices: true, otherDocuments: true },
-          }} />
+          }} contractHref={contractHref} />
         ) : (
           <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
             <Loader2 className="animate-spin inline mr-2" size={16} /> Preparing statement…

@@ -32,7 +32,7 @@ export interface RFSPayRow {
   method?: string | null; chequeNumber?: string | null; mode?: string;
   status?: string; penalty?: number | null; kind?: string;
 }
-export interface RFSBand { label: string; rows: RFSPayRow[] }
+export interface RFSBand { label: string; band?: string; contractId?: number; contractNo?: string; startDate?: string | null; endDate?: string | null; rows: RFSPayRow[] }
 export interface RFSLine { label: string; amount: number; net: number; category: string; type: string }
 export interface RFSReceipt { amount: number; method?: string; reference?: string | null; receivedOn?: string | null }
 
@@ -111,7 +111,7 @@ function SummaryRow({ label, value, tone, strong, border }: { label: string; val
 }
 
 // ─── Document ─────────────────────────────────────────────────────────────────
-export default function RentalFinalSettlementDoc({ data }: { data: RFSData }) {
+export default function RentalFinalSettlementDoc({ data, contractHref }: { data: RFSData; contractHref?: (id: number) => string }) {
   const c = data.contract;
   const utilities = data.lines.filter(l => l.category === 'utility');
   const restoration = data.lines.filter(l => l.category === 'restoration');
@@ -178,37 +178,18 @@ export default function RentalFinalSettlementDoc({ data }: { data: RFSData }) {
       </div>
 
       <div className="p-5 space-y-4">
-        {/* §1 + Result */}
-        <div className="grid lg:grid-cols-[1.6fr_1fr] gap-4">
-          <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
-            <SectionHead n={1} title="Customer & Contract Details" />
-            <div className="p-3 grid sm:grid-cols-2 gap-2.5">
-              <Field label="Customer Name" value={c.tenantName || '—'} />
-              <Field label="Contract Start Date" value={fmtDate(c.startDate)} />
-              <Field label="Property Address" value={c.propertyAddress || '—'} />
-              <Field label="Contract End Date" value={fmtDate(c.endDate)} />
-              <Field label="Unit No." value={c.unit || '—'} />
-              <Field label="Move-out Date" value={fmtDate(c.actualMoveOutDate)} accent />
-              <Field label="Contract / Tenancy No." value={c.contractNo || '—'} />
-              <Field label="Property Type" value={c.propertyType || '—'} />
-            </div>
-          </div>
-          <div className="rounded-lg border border-[#e8e6e0] overflow-hidden flex flex-col">
-            <SectionHead n="" title="Final Settlement Result" />
-            <div className="p-4 flex-1 flex flex-col justify-center">
-              <div className="text-[11px] font-semibold text-[#6b6860] uppercase tracking-wide">
-                {isRefund ? 'Net Refund to Customer (AED)' : 'Amount Payable by Customer (AED)'}
-              </div>
-              <div className={`mt-1 rounded-lg border px-3 py-3 text-[30px] font-extrabold tabular-nums ${isRefund ? 'border-[#c5e8df] bg-[#f0faf6] text-[#1a7a5a]' : 'border-[#fecaca] bg-[#fef2f2] text-[#b91c1c]'}`}>
-                {money(isRefund ? netRefund : amountPayable)}
-              </div>
-              <p className="text-[11px] text-[#9b9890] mt-2 leading-snug">
-                {isRefund
-                  ? 'Security deposit refundable after all deductions (see Section 7).'
-                  : 'Deductions and outstanding rent exceed the deposit held (see Section 7).'}
-              </p>
-              {data.settlementDate && <p className="text-[11px] text-[#6b6860] mt-1 flex items-center gap-1"><Wallet size={11} /> Settled {fmtDate(data.settlementDate)}</p>}
-            </div>
+        {/* §1 Customer & Contract Details */}
+        <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
+          <SectionHead n={1} title="Customer & Contract Details" />
+          <div className="p-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <Field label="Customer Name" value={c.tenantName || '—'} />
+            <Field label="Contract Start Date" value={fmtDate(c.startDate)} />
+            <Field label="Contract End Date" value={fmtDate(c.endDate)} />
+            <Field label="Move-out Date" value={fmtDate(c.actualMoveOutDate)} accent />
+            <Field label="Property Address" value={c.propertyAddress || '—'} />
+            <Field label="Unit No." value={c.unit || '—'} />
+            <Field label="Contract / Tenancy No." value={c.contractNo || '—'} />
+            <Field label="Property Type" value={c.propertyType || '—'} />
           </div>
         </div>
 
@@ -243,7 +224,15 @@ export default function RentalFinalSettlementDoc({ data }: { data: RFSData }) {
                 {data.paymentHistory.map((band, bi) => (
                   <>
                     <tr key={`b${bi}`} className="bg-[#f4f2ee]">
-                      <td colSpan={7} className="px-3 py-1 text-[11px] font-bold text-[#4a4842] uppercase tracking-wide">{band.label}</td>
+                      <td colSpan={7} className="px-3 py-1 text-[11px] font-bold text-[#4a4842] uppercase tracking-wide">
+                        {band.contractNo && band.contractId != null
+                          ? <>{band.band ?? 'YEAR'}{'  ·  '}
+                              {contractHref
+                                ? <a href={contractHref(band.contractId)} target="_blank" rel="noreferrer" className="text-[#1f6b4f] hover:underline normal-case">{band.contractNo}</a>
+                                : <span className="text-[#1f6b4f]">{band.contractNo}</span>}
+                              {band.startDate ? `  ·  ${fmtDate(band.startDate)} → ${fmtDate(band.endDate)}` : ''}</>
+                          : band.label}
+                      </td>
                     </tr>
                     {band.rows.map((r, ri) => (
                       <tr key={`b${bi}r${ri}`} className="border-t border-[#f0ede8]">
@@ -292,6 +281,27 @@ export default function RentalFinalSettlementDoc({ data }: { data: RFSData }) {
               {paymentsReceivedTotal > 0 && <SummaryRow label="Payments received from customer" value={money(paymentsReceivedTotal)} tone="text-[#1a7a5a]" />}
               <SummaryRow label="Other Adjustments (if any)" value={money(data.otherAdjustments ?? 0)} />
               <SummaryRow label={isRefund ? 'NET REFUND TO CUSTOMER' : 'AMOUNT PAYABLE BY CUSTOMER'} value={money(isRefund ? netRefund : amountPayable)} tone={isRefund ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'} strong border />
+            </div>
+          </div>
+        </div>
+
+        {/* Final Settlement Result — headline outcome, directly under the summary */}
+        <div className={`rounded-lg border-2 overflow-hidden ${isRefund ? 'border-[#c5e8df] bg-[#f0faf6]' : 'border-[#fecaca] bg-[#fef2f2]'}`}>
+          <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-4">
+            <div>
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#4a4842]">
+                <Wallet size={13} /> Final Settlement Result
+              </div>
+              <p className="text-[11px] text-[#6b6860] mt-1 leading-snug max-w-md">
+                {isRefund
+                  ? 'Security deposit refundable to the customer after all deductions (Sections 3–6) and outstanding rent (Section 7).'
+                  : 'Deductions (Sections 3–6) and outstanding rent (Section 7) exceed the deposit held — the balance is payable by the customer.'}
+              </p>
+              {data.settlementDate && <p className="text-[11px] text-[#6b6860] mt-1 flex items-center gap-1">Settled {fmtDate(data.settlementDate)}</p>}
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] font-semibold text-[#6b6860] uppercase tracking-wide">{isRefund ? 'Net Refund to Customer (AED)' : 'Amount Payable by Customer (AED)'}</div>
+              <div className={`text-[34px] font-extrabold tabular-nums leading-none mt-1 ${isRefund ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'}`}>{money(isRefund ? netRefund : amountPayable)}</div>
             </div>
           </div>
         </div>
