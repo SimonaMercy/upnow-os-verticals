@@ -15,6 +15,7 @@ import {
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { CustomerRenewalBanner } from '@/components/upnow/CustomerRenewalBanner';
 import { AuthModal, type AuthModalMode } from '@/components/upnow/AuthModal';
+import { PublicPageTracker } from '@/components/upnow/PublicPageTracker';
 
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () => void) {
   useEffect(() => {
@@ -64,6 +65,7 @@ export function SiteHeader() {
 
   return (
     <>
+      <PublicPageTracker />
       <header className="l-nav">
         <div className="l-nav-inner">
           {/* Brand */}

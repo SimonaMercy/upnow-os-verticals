@@ -451,50 +451,54 @@ function Hero({
     return () => document.removeEventListener('mousedown', handle);
   }, []);
 
-  useEffect(() => {
-    // Same-origin proxy (/api) — never an absolute backend URL. In the browser
-    // this avoids CORS and works in every environment without a build-time
-    // NEXT_PUBLIC_* var (which is how this hit localhost:3001 in production).
+  // Lazy — load location suggestions on first focus/type of the search box.
+  // Previously this ran on mount, firing 8 calls (emirates + per-emirate
+  // communities) on every landing visit even when nobody searched.
+  const suggestionsLoaded = useRef(false);
+  const loadLocationSuggestions = async () => {
+    if (suggestionsLoaded.current) return;
+    suggestionsLoaded.current = true;
+    // Same-origin proxy (/api) — never an absolute backend URL (avoids CORS).
     const API = '/api';
-    (async () => {
-      try {
-        const emirates: EmirateOption[] = await fetch(`${API}/locations/emirates`)
-          .then(r => r.ok ? r.json() : []);
+    try {
+      const emirates: EmirateOption[] = await fetch(`${API}/locations/emirates`)
+        .then(r => r.ok ? r.json() : []);
 
-        const emirateSuggestions: LocationSuggestion[] = emirates.map(em => ({
-          label: em.nameEn,
-          type: 'emirate' as const,
-          communityName: null,
-          emirateSlug: em.slug,
-          emirateName: em.nameEn,
-        }));
+      const emirateSuggestions: LocationSuggestion[] = emirates.map(em => ({
+        label: em.nameEn,
+        type: 'emirate' as const,
+        communityName: null,
+        emirateSlug: em.slug,
+        emirateName: em.nameEn,
+      }));
 
-        const communityLists: { nameEn: string }[][] = await Promise.all(
-          emirates.map(em =>
-            fetch(`${API}/locations/emirates/${em.id}/communities`)
-              .then(r => r.ok ? r.json() : [])
-              .catch(() => [])
-          )
-        );
+      const communityLists: { nameEn: string }[][] = await Promise.all(
+        emirates.map(em =>
+          fetch(`${API}/locations/emirates/${em.id}/communities`)
+            .then(r => r.ok ? r.json() : [])
+            .catch(() => [])
+        )
+      );
 
-        const commSuggestions: LocationSuggestion[] = [];
-        communityLists.forEach((communities, i) => {
-          const em = emirates[i];
-          communities.forEach(c => {
-            commSuggestions.push({
-              label: `${c.nameEn}, ${em.nameEn}`,
-              type: 'community',
-              communityName: c.nameEn,
-              emirateSlug: em.slug,
-              emirateName: em.nameEn,
-            });
+      const commSuggestions: LocationSuggestion[] = [];
+      communityLists.forEach((communities, i) => {
+        const em = emirates[i];
+        communities.forEach(c => {
+          commSuggestions.push({
+            label: `${c.nameEn}, ${em.nameEn}`,
+            type: 'community',
+            communityName: c.nameEn,
+            emirateSlug: em.slug,
+            emirateName: em.nameEn,
           });
         });
+      });
 
-        setLocationSuggestions([...emirateSuggestions, ...commSuggestions]);
-      } catch { /* silent — search still works without suggestions */ }
-    })();
-  }, []);
+      setLocationSuggestions([...emirateSuggestions, ...commSuggestions]);
+    } catch {
+      suggestionsLoaded.current = false; // allow a retry on the next focus
+    }
+  };
 
   const locFiltered = locationText.trim().length >= 1
     ? locationSuggestions
@@ -565,12 +569,13 @@ function Hero({
                 value={locationText}
                 autoComplete="off"
                 onChange={e => {
+                  loadLocationSuggestions();
                   setLocationText(e.target.value);
                   setLocationSel(null);
                   setLocOpen(true);
                   setBudgetOpen(false);
                 }}
-                onFocus={() => { if (locationText.trim()) setLocOpen(true); }}
+                onFocus={() => { loadLocationSuggestions(); if (locationText.trim()) setLocOpen(true); }}
                 onKeyDown={e => {
                   if (e.key === 'Escape') setLocOpen(false);
                   if (e.key === 'Enter') { setLocOpen(false); handleSearch(); }
