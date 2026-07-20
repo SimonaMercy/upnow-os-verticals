@@ -35,6 +35,7 @@ import {
   Bell, Download, Clock, Shield, Coins, Calendar, Pencil,
 } from 'lucide-react';
 import { tenantDisplayName } from '@/lib/tenantName';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Status model (preserved from previous version)
@@ -214,7 +215,7 @@ function statusLabel(c: Contract): string {
 
 function Row({
   contract, now, soonBy, onEdit, basePath,
-}: { contract: Contract; now: Date; soonBy: Date; onEdit: (id: number) => void; basePath: string }) {
+}: { contract: Contract; now: Date; soonBy: Date; onEdit?: (id: number) => void; basePath: string }) {
   const c = contract;
   const ds = displayStatusOf(c);
   const soon = isInForce(c) && endsSoon(c, soonBy);
@@ -265,7 +266,7 @@ function Row({
       <div className="col-chev">
         {/* Edit terms — hidden once the contract is signed by any party (the
             executed agreement is locked; the backend rejects the edit too). */}
-        {!c.signed && (
+        {!c.signed && onEdit && (
           <button type="button" className="edit-btn" title="Edit contract" aria-label="Edit contract"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(c.id); }}>
             <Pencil size={14} />
@@ -284,6 +285,12 @@ function Row({
 // ────────────────────────────────────────────────────────────────────────────
 
 export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
+  // Manager portal is per-landlord: "New contract" needs canCreateContracts and
+  // the row Edit needs canManageAgreements on the acting landlord. The RP (no
+  // `manager` prop) owns their own contracts, so both are allowed.
+  const { canForRp } = useManagerPermissions();
+  const canCreate    = !manager || canForRp('canCreateContracts', manager.rp);
+  const canEditTerms = !manager || canForRp('canManageAgreements', manager.rp);
   // Base route for detail/edit/new links + the API source. In manager mode the
   // page reuses the landlord-scoped /manager/contracts endpoints and links into
   // the manager portal, mirroring UnitsWorkspace.
@@ -473,7 +480,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
               </select>
             </div>
             <button type="button" className="btn btn-ghost"><Download size={14} /> Export</button>
-            <Link href={`${contractBase}/new`} className="btn btn-primary"><Plus size={14} /> New contract</Link>
+            {canCreate && <Link href={`${contractBase}/new`} className="btn btn-primary"><Plus size={14} /> New contract</Link>}
           </div>
         </div>
 
@@ -567,7 +574,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
             <div className="rows">
               {rows.map(c => (
                 <Row key={c.id} contract={c} now={now} soonBy={soonBy} basePath={contractBase}
-                  onEdit={(cid) => router.push(`${contractBase}/${cid}/edit`)} />
+                  onEdit={canEditTerms ? (cid) => router.push(`${contractBase}/${cid}/edit`) : undefined} />
               ))}
             </div>
             {totalPages > 1 && (
