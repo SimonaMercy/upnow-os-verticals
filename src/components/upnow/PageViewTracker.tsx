@@ -12,7 +12,7 @@
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 
-export function PageViewTracker({ portal }: { portal: 'rp' | 'manager' | 'customer' | 'admin' }) {
+export function PageViewTracker({ portal }: { portal: 'rp' | 'manager' | 'customer' | 'admin' | 'service_provider' }) {
   const pathname = usePathname();
   const last = useRef<string | null>(null);
 
