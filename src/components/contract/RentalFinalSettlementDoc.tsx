@@ -134,6 +134,8 @@ export default function RentalFinalSettlementDoc({ data }: { data: RFSData }) {
   const utilOther = Math.round((sumNet(utilities, ['utility']) - matchedUtil) * 100) / 100;
   if (utilOther > 0.005) utilRows.push({ label: 'Other utilities', amount: utilOther });
   const utilitiesTotal = sumNet(utilities, ['utility']);
+  // Only show utility rows that carry a value (zero rows are hidden in the preview).
+  const utilRowsShown = utilRows.filter(r => Math.abs(r.amount) > 0.005);
 
   // §4 — restoration lines verbatim (repairs / cleaning / keys …).
   const restorationRows = restoration.length
@@ -263,7 +265,7 @@ export default function RentalFinalSettlementDoc({ data }: { data: RFSData }) {
 
         {/* §3 §4 §5 charge columns */}
         <div className="grid md:grid-cols-3 gap-4">
-          <ChargeCol n={3} title="Outstanding Utility & Service Charges" rows={utilRows} total={utilitiesTotal} />
+          <ChargeCol n={3} title="Outstanding Utility & Service Charges" rows={utilRowsShown} total={utilitiesTotal} />
           <ChargeCol n={4} title="Property Restoration Charges" rows={restorationRows} total={restorationTotal} />
           <ChargeCol n={5} title="Additional Recoverable Charges" rows={additionalRows} total={additionalTotal} />
         </div>

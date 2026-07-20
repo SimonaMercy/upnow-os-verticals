@@ -5,7 +5,7 @@ import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle, AlertTriangle, Info,
-  Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw,
+  Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw, Paperclip, X,
 } from 'lucide-react';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
 import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
@@ -51,10 +51,15 @@ interface ApiSettlement {
 }
 
 interface ContractMeta { property: string; unit: string; tenantName: string }
+interface LineAttachment { name: string; fileUrl?: string; s3Key?: string; docId?: number }
 interface Row {
   key: string; label: string; amount: string; type: LineType; category: LineCategory;
   source?: string; discount: string; discountReason: string; paymentId?: number | null; meta?: Record<string, unknown> | null;
+  prefill?: boolean; attachments?: LineAttachment[];
 }
+
+// Standard utility rows prefilled under §3 so the RP just fills the amounts.
+const STD_UTILITIES = ['Electricity / Water', 'Cooling / District Cooling', 'Gas', 'Community Fees', 'Telecommunications'];
 interface PayRow { key: string; amount: string; method: PayMethod; reference: string; receivedOn: string }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -133,12 +138,24 @@ export default function SettlementPage() {
     setDeposit(String(s.depositHeld ?? 0));
     setMoveOut(s.moveoutDateOverride ?? s.statement?.contract?.actualMoveOutDate ?? '');
     setNotes(s.notes ?? '');
-    setRows((s.lines ?? []).map(l => ({
-      key: uid(), label: l.label, amount: String(l.amount), type: l.type,
-      category: (l.category ?? 'other') as LineCategory, source: l.source,
-      discount: l.discountAmount ? String(l.discountAmount) : '', discountReason: l.discountReason ?? '',
-      paymentId: l.paymentId ?? null, meta: l.meta ?? null,
-    })));
+    const mapped: Row[] = (s.lines ?? []).map(l => {
+      const rawMeta = (l.meta ?? {}) as Record<string, unknown> & { attachments?: LineAttachment[] };
+      const { attachments, ...restMeta } = rawMeta;
+      return {
+        key: uid(), label: l.label, amount: String(l.amount), type: l.type,
+        category: (l.category ?? 'other') as LineCategory, source: l.source,
+        discount: l.discountAmount ? String(l.discountAmount) : '', discountReason: l.discountReason ?? '',
+        paymentId: l.paymentId ?? null,
+        meta: Object.keys(restMeta).length ? restMeta : null,
+        attachments: Array.isArray(attachments) ? attachments : undefined,
+      };
+    });
+    // Prefill the standard utility list when §3 is still empty (editable drafts only).
+    const hasUtility = mapped.some(r => r.category === 'utility');
+    const rowsToSet = (!hasUtility && s.status === 'draft')
+      ? [...mapped, ...STD_UTILITIES.map(label => ({ key: uid(), label, amount: '', type: 'due' as LineType, category: 'utility' as LineCategory, source: 'manual', discount: '', discountReason: '', prefill: true } as Row))]
+      : mapped;
+    setRows(rowsToSet);
     setAvailable(s.availablePenalties ?? []);
     setAdminRules(s.adminChargeRules ?? []);
     setCaps(s.discountCaps ?? { rent: null, penalties: null, restoration: null, utilities: null });
@@ -209,26 +226,58 @@ export default function SettlementPage() {
 
   function linesPayload() {
     return rows
-      .filter(r => r.label.trim() || Number(r.amount) > 0)
-      .map(r => ({
-        label: r.label.trim() || 'Adjustment',
-        amount: Math.max(0, Number(r.amount) || 0),
-        type: r.type,
-        category: r.category,
-        source: r.source ?? 'manual',
-        discountAmount: Math.max(0, Number(r.discount) || 0),
-        discountReason: r.discountReason.trim() || null,
-        paymentId: r.paymentId ?? null,
-        meta: r.meta ?? null,
-      }));
+      // keep real lines; drop the untouched utility prefills (label but no amount)
+      .filter(r => (r.label.trim() || Number(r.amount) > 0) && !(r.prefill && !(Number(r.amount) > 0)))
+      .map(r => {
+        const atts = r.attachments?.length ? { attachments: r.attachments } : {};
+        const meta = (r.meta || r.attachments?.length) ? { ...(r.meta || {}), ...atts } : null;
+        return {
+          label: r.label.trim() || 'Adjustment',
+          amount: Math.max(0, Number(r.amount) || 0),
+          type: r.type,
+          category: r.category,
+          source: r.source ?? 'manual',
+          discountAmount: Math.max(0, Number(r.discount) || 0),
+          discountReason: r.discountReason.trim() || null,
+          paymentId: r.paymentId ?? null,
+          meta,
+        };
+      });
   }
 
-  // Client-side discount guard mirrors the backend (reason required, within cap).
+  // Attach an evidence document (invoice, receipt, photo) to a settlement line.
+  async function attachToLine(key: string, file: File) {
+    if (!contractId) return;
+    if (file.size > 15 * 1024 * 1024) { setError('File must be under 15 MB.'); return; }
+    setError(null);
+    try {
+      const docKey = `settlement_evidence_${Date.now()}`;
+      const urlRes = await fetch('/api/documents/upload-url', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: Number(contractId), documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
+      });
+      if (!urlRes.ok) throw new Error('upload-url');
+      const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey?: string };
+      const target = (() => { try { const p = new URL(uploadUrl); return p.pathname.startsWith('/api/') ? p.pathname + p.search : uploadUrl; } catch { return uploadUrl; } })();
+      const put = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+      if (!put.ok) throw new Error('put');
+      const created = await fetch('/api/documents', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: Number(contractId), category: 'payment', documentKey: docKey, displayName: file.name, fileUrl, mimeType: file.type || 'application/octet-stream', s3Key: fileKey, storageProvider: 's3' }),
+      });
+      const cj = created.ok ? await created.json().catch(() => ({})) : {};
+      setRows(rs => rs.map(r => r.key === key ? { ...r, attachments: [...(r.attachments ?? []), { name: file.name, fileUrl, s3Key: fileKey, docId: (cj as { id?: number })?.id }] } : r));
+    } catch { setError('Attachment upload failed. Please try again.'); }
+  }
+  function removeAttachment(key: string, idx: number) {
+    setRows(rs => rs.map(r => r.key === key ? { ...r, attachments: (r.attachments ?? []).filter((_, i) => i !== idx) } : r));
+  }
+
+  // Client-side discount guard mirrors the backend (within the line + within cap).
   function discountError(): string | null {
     for (const r of rows) {
       const d = Math.max(0, Number(r.discount) || 0);
       if (d <= 0) continue;
-      if (!r.discountReason.trim()) return `Add a reason for the discount on "${r.label.trim() || 'a line'}".`;
       const amt = Math.max(0, Number(r.amount) || 0);
       if (d > amt) return `The discount on "${r.label.trim() || 'a line'}" exceeds the charge.`;
       const sec = SECTIONS.find(s => s.cats.includes(r.category));
@@ -524,20 +573,36 @@ export default function SettlementPage() {
                       </div>
                       {/* Discount (only offered while editable and cap > 0) */}
                       {!locked && cap > 0 && (
-                        <div className="grid grid-cols-[130px_1fr] gap-2 items-center pl-0.5">
-                          <div className="flex items-center gap-1">
-                            <span className="text-[11px] text-[#9b9890]">− disc.</span>
-                            <input type="number" min={0} step="0.01" value={r.discount} placeholder="0"
-                              onChange={e => updateRow(r.key, { discount: e.target.value })}
-                              className="w-full text-xs text-[#b45309] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82]" />
-                          </div>
-                          <input type="text" value={r.discountReason} placeholder={disc > 0 ? 'Reason for discount (required)' : 'discount reason'}
-                            onChange={e => updateRow(r.key, { discountReason: e.target.value })}
-                            className={`w-full text-xs border rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] ${disc > 0 && !r.discountReason.trim() ? 'border-[#fca5a5] bg-[#fef2f2]' : 'border-[#e8e6e0] text-[#6b6860]'}`} />
+                        <div className="flex items-center gap-1.5 pl-0.5">
+                          <span className="text-[11px] text-[#9b9890]">− discount</span>
+                          <span className="text-[11px] text-[#9b9890]">AED</span>
+                          <input type="number" min={0} step="0.01" value={r.discount} placeholder="0"
+                            onChange={e => updateRow(r.key, { discount: e.target.value })}
+                            className="w-[110px] text-xs text-[#b45309] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82]" />
                         </div>
                       )}
                       {disc > 0 && (
-                        <p className="text-[11px] text-[#6b6860] pl-0.5">Net charged <span className="font-semibold tabular-nums">{aed(Math.max(0, gross - disc))}</span>{locked && r.discountReason ? ` · ${r.discountReason}` : ''}</p>
+                        <p className="text-[11px] text-[#6b6860] pl-0.5">Net charged <span className="font-semibold tabular-nums">{aed(Math.max(0, gross - disc))}</span></p>
+                      )}
+                      {/* Per-line supporting documents (invoice / receipt / photo) */}
+                      {((r.attachments?.length ?? 0) > 0 || !locked) && (
+                        <div className="flex items-center gap-1.5 flex-wrap pl-0.5 pt-0.5">
+                          {(r.attachments ?? []).map((a, i) => (
+                            <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
+                              <Paperclip size={10} className="text-[#9b9890]" />
+                              {a.docId
+                                ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[130px] truncate hover:underline">{a.name}</a>
+                                : <span className="max-w-[130px] truncate">{a.name}</span>}
+                              {!locked && <button type="button" onClick={() => removeAttachment(r.key, i)} className="text-[#c8c6be] hover:text-[#ef4444]"><X size={11} /></button>}
+                            </span>
+                          ))}
+                          {!locked && (
+                            <label className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] cursor-pointer hover:opacity-75">
+                              <Paperclip size={11} /> Attach
+                              <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToLine(r.key, f); e.currentTarget.value = ''; }} />
+                            </label>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
