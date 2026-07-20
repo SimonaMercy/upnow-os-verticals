@@ -13,6 +13,7 @@ import { Loader2 } from 'lucide-react';
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import { ContractDocsBinder, LandlordLinkButton, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
+import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { type PlanPayment } from '@/lib/currentPlan';
 import { toEjari } from '@/lib/toEjari';
 import { currentDocWatermark } from '@/lib/docViewer';
@@ -94,7 +95,12 @@ export default function ContractDocumentsPage() {
       receipt={c as unknown as ReceiptContract}
       watermark={watermark}
       signatureCertificate={cert}
-      headerRight={c.tenant?.id ? <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} /> : undefined}
+      headerRight={c.tenant?.id ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <DocsLinkButton tenantId={c.tenant.id} contractId={c.id} label="Send docs link" />
+          <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} />
+        </div>
+      ) : undefined}
       signerName={c.landlord?.companyName || c.landlord?.name || 'Landlord'}
       signerDefaultName={c.landlord?.name || c.landlord?.companyName || ''}
       landlordSigned={sigs.some(s => s.role === 'landlord')}
