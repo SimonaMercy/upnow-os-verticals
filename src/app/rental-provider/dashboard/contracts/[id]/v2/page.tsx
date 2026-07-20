@@ -677,8 +677,14 @@ interface ActorPerms {
   signLandlord: boolean;
   /** Sign tenant / witness / manager signatures → canSignDocuments. */
   signDocuments: boolean;
-  /** Deposit edit + settlement → canManageDeposits OR canManageCollections. */
+  /** Counter-sign a move-in / move-out inspection → canManageInspections (NOT
+   *  the landlord/POA contract signature — a manager signs inspections). */
+  inspections: boolean;
+  /** Deposit edit → canManageDeposits OR canManageCollections. */
   deposits: boolean;
+  /** Finalize / sign off the FINAL SETTLEMENT (send, mark-paid, unsend) →
+   *  canSettleDeposits. */
+  settleDeposits: boolean;
   /** Record / edit payments, fees, cheque-status, confirm PDC → canManageCollections. */
   collections: boolean;
 }
@@ -1387,7 +1393,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             </div>
           </div>
           <p className="note" style={{ marginTop: 8 }}>Optional — you can proceed to settlement.</p>
-          {h.perms.deposits && (
+          {h.perms.settleDeposits && (
             <Link href={h.settlementUrl} className="btn btn-jade btn-block">
               <Wallet size={14} /> Proceed to settlement
             </Link>
@@ -1425,15 +1431,15 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                This is live wind-down management (like recording a payment), so
                it is NOT gated by readOnlyWorkflow — the lease stays active
                through settlement, which would otherwise lock it permanently.
-               A manager without the deposits/collections permission sees it
+               A manager without the settle-deposits permission sees it
                locked (read-only). */}
             <ChkRow on={ss === 'sent' || ss === 'agreed'} label="Settlement sent to customer"
-              onToggle={h.onUnsendSettlement} locked={ss === 'agreed' || !h.perms.deposits} />
+              onToggle={h.onUnsendSettlement} locked={ss === 'agreed' || !h.perms.settleDeposits} />
             {/* The customer's agreement and the payout are not the RP's to undo here. */}
             <ChkRow on={ss === 'agreed'} label={`${TEN} agreed`} onToggle={() => {}} locked />
             <ChkRow on={false} label="Refund marked paid" onToggle={() => {}} locked />
           </div>
-          {h.perms.deposits && (
+          {h.perms.settleDeposits && (
             <Link href={h.settlementUrl} className="btn btn-jade btn-block">
               <Wallet size={14} /> Open settlement workspace
             </Link>
@@ -2795,7 +2801,7 @@ function DetailsDrawer({
                                           <Pencil size={12} /> Edit
                                         </button>
                                       )}
-                                      {(!sd.status || sd.status === 'held') && (
+                                      {perms.settleDeposits && (!sd.status || sd.status === 'held') && (
                                         <Link href={`${contractBase}/settlement`} className="mini-btn view" title="Settle the deposit (refund / deduction)">
                                           <Stamp size={12} /> Settle
                                         </Link>
@@ -5684,8 +5690,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     // only sign the landlord's signature with power of attorney).
     signLandlord:  mgrCan('canSignDocuments') && mgrCan('canActAsPoa'),
     signDocuments: mgrCan('canSignDocuments'),
-    // Deposit edit / settlement: either deposits OR collections permission.
+    // Inspection counter-sign = inspection-management, not contract signing.
+    inspections:   mgrCan('canManageInspections'),
+    // Deposit edit: either deposits OR collections permission.
     deposits:      mgrCan('canManageDeposits') || mgrCan('canManageCollections'),
+    // Final-settlement sign-off (send / mark-paid / unsend) → canSettleDeposits.
+    settleDeposits: mgrCan('canSettleDeposits'),
     // Record/edit payment + clear-cheque: the backend accepts the granular
     // carve-out flags OR the umbrella, so surface the buttons for any of them.
     collections:   mgrCan('canManageCollections') || mgrCan('canRecordPayments') || mgrCan('canClearCheques'),
@@ -6255,8 +6265,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             {/* Move-in: second link for the on-site inspection manager — they
                  fill the move-in form, attach photos, submit and counter-sign
                  the RP side via the same no-login portal, so no separate account
-                 is needed. */}
-            {selStep.key === 'movein' && contract.tenant.id && !readOnlyWorkflow && (
+                 is needed. Provisioning the counter-sign → canManageInspections. */}
+            {selStep.key === 'movein' && contract.tenant.id && !readOnlyWorkflow && perms.inspections && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
                   Inspection manager link
@@ -6272,7 +6282,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             )}
             {/* Inline RP counter-signature — appears once the customer has signed
                  the move-in inspection, so it can be completed right here. */}
-            {selStep.key === 'movein' && derived.moveIn.rpSubmitted && derived.moveIn.tenantSig && !derived.moveIn.rpCounterSig && perms.signDocuments && (
+            {selStep.key === 'movein' && derived.moveIn.rpSubmitted && derived.moveIn.tenantSig && !derived.moveIn.rpCounterSig && perms.inspections && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <InlineInspectionCounterSign contractId={contract.id} type="move_in" onSigned={() => void reload()} />
               </div>
@@ -6295,8 +6305,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             {/* Move-out: second link for the on-site inspection manager — they
                  fill the move-out form, attach photos, submit and counter-sign
                  the RP side via the same no-login portal. Mirrors the move-in
-                 inspector link above; backend already supports move_out. */}
-            {selStep.key === 'moveout' && contract.tenant.id && !derived.moveOut.rpCounterSig && (
+                 inspector link above; backend already supports move_out.
+                 Provisioning the counter-sign → canManageInspections. */}
+            {selStep.key === 'moveout' && contract.tenant.id && !derived.moveOut.rpCounterSig && perms.inspections && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
                   Inspection manager link

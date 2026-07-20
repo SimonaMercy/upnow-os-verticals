@@ -255,6 +255,12 @@ export interface ContractDocsBinderProps {
   signerName: string;
   signerDefaultName: string;
   landlordSigned: boolean;
+  /** Whether the current actor may sign as landlord — needs signing rights AND
+   *  power of attorney for a delegated manager. Defaults to true so the no-login
+   *  portal (LandlordReview) and RP-owner paths are unaffected; the authed
+   *  manager documents page passes the computed value. When false, the sign bar
+   *  is hidden (the tenancy contract is landlord/POA-only). */
+  canLandlordSign?: boolean;
   onSign: (p: { signatureImage: string; signatoryName: string }) => Promise<void>;
 }
 
@@ -265,7 +271,7 @@ type Slot =
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
-  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, signatureCertificate, headerRight, signerName, signerDefaultName, landlordSigned, onSign } = props;
+  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, signatureCertificate, headerRight, signerName, signerDefaultName, landlordSigned, canLandlordSign = true, onSign } = props;
   const planRefNo = paymentRefs?.planRefNo ?? null;
   // Enrich the receipt contract so per-payment receipts print their real gapless
   // number and the plan number (see PaymentReceiptPdf).
@@ -502,14 +508,16 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         </section>
       </div>
 
-      <ContractSignBar
-        signerRole="Landlord"
-        signerName={signerName}
-        defaultName={signerDefaultName}
-        alreadySigned={landlordSigned}
-        onSign={onSign}
-        reviewNote="You've reviewed every document above."
-      />
+      {canLandlordSign && (
+        <ContractSignBar
+          signerRole="Landlord"
+          signerName={signerName}
+          defaultName={signerDefaultName}
+          alreadySigned={landlordSigned}
+          onSign={onSign}
+          reviewNote="You've reviewed every document above."
+        />
+      )}
     </div>
   );
 }

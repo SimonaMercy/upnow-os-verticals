@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, createElement } from 'react';
 import { useParams, usePathname } from 'next/navigation';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
@@ -120,6 +121,13 @@ export default function SettlementPage() {
   // The move-out inspection report a restoration line was priced from.
   const moveOutReportHref = (id: number) => `${dashBase}/contracts/${id}/inspection/v2?type=move_out`;
 
+  // Final-settlement sign-off is gated by canSettleDeposits for a delegated
+  // manager (?rp isn't propagated to this sub-route, so the acting landlord id
+  // comes from the contract fetch). RP owners always may.
+  const { canForRp } = useManagerPermissions();
+  const isManagerView = (pathname ?? '').startsWith('/dashboard/manager');
+  const [landlordId, setLandlordId] = useState<number | null>(null);
+
   const [meta, setMeta] = useState<ContractMeta | null>(null);
   const [view, setView] = useState<'worksheet' | 'statement'>('worksheet');
   const [statement, setStatement] = useState<ApiStatement | null>(null);
@@ -144,6 +152,9 @@ export default function SettlementPage() {
   const [savedTick, setSavedTick] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Manager may finalize the settlement only with canSettleDeposits on this
+  // landlord; RP owners always may. Hides Save/Send/Mark-paid when not allowed.
+  const canSettle = !isManagerView || (landlordId != null && canForRp('canSettleDeposits', landlordId));
   const locked = status !== 'draft';
   const payLocked = status === 'paid';
 
@@ -206,6 +217,7 @@ export default function SettlementPage() {
           unit: c.unit?.number ?? c.unit?.unitNumber ?? '',
           tenantName: c.tenant?.name ?? '',
         });
+        setLandlordId(c.landlord?.id ?? null);
         setIsDirect(c.termination?.method === 'direct');
       }
       if (sRes.ok) {
@@ -760,7 +772,7 @@ export default function SettlementPage() {
         <p className="text-xs text-[#6b6860]">Customer has vacated — you can record the refund and close the lease directly.</p>
       )}
       <div className="flex flex-wrap items-center gap-3 pb-10">
-        {!locked && (
+        {!locked && canSettle && (
           <>
             <button onClick={() => void save()} disabled={saving || acting !== null}
               className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
@@ -772,7 +784,7 @@ export default function SettlementPage() {
             </button>
           </>
         )}
-        {(status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
+        {canSettle && (status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
           <div className="flex flex-col gap-1.5">
             <button onClick={() => void markPaid()} disabled={acting !== null || balance < -0.005 || blockingGaps.length > 0}
               className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">

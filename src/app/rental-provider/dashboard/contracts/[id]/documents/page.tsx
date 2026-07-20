@@ -8,8 +8,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import { ContractDocsBinder, LandlordLinkButton, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
@@ -27,7 +28,7 @@ interface Contract {
   originLeadId?: number | null; offerPlan?: OfferPlan | null;
   termination?: { response?: string | null } | null;
   documents?: BinderDoc[];
-  landlord?: { name?: string | null; companyName?: string | null } | null;
+  landlord?: { id?: number | null; name?: string | null; companyName?: string | null } | null;
   tenant?: { id?: number | null } | null;
   payments?: PlanPayment[];
   fees?: PlanPayment[];
@@ -40,6 +41,12 @@ function Center({ children }: { children: React.ReactNode }) {
 export default function ContractDocumentsPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
+  // Signing the tenancy contract as landlord needs signing rights AND power of
+  // attorney — so a delegated manager needs canSignDocuments && canActAsPoa on
+  // the acting landlord. RP owners (not in the /manager portal) always may.
+  const pathname = usePathname();
+  const isManagerView = pathname?.startsWith('/dashboard/manager') ?? false;
+  const { canForRp } = useManagerPermissions();
   const [c, setC] = useState<Contract | null>(null);
   const [sigs, setSigs] = useState<Sig[]>([]);
   const [cert, setCert] = useState<SignatureCertificateData | null>(null);
@@ -68,6 +75,10 @@ export default function ContractDocumentsPage() {
   if (err) return <Center>Failed to load documents: {err}</Center>;
   if (!c) return <Center><Loader2 className="animate-spin" size={32} /></Center>;
 
+  const landlordId = c.landlord?.id ?? null;
+  const canLandlordSign = !isManagerView
+    || (landlordId != null && canForRp('canSignDocuments', landlordId) && canForRp('canActAsPoa', landlordId));
+
   const ejari = toEjari(c, sigs);
   const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
     const res = await fetch(`/api/contracts/${c.id}/sign`, {
@@ -94,12 +105,11 @@ export default function ContractDocumentsPage() {
       receipt={c as unknown as ReceiptContract}
       watermark={watermark}
       signatureCertificate={cert}
-      headerRight={c.tenant?.id ? (
-        <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} />
-      ) : undefined}
+      headerRight={c.tenant?.id && canLandlordSign ? <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} /> : undefined}
       signerName={c.landlord?.companyName || c.landlord?.name || 'Landlord'}
       signerDefaultName={c.landlord?.name || c.landlord?.companyName || ''}
       landlordSigned={sigs.some(s => s.role === 'landlord')}
+      canLandlordSign={canLandlordSign}
       onSign={sign}
     />
   );
