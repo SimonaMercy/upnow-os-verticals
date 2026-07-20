@@ -747,7 +747,7 @@ export default function CustomerDetailPage() {
           )}
           {/* Standalone (no-lease) document-upload link for this customer:
               generate → open / copy → send by email. */}
-          <DocsLinkButton tenantId={Number(params.id)} label="Send documents link" />
+          <DocsLinkButton tenantId={Number(params.id)} label="Request documents" />
         </div>
         <div className="p-2 max-h-[480px] overflow-y-auto">
           {kycChecklist.map(({ req, docs, satisfied, partialHint }) => {

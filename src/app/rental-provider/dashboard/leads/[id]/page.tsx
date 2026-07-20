@@ -1363,7 +1363,7 @@ function DocsSection({
             {/* External upload link — send the lead's customer a no-login link to
                 upload the requested documents (in addition to their own journey). */}
             {canUpload && lead.convertedTenant?.id && (
-              <DocsLinkButton tenantId={lead.convertedTenant.id} label="Send upload link" />
+              <DocsLinkButton tenantId={lead.convertedTenant.id} label="Request documents" />
             )}
           </div>
         </div>
