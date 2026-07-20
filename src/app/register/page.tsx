@@ -1,6 +1,8 @@
-import { redirect } from "next/navigation";
+import { redirect } from 'next/navigation';
 
-// Per Jira SCRUM-7 (T-107): visiting /register without a role redirects home.
+// Registration now happens in a popup on the landing page — there is no
+// separate registration page. Redirect to the marketplace with the sign-up
+// popup opened via ?auth.
 export default function RegisterIndexPage() {
-  redirect("/");
+  redirect('/?auth=signup');
 }
