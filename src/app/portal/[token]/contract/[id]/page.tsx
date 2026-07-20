@@ -17,10 +17,17 @@ import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractD
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
+import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import type { InspectionDoc } from '@/lib/inspectionCatalog';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
+});
+
+const ReceiptButtons = dynamic(() => import('@/components/upnow/PaymentReceiptPdf').then(m => ({ default: m.ReceiptButtons })), {
+  ssr: false,
+  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing receipts…</div>,
 });
 
 interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
@@ -97,8 +104,8 @@ export default function ContractReviewPage() {
   useEffect(() => {
     const isLandlord = (d?.signerRole ?? 'tenant') === 'landlord';
     const who = isLandlord
-      ? (d?.contract?.landlord?.name ?? d?.contract?.landlord?.companyName ?? null)
-      : (d?.contract?.tenant?.name ?? null);
+      ? (d?.contract?.landlord?.companyName ?? d?.contract?.landlord?.name ?? null)
+      : (d?.contract?.tenant?.companyName ?? d?.contract?.tenant?.name ?? null);
     setDocViewerWatermark(who);
   }, [d]);
 
@@ -140,6 +147,14 @@ export default function ContractReviewPage() {
   // Combine the addendum into the contract PDF the tenant reads/signs.
   const addendums: EjariAddendum[] = d.addendums ?? [];
 
+  // System-generated payment receipts (proof of payment) — the same generator the
+  // RP / landlord views use, fed from the token-scoped plan the backend now returns
+  // on the customer link. Shown only when there are payment / fee rows to receipt.
+  const receipt: ReceiptContract | null =
+    d.plan && (d.plan.payments.length > 0 || (d.plan.fees?.length ?? 0) > 0)
+      ? ({ ...d.contract, payments: d.plan.payments, fees: d.plan.fees, pdcConfirmed: d.pdcConfirmed } as unknown as ReceiptContract)
+      : null;
+
   // Landlord links get a dedicated layout: the contract + every document in full
   // preview (no download) with a sticky sign menu — the lessor's equivalent of
   // the customer review-and-sign page.
@@ -163,6 +178,22 @@ export default function ContractReviewPage() {
   const showMoveIn = (purpose === 'move_in' || purpose === 'all') && (d.moveInAvailable || isInspector);
   const showMoveOut = purpose === 'move_out';
 
+  // Meta for the shared v2 inspection report — the magic-link now renders the SAME
+  // component as the logged-in customer page. Tenant view: money + per-item photos
+  // are already stripped server-side (getInspectionForTenant).
+  const reportMeta: ReportMeta = {
+    property: d.contract.property?.buildingName ?? d.contract.property?.fullAddress ?? '',
+    unitNo: d.contract.unit?.number ?? '',
+    propertyType: d.contract.unit?.type ?? '',
+    floor: '',
+    tenantName: d.contract.tenant?.name ?? '',
+    tenantPhone: (d.contract.tenant as { phone?: string | null })?.phone ?? '',
+    tenantEmail: (d.contract.tenant as { email?: string | null })?.email ?? '',
+    inspectorName: insp?.inspectorName ?? '',
+    inspectorCompany: (insp as { inspectorCompany?: string } | null)?.inspectorCompany ?? '',
+    inspectorRole: (insp as { inspectorRole?: string } | null)?.inspectorRole ?? 'Property Representative',
+  };
+
   return (
     <div className="min-h-screen bg-[#f7f6f2]">
       <div className="max-w-3xl mx-auto px-4 py-8">
@@ -181,7 +212,19 @@ export default function ContractReviewPage() {
         <div className="mt-5">
           {inspType ? (
             insp && insp.rpSubmittedAt ? (
-              <InspectionPreview insp={insp} type={inspType} />
+              <InspectionReportView
+                doc={insp as unknown as InspectionDoc}
+                meta={reportMeta}
+                phase={inspType}
+                audience="customer"
+                dates={{
+                  inspectionDate: (insp as { reportGeneratedDate?: string; inspectionDate?: string }).reportGeneratedDate
+                    ?? (insp as { inspectionDate?: string }).inspectionDate ?? null,
+                  moveInDate: d.contract.startDate ?? null,
+                  moveOutDate: d.contract.endDate ?? null,
+                }}
+                hideSignatures
+              />
             ) : (
               <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
                 {isInspector
@@ -190,22 +233,9 @@ export default function ContractReviewPage() {
               </div>
             )
           ) : (
-            <EjariInline data={ejari} addendums={addendums} height={680} fluid />
+            <EjariInline data={ejari} addendums={addendums} noScroll />
           )}
         </div>
-
-        {/* Any extra signed/official copies attached — hidden on the move-out signing view */}
-        {inspType !== 'move_out' && d.documents.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {d.documents.map(x => (
-              <button key={x.documentKey} type="button"
-                onClick={() => openDocViewer({ fileUrl: x.fileUrl, caption: (x.displayName ?? x.documentKey).replace(/_/g, ' ') })}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-[#e8e6e0] text-[#2e9f82] cursor-pointer">
-                <FileText size={13} /> {(x.displayName ?? x.documentKey).replace(/_/g, ' ')}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Sign the contract */}
         {showContract && (
@@ -215,6 +245,16 @@ export default function ContractReviewPage() {
             ) : (
               <SignBox token={token} contractId={id} kind="contract" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
             )}
+          </Card>
+        )}
+
+        {/* System-generated payment receipts — after signing; surfaced as
+             View / Download actions (no inline preview), since the tenancy
+             contract is the only inline preview. Contract links only. */}
+        {!inspType && receipt && (
+          <Card title="Payment receipts" icon={FileText}>
+            <p className="text-xs text-[#6b6860] mb-3">Your system-generated payment receipts for this tenancy.</p>
+            <ReceiptButtons contract={receipt} />
           </Card>
         )}
 

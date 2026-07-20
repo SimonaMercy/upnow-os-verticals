@@ -25,6 +25,7 @@ import {
   LayoutGrid, Rows3, Search, Plus, Trash2,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiDelete } from '@/lib/api';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { UnitFormModal } from '@/components/upnow/UnitFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { LayoutFinancialsModal, type Plan } from '@/components/upnow/LayoutFinancialsModal';
@@ -116,6 +117,14 @@ function PlanThumb({ url, alt, emptyLabel = 'No floor plan' }: { url: string | n
  */
 export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const rpQ = manager ? `rp=${manager.rp}` : '';
+  // Manager portal is per-landlord: edit / price / add / delete need
+  // canEditProperties on THIS landlord; publishing a listing needs
+  // canPublishListings. The RP (no `manager` prop) owns their own units, so
+  // everything is allowed. While a manager's permissions load, canForRp
+  // returns false → edit affordances stay hidden until known (safe default).
+  const { canForRp } = useManagerPermissions();
+  const canEdit    = !manager || canForRp('canEditProperties', manager.rp);
+  const canPublish = !manager || canForRp('canPublishListings', manager.rp);
   const [data, setData] = useState<Resp | null>(null);
   const [propertyId, setPropertyId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState('all');
@@ -460,11 +469,13 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           <Maximize size={13} />
         </button>
       )}
-      <button onClick={(e) => { e.stopPropagation(); pickImage(p); }} disabled={isUploading}
-        title="Replace floor plan (applies to all units on this plan)" className="flex items-center justify-center hover:bg-white disabled:opacity-60"
-        style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,.95)', color: '#5a635c', boxShadow: '0 2px 6px rgba(20,40,30,.1)', border: '1px solid #e2e7e1' }}>
-        {isUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-      </button>
+      {canEdit && (
+        <button onClick={(e) => { e.stopPropagation(); pickImage(p); }} disabled={isUploading}
+          title="Replace floor plan (applies to all units on this plan)" className="flex items-center justify-center hover:bg-white disabled:opacity-60"
+          style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,.95)', color: '#5a635c', boxShadow: '0 2px 6px rgba(20,40,30,.1)', border: '1px solid #e2e7e1' }}>
+          {isUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+        </button>
+      )}
     </div>
   );
 
@@ -482,10 +493,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           <div style={{ fontSize: 14, fontWeight: 700, color: '#b91c1c' }}>No price set</div>
         )}
       </div>
-      <button onClick={() => setFinModal(p)} className="flex items-center gap-1.5 whitespace-nowrap shrink-0"
-        style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 15px', borderRadius: 10 }}>
-        <Pencil size={13} /> {p.rentFrom != null ? 'Edit' : 'Set price'}
-      </button>
+      {canEdit && (
+        <button onClick={() => setFinModal(p)} className="flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 15px', borderRadius: 10 }}>
+          <Pencil size={13} /> {p.rentFrom != null ? 'Edit' : 'Set price'}
+        </button>
+      )}
     </div>
   );
 
@@ -577,24 +590,26 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // "View" button; the mock leads with the "Edit" pill.)
   const unitActions = (p: Plan, u: UnitRecord, busy: boolean) => (
     <>
-      {u.availability === 'available' && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
+      {canPublish && u.availability === 'available' && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
         <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'submit-listing'); }}
           className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '7px 11px', borderRadius: 9 }}>
           {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
         </button>
       )}
-      {u.availability === 'available' && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
+      {canPublish && u.availability === 'available' && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
         <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'withdraw-listing'); }}
           className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#6b756f', background: '#eef1ec', padding: '7px 11px', borderRadius: 9 }}>
           Withdraw
         </button>
       )}
-      <button onClick={(e) => { e.stopPropagation(); setUnitModal({ plan: p, editingUnit: u }); }} title="Edit unit"
-        className="flex items-center gap-1.5 shrink-0"
-        style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 14px', borderRadius: 10 }}>
-        <Pencil size={13} /> Edit
-      </button>
-      {confirmDelete === u.id ? (
+      {canEdit && (
+        <button onClick={(e) => { e.stopPropagation(); setUnitModal({ plan: p, editingUnit: u }); }} title="Edit unit"
+          className="flex items-center gap-1.5 shrink-0"
+          style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 14px', borderRadius: 10 }}>
+          <Pencil size={13} /> Edit
+        </button>
+      )}
+      {canEdit && (confirmDelete === u.id ? (
         <span className="flex items-center gap-1 shrink-0">
           <button disabled={busy} onClick={(e) => { e.stopPropagation(); onDeleteUnit(p.propertyId, u.id); }}
             className="disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#b91c1c', background: '#fdecec', padding: '7px 10px', borderRadius: 9 }}>
@@ -608,7 +623,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           className="flex items-center justify-center shrink-0" style={{ width: 34, height: 34, borderRadius: 9, color: '#b91c1c', background: '#fff', border: '1px solid #f1d5d5' }}>
           <Trash2 size={14} />
         </button>
-      )}
+      ))}
     </>
   );
 
@@ -709,13 +724,16 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
             <h1 style={{ margin: '6px 0 0', fontSize: 30, fontWeight: 800, letterSpacing: '-.025em', color: INK }}>My Units</h1>
           </div>
           {/* Bulk add-units wizard. Managers land on the same wizard scoped to the
-              acting landlord (?rp) via the manager route re-export. */}
-          <Link
-            href={manager ? `/dashboard/manager/units/add?rp=${manager.rp}` : '/rental-provider/dashboard/units/add'}
-            className="flex items-center gap-2 shrink-0"
-            style={{ fontSize: 14, fontWeight: 700, color: '#fff', background: GREEN, padding: '11px 18px', borderRadius: 11, boxShadow: '0 6px 16px rgba(46,159,100,.26)' }}>
-            <Plus size={16} /> Add units
-          </Link>
+              acting landlord (?rp) via the manager route re-export. Gated by the
+              manager's edit permission on this landlord. */}
+          {canEdit && (
+            <Link
+              href={manager ? `/dashboard/manager/units/add?rp=${manager.rp}` : '/rental-provider/dashboard/units/add'}
+              className="flex items-center gap-2 shrink-0"
+              style={{ fontSize: 14, fontWeight: 700, color: '#fff', background: GREEN, padding: '11px 18px', borderRadius: 11, boxShadow: '0 6px 16px rgba(46,159,100,.26)' }}>
+              <Plus size={16} /> Add units
+            </Link>
+          )}
         </div>
 
         {/* CONTROLS — By unit / By layout · sort · grid/list */}
@@ -855,7 +873,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
                     <span style={CHIP_COUNT}>{g.items.length} {g.items.length === 1 ? 'unit' : 'units'}</span>
                     <div className="flex-1" />
                     {/* Add a unit to this building (its property); the form sets the type. */}
-                    {g.items[0]?.pl && (
+                    {canEdit && g.items[0]?.pl && (
                       <button onClick={() => setUnitModal({ plan: g.items[0].pl })} className="flex items-center gap-1.5"
                         style={{ fontSize: 12.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, border: '1px solid #cce6d8', padding: '8px 13px', borderRadius: 9 }}>
                         <Plus size={14} /> Add unit
@@ -979,7 +997,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           contracts={contracts
             .filter(x => x.unit?.id === unitPreview.unit.id)
             .map(c => ({ id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive }))}
-          onEdit={() => { setUnitModal({ plan: unitPreview.plan, editingUnit: unitPreview.unit }); setUnitPreview(null); }}
+          onEdit={canEdit ? () => { setUnitModal({ plan: unitPreview.plan, editingUnit: unitPreview.unit }); setUnitPreview(null); } : undefined}
           onClose={() => setUnitPreview(null)}
         />
       )}

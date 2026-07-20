@@ -51,6 +51,8 @@ interface UnitLite {
   unitSizeSqft: number | null;
   planLabel: string | null;
   rentalPrice: number | null;
+  marketPrice: number | null;
+  lastLeaseRent: number | null;   // annual rent of the unit's most recent lease (active OR ended); null = never leased
 }
 
 interface Property {
@@ -180,7 +182,8 @@ interface MixLayout {
   sqmLo: number | null; sqmHi: number | null;
   sqftLo: number | null; sqftHi: number | null;
   priceLo: number | null; priceHi: number | null;
-  sum: number;          // Σ annual rent over priced units
+  sum: number;          // Σ last lease contract value (units.rental_price) over priced units
+  marketSum: number;    // Σ market value (units.market_price) over benchmarked units
   unpriced: number;
   hasPlan: boolean;     // a matching floor-plan exists (→ editable)
 }
@@ -194,6 +197,7 @@ interface MixGroup {
   sqftLo: number | null; sqftHi: number | null;
   priceLo: number | null; priceHi: number | null;
   sum: number;
+  marketSum: number;
   unpriced: number;
   layouts: MixLayout[];
 }
@@ -209,34 +213,41 @@ const maxOf = (a: number | null, b: number | null) => (a == null ? b : b == null
  * spans, price spans and rent-roll sums. `planLabels` (from the floor-plans
  * endpoint) marks which layouts have an editable plan.
  */
-function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRow[]; totalUnits: number; grandSum: number; unpriced: number } {
+function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRow[]; totalUnits: number; grandSum: number; grandMarketSum: number; unpriced: number } {
   const groups = new Map<string, MixGroup>();
   for (const u of units) {
     const gkey = `${u.unitType}::${u.bedrooms ?? ''}`;
     let g = groups.get(gkey);
     if (!g) {
-      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, layouts: [] };
+      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, marketSum: 0, unpriced: 0, layouts: [] };
       groups.set(gkey, g);
     }
     const lp = u.planLabel ?? null;
     let l = g.layouts.find((x) => x.planLabel === lp);
     if (!l) {
-      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, hasPlan: lp != null && planLabels.has(lp) };
+      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, marketSum: 0, unpriced: 0, hasPlan: lp != null && planLabels.has(lp) };
       g.layouts.push(l);
     }
-    const price = u.rentalPrice;
+    // Last lease value: the unit's most recent lease rent (active OR ended), so
+    // now-inactive units still count. Falls back to the asking rent only when the
+    // unit has never been leased.
+    const lease = u.lastLeaseRent ?? u.rentalPrice;
+    const market = u.marketPrice;
     for (const bucket of [g, l]) {
       bucket.count += 1;
       bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
       bucket.sqmHi = maxOf(bucket.sqmHi, u.unitSizeSqm);
       bucket.sqftLo = minOf(bucket.sqftLo, u.unitSizeSqft);
       bucket.sqftHi = maxOf(bucket.sqftHi, u.unitSizeSqft);
-      if (price != null && price > 0) {
-        bucket.sum += price;
-        bucket.priceLo = minOf(bucket.priceLo, price);
-        bucket.priceHi = maxOf(bucket.priceHi, price);
+      if (lease != null && lease > 0) {
+        bucket.sum += lease;
+        bucket.priceLo = minOf(bucket.priceLo, lease);
+        bucket.priceHi = maxOf(bucket.priceHi, lease);
       } else {
         bucket.unpriced += 1;
+      }
+      if (market != null && market > 0) {
+        bucket.marketSum += market;
       }
     }
   }
@@ -247,8 +258,9 @@ function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRo
   const rows: MixRow[] = out.flatMap((g) => g.layouts.map((l) => ({ ...l, unitType: g.unitType, bedrooms: g.bedrooms })));
   const totalUnits = units.length;
   const grandSum = out.reduce((s, g) => s + g.sum, 0);
+  const grandMarketSum = out.reduce((s, g) => s + g.marketSum, 0);
   const unpriced = out.reduce((s, g) => s + g.unpriced, 0);
-  return { rows, totalUnits, grandSum, unpriced };
+  return { rows, totalUnits, grandSum, grandMarketSum, unpriced };
 }
 
 // Open a transient file picker and resolve with the chosen files.
@@ -393,6 +405,8 @@ export function PropertyDetailsModal({
         unitSizeSqm: numOrNull(r.unitSizeSqm),
         unitSizeSqft: numOrNull(r.unitSizeSqft),
         rentalPrice: numOrNull(r.rentalPrice),
+        marketPrice: numOrNull(r.marketPrice),
+        lastLeaseRent: numOrNull(r.lastLeaseRent),
       }));
       rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
       setUnits(rows);
@@ -802,7 +816,7 @@ export function PropertyDetailsModal({
                     <div style={{ minWidth: 720 }}>
                       {/* header */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
-                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Rent / unit', 'Total / yr', ''].map((h, i) => (
+                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Sum of Last Lease Value', 'Sum of Market Value', ''].map((h, i) => (
                           <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
                         ))}
                       </div>
@@ -819,14 +833,14 @@ export function PropertyDetailsModal({
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
                           <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
-                          {/* Rent / unit — the per-unit annual price */}
+                          {/* Sum of Last Lease Value — Σ units.rental_price (last activated lease's rent) for the layout */}
                           <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontSize: 12.5, fontWeight: 600, color: r.priceLo == null ? C.amber : C.ink2, fontVariantNumeric: 'tabular-nums' }}>{r.priceLo == null ? 'No price' : `AED ${spanLabel(r.priceLo, r.priceHi)}`}</span>
-                          </div>
-                          {/* Total / yr — Rent × Units for the layout */}
-                          <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: r.sum > 0 ? C.greenD : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.sum > 0 ? `AED ${aed(r.sum)}` : '—'}</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: r.sum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.sum > 0 ? `AED ${aed(r.sum)}` : '—'}</span>
                             {r.unpriced > 0 && r.sum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
+                          </div>
+                          {/* Sum of Market Value — Σ units.market_price for the layout */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: r.marketSum > 0 ? C.greenD : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.marketSum > 0 ? `AED ${aed(r.marketSum)}` : '—'}</span>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             {pricingEditable && r.planLabel && (
@@ -845,8 +859,8 @@ export function PropertyDetailsModal({
                         <div />
                         <div />
                         <div style={{ fontSize: 13, fontWeight: 800, color: C.ink, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{mix.totalUnits}</div>
-                        <div style={{ fontSize: 9, fontWeight: 700, color: C.mute2, textAlign: 'right', textTransform: 'uppercase', letterSpacing: '.05em' }}>Rent roll</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: C.greenD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandSum)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandSum)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.greenD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandMarketSum)}</div>
                         <div />
                       </div>
                     </div>

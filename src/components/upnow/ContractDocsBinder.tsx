@@ -329,6 +329,10 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const isSalaryDoc = (d: BinderDoc) => /salary/.test(norm(d.documentKey)) || /salary/i.test(d.displayName || '');
   const isMoveInDoc = (d: BinderDoc) => /move_?in/.test(norm(d.documentKey)) || /move[ -]?in/i.test(d.displayName || '');
   const leftover = all.filter(d => !isKyc(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && (isSalaryDoc(d) || isMoveInDoc(d))));
+  // The loose "Other documents" bin is an internal-review convenience — hide it on
+  // the no-login magic-link view (landlord portal) so the lessor only reviews the
+  // canonical binder set, not miscellaneous uploads. Authenticated RP view unchanged.
+  const showLeftover = leftover.length > 0 && !portalToken;
 
   const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'agreement' ? 'Agreement' : s.label;
   const slotId = (s: Slot) => s.kind === 'doc' ? `r-${s.key}` : `r-${s.kind}`;
@@ -338,7 +342,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   ];
   const rightNav = [
     ...seq.filter(s => !(s.kind === 'doc' && s.optional && matchDocs(s.key).length === 0)).map(s => ({ id: slotId(s), label: rightLabel(s) })),
-    ...(leftover.length ? [{ id: 'r-other', label: 'Other documents' }] : []),
+    ...(showLeftover ? [{ id: 'r-other', label: 'Other documents' }] : []),
   ];
 
   // ── "Download documents" popup — everything AVAILABLE on this page, in page
@@ -488,7 +492,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
             }
             return <div key={slotId(s)} id={slotId(s)} style={{ scrollMarginTop: JUMP_OFFSET }}>{inner}</div>;
           })}
-          {leftover.length > 0 && (
+          {showLeftover && (
             <div id="r-other" style={{ scrollMarginTop: JUMP_OFFSET }}>
               {leftover.map(d => (
                 <SecurePreview key={'x' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} watermark={watermark} />

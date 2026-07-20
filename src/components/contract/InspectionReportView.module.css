@@ -1,0 +1,175 @@
+/* Shared inspection report layout (RP + customer, move-in + move-out).
+   Ported from the approved Mockups/customer-rental-journey/inspection-report-template.html */
+
+.report{
+  --green:#2e9f82; --ink:#1a1916; --muted:#6b6860; --faint:#9b9890;
+  --line:#e5e3dc; --line-soft:#f1efe9; --gutter:#fafcfb;
+  --good:#2e9f82; --fair:#e0912f; --poor:#dc2626;
+  --t-cat:#2e9f82; --t-items:#4f6ef7; --t-replace:#e0912f; --t-cost:#dc2626;
+  color:var(--ink);
+  font-size:14px; line-height:1.45;
+  /* Clean white card so the form reads crisp on any page background. */
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:24px 26px;
+  box-shadow:0 1px 3px rgba(20,18,15,.04);
+}
+@media (max-width:560px){ .report{ padding:18px 16px } }
+.report *{box-sizing:border-box}
+.ico{display:inline-grid;place-items:center}
+.ico :global(svg){display:block}
+.tabnum{font-variant-numeric:tabular-nums}
+
+/* Title */
+.titlerow{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
+.title{display:flex;align-items:flex-start;gap:13px}
+.homeIcon{color:var(--green);margin-top:3px}
+.homeIcon :global(svg){width:34px;height:34px}
+.title h1{margin:0;font-size:30px;line-height:1.02;font-weight:800;letter-spacing:-.01em;color:var(--green);text-wrap:balance}
+.title p{margin:6px 0 0;color:var(--muted);font-size:13px}
+
+/* Date boxes */
+.dates{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.datebox{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#fcfcfb}
+.datebox .dbi{color:var(--green)}
+.datebox .dbi :global(svg){width:15px;height:15px}
+.datebox .k{font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+.datebox .v{font-size:13px;font-weight:700;margin-top:1px;white-space:nowrap}
+
+/* Detail cards */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+.card{border:1px solid var(--line);border-radius:12px;padding:15px 17px}
+.card h3{margin:0 0 11px;display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--green)}
+.card h3 .ico :global(svg){width:17px;height:17px}
+.kv{display:grid;grid-template-columns:98px 9px 1fr;align-items:baseline;padding:3.5px 0;font-size:12.5px}
+.kv .k{color:var(--faint)}
+.kv .sep{color:var(--faint)}
+.kv .v{font-weight:600}
+
+/* Tiles */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:16px}
+.tiles.three{grid-template-columns:repeat(3,1fr)}
+.tile{display:flex;align-items:center;gap:13px;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.tile .tIc{width:38px;height:38px;border-radius:10px;flex:none}
+.tile .tIc :global(svg){width:20px;height:20px}
+.tile .body{display:flex;flex-direction:column;min-width:0}
+.tile .l{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.tile .warn{color:var(--t-replace);display:inline-grid;place-items:center}
+.tile .warn :global(svg){width:12px;height:12px}
+.tile .num{font-size:25px;font-weight:800;letter-spacing:-.02em;margin-top:3px}
+.cat .tIc{background:color-mix(in srgb,var(--t-cat) 14%,transparent);color:var(--t-cat)}
+.items .tIc{background:color-mix(in srgb,var(--t-items) 14%,transparent);color:var(--t-items)}
+.replace .tIc{background:color-mix(in srgb,var(--t-replace) 14%,transparent);color:var(--t-replace)}
+.cost .tIc{background:color-mix(in srgb,var(--t-cost) 14%,transparent);color:var(--t-cost)}
+.replace .num{color:var(--t-replace)}
+.cost .num{color:var(--t-cost)}
+
+/* Section heading */
+.secH{display:flex;justify-content:space-between;align-items:center;margin:26px 0 12px}
+.secH h2{margin:0;font-size:15px;font-weight:800;letter-spacing:.02em;color:var(--green);text-transform:uppercase}
+.addbtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--green);color:var(--green);background:transparent;border-radius:9px;padding:7px 12px;font:inherit;font-weight:700;font-size:12.5px;cursor:pointer}
+.addbtn .ico :global(svg){width:14px;height:14px}
+
+/* Table */
+.tblWrap{border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+.comp{width:100%;border-collapse:collapse;font-size:12.5px}
+.comp thead th{background:#f7f8f6;text-align:left;padding:9px 12px;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);vertical-align:middle}
+.comp th.center,.comp td.center{text-align:center}
+.comp th.right,.comp td.right{text-align:right}
+.thSub{display:block;font-weight:600;text-transform:none;letter-spacing:0;font-size:9px;color:var(--faint);margin-top:1px}
+
+.catnumCell,.catnameCell{background:var(--gutter);vertical-align:middle;border-top:1px solid var(--line)}
+.catnumCell{text-align:center;border-right:1px solid var(--line-soft)}
+.catnameCell{border-right:1px solid var(--line)}
+.catnumBig{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:8px;background:var(--green);color:#fff;font-weight:800;font-size:14px}
+.catcell{display:flex;align-items:center;gap:10px;padding:2px 4px}
+.caticon{width:32px;height:32px;border-radius:9px;background:color-mix(in srgb,var(--green) 11%,transparent);color:var(--green);display:grid;place-items:center;flex:none}
+.caticon :global(svg){width:18px;height:18px}
+.catname{font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.02em;line-height:1.15}
+.catmeta{font-size:10.5px;color:var(--faint);margin-top:1px}
+
+.comp tbody td{padding:7px 12px;border-top:1px solid var(--line-soft);vertical-align:middle}
+.catLast td{border-bottom:1px solid var(--line)}
+.rn{color:var(--faint);font-variant-numeric:tabular-nums;margin-right:9px;font-weight:600}
+.compCell{font-weight:500}
+
+/* Condition read-only badge */
+.cond{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--line);border-radius:8px;padding:4px 9px;font-weight:700;font-size:12px;background:#fff;min-width:82px}
+.cond .dot{width:7px;height:7px;border-radius:50%}
+.cond.good{color:var(--good)} .cond.good .dot{background:var(--good)}
+.cond.fair{color:var(--fair)} .cond.fair .dot{background:var(--fair)}
+.cond.poor{color:var(--poor)} .cond.poor .dot{background:var(--poor)}
+.condEmpty{color:var(--faint)}
+
+/* 3-option condition picker */
+.condPick{display:inline-flex;gap:3px}
+.cp{border:1px solid var(--line);background:#fff;color:var(--faint);font:inherit;font-weight:700;font-size:11px;padding:4px 8px;border-radius:7px;cursor:pointer;transition:.12s}
+.cp:hover{border-color:#c8c6be}
+.cp:focus-visible{outline:2px solid var(--green);outline-offset:1px}
+.cp.on{color:#fff;border-color:transparent}
+.cp.on.good{background:var(--good)} .cp.on.fair{background:var(--fair)} .cp.on.poor{background:var(--poor)}
+
+.qtyIn{width:54px;text-align:center;border:1px solid var(--line);border-radius:7px;padding:5px;font:inherit;font-weight:600}
+.qtyRo{font-weight:600;font-variant-numeric:tabular-nums}
+.costV{font-weight:700;font-variant-numeric:tabular-nums}
+.rmkIn{width:100%;min-width:150px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;font:inherit;font-size:12px;background:#fff}
+.rmkIn::placeholder{color:#c3c1ba}
+.rmkRo{font-size:12px;color:var(--muted)}
+.rmkRo:empty::before{content:'\2014';color:var(--faint)}
+
+/* Footer */
+.foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-top:14px;padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:#f7f8f6}
+.foot .ft{display:flex;align-items:baseline;gap:10px}
+.foot .ft .k{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.foot .ft .v{font-size:19px;font-weight:800}
+.foot .ft.replace .v{color:var(--t-replace)}
+.foot .ft.cost .v{color:var(--t-cost)}
+
+/* Panels */
+.panels{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px}
+.panel{border:1px solid var(--line);border-radius:12px;padding:15px 16px}
+.panel h4{margin:0 0 10px;display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.panel h4 .ico{color:var(--green)} .panel h4 .ico :global(svg){width:15px;height:15px}
+.notesIn{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);resize:vertical;min-height:86px;background:#fff}
+.notesIn::placeholder{color:#c3c1ba}
+.notesRo{font-size:12.5px;color:var(--muted);line-height:1.55;white-space:pre-wrap}
+.guideHead{display:grid;grid-template-columns:70px 1fr;font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding-bottom:6px;border-bottom:1px solid var(--line-soft);margin-bottom:4px}
+.guideRow{display:grid;grid-template-columns:70px 1fr;align-items:center;padding:4px 0;font-size:12.5px}
+.guideRow .g{display:inline-flex;align-items:center;gap:7px;font-weight:800}
+.guideRow .g .dot{width:9px;height:9px;border-radius:50%}
+.guideRow .ex{color:var(--muted)}
+.panel ul{margin:0;padding-left:16px;color:var(--muted);font-size:12.5px;line-height:1.6}
+
+/* General Notes (standalone, full width) */
+.notesWrap{margin-top:20px}
+
+/* Signatures — bordered two-party block, mirroring the tenancy-contract layout */
+.sigSection{margin-top:24px}
+.sigBar{background:var(--green);color:#fff;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:9px 14px;border-radius:10px 10px 0 0}
+.sigBox{border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px;display:grid;grid-template-columns:1fr 1fr;overflow:hidden}
+.sigCell{padding:15px 16px;display:flex;flex-direction:column}
+.sigCellDivider{border-right:1px solid var(--line)}
+.sigRole{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.sigName{font-weight:700;font-size:13.5px;margin-top:3px;color:var(--ink)}
+.sigCompany{font-size:11.5px;color:var(--muted);margin-top:1px}
+.sigPad{margin-top:12px;height:74px;border:1px dashed #cfcdc6;border-radius:9px;background:#fcfcfb;display:grid;place-items:center;overflow:hidden}
+.sigPad img{max-height:62px;max-width:90%;object-fit:contain}
+/* Holds the interactive signing pad (which supplies its own box) — no fixed height
+   or nested border, so the canvas isn't clipped inside the image container. */
+.sigSlot{margin-top:12px}
+.sigPlaceholder{font-size:11.5px;color:#bdbbb4}
+.sigFoot{margin-top:11px;padding-top:9px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+.sigDate{font-weight:600;color:var(--ink)}
+.ack{margin-top:16px;border:1px solid var(--line);background:#f7f8f6;border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--muted)}
+.ack b{color:var(--ink)}
+
+@media (max-width:860px){
+  .cards,.tiles,.tiles.three,.panels{grid-template-columns:1fr 1fr}
+  .dates{justify-content:flex-start}
+}
+@media (max-width:560px){
+  .cards,.tiles,.tiles.three,.panels{grid-template-columns:1fr}
+  .sigBox{grid-template-columns:1fr}
+  .sigCellDivider{border-right:0;border-bottom:1px solid var(--line)}
+}

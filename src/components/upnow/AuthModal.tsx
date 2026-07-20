@@ -24,6 +24,7 @@ import {
 } from '@/contexts/AuthContext';
 import { OAuthButtons } from '@/components/auth/OAuthButtons';
 import { apiPost } from '@/lib/api';
+import { getSessionId } from '@/lib/trackingIds';
 
 export type AuthModalMode = 'signin' | 'signup';
 

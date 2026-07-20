@@ -306,7 +306,12 @@ export default function ManagerEndedLeasesPage() {
             contract: `/dashboard/manager/contracts/${previewLeaseId}/v2?rp=${effectiveRp}`,
             payments: `/dashboard/manager/payments?rp=${effectiveRp}`,
             deposits: `/dashboard/manager/deposits?rp=${effectiveRp}`,
-            worksheet: `/dashboard/manager/contracts/${previewLeaseId}/settlement?rp=${effectiveRp}`,
+            // The worksheet starts the deposit-settlement mutate flow — only
+            // expose it to a manager who can settle (or terminate) on this
+            // landlord. Undefined ⇒ the modal/statement omit the link.
+            worksheet: (effectiveRp != null && (canForRp('canSettleDeposits', effectiveRp) || canForRp('canManageTermination', effectiveRp)))
+              ? `/dashboard/manager/contracts/${previewLeaseId}/settlement?rp=${effectiveRp}`
+              : undefined,
           }}
         />
       )}

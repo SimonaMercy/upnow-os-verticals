@@ -685,9 +685,10 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
       return;
     }
     setSaving(true);
-    // One price: the annual rent is also the market/list price, so keep them in
-    // lock-step rather than exposing a second field.
-    const payload = { ...form, marketPrice: form.rentalPrice };
+    // Market rent is the benchmark the risk & rent-vs-market reports compare the
+    // in-place rent against. It defaults to the asking rent when left blank, but
+    // the RP can set a distinct value — the two need not move in lock-step.
+    const payload = { ...form, marketPrice: form.marketPrice.trim() || form.rentalPrice };
     try { await onSave(payload, floorPlan, propertyStandalone === false ? titleDeed : null, addendums); requestClose(); }
     finally { setSaving(false); }
   };
@@ -858,11 +859,18 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
           {/* 2 · PRICING & FEES */}
           <div ref={setRef('pricing')} className={ds.secHead}><span className={ds.secNum}>2</span><div><div className={ds.secTitle}>Pricing &amp; fees</div><div className={ds.secSub}>Rent and one-off charges for this unit.</div></div></div>
 
-          <div className={ds.field}>
-            <label className={ds.lbl}>Annual Rent (AED) <span className={ds.req}>*</span></label>
-            <input type="number" min="0" step="any" className={cn(ds.input, errors.rentalPrice && ds.inputErr)} placeholder="e.g. 85000"
-              value={form.rentalPrice} onChange={e => upd('rentalPrice', e.target.value)} />
-            {errors.rentalPrice && <p className={ds.errText}>{errors.rentalPrice}</p>}
+          <div className={ds.grid2}>
+            <div className={ds.field}>
+              <label className={ds.lbl}>Annual Rent (AED) <span className={ds.req}>*</span></label>
+              <input type="number" min="0" step="any" className={cn(ds.input, errors.rentalPrice && ds.inputErr)} placeholder="e.g. 85000"
+                value={form.rentalPrice} onChange={e => upd('rentalPrice', e.target.value)} />
+              {errors.rentalPrice && <p className={ds.errText}>{errors.rentalPrice}</p>}
+            </div>
+            <div className={ds.field}>
+              <label className={ds.lbl}>Market Rent (AED)</label>
+              <input type="number" min="0" step="any" className={ds.input} placeholder="Defaults to the annual rent"
+                value={form.marketPrice} onChange={e => upd('marketPrice', e.target.value)} />
+            </div>
           </div>
 
           <div className={ds.feesBox}>

@@ -11,6 +11,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
+import { getSessionId } from '@/lib/trackingIds';
 
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
 
@@ -30,6 +31,8 @@ export function PublicPageTracker() {
       if (v) payload[k] = v;
     }
     if (document.referrer) payload.referrer = document.referrer;
+    const sid = getSessionId();
+    if (sid) payload.session_id = sid;
 
     try {
       void fetch('/api/track/visit', {
