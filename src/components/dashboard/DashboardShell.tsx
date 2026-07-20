@@ -531,12 +531,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     if (!checkedAuthRef.current) {
       checkedAuthRef.current = true;
       void refresh().then((me) => {
-        if (!me) router.replace('/login');
+        if (!me) router.replace('/');
       });
       return;
     }
     if (!isAuthenticated) {
-      router.replace('/login');
+      router.replace('/');
     }
   }, [loading, user, isAuthenticated, refresh, router]);
 

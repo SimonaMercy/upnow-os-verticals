@@ -430,7 +430,9 @@ export function ManagerOperationsReport({
   }, [data]);
 
   /* Drill-down: the records behind one clicked matrix number, each with the
-     person's action time(s) at that stage and the record's full history. */
+     person's action time(s) at that stage and the record's history. A specific
+     person's cell shows ONLY that person's own steps on the record; the Team
+     ("all") cell shows every party's steps — the full history. */
   const drillData = useMemo(() => {
     if (!drill || !data) return null;
     const acts = data.managerActions.filter(a =>
@@ -442,12 +444,21 @@ export function ManagerOperationsReport({
       e.times.push(a.at);
       byRec.set(key, e);
     }
-    return [...byRec.values()].map(r => ({
-      ...r,
-      journey: data.records.find(j =>
+    return [...byRec.values()].map(r => {
+      const journey = data.records.find(j =>
         (r.contractId != null && j.contractId === r.contractId)
-        || (r.leadId != null && j.type === 'lead' && j.leadId === r.leadId)) ?? null,
-    }));
+        || (r.leadId != null && j.type === 'lead' && j.leadId === r.leadId)) ?? null;
+      const allEvents = journey?.events ?? [];
+      const scoped = drill.userId == null ? allEvents : allEvents.filter(e => e.actorUserId === drill.userId);
+      // Re-time each gap against the previous VISIBLE step so durations stay
+      // truthful after filtering (not a hidden full-history neighbour).
+      const visibleEvents = scoped.map((e, i) => ({
+        ...e,
+        gapDays: i === 0 ? null
+          : Math.round(Math.max(0, (new Date(e.at).getTime() - new Date(scoped[i - 1].at).getTime()) / 86_400_000) * 10) / 10,
+      }));
+      return { ...r, journey, visibleEvents };
+    });
   }, [drill, data]);
 
   /* Day drill-down: everything one person did on one Dubai day. */
@@ -991,7 +1002,8 @@ export function ManagerOperationsReport({
                     <h3 className="text-sm font-bold text-[#1a1916]">{drill.who} — {drill.stage}</h3>
                     <p className="text-xs text-[#6b6860] mt-0.5">
                       {drillData.length} record{drillData.length === 1 ? '' : 's'}
-                      {drillData.length < drill.count ? ` shown of ${drill.count} — narrow the period for the rest` : ''} · full history with step durations
+                      {drillData.length < drill.count ? ` shown of ${drill.count} — narrow the period for the rest` : ''}
+                      {drill.userId == null ? ' · full history with step durations' : ` · ${drill.who}’s own steps — click Team for full history`}
                     </p>
                   </div>
                   <button onClick={() => setDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
@@ -1023,7 +1035,7 @@ export function ManagerOperationsReport({
                         Counted for {drill.who} — worked this stage {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
                       </div>
                     )}
-                    {r.journey ? r.journey.events.map((e, i) => {
+                    {r.visibleEvents.length > 0 ? r.visibleEvents.map((e, i) => {
                       const mine = r.times.some(t2 => Math.abs(new Date(t2).getTime() - new Date(e.at).getTime()) < 60_000);
                       return (
                         <div key={i} className={`px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm ${mine ? 'bg-[#f0faf6]' : ''}`}>
@@ -1032,7 +1044,7 @@ export function ManagerOperationsReport({
                           <span className="text-[#1a1916] font-medium">{e.label}</span>
                           {e.gapDays != null && (
                             <span className={`ml-auto inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums shrink-0 ${gapTone(e.gapDays)}`}
-                              title="Days since the previous step on this record">
+                              title="Days since the previous step shown">
                               +{e.gapDays}d
                             </span>
                           )}

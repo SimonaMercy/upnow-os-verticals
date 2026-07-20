@@ -5,15 +5,11 @@ import { serviceImg as sharedServiceImg } from '@/lib/serviceImages';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Menu, X, LogOut, Building2, Home, Factory, Wrench, Leaf, Wind, Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check, User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain, Sparkles, Droplets, Zap, Hammer, PaintRoller, Bug, Car,
+  Building2, Home, Factory, Wrench, Wind, Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check, Grid3X3, Mountain, Sparkles, Droplets, Zap, Hammer, PaintRoller, Bug, Car,
 } from 'lucide-react';
-import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
-import { HowItWorks } from '@/components/upnow/HowItWorks';
-import { TrustSignals } from '@/components/upnow/TrustSignals';
-import { CustomerRenewalBanner } from '@/components/upnow/CustomerRenewalBanner';
 import { Footer } from '@/components/upnow/Footer';
-import { SignupChoice } from '@/components/upnow/SignupChoice';
+import { SiteHeader } from '@/components/upnow/SiteHeader';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -78,20 +74,6 @@ function mapToSpaceItem(item: ListingItem): SpaceItem {
     tag,
     img: coverPhotoUrl ? photoUrl(coverPhotoUrl) : fallbackImg(property.spaceCategory, unit.id),
   };
-}
-
-function useClickOutside(
-  ref: React.RefObject<HTMLElement | null>,
-  handler: () => void,
-) {
-  useEffect(() => {
-    const listener = (e: MouseEvent) => {
-      if (!ref.current || ref.current.contains(e.target as Node)) return;
-      handler();
-    };
-    document.addEventListener('mousedown', listener);
-    return () => document.removeEventListener('mousedown', listener);
-  }, [ref, handler]);
 }
 
 function phClass(seed: string): string {
@@ -395,281 +377,6 @@ function CategoryRail({
   );
 }
 
-// ─── NAV ─────────────────────────────────────────────────────────────────────
-
-const customerDropdownItems = [
-  { label: 'Profile', icon: UserCircle, href: '/dashboard/customer/profile' },
-  { label: 'My Spaces', icon: Building2, href: '/dashboard/customer/spaces' },
-  { label: 'My Services', icon: Calendar, href: '/dashboard/customer/services' },
-  { label: 'Notifications', icon: Bell, href: '/dashboard/customer/notifications' },
-  { label: 'Help Center', icon: HelpCircle, href: '/dashboard/customer/help' },
-] as const;
-
-function LandingNav({
-  mode,
-  setMode,
-}: {
-  mode: 'services' | 'spaces';
-  setMode: (m: 'services' | 'spaces') => void;
-}) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [avatarOpen, setAvatarOpen] = useState(false);
-  const avatarRef = useRef<HTMLDivElement>(null);
-  useClickOutside(avatarRef, () => setAvatarOpen(false));
-
-  const { isAuthenticated, user, signOut } = useAuth();
-  const displayName = user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ');
-  const initials = displayName?.charAt(0)?.toUpperCase() ?? 'U';
-  const isCustomerRole = user?.role === 'customer';
-
-  return (
-    <>
-      <header className="l-nav">
-        <div className="l-nav-inner">
-          {/* Brand */}
-          <Link href="/" className="l-brand">
-            <span className="l-brand-mark">U</span>
-            UpNow
-          </Link>
-
-          {/* Center tabs */}
-          <nav className="l-nav-center">
-            {(['services', 'spaces'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`l-nav-tab${mode === m ? ' active' : ''}`}
-              >
-                <span className="dot" />
-                {m === 'services' ? 'Services' : 'Spaces'}
-              </button>
-            ))}
-            <a className="l-nav-link" href="#how-it-works">How it works</a>
-            <a className="l-nav-link" href="#about">About Us</a>
-          </nav>
-
-          {/* Right: auth */}
-          <div className="l-nav-actions hidden md:flex">
-            {isAuthenticated ? (
-              isCustomerRole ? (
-                <div className="relative" ref={avatarRef}>
-                  <button
-                    onClick={() => setAvatarOpen(!avatarOpen)}
-                    className="flex items-center gap-2 rounded-full py-1.5 pl-3 pr-1.5 hover:shadow-md transition-all cursor-pointer"
-                    style={{ border: '1px solid #e8ece9', background: 'white' }}
-                  >
-                    <Menu size={16} style={{ color: '#6b7a74' }} />
-                    <div
-                      style={{
-                        width: 32, height: 32, borderRadius: '50%',
-                        backgroundColor: '#2e9f82', color: 'white',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 13, fontWeight: 700,
-                      }}
-                    >
-                      {initials}
-                    </div>
-                  </button>
-                  {avatarOpen && (
-                    <div
-                      style={{
-                        position: 'absolute', right: 0, top: 52, width: 224,
-                        backgroundColor: 'white', borderRadius: 12,
-                        boxShadow: '0 8px 32px -4px rgba(0,0,0,0.16)',
-                        overflow: 'hidden', zIndex: 60, padding: '6px 0',
-                      }}
-                    >
-                      {customerDropdownItems.map((item) => (
-                        <Link
-                          key={item.label}
-                          href={item.href}
-                          onClick={() => setAvatarOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-sm"
-                          style={{ color: '#36433d' }}
-                        >
-                          <item.icon size={16} style={{ color: '#6b7a74' }} />
-                          {item.label}
-                        </Link>
-                      ))}
-                      <div style={{ borderTop: '1px solid #e8ece9', margin: '4px 0' }} />
-                      <button
-                        onClick={signOut}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-sm text-left"
-                        style={{ color: '#36433d' }}
-                      >
-                        <LogOut size={16} style={{ color: '#6b7a74' }} />
-                        Log out
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <Link
-                    href={user?.role ? dashboardPath(user.role) : '/dashboard'}
-                    style={{
-                      padding: '10px 16px', borderRadius: 999,
-                      backgroundColor: '#2e9f82', color: 'white',
-                      fontSize: 14, fontWeight: 600, textDecoration: 'none',
-                    }}
-                  >
-                    {displayName?.split(' ')[0] || 'Dashboard'}
-                  </Link>
-                  <button
-                    onClick={signOut}
-                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg transition-colors hover:bg-gray-50"
-                    style={{ color: '#36433d' }}
-                  >
-                    <LogOut size={16} />
-                    Sign out
-                  </button>
-                </>
-              )
-            ) : (
-              <>
-                <Link
-                  href="/login"
-                  style={{
-                    padding: '10px 16px', borderRadius: 999,
-                    border: '1.5px solid #e8ece9', color: '#0e1a16',
-                    fontSize: 14, fontWeight: 600, textDecoration: 'none',
-                    backgroundColor: 'transparent',
-                  }}
-                >
-                  Sign in
-                </Link>
-                <Link
-                  href="/#signup"
-                  style={{
-                    padding: '10px 16px', borderRadius: 999,
-                    backgroundColor: '#2e9f82', color: 'white',
-                    fontSize: 14, fontWeight: 600, textDecoration: 'none',
-                  }}
-                >
-                  Sign up
-                </Link>
-              </>
-            )}
-          </div>
-
-          {/* Mobile hamburger */}
-          <button
-            className="md:hidden"
-            style={{ color: '#36433d', background: 'none', border: 'none', cursor: 'pointer' }}
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open menu"
-          >
-            <Menu size={24} />
-          </button>
-        </div>
-      </header>
-
-      {/* Sticky "your renewal needs action" bar — logged-in customers only */}
-      <CustomerRenewalBanner />
-
-      {/* Mobile drawer */}
-      {drawerOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 60 }} className="md:hidden">
-          <div
-            style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.3)' }}
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div
-            style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 280,
-              backgroundColor: 'white', boxShadow: '0 0 60px rgba(0,0,0,0.2)',
-              display: 'flex', flexDirection: 'column', padding: 24,
-            }}
-          >
-            <button
-              onClick={() => setDrawerOpen(false)}
-              style={{ alignSelf: 'flex-end', marginBottom: 24, color: '#36433d', background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              <X size={24} />
-            </button>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {(['services', 'spaces'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => { setMode(m); setDrawerOpen(false); }}
-                  style={{
-                    padding: '10px 16px', borderRadius: 8, border: 'none',
-                    textAlign: 'left', fontSize: 16, fontWeight: 600, cursor: 'pointer',
-                    backgroundColor: mode === m ? '#e7f5f0' : 'transparent',
-                    color: mode === m ? '#155a48' : '#36433d',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {m === 'services' ? 'Services' : 'Spaces'}
-                </button>
-              ))}
-              <a href="#how-it-works" onClick={() => setDrawerOpen(false)}
-                style={{ padding: '10px 16px', fontSize: 16, fontWeight: 500, color: '#36433d', textDecoration: 'none' }}>
-                How it works
-              </a>
-              <a href="#about" onClick={() => setDrawerOpen(false)}
-                style={{ padding: '10px 16px', fontSize: 16, fontWeight: 500, color: '#36433d', textDecoration: 'none' }}>
-                About Us
-              </a>
-            </div>
-            <div style={{ borderTop: '1px solid #e8ece9', margin: '20px 0' }} />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {isAuthenticated ? (
-                <>
-                  <Link
-                    href={user?.role ? dashboardPath(user.role) : '/dashboard'}
-                    onClick={() => setDrawerOpen(false)}
-                    style={{
-                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#2e9f82',
-                      color: 'white', fontWeight: 600, textAlign: 'center', textDecoration: 'none',
-                    }}
-                  >
-                    Dashboard
-                  </Link>
-                  <button
-                    onClick={() => { setDrawerOpen(false); signOut(); }}
-                    style={{
-                      padding: '12px 16px', borderRadius: 999, border: '1px solid #e8ece9',
-                      backgroundColor: 'white', color: '#36433d', fontWeight: 600, cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link
-                    href="/#signup"
-                    onClick={() => setDrawerOpen(false)}
-                    style={{
-                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#2e9f82',
-                      color: 'white', fontWeight: 600, textAlign: 'center', textDecoration: 'none',
-                    }}
-                  >
-                    Sign up
-                  </Link>
-                  <Link
-                    href="/login"
-                    onClick={() => setDrawerOpen(false)}
-                    style={{
-                      padding: '12px 16px', borderRadius: 999, border: '1px solid #e8ece9',
-                      backgroundColor: 'white', color: '#36433d', fontWeight: 600,
-                      textAlign: 'center', textDecoration: 'none',
-                    }}
-                  >
-                    Sign in
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
 // ─── Location autocomplete + budget filter ────────────────────────────────────
 
 interface EmirateOption { id: number; nameEn: string; slug: string; }
@@ -690,6 +397,17 @@ const BUDGET_BRACKETS: BudgetRange[] = [
   { label: 'AED 120K – 250K/yr', min: '120000', max: '250000' },
   { label: 'AED 250K – 500K/yr', min: '250000', max: '500000' },
   { label: 'AED 500K+/yr',       min: '500000', max: ''       },
+];
+
+interface WhenOption { label: string; value: string; }
+
+const WHEN_OPTIONS: WhenOption[] = [
+  { label: 'Anytime',      value: ''             },
+  { label: 'Today',        value: 'today'        },
+  { label: 'Tomorrow',     value: 'tomorrow'     },
+  { label: 'This week',    value: 'this_week'    },
+  { label: 'This weekend', value: 'this_weekend' },
+  { label: 'Next week',    value: 'next_week'    },
 ];
 
 // ─── HERO ─────────────────────────────────────────────────────────────────────
@@ -715,66 +433,72 @@ function Hero({
   const [locOpen, setLocOpen] = useState(false);
   const [budgetSel, setBudgetSel] = useState<BudgetRange>(BUDGET_BRACKETS[0]);
   const [budgetOpen, setBudgetOpen] = useState(false);
-  const [secondary, setSecondary] = useState('');
+  const [whenSel, setWhenSel] = useState<WhenOption>(WHEN_OPTIONS[0]);
+  const [whenOpen, setWhenOpen] = useState(false);
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
 
-  useEffect(() => { setLocOpen(false); setBudgetOpen(false); }, [mode]);
+  useEffect(() => { setLocOpen(false); setBudgetOpen(false); setWhenOpen(false); }, [mode]);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (!searchRef.current?.contains(e.target as Node)) {
         setLocOpen(false);
         setBudgetOpen(false);
+        setWhenOpen(false);
       }
     }
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, []);
 
-  useEffect(() => {
-    // Same-origin proxy (/api) — never an absolute backend URL. In the browser
-    // this avoids CORS and works in every environment without a build-time
-    // NEXT_PUBLIC_* var (which is how this hit localhost:3001 in production).
+  // Lazy — load location suggestions on first focus/type of the search box.
+  // Previously this ran on mount, firing 8 calls (emirates + per-emirate
+  // communities) on every landing visit even when nobody searched.
+  const suggestionsLoaded = useRef(false);
+  const loadLocationSuggestions = async () => {
+    if (suggestionsLoaded.current) return;
+    suggestionsLoaded.current = true;
+    // Same-origin proxy (/api) — never an absolute backend URL (avoids CORS).
     const API = '/api';
-    (async () => {
-      try {
-        const emirates: EmirateOption[] = await fetch(`${API}/locations/emirates`)
-          .then(r => r.ok ? r.json() : []);
+    try {
+      const emirates: EmirateOption[] = await fetch(`${API}/locations/emirates`)
+        .then(r => r.ok ? r.json() : []);
 
-        const emirateSuggestions: LocationSuggestion[] = emirates.map(em => ({
-          label: em.nameEn,
-          type: 'emirate' as const,
-          communityName: null,
-          emirateSlug: em.slug,
-          emirateName: em.nameEn,
-        }));
+      const emirateSuggestions: LocationSuggestion[] = emirates.map(em => ({
+        label: em.nameEn,
+        type: 'emirate' as const,
+        communityName: null,
+        emirateSlug: em.slug,
+        emirateName: em.nameEn,
+      }));
 
-        const communityLists: { nameEn: string }[][] = await Promise.all(
-          emirates.map(em =>
-            fetch(`${API}/locations/emirates/${em.id}/communities`)
-              .then(r => r.ok ? r.json() : [])
-              .catch(() => [])
-          )
-        );
+      const communityLists: { nameEn: string }[][] = await Promise.all(
+        emirates.map(em =>
+          fetch(`${API}/locations/emirates/${em.id}/communities`)
+            .then(r => r.ok ? r.json() : [])
+            .catch(() => [])
+        )
+      );
 
-        const commSuggestions: LocationSuggestion[] = [];
-        communityLists.forEach((communities, i) => {
-          const em = emirates[i];
-          communities.forEach(c => {
-            commSuggestions.push({
-              label: `${c.nameEn}, ${em.nameEn}`,
-              type: 'community',
-              communityName: c.nameEn,
-              emirateSlug: em.slug,
-              emirateName: em.nameEn,
-            });
+      const commSuggestions: LocationSuggestion[] = [];
+      communityLists.forEach((communities, i) => {
+        const em = emirates[i];
+        communities.forEach(c => {
+          commSuggestions.push({
+            label: `${c.nameEn}, ${em.nameEn}`,
+            type: 'community',
+            communityName: c.nameEn,
+            emirateSlug: em.slug,
+            emirateName: em.nameEn,
           });
         });
+      });
 
-        setLocationSuggestions([...emirateSuggestions, ...commSuggestions]);
-      } catch { /* silent — search still works without suggestions */ }
-    })();
-  }, []);
+      setLocationSuggestions([...emirateSuggestions, ...commSuggestions]);
+    } catch {
+      suggestionsLoaded.current = false; // allow a retry on the next focus
+    }
+  };
 
   const locFiltered = locationText.trim().length >= 1
     ? locationSuggestions
@@ -797,7 +521,7 @@ function Hero({
       if (budgetSel.max) params.set('maxPrice', budgetSel.max);
     } else {
       if (locationText.trim()) params.set('location', locationText.trim());
-      if (secondary.trim()) params.set('when', secondary.trim());
+      if (whenSel.value) params.set('when', whenSel.value);
     }
 
     router.push(`${base}${params.toString() ? `?${params.toString()}` : ''}`);
@@ -845,12 +569,13 @@ function Hero({
                 value={locationText}
                 autoComplete="off"
                 onChange={e => {
+                  loadLocationSuggestions();
                   setLocationText(e.target.value);
                   setLocationSel(null);
                   setLocOpen(true);
                   setBudgetOpen(false);
                 }}
-                onFocus={() => { if (locationText.trim()) setLocOpen(true); }}
+                onFocus={() => { loadLocationSuggestions(); if (locationText.trim()) setLocOpen(true); }}
                 onKeyDown={e => {
                   if (e.key === 'Escape') setLocOpen(false);
                   if (e.key === 'Enter') { setLocOpen(false); handleSearch(); }
@@ -858,15 +583,14 @@ function Hero({
               />
             </div>
 
-            {/* Budget / When field */}
+            {/* Budget / When field — both are dropdown selectors */}
             <div
               className="field"
-              style={{ cursor: mode === 'spaces' ? 'pointer' : 'text' }}
+              style={{ cursor: 'pointer' }}
               onClick={() => {
-                if (mode === 'spaces') {
-                  setBudgetOpen(v => !v);
-                  setLocOpen(false);
-                }
+                setLocOpen(false);
+                if (mode === 'spaces') { setBudgetOpen(v => !v); setWhenOpen(false); }
+                else { setWhenOpen(v => !v); setBudgetOpen(false); }
               }}
             >
               <div className="lbl">{mode === 'spaces' ? 'Budget' : 'When'}</div>
@@ -878,13 +602,12 @@ function Hero({
                   <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
                 </div>
               ) : (
-                <input
-                  type="text"
-                  placeholder="Anytime"
-                  value={secondary}
-                  onChange={e => setSecondary(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                />
+                <div className="l-budget-display">
+                  <span style={{ color: whenSel.value === '' ? '#6b7a74' : '#0e1a16' }}>
+                    {whenSel.label}
+                  </span>
+                  <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
+                </div>
               )}
             </div>
 
@@ -934,6 +657,26 @@ function Hero({
               ))}
             </div>
           )}
+
+          {/* When dropdown */}
+          {whenOpen && (
+            <div className="loc-dropdown loc-dropdown--right">
+              {WHEN_OPTIONS.map((w, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`loc-option${whenSel.label === w.label ? ' sel' : ''}`}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => { setWhenSel(w); setWhenOpen(false); }}
+                >
+                  <span>{w.label}</span>
+                  {whenSel.label === w.label && (
+                    <Check size={13} style={{ marginLeft: 'auto', color: '#2e9f82', flexShrink: 0 }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Category chip row */}
@@ -955,110 +698,6 @@ function Hero({
               {cat.label}
             </button>
           ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── PATHS SECTION ────────────────────────────────────────────────────────────
-
-function PathsSection() {
-  const paths = [
-    {
-      icon: <User size={24} />,
-      title: 'Sign up as Customer',
-      desc: 'Find a place to rent and book trusted home & business services near you.',
-      cta: 'Create customer account',
-      href: '/register/customer',
-    },
-    {
-      icon: <Building2 size={24} />,
-      title: 'Sign up as Rental Provider',
-      desc: 'List apartments, offices or warehouses and manage tenancies in one dashboard.',
-      cta: 'Create rental account',
-      href: '/register/rental-provider',
-    },
-    {
-      icon: <Key size={24} />,
-      title: 'Sign up as Service Provider',
-      desc: 'Offer maintenance and home services to customers in your area.',
-      cta: 'Create service account',
-      href: '/register/service-provider',
-    },
-  ];
-
-  return (
-    <section id="paths" style={{ background: '#fafbf9', paddingBlock: 64 }}>
-      <div className="l-wrap">
-        <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <span className="l-eyebrow">Get started</span>
-          <h2 style={{ fontSize: 'clamp(26px,3vw,40px)', fontWeight: 700, letterSpacing: '-.022em', lineHeight: 1.06, marginTop: 12, color: '#0e1a16' }}>
-            Pick the path that matches you.
-          </h2>
-          <p style={{ fontSize: 'clamp(16px,1.3vw,19px)', color: '#36433d', margin: '12px auto 0', textAlign: 'center', maxWidth: '54ch', lineHeight: 1.55 }}>
-            Customers, rental providers and service providers each get a dedicated workspace.
-          </p>
-        </div>
-        <div className="l-paths">
-          {paths.map((p) => (
-            <div key={p.title} className="l-path">
-              <div className="pi">{p.icon}</div>
-              <h4>{p.title}</h4>
-              <p>{p.desc}</p>
-              <Link href={p.href} className="cta">
-                {p.cta} <ArrowRight size={14} />
-              </Link>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── GROW SECTION ─────────────────────────────────────────────────────────────
-
-function GrowSection() {
-  const cards = [
-    {
-      icon: <Wrench size={22} />,
-      title: 'Offer your services',
-      desc: 'Apply to list your service business and get matched with customers in your area.',
-      cta: 'Submit an application',
-      href: '/register/service-provider',
-    },
-    {
-      icon: <Building2 size={22} />,
-      title: 'List your space',
-      desc: 'Publish apartments, offices or warehouses and manage everything in one dashboard.',
-      cta: 'Submit an application',
-      href: '/register/rental-provider',
-    },
-  ];
-
-  return (
-    <section id="about" style={{ paddingTop: 24, paddingBottom: 72 }}>
-      <div className="l-wrap">
-        <div className="l-grow">
-          <div className="l-grow-inner">
-            <h2>Grow your business with UpNow.</h2>
-            <p className="gsub">
-              Join hundreds of providers expanding their reach — list your space or offer your services to customers in your area.
-            </p>
-            <div className="l-grow-cards">
-              {cards.map((card) => (
-                <div key={card.title} className="l-gcard">
-                  <div className="gi">{card.icon}</div>
-                  <h4>{card.title}</h4>
-                  <p>{card.desc}</p>
-                  <Link href={card.href} className="btn">
-                    {card.cta} <ArrowRight size={13} />
-                  </Link>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -1108,7 +747,7 @@ export function LandingPageV2() {
 
   return (
     <>
-      <LandingNav mode={mode} setMode={handleSetMode} />
+      <SiteHeader />
 
       <main>
         <Hero
@@ -1149,19 +788,6 @@ export function LandingPageV2() {
                 </CategoryRail>
               ))}
         </div>
-
-        <div id="how-it-works">
-          <HowItWorks />
-        </div>
-
-        <TrustSignals />
-
-        <PathsSection />
-
-        <GrowSection />
-
-        {/* Sign-up section — the #signup anchor the "Sign up" links target. */}
-        <SignupChoice />
       </main>
 
       <Footer />
