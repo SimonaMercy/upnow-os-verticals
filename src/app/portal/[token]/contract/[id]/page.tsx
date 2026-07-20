@@ -97,8 +97,8 @@ export default function ContractReviewPage() {
   useEffect(() => {
     const isLandlord = (d?.signerRole ?? 'tenant') === 'landlord';
     const who = isLandlord
-      ? (d?.contract?.landlord?.name ?? d?.contract?.landlord?.companyName ?? null)
-      : (d?.contract?.tenant?.name ?? null);
+      ? (d?.contract?.landlord?.companyName ?? d?.contract?.landlord?.name ?? null)
+      : (d?.contract?.tenant?.companyName ?? d?.contract?.tenant?.name ?? null);
     setDocViewerWatermark(who);
   }, [d]);
 
