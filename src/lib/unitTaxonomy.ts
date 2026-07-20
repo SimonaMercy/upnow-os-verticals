@@ -11,6 +11,10 @@
 export const RESIDENTIAL_UNIT_TYPES: string[] = [
   'apartment', 'villa', 'villa_compound', 'townhouse', 'penthouse',
   'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home',
+  // Accommodation types are offered under residential + commercial; they are
+  // residential in nature (beds shown, VAT-exempt by default). Kept OUT of the
+  // COMMERCIAL_UNIT_TYPES VAT set below so mixed-use units default to residential.
+  'labour_accommodation', 'staff_accommodation',
 ];
 
 /** Land / plot unit types — a bare plot has none of the built-space attributes

@@ -17,7 +17,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2, Send } from 'lucide-react';
+import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2 } from 'lucide-react';
+import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
@@ -119,42 +120,15 @@ const AVAILABILITY_CONFIG: Record<Unit['availability'], { label: string; dot: st
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-/** Generate + copy a documents-upload portal link for the selected customer.
- *  A 'documents' link needs only the tenant (no contract yet), so it works
- *  mid-creation — the RP can send it before the contract is even saved. */
+/** Request documents from the selected customer mid-creation — before the
+ *  contract is even saved (a 'documents' link needs only the tenant). Delegates
+ *  to the shared request-picker so the customer's upload link shows only the
+ *  documents the RP picks. */
 function SendDocsLinkButton({ tenantId }: { tenantId: number }) {
-  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
-  const [link, setLink] = useState('');
-  const [copied, setCopied] = useState(false);
-  const send = async () => {
-    setState('sending');
-    try {
-      const res = await fetch('/api/portal/generate', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId, purpose: 'documents' }),
-      });
-      if (!res.ok) throw new Error();
-      const d = await res.json();
-      setLink(d.link ?? ''); setState('done');
-      if (d.link) { try { await navigator.clipboard.writeText(d.link); setCopied(true); } catch { /* ignore */ } }
-    } catch { setState('error'); }
-  };
-  if (state === 'done' && link) {
-    return (
-      <div className="mt-2 flex items-center gap-2 max-w-md">
-        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
-          className="flex-1 text-[11px] px-2 py-1.5 rounded-lg border border-[#e8e6e0] bg-[#fafaf8] text-[#1a1916]" />
-        <button type="button"
-          onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } }}
-          className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-[#2e9f82] text-white whitespace-nowrap">{copied ? 'Copied ✓' : 'Copy'}</button>
-      </div>
-    );
-  }
   return (
-    <button type="button" onClick={send} disabled={state === 'sending'}
-      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#2e9f82] text-[#2e9f82] disabled:opacity-60">
-      <Send size={12} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : 'Send documents upload link'}
-    </button>
+    <div className="mt-2">
+      <DocsLinkButton tenantId={tenantId} label="Request documents" />
+    </div>
   );
 }
 

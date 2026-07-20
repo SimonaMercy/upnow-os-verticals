@@ -3821,7 +3821,9 @@ function DetailsDrawer({
                           contractId={contract.id}
                           section="documents"
                           label="Send docs link"
-                          disabled={reqSelected.length === 0}
+                          // Link is request-scoped: the customer sees only what was
+                          // actually requested, so unlock it once the request is sent.
+                          disabled={reqSent === 0}
                         />
                       )}
                       <button className="btn btn-ghost btn-sm" disabled={reqBusy} onClick={() => setShowReqModal(false)}>Close</button>

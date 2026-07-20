@@ -97,12 +97,16 @@ export default function TenantPortalPage() {
         <h1 className="text-2xl font-bold text-[#1a1916] mt-3">Hi {greetName(data.tenant.name)},</h1>
         <p className="text-sm text-[#6b6860] mt-1">Please upload the documents requested below.</p>
 
-        {(data.requestedDocuments?.length ?? 0) > 0 && (
-          <DocSection title="Requested by your rental provider" subtitle="Specific documents your landlord asked you to provide" docs={data.requestedDocuments!} uploading={uploading} onUpload={upload} />
-        )}
-        <DocSection title="Identity documents (KYC)" subtitle="Your Emirates ID, passport and visa" docs={data.kycDocuments} uploading={uploading} onUpload={upload} />
-        {data.otherDocuments.length > 0 && (
-          <DocSection title="Rental documents" subtitle="Supporting documents for your tenancy" docs={data.otherDocuments} uploading={uploading} onUpload={upload} />
+        {/* Request-scoped: the customer uploads ONLY the documents the rental
+            provider explicitly asked for — nothing else from the catalog. */}
+        {(data.requestedDocuments?.length ?? 0) > 0 ? (
+          <DocSection title="Requested documents" subtitle="Your rental provider asked you to provide these" docs={data.requestedDocuments!} uploading={uploading} onUpload={upload} />
+        ) : (
+          <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-6 px-5 py-10 text-center">
+            <CheckCircle2 size={24} className="text-[#2e9f82] mx-auto mb-2" />
+            <p className="text-sm font-semibold text-[#1a1916]">Nothing to upload right now</p>
+            <p className="text-xs text-[#9b9890] mt-1">Your rental provider hasn&apos;t requested any documents yet. They&apos;ll show up here when they do.</p>
+          </div>
         )}
 
         <p className="text-xs text-[#9b9890] text-center mt-6">Link expires {new Date(data.expiresAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}. Powered by UpNow.</p>

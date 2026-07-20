@@ -19,6 +19,7 @@ import { openDocViewer } from '@/lib/docViewer';
 import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/DocumentReaderModal';
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
+import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
 
 type Lease = {
@@ -744,6 +745,9 @@ export default function CustomerDetailPage() {
               <Eye size={14} /> View All
             </button>
           )}
+          {/* Standalone (no-lease) document-upload link for this customer:
+              generate → open / copy → send by email. */}
+          <DocsLinkButton tenantId={Number(params.id)} label="Request documents" />
         </div>
         <div className="p-2 max-h-[480px] overflow-y-auto">
           {kycChecklist.map(({ req, docs, satisfied, partialHint }) => {

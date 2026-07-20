@@ -13,10 +13,33 @@ const aed = (n: number | string | null) => (n == null ? '—' : `AED ${Number(n)
 
 interface Booking {
   id: number; status: string; pricingMode: string | null; serviceName: string | null;
-  scheduledAt: string; totalAmount: number | string | null; serviceProviderId: number | null;
+  scheduledAt: string; createdAt: string; totalAmount: number | string | null; serviceProviderId: number | null;
   tenant?: { user?: { name?: string | null } | null } | null;
 }
 interface Provider { id: number; businessName: string; compliant: boolean; jobReady: boolean; technicians: { id: number; name: string }[] }
+
+const HOUR = 3_600_000;
+const TONE = {
+  stale: { bg: '#fee2e2', fg: '#991b1b' },
+  warn: { bg: '#fef3c7', fg: '#92400e' },
+  fresh: { bg: '#f3f4f6', fg: '#6b7280' },
+} as const;
+const ageLabel = (hours: number) => {
+  const h = Math.abs(hours);
+  if (h < 1) return '<1h';
+  if (h < 24) return `${Math.floor(h)}h`;
+  return `${Math.floor(h / 24)}d`;
+};
+// A booking is "overdue" once its slot has passed and it isn't done or cancelled.
+const isOverdue = (b: Booking, now: number) =>
+  new Date(b.scheduledAt).getTime() < now && !['completed', 'cancelled'].includes(b.status);
+// Urgency of an unplaced booking: how long it has waited + how close the slot is.
+const placementInfo = (b: Booking, now: number) => {
+  const waited = (now - new Date(b.createdAt).getTime()) / HOUR;
+  const toSlot = (new Date(b.scheduledAt).getTime() - now) / HOUR;
+  const tone: keyof typeof TONE = waited >= 24 || toSlot <= 6 ? 'stale' : waited >= 6 || toSlot <= 24 ? 'warn' : 'fresh';
+  return { waited, toSlot, tone };
+};
 
 const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
   booked: { label: 'Booked', bg: '#fef3c7', fg: '#92400e' },
@@ -61,12 +84,20 @@ export default function AdminOperationsPage() {
     return (id: number | null) => (id ? m.get(id) ?? `Provider #${id}` : null);
   }, [providers]);
 
+  const now = Date.now();
+
   // Paid-but-unplaced jobs AND quote-priced bookings still awaiting a callout
   // provider — both are things the auto-matcher couldn't place and Ops must
   // action. A callout (BOOKED quote) is placed provider-only (no technician).
   const needsAssignment = bookings.filter((b) => b.status === 'confirmed' && !b.serviceProviderId);
   const needsCallout = bookings.filter((b) => b.status === 'booked' && b.pricingMode === 'quote' && !b.serviceProviderId);
-  const needsPlacement = [...needsAssignment, ...needsCallout];
+  // Most time-critical first: soonest (or already-passed) slot at the top.
+  const needsPlacement = [...needsAssignment, ...needsCallout].sort(
+    (a, b) => placementInfo(a, now).toSlot - placementInfo(b, now).toSlot,
+  );
+  // Jobs already placed but stalled past their slot (assigned/en-route/in-progress
+  // that never completed) — the other half of "stuck".
+  const overdue = bookings.filter((b) => isOverdue(b, now));
   const chosenProvider = providers.find((p) => p.id === spId);
   const assignBooking = assignId != null ? bookings.find((b) => b.id === assignId) ?? null : null;
   const isCallout = assignBooking?.status === 'booked';
@@ -90,7 +121,7 @@ export default function AdminOperationsPage() {
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '8px 4px 48px' }}>
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: PRIMARY }}>Operations</div>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Booking dispatch</h1>
-      <p style={{ color: MUTE, fontSize: 14, marginTop: 4 }}>Watch every booking, and place the ones the auto-matcher couldn&apos;t.</p>
+      <p style={{ color: MUTE, fontSize: 14, marginTop: 4 }}>Place the jobs the auto-matcher couldn&apos;t — most time-critical first — and catch anything that&apos;s overdue.</p>
 
       {error && <div style={{ marginTop: 12, background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
 
@@ -105,12 +136,16 @@ export default function AdminOperationsPage() {
           <div style={{ padding: '22px 18px', color: FAINT, fontSize: 14 }}>Every booking is placed. 🎉</div>
         ) : needsPlacement.map((b) => {
           const callout = b.status === 'booked';
+          const info = placementInfo(b, now);
           return (
             <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: '1px solid #f6f6f4' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, color: INK, fontSize: 14 }}>{b.serviceName ?? 'Service'} <span style={{ color: FAINT, fontWeight: 400, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>BK-{b.id}</span>{callout && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 999, padding: '2px 7px', textTransform: 'uppercase', letterSpacing: '.04em' }}>Quote callout</span>}</div>
                 <div style={{ fontSize: 12.5, color: MUTE, marginTop: 2 }}>{b.tenant?.user?.name ?? 'Customer'} · {fmtWhen(b.scheduledAt)} · {callout ? 'Quote on assessment' : aed(b.totalAmount)}</div>
               </div>
+              <span title={`Waiting ${ageLabel(info.waited)} since booked`} style={{ fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap', background: TONE[info.tone].bg, color: TONE[info.tone].fg }}>
+                {ageLabel(info.waited)} waiting{info.toSlot < 0 ? ' · slot passed' : info.toSlot <= 24 ? ` · slot in ${ageLabel(info.toSlot)}` : ''}
+              </span>
               <button onClick={() => openAssign(b.id)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 15px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{callout ? 'Place callout' : 'Assign'}</button>
             </div>
           );
@@ -119,7 +154,10 @@ export default function AdminOperationsPage() {
 
       {/* All bookings */}
       <div style={card({ marginTop: 18, overflow: 'hidden' })}>
-        <div style={{ padding: '13px 18px', borderBottom: BORDER, fontSize: 14, fontWeight: 700, color: INK }}>All bookings <span style={{ color: FAINT, fontWeight: 400 }}>({bookings.length})</span></div>
+        <div style={{ padding: '13px 18px', borderBottom: BORDER, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>All bookings <span style={{ color: FAINT, fontWeight: 400 }}>({bookings.length})</span></span>
+          {overdue.length > 0 && <span title="Slot passed, not completed or cancelled" style={{ fontSize: 12, fontWeight: 700, color: '#991b1b', background: '#fee2e2', borderRadius: 999, padding: '2px 9px' }}>{overdue.length} overdue</span>}
+        </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
             <thead>
@@ -139,7 +177,7 @@ export default function AdminOperationsPage() {
                     <td style={{ padding: '11px 18px' }}><span style={{ fontWeight: 600 }}>{b.serviceName ?? 'Service'}</span> <span style={{ color: FAINT, fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>BK-{b.id}</span></td>
                     <td style={{ padding: '11px 18px', color: MUTE }}>{b.tenant?.user?.name ?? '—'}</td>
                     <td style={{ padding: '11px 18px', color: MUTE, whiteSpace: 'nowrap' }}>{fmtWhen(b.scheduledAt)}</td>
-                    <td style={{ padding: '11px 18px' }}><span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: st.bg, color: st.fg, whiteSpace: 'nowrap' }}>{st.label}</span></td>
+                    <td style={{ padding: '11px 18px', whiteSpace: 'nowrap' }}><span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: st.bg, color: st.fg }}>{st.label}</span>{isOverdue(b, now) && <span title="Slot passed, not completed" style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: '#991b1b', background: '#fee2e2', borderRadius: 999, padding: '2px 7px' }}>Overdue</span>}</td>
                     <td style={{ padding: '11px 18px', color: pName ? INK : FAINT }}>{pName ?? 'Unassigned'}</td>
                     <td style={{ padding: '11px 18px', textAlign: 'right' }}>
                       {canAssign && <button onClick={() => openAssign(b.id)} style={{ background: 'none', border: BORDER, borderRadius: 8, padding: '5px 11px', fontSize: 12.5, fontWeight: 600, color: PRIMARY, cursor: 'pointer' }}>{b.serviceProviderId ? 'Reassign' : (b.status === 'booked' ? 'Place callout' : 'Assign')}</button>}

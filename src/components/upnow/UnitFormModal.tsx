@@ -18,7 +18,7 @@ import ds from './unitForm.module.css';
 // many existing `import { RESIDENTIAL_UNIT_TYPES } from '.../UnitFormModal'`
 // call-sites keep working.
 export { RESIDENTIAL_UNIT_TYPES };
-export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical'];
+export const COMMERCIAL_UNIT_TYPES  = ['office_fitted', 'office_shell_core', 'retail_shop', 'showroom', 'restaurant_fnb', 'clinic_medical', 'labour_accommodation', 'staff_accommodation'];
 export const INDUSTRIAL_UNIT_TYPES  = ['warehouse', 'open_yard', 'storage_unit', 'cold_storage', 'logistics_facility'];
 export const WORKSPACES_UNIT_TYPES  = ['coworking_desk', 'private_office', 'meeting_room', 'day_office'];
 export const VENUES_UNIT_TYPES      = ['event_hall', 'wedding_venue', 'conference_hall', 'private_dining', 'outdoor_venue'];
@@ -55,6 +55,8 @@ export const UNIT_TYPE_LABELS: Record<string, string> = {
   residential_land: 'Residential Land', commercial_land: 'Commercial Land',
   industrial_land: 'Industrial Land', mixed_use_land: 'Mixed-Use Land',
   agricultural_land: 'Agricultural Land', labour_accommodation_land: 'Labour Accommodation Land',
+  // Accommodation (offered under residential + commercial)
+  labour_accommodation: 'Labour Accommodation', staff_accommodation: 'Staff Accommodation',
 };
 
 export function unitTypesForCategory(category: string): string[] {
@@ -65,8 +67,9 @@ export function unitTypesForCategory(category: string): string[] {
     case 'workspaces':   return WORKSPACES_UNIT_TYPES;
     case 'venues':       return VENUES_UNIT_TYPES;
     case 'land':         return LAND_UNIT_TYPES;
-    case 'mixed_use':    return [...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES];
-    default:             return [...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES];
+    // Dedupe — the accommodation types live under BOTH residential and commercial.
+    case 'mixed_use':    return Array.from(new Set([...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES]));
+    default:             return Array.from(new Set([...RESIDENTIAL_UNIT_TYPES, ...COMMERCIAL_UNIT_TYPES]));
   }
 }
 

@@ -13,7 +13,7 @@ import {
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
 interface QuoteItem { itemName: string; description?: string | null; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
-interface Quote { id: number; status: string; totalAmount: number | string; summary?: string | null; validUntil?: string | null; items: QuoteItem[] }
+interface Quote { id: number; status: string; totalAmount: number | string; laborAmount?: number | string | null; materialsAmount?: number | string | null; summary?: string | null; validUntil?: string | null; rejectionReason?: string | null; items: QuoteItem[] }
 interface BookingRow {
   id: number;
   status: string;
@@ -25,6 +25,7 @@ interface BookingRow {
   addressText: string | null;
   serviceName?: string | null;
   packageName?: string | null;
+  customerSignedOff?: boolean;
   template?: { name?: string | null } | null;
   variant?: { name?: string | null } | null;
 }
@@ -51,6 +52,9 @@ export default function CustomerServicesPage() {
   const [timeline, setTimeline] = useState<Record<number, TimelineStep[]>>({});
   const [quotes, setQuotes] = useState<Record<number, Quote | null>>({});
   const [approving, setApproving] = useState<number | null>(null);
+  const [declineFor, setDeclineFor] = useState<number | null>(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declining, setDeclining] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reportFor, setReportFor] = useState<number | null>(null);
@@ -63,6 +67,7 @@ export default function CustomerServicesPage() {
   const [reviewHover, setReviewHover] = useState(0);
   const [reviewBody, setReviewBody] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  const [signingOff, setSigningOff] = useState<number | null>(null);
 
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
@@ -117,6 +122,27 @@ export default function CustomerServicesPage() {
     }
   };
 
+  const submitDecline = async () => {
+    const id = declineFor;
+    if (id == null) return;
+    setDeclining(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/bookings/${id}/quote/reject`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: declineReason.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not decline the quote');
+      setQuotes((prev) => ({ ...prev, [id]: d })); // updated quote (now rejected)
+      setDeclineFor(null); setDeclineReason('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not decline the quote');
+    } finally {
+      setDeclining(false);
+    }
+  };
+
   const cancel = async (b: BookingRow) => {
     const warn = b.status === 'confirmed'
       ? 'Cancel this booking? A cancellation fee may apply if your slot is less than 6 hours away.'
@@ -162,6 +188,23 @@ export default function CustomerServicesPage() {
       setError(e instanceof Error ? e.message : 'Could not submit your report');
     } finally {
       setReporting(false);
+    }
+  };
+
+  const signOff = async (id: number) => {
+    setSigningOff(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/bookings/${id}/sign-off`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not confirm');
+      await load(); // customerSignedOff flips on the refreshed row
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not confirm the job');
+    } finally {
+      setSigningOff(null);
     }
   };
 
@@ -292,6 +335,16 @@ export default function CustomerServicesPage() {
                             </div>
                           ))}
                         </div>
+                        {Number(quote.materialsAmount ?? 0) > 0 && (
+                          <div className="mt-2.5 pt-2.5 space-y-1" style={{ borderTop: '1px dashed var(--color-base-200)' }}>
+                            <div className="flex justify-between text-[11px]" style={{ color: 'var(--color-neutral-500)' }}>
+                              <span>Labour</span><span className="font-mono">AED {fmtAed(quote.laborAmount ?? 0)}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]" style={{ color: 'var(--color-neutral-500)' }}>
+                              <span>Materials</span><span className="font-mono">AED {fmtAed(quote.materialsAmount ?? 0)}</span>
+                            </div>
+                          </div>
+                        )}
                         <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: '1px solid var(--color-base-200)' }}>
                           <span className="text-sm font-bold" style={{ color: 'var(--color-neutral-900)' }}>Total</span>
                           <span className="text-sm font-bold" style={{ color: 'var(--color-neutral-900)' }}>AED {fmtAed(quote.totalAmount)}</span>
@@ -305,8 +358,34 @@ export default function CustomerServicesPage() {
                         >
                           {approving === b.id ? 'Processing…' : `Approve & pay · AED ${fmtAed(quote.totalAmount)}`}
                         </button>
-                        <p className="text-[10px] mt-2 text-center" style={{ color: 'var(--color-neutral-400)' }}>
-                          You only pay after approving.{quote.validUntil ? ` Valid until ${new Date(quote.validUntil).toLocaleDateString('en-AE', { day: 'numeric', month: 'short' })}.` : ''}
+                        <div className="flex items-center justify-between mt-2 gap-3">
+                          <p className="text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>
+                            You only pay after approving.{quote.validUntil ? ` Valid until ${new Date(quote.validUntil).toLocaleDateString('en-AE', { day: 'numeric', month: 'short' })}.` : ''}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => { setDeclineFor(b.id); setDeclineReason(''); }}
+                            className="text-[11px] font-semibold whitespace-nowrap"
+                            style={{ color: 'var(--color-neutral-500)' }}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {quote && quote.status === 'rejected' && (
+                      <div className="mt-4 rounded-xl border p-3.5" style={{ borderColor: 'var(--color-base-200)', background: '#fafaf9' }}>
+                        <div className="text-xs font-semibold" style={{ color: 'var(--color-neutral-700)' }}>You declined this quote</div>
+                        <p className="text-[11px] mt-1" style={{ color: 'var(--color-neutral-500)' }}>
+                          The provider can send a revised quote, or you can cancel the request.
+                        </p>
+                      </div>
+                    )}
+                    {quote && quote.status === 'expired' && (
+                      <div className="mt-4 rounded-xl border p-3.5" style={{ borderColor: 'var(--color-base-200)', background: '#fafaf9' }}>
+                        <div className="text-xs font-semibold" style={{ color: 'var(--color-neutral-700)' }}>This quote expired</div>
+                        <p className="text-[11px] mt-1" style={{ color: 'var(--color-neutral-500)' }}>
+                          Ask the provider for a fresh quote, or cancel the request.
                         </p>
                       </div>
                     )}
@@ -328,6 +407,21 @@ export default function CustomerServicesPage() {
                     )}
                     {b.status === 'completed' && (
                       <div className="mt-4 flex items-center gap-2 flex-wrap">
+                        {b.customerSignedOff ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#1a7a5a' }}>
+                            <CheckCircle2 size={14} /> You confirmed this job
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={signingOff === b.id}
+                            onClick={() => signOff(b.id)}
+                            className="text-xs font-semibold px-3.5 py-2 rounded-lg text-white"
+                            style={{ background: 'var(--color-primary)', opacity: signingOff === b.id ? 0.6 : 1 }}
+                          >
+                            {signingOff === b.id ? 'Confirming…' : 'Confirm job done'}
+                          </button>
+                        )}
                         {reviews[b.id] ? (
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: '#1a7a5a' }}>
                             <span style={{ color: '#f59e0b', letterSpacing: '1px' }}>{'★'.repeat(reviews[b.id].rating)}{'☆'.repeat(5 - reviews[b.id].rating)}</span>
@@ -337,8 +431,8 @@ export default function CustomerServicesPage() {
                           <button
                             type="button"
                             onClick={() => { setReviewFor(b.id); setReviewRating(0); setReviewHover(0); setReviewBody(''); }}
-                            className="text-xs font-semibold px-3.5 py-2 rounded-lg text-white"
-                            style={{ background: 'var(--color-primary)' }}
+                            className="text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                            style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-primary)' }}
                           >
                             Leave a review
                           </button>
@@ -385,6 +479,28 @@ export default function CustomerServicesPage() {
               <button onClick={() => setReportFor(null)} className="text-xs font-semibold px-3.5 py-2 rounded-lg border" style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-500)' }}>Cancel</button>
               <button onClick={submitReport} disabled={reporting || !reportTitle.trim()} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ backgroundColor: 'var(--color-primary)', opacity: reporting || !reportTitle.trim() ? 0.5 : 1 }}>
                 {reporting ? 'Submitting…' : 'Submit report'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {declineFor != null && (
+        <div onClick={() => setDeclineFor(null)} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,20,18,.45)' }}>
+          <div onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl p-5 w-full max-w-md" style={{ border: '1px solid var(--color-base-200)' }}>
+            <h2 className="text-base font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Decline this quote?</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-500)' }}>
+              We&apos;ll let the provider know so they can send a revised quote for BK-{declineFor}. You won&apos;t be charged.
+            </p>
+            <textarea
+              value={declineReason} onChange={(e) => setDeclineReason(e.target.value)}
+              placeholder="Why are you declining? (optional — helps the provider revise)" rows={3}
+              className="w-full mt-4 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--color-base-200)' }}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setDeclineFor(null)} className="text-xs font-semibold px-3.5 py-2 rounded-lg border" style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-500)' }}>Keep quote</button>
+              <button onClick={submitDecline} disabled={declining} className="text-xs font-semibold px-4 py-2 rounded-lg text-white" style={{ backgroundColor: 'var(--color-error)', opacity: declining ? 0.5 : 1 }}>
+                {declining ? 'Declining…' : 'Decline quote'}
               </button>
             </div>
           </div>

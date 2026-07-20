@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
 
@@ -27,8 +27,8 @@ interface Booking {
 interface Technician { id: number; name: string; jobStatus: string }
 interface TeamMember { id: number; name: string; isLeadCapable: boolean }
 interface QuoteItem { itemName: string; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
-interface Quote { id: number; status: string; totalAmount: number | string; summary?: string | null; validUntil?: string | null; items: QuoteItem[] }
-interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null }
+interface Quote { id: number; status: string; totalAmount: number | string; laborAmount?: number | string | null; materialsAmount?: number | string | null; summary?: string | null; validUntil?: string | null; rejectionReason?: string | null; items: QuoteItem[] }
+interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null; accepted?: boolean }
 interface Dispute {
   id: number; status: string; title: string; description: string | null;
   resolutionSummary: string | null; providerResponse: string | null; bookingId: number;
@@ -54,10 +54,11 @@ const fmtWhen = (iso: string) =>
   new Date(iso).toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' +
   new Date(iso).toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit' });
 
-const emptyRow = () => ({ itemName: '', quantity: '1', unitPrice: '' });
+const emptyRow = () => ({ itemName: '', quantity: '1', unitPrice: '', itemType: 'labor' as 'labor' | 'materials' });
 
 export default function ProviderJobPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [data, setData] = useState<JobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,6 +67,8 @@ export default function ProviderJobPage() {
   const [summary, setSummary] = useState('');
   const [dispute, setDispute] = useState<Dispute | null>(null);
   const [respondText, setRespondText] = useState('');
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -103,10 +106,27 @@ export default function ProviderJobPage() {
     catch (e) { setError(e instanceof Error ? e.message : 'Could not update status'); }
     finally { setBusy(false); }
   };
+  const accept = async () => {
+    setBusy(true);
+    try { await apiPost(`/bookings/${id}/accept`, {}); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not accept'); }
+    finally { setBusy(false); }
+  };
+  const decline = async () => {
+    setBusy(true);
+    try {
+      await apiPost(`/bookings/${id}/decline`, { reason: declineReason.trim() || undefined });
+      // Declining hands the job to another provider (or Ops) — it is no longer ours.
+      router.push('/dashboard/service-provider/operations');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not decline');
+      setBusy(false);
+    }
+  };
   const submitQuote = async () => {
     const items = rows
       .filter((r) => r.itemName.trim() && Number(r.unitPrice) > 0)
-      .map((r) => ({ itemName: r.itemName.trim(), quantity: Number(r.quantity) || 1, unitPrice: Number(r.unitPrice) }));
+      .map((r) => ({ itemName: r.itemName.trim(), quantity: Number(r.quantity) || 1, unitPrice: Number(r.unitPrice), itemType: r.itemType }));
     if (!items.length) { setError('Add at least one priced line.'); return; }
     setBusy(true);
     try { await apiPost(`/bookings/${id}/quote`, { items, summary: summary.trim() || undefined }); await load(); }
@@ -118,11 +138,14 @@ export default function ProviderJobPage() {
   if (error && !data) return <div style={{ padding: 24, color: '#B42318' }}>{error}</div>;
   if (!data) return null;
 
-  const { booking: b, technician, team, quote } = data;
+  const { booking: b, technician, team, quote, accepted } = data;
   const st = STATUS[b.status] ?? STATUS.booked;
   const isQuote = b.pricingMode === 'quote';
   const next = NEXT[b.status];
-  const draftTotal = rows.reduce((s, r) => s + (Number(r.quantity) || 0) * (Number(r.unitPrice) || 0), 0);
+  const lineAmt = (r: { quantity: string; unitPrice: string }) => (Number(r.quantity) || 0) * (Number(r.unitPrice) || 0);
+  const draftTotal = rows.reduce((s, r) => s + lineAmt(r), 0);
+  const draftMaterials = rows.filter((r) => r.itemType === 'materials').reduce((s, r) => s + lineAmt(r), 0);
+  const draftLabor = draftTotal - draftMaterials;
   const label = `${b.serviceName ?? 'Service'}${b.packageName ? ` — ${b.packageName}` : ''}`;
 
   return (
@@ -215,15 +238,34 @@ export default function ProviderJobPage() {
       {isQuote && (
         <div style={card({ marginTop: 14, padding: '16px 18px' })}>
           <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>Quote</div>
-          {!quote || quote.status === 'draft' ? (
+          {!quote || ['draft', 'rejected', 'expired'].includes(quote.status) ? (
             <>
-              <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>After your assessment, price the job. The customer approves and pays before you start.</p>
+              {quote?.status === 'rejected' && (
+                <div style={{ marginTop: 10, padding: '9px 12px', background: TINT_AMBER, border: '1px solid #F5D9A8', borderRadius: 10 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: AMBER }}>The customer declined your quote.</span>
+                  {quote.rejectionReason && <span style={{ fontSize: 13, color: MUTE }}> “{quote.rejectionReason}”</span>}
+                  <span style={{ fontSize: 13, color: MUTE }}> Send a revised quote below.</span>
+                </div>
+              )}
+              {quote?.status === 'expired' && (
+                <div style={{ marginTop: 10, padding: '9px 12px', background: TINT_AMBER, border: '1px solid #F5D9A8', borderRadius: 10 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: AMBER }}>Your previous quote expired.</span>
+                  <span style={{ fontSize: 13, color: MUTE }}> Send a fresh quote below if the customer still wants the job.</span>
+                </div>
+              )}
+              <p style={{ fontSize: 13, color: MUTE, marginTop: quote ? 10 : 4 }}>After your assessment, price the job. The customer approves and pays before you start.</p>
               <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {rows.map((r, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8 }}>
                     <input placeholder="Line item (e.g. Labour)" value={r.itemName}
                       onChange={(e) => setRows((p) => p.map((x, j) => j === i ? { ...x, itemName: e.target.value } : x))}
                       style={{ flex: 1, border: BORDER, borderRadius: 9, padding: '8px 10px', fontSize: 13, color: INK }} />
+                    <select value={r.itemType}
+                      onChange={(e) => setRows((p) => p.map((x, j) => j === i ? { ...x, itemType: e.target.value as 'labor' | 'materials' } : x))}
+                      style={{ width: 104, border: BORDER, borderRadius: 9, padding: '8px 6px', fontSize: 12, color: MUTE, background: '#fff' }}>
+                      <option value="labor">Labour</option>
+                      <option value="materials">Materials</option>
+                    </select>
                     <input placeholder="Qty" value={r.quantity} inputMode="numeric"
                       onChange={(e) => setRows((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
                       style={{ width: 58, border: BORDER, borderRadius: 9, padding: '8px 10px', fontSize: 13, color: INK, textAlign: 'center' }} />
@@ -239,6 +281,11 @@ export default function ProviderJobPage() {
               </div>
               <input placeholder="Summary for the customer (optional)" value={summary} onChange={(e) => setSummary(e.target.value)}
                 style={{ width: '100%', marginTop: 8, border: BORDER, borderRadius: 9, padding: '8px 10px', fontSize: 13, color: INK }} />
+              {draftMaterials > 0 && (
+                <div style={{ marginTop: 10, fontSize: 12, color: FAINT, display: 'flex', gap: 14 }}>
+                  <span>Labour {aed(draftLabor)}</span><span>Materials {aed(draftMaterials)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: INK }}>Total {aed(draftTotal)}</span>
                 <button disabled={busy || draftTotal <= 0} onClick={submitQuote}
@@ -263,6 +310,16 @@ export default function ProviderJobPage() {
                   </div>
                 ))}
               </div>
+              {Number(quote.materialsAmount ?? 0) > 0 && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: HAIRLINE, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: FAINT }}>
+                    <span>Labour</span><span style={{ fontFamily: 'ui-monospace, monospace' }}>{aed(quote.laborAmount ?? 0)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: FAINT }}>
+                    <span>Materials</span><span style={{ fontFamily: 'ui-monospace, monospace' }}>{aed(quote.materialsAmount ?? 0)}</span>
+                  </div>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: HAIRLINE, fontWeight: 700, color: INK }}>
                 <span>Total</span><span>{aed(quote.totalAmount)}</span>
               </div>
@@ -276,6 +333,28 @@ export default function ProviderJobPage() {
         <div style={lbl}>Job progress</div>
         {b.status === 'booked' && isQuote ? (
           <p style={{ fontSize: 14, color: MUTE, marginTop: 8 }}>Waiting for the customer to approve your quote. You&apos;ll be able to start once they pay.</p>
+        ) : b.status === 'assigned' ? (
+          <div style={{ marginTop: 10 }}>
+            {accepted && <div style={{ fontSize: 13, fontWeight: 600, color: GREEN, marginBottom: 10 }}>✓ You accepted this job</div>}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {!accepted ? (
+                <button disabled={busy} onClick={accept}
+                  style={{ flex: 1, minWidth: 160, background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                  {busy ? 'Working…' : 'Accept job'}
+                </button>
+              ) : next ? (
+                <button disabled={busy} onClick={() => advance(next.to)}
+                  style={{ flex: 1, minWidth: 160, background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                  {busy ? 'Updating…' : next.label}
+                </button>
+              ) : null}
+              <button disabled={busy} onClick={() => { setDeclineReason(''); setDeclineOpen(true); }}
+                style={{ background: '#fff', color: '#B42318', border: '1px solid #FECDCA', borderRadius: 11, padding: '12px 18px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                Decline
+              </button>
+            </div>
+            {!accepted && <p style={{ fontSize: 12.5, color: FAINT, marginTop: 8 }}>Accept to confirm you&apos;ll take this job — the customer is told you&apos;re confirmed. Can&apos;t make it? Decline and we&apos;ll reassign it.</p>}
+          </div>
         ) : next ? (
           <button disabled={busy} onClick={() => advance(next.to)}
             style={{ marginTop: 10, width: '100%', background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
@@ -295,6 +374,23 @@ export default function ProviderJobPage() {
           </div>
         )}
       </div>
+
+      {/* Decline confirmation */}
+      {declineOpen && (
+        <div onClick={() => setDeclineOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,18,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={card({ width: 440, maxWidth: '100%', padding: 22 })}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: INK }}>Decline this job?</div>
+            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>We&apos;ll reassign BK-{b.id} to another provider (or hand it to Ops). A reason helps us dispatch better.</p>
+            <textarea value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} rows={3}
+              placeholder="Reason (optional) — e.g. fully booked at that time"
+              style={{ width: '100%', marginTop: 12, border: BORDER, borderRadius: 10, padding: '9px 11px', fontSize: 13, color: INK, resize: 'vertical', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+              <button onClick={() => setDeclineOpen(false)} style={{ background: 'none', border: BORDER, borderRadius: 9, padding: '9px 15px', fontSize: 13, fontWeight: 600, color: MUTE, cursor: 'pointer' }}>Keep job</button>
+              <button disabled={busy} onClick={decline} style={{ background: '#B42318', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 17px', fontSize: 13, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>{busy ? 'Declining…' : 'Decline & reassign'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
