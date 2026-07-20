@@ -5,7 +5,8 @@ import FilterBar, { ListingsSearchBar } from './FilterBar';
 import type { FilterBarProps } from './FilterBar';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import FilterSidebarWrapper from './FilterSidebarWrapper';
-import { Navbar } from '@/components/upnow/Navbar';
+import { SiteHeader } from '@/components/upnow/SiteHeader';
+import { Footer } from '@/components/upnow/Footer';
 import HeartButton from './HeartButton';
 
 const BACKEND = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
@@ -212,7 +213,7 @@ export default async function ListingsView({ country, emirate, searchParams }: P
 
   return (
     <div style={{ minHeight: '100vh', background: '#fff' }}>
-      <Navbar />
+      <SiteHeader />
 
       {/* ── Hero ─────────────────────────────────────────── */}
       <section className="lst-hero">
@@ -401,6 +402,7 @@ export default async function ListingsView({ country, emirate, searchParams }: P
           </div>
         </div>
       </section>
+      <Footer />
     </div>
   );
 }
