@@ -1,13 +1,6 @@
-import { Suspense } from 'react';
-import { RegisterForm } from "@/components/auth/RegisterForm";
+import { redirect } from 'next/navigation';
 
+// Registration now happens in a popup on the landing page.
 export default function RegisterServiceProviderPage() {
-  return (
-    <Suspense>
-      <RegisterForm
-        role="service_provider"
-        title="Sign up as a Service Provider"
-      />
-    </Suspense>
-  );
+  redirect('/?auth=signup');
 }

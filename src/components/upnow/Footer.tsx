@@ -22,42 +22,48 @@ const XIcon = () => (
   </svg>
 );
 
+// SERVICES + SPACES mirror the real catalog codes the landing rails use
+// (GET /api/catalog/public + SPACE_CAT_DEFS). Links to pages that are not yet
+// built point to '#' rather than a dead route.
 const cols = [
   {
     label: 'SERVICES',
     links: [
-      { text: 'Home and Office Maintenance', href: '/services?category=home-office-maintenance' },
-      { text: 'Cleaning and Hygiene',        href: '/services?category=cleaning-hygiene' },
-      { text: 'Water Pest and Environmental',href: '/services?category=water-pest-environmental' },
-      { text: 'Outdoor and Landscaping',     href: '/services?category=outdoor-landscaping' },
-      { text: 'View all services →',         href: '/services' },
+      { text: 'Home Cleaning', href: '/services?category=home_cleaning' },
+      { text: 'AC Services',   href: '/services?category=ac_services' },
+      { text: 'Plumbing',      href: '/services?category=plumbing' },
+      { text: 'Electrical',    href: '/services?category=electrical' },
+      { text: 'Handyman',      href: '/services?category=handyman' },
+      { text: 'View all services →', href: '/services' },
     ],
   },
   {
     label: 'SPACES',
     links: [
-      { text: 'Residential', href: '/listings?category=Residential' },
-      { text: 'Commercial',  href: '/listings?category=Commercial' },
-      { text: 'Industrial',  href: '/listings?category=Industrial' },
+      { text: 'Residential', href: '/listings?category=residential' },
+      { text: 'Commercial',  href: '/listings?category=commercial' },
+      { text: 'Industrial',  href: '/listings?category=industrial' },
+      { text: 'Land',        href: '/listings?category=land' },
+      { text: 'Mixed-use',   href: '/listings?category=mixed_use' },
       { text: 'View all spaces →', href: '/listings' },
     ],
   },
   {
     label: 'PROVIDERS',
     links: [
-      { text: 'Provider Login',               href: '/portal/login' },
-      { text: 'Become a Service Provider',    href: '/providers/services' },
-      { text: 'Become a Space Provider',      href: '/providers/spaces' },
+      { text: 'Provider Login',            href: '/login' },
+      { text: 'Become a Service Provider', href: '/register/service-provider' },
+      { text: 'Become a Space Provider',   href: '/register/rental-provider' },
     ],
   },
   {
     label: 'COMPANY',
     links: [
-      { text: 'About',            href: '/about' },
-      { text: 'Help Center',      href: '/help-center' },
-      { text: 'Contact',          href: '/contact' },
-      { text: 'Terms of Service', href: '/terms' },
-      { text: 'Privacy Policy',   href: '/privacy' },
+      { text: 'About',            href: '#' },
+      { text: 'Help Center',      href: '#' },
+      { text: 'Contact',          href: '#' },
+      { text: 'Terms of Service', href: '#' },
+      { text: 'Privacy Policy',   href: '#' },
     ],
   },
 ];
@@ -83,7 +89,7 @@ export function Footer() {
               {socials.map(({ Icon, label }) => (
                 <Link
                   key={label}
-                  href="/about"
+                  href="#"
                   aria-label={label}
                   title={label}
                   className="flex items-center justify-center transition-colors duration-200"
@@ -125,10 +131,7 @@ export function Footer() {
           style={{ borderTop: '1px solid rgba(255,255,255,0.10)' }}
         >
           <span className="text-xs" style={{ color: 'rgba(255,255,255,0.40)' }}>
-            © 2025 UpNow. All rights reserved.
-          </span>
-          <span className="text-xs mt-2 sm:mt-0" style={{ color: 'rgba(255,255,255,0.40)' }}>
-            All prices in AED — UAE
+            © {new Date().getFullYear()} UpNow. All rights reserved.
           </span>
         </div>
       </div>

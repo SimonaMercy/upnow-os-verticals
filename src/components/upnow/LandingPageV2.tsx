@@ -5,15 +5,13 @@ import { serviceImg as sharedServiceImg } from '@/lib/serviceImages';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Menu, X, LogOut, Building2, Home, Factory, Wrench, Leaf, Wind, Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check, User, Key, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain, Sparkles, Droplets, Zap, Hammer, PaintRoller, Bug, Car,
+  Menu, X, LogOut, Building2, Home, Factory, Wrench, Wind, Star, MapPin, Heart, Search, ArrowRight, ChevronDown, Check, UserCircle, Bell, Calendar, HelpCircle, Grid3X3, Mountain, Sparkles, Droplets, Zap, Hammer, PaintRoller, Bug, Car,
 } from 'lucide-react';
 import { useAuth, dashboardPath } from '@/contexts/AuthContext';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
-import { HowItWorks } from '@/components/upnow/HowItWorks';
-import { TrustSignals } from '@/components/upnow/TrustSignals';
 import { CustomerRenewalBanner } from '@/components/upnow/CustomerRenewalBanner';
 import { Footer } from '@/components/upnow/Footer';
-import { SignupChoice } from '@/components/upnow/SignupChoice';
+import { AuthModal, type AuthModalMode } from '@/components/upnow/AuthModal';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -405,22 +403,32 @@ const customerDropdownItems = [
   { label: 'Help Center', icon: HelpCircle, href: '/dashboard/customer/help' },
 ] as const;
 
-function LandingNav({
-  mode,
-  setMode,
-}: {
-  mode: 'services' | 'spaces';
-  setMode: (m: 'services' | 'spaces') => void;
-}) {
+function LandingNav() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthModalMode | null>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
   useClickOutside(avatarRef, () => setAvatarOpen(false));
 
-  const { isAuthenticated, user, signOut } = useAuth();
+  const { isAuthenticated, user, signOut, loading } = useAuth();
   const displayName = user?.name ?? [user?.firstName, user?.lastName].filter(Boolean).join(' ');
   const initials = displayName?.charAt(0)?.toUpperCase() ?? 'U';
   const isCustomerRole = user?.role === 'customer';
+
+  // /login and /register redirect here with ?auth=signin|signup (there are no
+  // separate auth pages). Open the matching popup, then strip the param so a
+  // refresh or back-nav doesn't reopen it.
+  useEffect(() => {
+    if (loading || isAuthenticated) return;
+    const params = new URLSearchParams(window.location.search);
+    const a = params.get('auth');
+    if (a === 'signin' || a === 'signup') {
+      setAuthMode(a);
+      params.delete('auth');
+      const qs = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    }
+  }, [loading, isAuthenticated]);
 
   return (
     <>
@@ -431,22 +439,6 @@ function LandingNav({
             <span className="l-brand-mark">U</span>
             UpNow
           </Link>
-
-          {/* Center tabs */}
-          <nav className="l-nav-center">
-            {(['services', 'spaces'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`l-nav-tab${mode === m ? ' active' : ''}`}
-              >
-                <span className="dot" />
-                {m === 'services' ? 'Services' : 'Spaces'}
-              </button>
-            ))}
-            <a className="l-nav-link" href="#how-it-works">How it works</a>
-            <a className="l-nav-link" href="#about">About Us</a>
-          </nav>
 
           {/* Right: auth */}
           <div className="l-nav-actions hidden md:flex">
@@ -527,27 +519,27 @@ function LandingNav({
               )
             ) : (
               <>
-                <Link
-                  href="/login"
+                <button
+                  onClick={() => setAuthMode('signin')}
                   style={{
                     padding: '10px 16px', borderRadius: 999,
                     border: '1.5px solid #e8ece9', color: '#0e1a16',
-                    fontSize: 14, fontWeight: 600, textDecoration: 'none',
-                    backgroundColor: 'transparent',
+                    fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                    backgroundColor: 'transparent', fontFamily: 'inherit',
                   }}
                 >
                   Sign in
-                </Link>
-                <Link
-                  href="/#signup"
+                </button>
+                <button
+                  onClick={() => setAuthMode('signup')}
                   style={{
-                    padding: '10px 16px', borderRadius: 999,
+                    padding: '10px 16px', borderRadius: 999, border: 'none',
                     backgroundColor: '#2e9f82', color: 'white',
-                    fontSize: 14, fontWeight: 600, textDecoration: 'none',
+                    fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                   }}
                 >
                   Sign up
-                </Link>
+                </button>
               </>
             )}
           </div>
@@ -587,32 +579,6 @@ function LandingNav({
             >
               <X size={24} />
             </button>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {(['services', 'spaces'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => { setMode(m); setDrawerOpen(false); }}
-                  style={{
-                    padding: '10px 16px', borderRadius: 8, border: 'none',
-                    textAlign: 'left', fontSize: 16, fontWeight: 600, cursor: 'pointer',
-                    backgroundColor: mode === m ? '#e7f5f0' : 'transparent',
-                    color: mode === m ? '#155a48' : '#36433d',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {m === 'services' ? 'Services' : 'Spaces'}
-                </button>
-              ))}
-              <a href="#how-it-works" onClick={() => setDrawerOpen(false)}
-                style={{ padding: '10px 16px', fontSize: 16, fontWeight: 500, color: '#36433d', textDecoration: 'none' }}>
-                How it works
-              </a>
-              <a href="#about" onClick={() => setDrawerOpen(false)}
-                style={{ padding: '10px 16px', fontSize: 16, fontWeight: 500, color: '#36433d', textDecoration: 'none' }}>
-                About Us
-              </a>
-            </div>
-            <div style={{ borderTop: '1px solid #e8ece9', margin: '20px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {isAuthenticated ? (
                 <>
@@ -639,32 +605,39 @@ function LandingNav({
                 </>
               ) : (
                 <>
-                  <Link
-                    href="/#signup"
-                    onClick={() => setDrawerOpen(false)}
+                  <button
+                    onClick={() => { setDrawerOpen(false); setAuthMode('signup'); }}
                     style={{
-                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#2e9f82',
-                      color: 'white', fontWeight: 600, textAlign: 'center', textDecoration: 'none',
+                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#2e9f82', border: 'none',
+                      color: 'white', fontWeight: 600, textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit',
                     }}
                   >
                     Sign up
-                  </Link>
-                  <Link
-                    href="/login"
-                    onClick={() => setDrawerOpen(false)}
+                  </button>
+                  <button
+                    onClick={() => { setDrawerOpen(false); setAuthMode('signin'); }}
                     style={{
                       padding: '12px 16px', borderRadius: 999, border: '1px solid #e8ece9',
                       backgroundColor: 'white', color: '#36433d', fontWeight: 600,
-                      textAlign: 'center', textDecoration: 'none',
+                      textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit',
                     }}
                   >
                     Sign in
-                  </Link>
+                  </button>
                 </>
               )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* Auth popup — sign in (OTP) / sign up (role choice) */}
+      {authMode && (
+        <AuthModal
+          mode={authMode}
+          onClose={() => setAuthMode(null)}
+          onModeChange={setAuthMode}
+        />
       )}
     </>
   );
@@ -692,6 +665,17 @@ const BUDGET_BRACKETS: BudgetRange[] = [
   { label: 'AED 500K+/yr',       min: '500000', max: ''       },
 ];
 
+interface WhenOption { label: string; value: string; }
+
+const WHEN_OPTIONS: WhenOption[] = [
+  { label: 'Anytime',      value: ''             },
+  { label: 'Today',        value: 'today'        },
+  { label: 'Tomorrow',     value: 'tomorrow'     },
+  { label: 'This week',    value: 'this_week'    },
+  { label: 'This weekend', value: 'this_weekend' },
+  { label: 'Next week',    value: 'next_week'    },
+];
+
 // ─── HERO ─────────────────────────────────────────────────────────────────────
 
 function Hero({
@@ -715,16 +699,18 @@ function Hero({
   const [locOpen, setLocOpen] = useState(false);
   const [budgetSel, setBudgetSel] = useState<BudgetRange>(BUDGET_BRACKETS[0]);
   const [budgetOpen, setBudgetOpen] = useState(false);
-  const [secondary, setSecondary] = useState('');
+  const [whenSel, setWhenSel] = useState<WhenOption>(WHEN_OPTIONS[0]);
+  const [whenOpen, setWhenOpen] = useState(false);
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
 
-  useEffect(() => { setLocOpen(false); setBudgetOpen(false); }, [mode]);
+  useEffect(() => { setLocOpen(false); setBudgetOpen(false); setWhenOpen(false); }, [mode]);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (!searchRef.current?.contains(e.target as Node)) {
         setLocOpen(false);
         setBudgetOpen(false);
+        setWhenOpen(false);
       }
     }
     document.addEventListener('mousedown', handle);
@@ -797,7 +783,7 @@ function Hero({
       if (budgetSel.max) params.set('maxPrice', budgetSel.max);
     } else {
       if (locationText.trim()) params.set('location', locationText.trim());
-      if (secondary.trim()) params.set('when', secondary.trim());
+      if (whenSel.value) params.set('when', whenSel.value);
     }
 
     router.push(`${base}${params.toString() ? `?${params.toString()}` : ''}`);
@@ -858,15 +844,14 @@ function Hero({
               />
             </div>
 
-            {/* Budget / When field */}
+            {/* Budget / When field — both are dropdown selectors */}
             <div
               className="field"
-              style={{ cursor: mode === 'spaces' ? 'pointer' : 'text' }}
+              style={{ cursor: 'pointer' }}
               onClick={() => {
-                if (mode === 'spaces') {
-                  setBudgetOpen(v => !v);
-                  setLocOpen(false);
-                }
+                setLocOpen(false);
+                if (mode === 'spaces') { setBudgetOpen(v => !v); setWhenOpen(false); }
+                else { setWhenOpen(v => !v); setBudgetOpen(false); }
               }}
             >
               <div className="lbl">{mode === 'spaces' ? 'Budget' : 'When'}</div>
@@ -878,13 +863,12 @@ function Hero({
                   <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
                 </div>
               ) : (
-                <input
-                  type="text"
-                  placeholder="Anytime"
-                  value={secondary}
-                  onChange={e => setSecondary(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                />
+                <div className="l-budget-display">
+                  <span style={{ color: whenSel.value === '' ? '#6b7a74' : '#0e1a16' }}>
+                    {whenSel.label}
+                  </span>
+                  <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
+                </div>
               )}
             </div>
 
@@ -934,6 +918,26 @@ function Hero({
               ))}
             </div>
           )}
+
+          {/* When dropdown */}
+          {whenOpen && (
+            <div className="loc-dropdown loc-dropdown--right">
+              {WHEN_OPTIONS.map((w, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`loc-option${whenSel.label === w.label ? ' sel' : ''}`}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => { setWhenSel(w); setWhenOpen(false); }}
+                >
+                  <span>{w.label}</span>
+                  {whenSel.label === w.label && (
+                    <Check size={13} style={{ marginLeft: 'auto', color: '#2e9f82', flexShrink: 0 }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Category chip row */}
@@ -955,110 +959,6 @@ function Hero({
               {cat.label}
             </button>
           ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── PATHS SECTION ────────────────────────────────────────────────────────────
-
-function PathsSection() {
-  const paths = [
-    {
-      icon: <User size={24} />,
-      title: 'Sign up as Customer',
-      desc: 'Find a place to rent and book trusted home & business services near you.',
-      cta: 'Create customer account',
-      href: '/register/customer',
-    },
-    {
-      icon: <Building2 size={24} />,
-      title: 'Sign up as Rental Provider',
-      desc: 'List apartments, offices or warehouses and manage tenancies in one dashboard.',
-      cta: 'Create rental account',
-      href: '/register/rental-provider',
-    },
-    {
-      icon: <Key size={24} />,
-      title: 'Sign up as Service Provider',
-      desc: 'Offer maintenance and home services to customers in your area.',
-      cta: 'Create service account',
-      href: '/register/service-provider',
-    },
-  ];
-
-  return (
-    <section id="paths" style={{ background: '#fafbf9', paddingBlock: 64 }}>
-      <div className="l-wrap">
-        <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <span className="l-eyebrow">Get started</span>
-          <h2 style={{ fontSize: 'clamp(26px,3vw,40px)', fontWeight: 700, letterSpacing: '-.022em', lineHeight: 1.06, marginTop: 12, color: '#0e1a16' }}>
-            Pick the path that matches you.
-          </h2>
-          <p style={{ fontSize: 'clamp(16px,1.3vw,19px)', color: '#36433d', margin: '12px auto 0', textAlign: 'center', maxWidth: '54ch', lineHeight: 1.55 }}>
-            Customers, rental providers and service providers each get a dedicated workspace.
-          </p>
-        </div>
-        <div className="l-paths">
-          {paths.map((p) => (
-            <div key={p.title} className="l-path">
-              <div className="pi">{p.icon}</div>
-              <h4>{p.title}</h4>
-              <p>{p.desc}</p>
-              <Link href={p.href} className="cta">
-                {p.cta} <ArrowRight size={14} />
-              </Link>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ─── GROW SECTION ─────────────────────────────────────────────────────────────
-
-function GrowSection() {
-  const cards = [
-    {
-      icon: <Wrench size={22} />,
-      title: 'Offer your services',
-      desc: 'Apply to list your service business and get matched with customers in your area.',
-      cta: 'Submit an application',
-      href: '/register/service-provider',
-    },
-    {
-      icon: <Building2 size={22} />,
-      title: 'List your space',
-      desc: 'Publish apartments, offices or warehouses and manage everything in one dashboard.',
-      cta: 'Submit an application',
-      href: '/register/rental-provider',
-    },
-  ];
-
-  return (
-    <section id="about" style={{ paddingTop: 24, paddingBottom: 72 }}>
-      <div className="l-wrap">
-        <div className="l-grow">
-          <div className="l-grow-inner">
-            <h2>Grow your business with UpNow.</h2>
-            <p className="gsub">
-              Join hundreds of providers expanding their reach — list your space or offer your services to customers in your area.
-            </p>
-            <div className="l-grow-cards">
-              {cards.map((card) => (
-                <div key={card.title} className="l-gcard">
-                  <div className="gi">{card.icon}</div>
-                  <h4>{card.title}</h4>
-                  <p>{card.desc}</p>
-                  <Link href={card.href} className="btn">
-                    {card.cta} <ArrowRight size={13} />
-                  </Link>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -1108,7 +1008,7 @@ export function LandingPageV2() {
 
   return (
     <>
-      <LandingNav mode={mode} setMode={handleSetMode} />
+      <LandingNav />
 
       <main>
         <Hero
@@ -1149,19 +1049,6 @@ export function LandingPageV2() {
                 </CategoryRail>
               ))}
         </div>
-
-        <div id="how-it-works">
-          <HowItWorks />
-        </div>
-
-        <TrustSignals />
-
-        <PathsSection />
-
-        <GrowSection />
-
-        {/* Sign-up section — the #signup anchor the "Sign up" links target. */}
-        <SignupChoice />
       </main>
 
       <Footer />
