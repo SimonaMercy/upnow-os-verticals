@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, createElement } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle, AlertTriangle, Info,
+  ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
   Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw, Paperclip, X, ExternalLink,
 } from 'lucide-react';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
@@ -27,7 +27,7 @@ interface ApiLine {
   id?: number; label: string; amount: number; type: LineType;
   category?: LineCategory; source?: string; discountAmount?: number; discountReason?: string | null;
   paymentId?: number | null; net?: number; meta?: Record<string, unknown> | null;
-  sourceContractId?: number; sourceContractNo?: string;
+  sourceContractId?: number; sourceContractNo?: string; inspectionContractId?: number;
 }
 interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null }
 interface StatementPayRow { description: string; date?: string | null; amount?: number; method?: string | null; chequeNumber?: string | null; mode?: string; status?: string; penalty?: number | null; kind?: string }
@@ -56,7 +56,7 @@ interface LineAttachment { name: string; fileUrl?: string; s3Key?: string; docId
 interface Row {
   key: string; label: string; amount: string; type: LineType; category: LineCategory;
   source?: string; discount: string; discountReason: string; paymentId?: number | null; meta?: Record<string, unknown> | null;
-  prefill?: boolean; attachments?: LineAttachment[]; sourceContractId?: number; sourceContractNo?: string;
+  prefill?: boolean; attachments?: LineAttachment[]; sourceContractId?: number; sourceContractNo?: string; inspectionContractId?: number;
 }
 
 // Standard utility rows prefilled under §3 so the RP just fills the amounts.
@@ -93,11 +93,6 @@ const SECTIONS: SectionDef[] = [
 const penaltyKeyToCategory = (key: string): LineCategory =>
   key === 'earlyTermination' ? 'early_termination' : key === 'lateMoveout' ? 'overstay' : 'penalty_breach';
 
-const GAP_TONE: Record<GapSeverity, { wrap: string; chip: string; icon: typeof AlertCircle }> = {
-  blocking: { wrap: 'bg-[#fef2f2] border-[#fecaca]', chip: 'bg-[#fee2e2] text-[#b91c1c]', icon: AlertCircle },
-  warning:  { wrap: 'bg-[#fff7ed] border-[#fed7aa]', chip: 'bg-[#ffedd5] text-[#c2410c]', icon: AlertTriangle },
-  info:     { wrap: 'bg-[#f4f3ef] border-[#e8e6e0]', chip: 'bg-[#eceae4] text-[#6b6860]', icon: Info },
-};
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
@@ -110,6 +105,8 @@ export default function SettlementPage() {
   // holds a bounced cheque behind a penalty line.
   const dashBase = (pathname ?? '/rental-provider/dashboard/contracts').replace(/\/contracts\/[^/]+\/settlement.*$/, '');
   const contractHref = (id: number) => `${dashBase}/contracts/${id}/v2`;
+  // The move-out inspection report a restoration line was priced from.
+  const moveOutReportHref = (id: number) => `${dashBase}/contracts/${id}/inspection/v2?type=move_out`;
 
   const [meta, setMeta] = useState<ContractMeta | null>(null);
   const [view, setView] = useState<'worksheet' | 'statement'>('worksheet');
@@ -155,6 +152,7 @@ export default function SettlementPage() {
         attachments: Array.isArray(attachments) ? attachments : undefined,
         sourceContractId: l.sourceContractId,
         sourceContractNo: l.sourceContractNo,
+        inspectionContractId: l.inspectionContractId,
       };
     });
     // Prefill the standard utility list when §3 is still empty (editable drafts only).
@@ -204,11 +202,6 @@ export default function SettlementPage() {
   const sumPayments = payRows.reduce((a, r) => a + (Math.max(0, Number(r.amount) || 0)), 0);
   const balance = Math.round((depositNum - sumLines + sumPayments) * 100) / 100;
   const blockingGaps = gaps.filter(g => g.severity === 'blocking');
-  const gapCounts = {
-    blocking: blockingGaps.length,
-    warning: gaps.filter(g => g.severity === 'warning').length,
-    info: gaps.filter(g => g.severity === 'info').length,
-  };
 
   const capFor = (sec: SectionDef): number => {
     const v = sec.capKey ? caps?.[sec.capKey] : null;
@@ -488,40 +481,6 @@ export default function SettlementPage() {
       {savedTick && !error && <div className="flex items-center gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3"><CheckCircle size={15} className="text-[#2e9f82]" /> <span className="font-semibold text-[#1a7a5a]">Saved.</span></div>}
 
       {view === 'worksheet' && (<>
-      {/* What's missing — one compact panel; completeness gaps from the real flow */}
-      {gaps.length > 0 && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#f0ede8] bg-[#faf9f6]">
-            <AlertTriangle size={15} className="text-[#c2410c]" />
-            <span className="text-sm font-bold text-[#1a1916]">What’s missing</span>
-            <div className="flex items-center gap-1.5 ml-auto text-[11px] font-semibold">
-              {gapCounts.blocking > 0 && <span className="px-1.5 py-0.5 rounded bg-[#fee2e2] text-[#b91c1c]">{gapCounts.blocking} blocking</span>}
-              {gapCounts.warning > 0 && <span className="px-1.5 py-0.5 rounded bg-[#ffedd5] text-[#c2410c]">{gapCounts.warning} to check</span>}
-              {gapCounts.info > 0 && <span className="px-1.5 py-0.5 rounded bg-[#eceae4] text-[#6b6860]">{gapCounts.info} note{gapCounts.info > 1 ? 's' : ''}</span>}
-            </div>
-          </div>
-          <div className="divide-y divide-[#f4f2ee]">
-            {gaps.map((g, i) => {
-              const dot = g.severity === 'blocking' ? 'bg-[#dc2626]' : g.severity === 'warning' ? 'bg-[#e08a3c]' : 'bg-[#c8c6be]';
-              return (
-                <div key={g.id + i} className="flex items-start gap-2.5 px-4 py-2">
-                  <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2 flex-wrap">
-                      <span className={`text-[10px] font-bold uppercase tracking-wide px-1 rounded ${GAP_TONE[g.severity].chip}`}>{g.section}</span>
-                      <span className="text-sm font-semibold text-[#1a1916]">{g.title}</span>
-                      {g.amount != null && <span className="text-xs font-bold text-[#b91c1c] tabular-nums">{aed(g.amount)}</span>}
-                      {g.heuristic && <span className="text-[10px] text-[#9b9890]">verify</span>}
-                    </div>
-                    <p className="text-xs text-[#6b6860] leading-snug mt-0.5 line-clamp-1" title={g.message}>{g.message}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Deposit + move-out date */}
       <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 grid sm:grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -586,13 +545,19 @@ export default function SettlementPage() {
                         )}
                         {!locked && <button type="button" onClick={() => removeRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] shrink-0" title="Remove"><Trash2 size={14} /></button>}
                       </div>
-                      {(disc > 0 || (r.attachments?.length ?? 0) > 0 || !!r.sourceContractId) && (
+                      {(disc > 0 || (r.attachments?.length ?? 0) > 0 || !!r.sourceContractId || !!r.inspectionContractId) && (
                         <div className="flex items-center gap-2 flex-wrap pl-1 pt-1">
                           {disc > 0 && <span className="text-[11px] text-[#6b6860]">Net <span className="font-semibold tabular-nums">{aed(Math.max(0, gross - disc))}</span></span>}
                           {r.sourceContractId && (
                             <a href={contractHref(r.sourceContractId)} target="_blank" rel="noreferrer"
                               className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] hover:underline" title="Open the lease that holds this cheque">
                               <ExternalLink size={10} /> {r.sourceContractNo ?? `contract #${r.sourceContractId}`}
+                            </a>
+                          )}
+                          {r.inspectionContractId && (
+                            <a href={moveOutReportHref(r.inspectionContractId)} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] hover:underline" title="Open the move-out inspection report">
+                              <ExternalLink size={10} /> Move-out report
                             </a>
                           )}
                           {(r.attachments ?? []).map((a, i) => (
@@ -805,14 +770,14 @@ export default function SettlementPage() {
             depositRow: (statement.contractSummary ?? []).find(r => r.kind === 'deposit') ?? null,
             paymentHistory: statement.paymentHistory ?? [],
             lines: rows.filter(r => r.label.trim() || Number(r.amount) > 0)
-              .map(r => ({ label: r.label.trim() || 'Adjustment', amount: Math.max(0, Number(r.amount) || 0), net: rowNet(r), category: r.category, type: r.type })),
+              .map(r => ({ label: r.label.trim() || 'Adjustment', amount: Math.max(0, Number(r.amount) || 0), net: rowNet(r), category: r.category, type: r.type, inspectionContractId: r.inspectionContractId })),
             depositHeld: depositNum,
             paymentsReceived: payRows.filter(r => Number(r.amount) > 0)
               .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
             otherAdjustments: 0,
             settlementDate: stamps.paidAt,
             supportingDocs: { inspectionReport: false, utilityBills: true, invoices: true, otherDocuments: true },
-          }} contractHref={contractHref} />
+          }} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
         ) : (
           <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
             <Loader2 className="animate-spin inline mr-2" size={16} /> Preparing statement…

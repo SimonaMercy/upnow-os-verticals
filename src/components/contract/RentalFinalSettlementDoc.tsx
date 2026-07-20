@@ -33,7 +33,7 @@ export interface RFSPayRow {
   status?: string; penalty?: number | null; kind?: string;
 }
 export interface RFSBand { label: string; band?: string; contractId?: number; contractNo?: string; startDate?: string | null; endDate?: string | null; rows: RFSPayRow[] }
-export interface RFSLine { label: string; amount: number; net: number; category: string; type: string }
+export interface RFSLine { label: string; amount: number; net: number; category: string; type: string; inspectionContractId?: number }
 export interface RFSReceipt { amount: number; method?: string; reference?: string | null; receivedOn?: string | null }
 
 export interface RFSData {
@@ -82,7 +82,7 @@ function Field({ label, value, accent }: { label: string; value: React.ReactNode
     </div>
   );
 }
-function ChargeCol({ n, title, rows, total, accent }: { n: number; title: string; rows: { label: string; amount: number }[]; total: number; accent?: string }) {
+function ChargeCol({ n, title, rows, total, accent, footer }: { n: number; title: string; rows: { label: string; amount: number }[]; total: number; accent?: string; footer?: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-[#e8e6e0] overflow-hidden flex flex-col">
       <SectionHead n={n} title={title} />
@@ -93,6 +93,7 @@ function ChargeCol({ n, title, rows, total, accent }: { n: number; title: string
             <span className="tabular-nums text-[#1a1916] shrink-0">{money(r.amount)}</span>
           </div>
         ))}
+        {footer && <div className="pt-1">{footer}</div>}
       </div>
       <div className="flex items-center justify-between px-2.5 py-1.5 border-t border-[#e8e6e0] bg-[#faf9f6]">
         <span className="text-[11px] font-bold uppercase tracking-wide text-[#1f6b4f]">Total</span>
@@ -111,7 +112,7 @@ function SummaryRow({ label, value, tone, strong, border }: { label: string; val
 }
 
 // ─── Document ─────────────────────────────────────────────────────────────────
-export default function RentalFinalSettlementDoc({ data, contractHref }: { data: RFSData; contractHref?: (id: number) => string }) {
+export default function RentalFinalSettlementDoc({ data, contractHref, moveOutReportHref }: { data: RFSData; contractHref?: (id: number) => string; moveOutReportHref?: (id: number) => string }) {
   const c = data.contract;
   const utilities = data.lines.filter(l => l.category === 'utility');
   const restoration = data.lines.filter(l => l.category === 'restoration');
@@ -142,6 +143,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref }: { data:
     ? restoration.map(l => ({ label: l.label.replace(/\s*\(move-out inspection\)\s*/i, ''), amount: l.net ?? l.amount }))
     : [{ label: 'Repairs & Maintenance', amount: 0 }, { label: 'Cleaning', amount: 0 }, { label: 'Missing Keys / Remotes', amount: 0 }];
   const restorationTotal = sumNet(restoration, ['restoration']);
+  const restorationInspId = restoration.find(l => l.inspectionContractId != null)?.inspectionContractId;
 
   // §5 — the standard additional-charge rows, each summed from its category.
   const additionalRows = [
@@ -255,7 +257,10 @@ export default function RentalFinalSettlementDoc({ data, contractHref }: { data:
         {/* §3 §4 §5 charge columns */}
         <div className="grid md:grid-cols-3 gap-4">
           <ChargeCol n={3} title="Outstanding Utility & Service Charges" rows={utilRowsShown} total={utilitiesTotal} />
-          <ChargeCol n={4} title="Property Restoration Charges" rows={restorationRows} total={restorationTotal} />
+          <ChargeCol n={4} title="Property Restoration Charges" rows={restorationRows} total={restorationTotal}
+            footer={restorationInspId != null && moveOutReportHref
+              ? <a href={moveOutReportHref(restorationInspId)} target="_blank" rel="noreferrer" className="text-[11px] font-medium text-[#1f6b4f] hover:underline">↗ From move-out inspection report</a>
+              : (restorationTotal > 0 ? <span className="text-[11px] text-[#9b9890]">From move-out inspection</span> : undefined)} />
           <ChargeCol n={5} title="Additional Recoverable Charges" rows={additionalRows} total={additionalTotal} />
         </div>
 
