@@ -8,7 +8,8 @@ import {
   Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw,
 } from 'lucide-react';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
-import TenantFinalSettlementDoc, { type TFSContract, type TFSRow, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
+import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
+import RentalFinalSettlementDoc from '@/components/contract/RentalFinalSettlementDoc';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +29,13 @@ interface ApiLine {
   paymentId?: number | null; net?: number; meta?: Record<string, unknown> | null;
 }
 interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null }
-interface ApiStatement { contract: TFSContract; contractSummary: TFSRow[]; rent: TFSRent }
+interface StatementPayRow { description: string; date?: string | null; amount?: number; method?: string | null; chequeNumber?: string | null; mode?: string; status?: string; penalty?: number | null; kind?: string }
+interface ApiStatement {
+  contract: TFSContract & { landlordName?: string; rpSignatoryName?: string; propertyType?: string | null; contractNo?: string; actualMoveOutDate?: string | null };
+  contractSummary: StatementPayRow[];
+  paymentHistory?: { label: string; rows: StatementPayRow[] }[];
+  rent: TFSRent;
+}
 interface ApiGap { id: string; section: string; severity: GapSeverity; title: string; message: string; amount: number | null; amountKnown: string; heuristic?: boolean }
 interface ApiSettlement {
   exists: boolean; id?: number; status: SettlementStatus; depositHeld: number; notes: string | null;
@@ -711,30 +718,33 @@ export default function SettlementPage() {
       </div>
       </>)}
 
-      {/* Statement view */}
+      {/* Statement view — the RENTAL FINAL SETTLEMENT document (9-section CEO form) */}
       {view === 'statement' && (
         statement ? (
-          <TenantFinalSettlementDoc data={{
-            contract: statement.contract,
-            contractSummary: statement.contractSummary,
-            rent: statement.rent,
-            depositHeld: depositNum,
+          <RentalFinalSettlementDoc data={{
+            contract: {
+              landlordName: statement.contract.landlordName,
+              rpSignatoryName: statement.contract.rpSignatoryName,
+              tenantName: statement.contract.tenantName,
+              propertyAddress: statement.contract.propertyAddress,
+              unit: statement.contract.unit,
+              contractNo: statement.contract.contractNo,
+              propertyType: statement.contract.propertyType,
+              contractAmount: statement.contract.contractAmount,
+              startDate: statement.contract.startDate,
+              endDate: statement.contract.endDate,
+              actualMoveOutDate: statement.contract.actualMoveOutDate ?? (moveOut || null),
+            },
+            depositRow: (statement.contractSummary ?? []).find(r => r.kind === 'deposit') ?? null,
+            paymentHistory: statement.paymentHistory ?? [],
             lines: rows.filter(r => r.label.trim() || Number(r.amount) > 0)
-              .map(r => ({ label: r.label.trim() || 'Adjustment', amount: rowNet(r), type: r.type })),
-            chargesTotal: sumLines,
-            payments: payRows.filter(r => Number(r.amount) > 0)
+              .map(r => ({ label: r.label.trim() || 'Adjustment', amount: Math.max(0, Number(r.amount) || 0), net: rowNet(r), category: r.category, type: r.type })),
+            depositHeld: depositNum,
+            paymentsReceived: payRows.filter(r => Number(r.amount) > 0)
               .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
-            paymentsReceivedTotal: sumPayments,
-            balance,
-            notes: notes.trim() || null,
-            status,
+            otherAdjustments: 0,
             settlementDate: stamps.paidAt,
-          }}
-          links={{
-            contract: `/rental-provider/dashboard/contracts/${contractId}/v2`,
-            payments: `/rental-provider/dashboard/payments`,
-            deposits: `/rental-provider/dashboard/deposits`,
-            worksheet: `/rental-provider/dashboard/contracts/${contractId}/settlement`,
+            supportingDocs: { inspectionReport: false, utilityBills: true, invoices: true, otherDocuments: true },
           }} />
         ) : (
           <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
