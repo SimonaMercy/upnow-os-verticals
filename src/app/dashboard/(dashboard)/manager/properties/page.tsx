@@ -321,7 +321,7 @@ function PropertyGridCard({
 
 // ─── Main page ────────────────────────────────────────────
 export default function ManagerPropertiesPage() {
-  const { can, loading: permsLoading } = useManagerPermissions();
+  const { can, canForRp, loading: permsLoading } = useManagerPermissions();
   const params   = useSearchParams();
   const router   = useRouter();
   const rpFilter = params.get('rp') ? Number(params.get('rp')) : null;
@@ -493,7 +493,7 @@ export default function ManagerPropertiesPage() {
                 : `Managing ${totalProperties} propert${totalProperties === 1 ? 'y' : 'ies'}${rpFilter ? ' for this landlord' : landlordCount ? ` across ${landlordCount} landlord${landlordCount === 1 ? '' : 's'}` : ''}.`}
             </p>
           </div>
-          {can('canEditProperties') && (
+          {(rpFilter ? canForRp('canEditProperties', rpFilter) : can('canEditProperties')) && (
             <button
               type="button"
               className={s.dxAddBtn}
@@ -626,7 +626,7 @@ export default function ManagerPropertiesPage() {
                     <PropertyCard
                       key={p.id}
                       vm={toCardVM(p, multiLandlord)}
-                      canEdit={can('canEditProperties')}
+                      canEdit={canForRp('canEditProperties', p.rentalProviderId)}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onShowDetails={() => setDetailsProperty(p)}
                     />
@@ -647,7 +647,7 @@ export default function ManagerPropertiesPage() {
                     <PropertyGridCard
                       key={p.id}
                       vm={toCardVM(p, multiLandlord)}
-                      canEdit={can('canEditProperties')}
+                      canEdit={canForRp('canEditProperties', p.rentalProviderId)}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onShowDetails={() => setDetailsProperty(p)}
                     />
@@ -679,9 +679,11 @@ export default function ManagerPropertiesPage() {
                 const p = visibleProperties.find((x) => x.id === id);
                 if (p) setDetailsProperty(p);
               }}
-              onEdit={can('canEditProperties') ? (id) => {
+              onEdit={(rpFilter ? canForRp('canEditProperties', rpFilter) : can('canEditProperties')) ? (id) => {
                 const p = visibleProperties.find((x) => x.id === id);
-                if (p) setPropertyModal({ open: true, editing: p });
+                // Per-landlord gate: never open the editor for a property whose
+                // landlord hasn't granted this manager edit rights.
+                if (p && canForRp('canEditProperties', p.rentalProviderId)) setPropertyModal({ open: true, editing: p });
               } : undefined}
             />
           </div>
@@ -740,8 +742,8 @@ export default function ManagerPropertiesPage() {
       {detailsProperty && (
         <PropertyDetailsModal
           fetchBase="/manager/properties"
-          editable={can('canManageDocuments')}
-          canEditPricing={can('canEditProperties')}
+          editable={canForRp('canManageDocuments', detailsProperty.rentalProviderId)}
+          canEditPricing={canForRp('canEditProperties', detailsProperty.rentalProviderId)}
           pricingRp={detailsProperty.rentalProviderId}
           property={{
             id: detailsProperty.id,
@@ -771,7 +773,7 @@ export default function ManagerPropertiesPage() {
             occupied: detailsProperty.occupiedCount ?? 0,
             rentTotal: detailsProperty.rentTotal ?? 0,
           }}
-          onEdit={can('canEditProperties') ? () => {
+          onEdit={canForRp('canEditProperties', detailsProperty.rentalProviderId) ? () => {
             const editing = detailsProperty;
             setDetailsProperty(null);
             setPropertyModal({ open: true, editing });
