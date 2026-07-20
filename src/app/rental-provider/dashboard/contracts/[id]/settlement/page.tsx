@@ -173,6 +173,11 @@ export default function SettlementPage() {
   const sumPayments = payRows.reduce((a, r) => a + (Math.max(0, Number(r.amount) || 0)), 0);
   const balance = Math.round((depositNum - sumLines + sumPayments) * 100) / 100;
   const blockingGaps = gaps.filter(g => g.severity === 'blocking');
+  const gapCounts = {
+    blocking: blockingGaps.length,
+    warning: gaps.filter(g => g.severity === 'warning').length,
+    info: gaps.filter(g => g.severity === 'info').length,
+  };
 
   const capFor = (sec: SectionDef): number => {
     const v = sec.capKey ? caps?.[sec.capKey] : null;
@@ -364,7 +369,7 @@ export default function SettlementPage() {
   const sm = STATUS_META[status];
 
   return (
-    <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-2xl'} mx-auto px-4 py-8 space-y-6 transition-[max-width]`}>
+    <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-4xl'} mx-auto px-4 py-8 space-y-5 transition-[max-width]`}>
       {/* Topbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
@@ -420,26 +425,37 @@ export default function SettlementPage() {
       {savedTick && !error && <div className="flex items-center gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3"><CheckCircle size={15} className="text-[#2e9f82]" /> <span className="font-semibold text-[#1a7a5a]">Saved.</span></div>}
 
       {view === 'worksheet' && (<>
-      {/* What's missing — completeness gaps surfaced from the real flow */}
+      {/* What's missing — one compact panel; completeness gaps from the real flow */}
       {gaps.length > 0 && (
-        <div className="space-y-2">
-          {gaps.map((g, i) => {
-            const t = GAP_TONE[g.severity];
-            return (
-              <div key={g.id + i} className={`flex items-start gap-2.5 text-sm border rounded-xl px-4 py-2.5 ${t.wrap}`}>
-                {createElement(t.icon, { size: 15, className: 'shrink-0 mt-0.5 text-[#6b6860]' })}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${t.chip}`}>{g.section}</span>
-                    <span className="font-semibold text-[#1a1916]">{g.title}</span>
-                    {g.amount != null && <span className="text-xs font-bold text-[#b91c1c] tabular-nums">{aed(g.amount)}</span>}
-                    {g.heuristic && <span className="text-[10px] text-[#9b9890]">· auto-detected, verify</span>}
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#f0ede8] bg-[#faf9f6]">
+            <AlertTriangle size={15} className="text-[#c2410c]" />
+            <span className="text-sm font-bold text-[#1a1916]">What’s missing</span>
+            <div className="flex items-center gap-1.5 ml-auto text-[11px] font-semibold">
+              {gapCounts.blocking > 0 && <span className="px-1.5 py-0.5 rounded bg-[#fee2e2] text-[#b91c1c]">{gapCounts.blocking} blocking</span>}
+              {gapCounts.warning > 0 && <span className="px-1.5 py-0.5 rounded bg-[#ffedd5] text-[#c2410c]">{gapCounts.warning} to check</span>}
+              {gapCounts.info > 0 && <span className="px-1.5 py-0.5 rounded bg-[#eceae4] text-[#6b6860]">{gapCounts.info} note{gapCounts.info > 1 ? 's' : ''}</span>}
+            </div>
+          </div>
+          <div className="divide-y divide-[#f4f2ee]">
+            {gaps.map((g, i) => {
+              const dot = g.severity === 'blocking' ? 'bg-[#dc2626]' : g.severity === 'warning' ? 'bg-[#e08a3c]' : 'bg-[#c8c6be]';
+              return (
+                <div key={g.id + i} className="flex items-start gap-2.5 px-4 py-2">
+                  <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className={`text-[10px] font-bold uppercase tracking-wide px-1 rounded ${GAP_TONE[g.severity].chip}`}>{g.section}</span>
+                      <span className="text-sm font-semibold text-[#1a1916]">{g.title}</span>
+                      {g.amount != null && <span className="text-xs font-bold text-[#b91c1c] tabular-nums">{aed(g.amount)}</span>}
+                      {g.heuristic && <span className="text-[10px] text-[#9b9890]">verify</span>}
+                    </div>
+                    <p className="text-xs text-[#6b6860] leading-snug mt-0.5 line-clamp-1" title={g.message}>{g.message}</p>
                   </div>
-                  <p className="text-xs text-[#6b6860] mt-0.5">{g.message}</p>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -461,13 +477,14 @@ export default function SettlementPage() {
         </div>
       </div>
 
-      {/* CEO sections — add amounts under each */}
+      {/* CEO sections — add amounts under each (two-up on wider screens) */}
+      <div className="grid md:grid-cols-2 gap-4 items-start">
       {SECTIONS.map(sec => {
         const secRows = rows.filter(r => sec.cats.includes(r.category));
         const secNet = secRows.reduce((a, r) => a + rowNet(r), 0);
         const cap = capFor(sec);
         return (
-          <div key={sec.id} className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
+          <div key={sec.id} className="bg-white rounded-2xl border border-[#e8e6e0] p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2">
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-[#2e9f82] text-white text-[11px] font-bold">{sec.num}</span>
@@ -568,6 +585,7 @@ export default function SettlementPage() {
           </div>
         );
       })}
+      </div>
 
       {/* Payments received from the customer */}
       <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
