@@ -33,7 +33,7 @@ const MAX_AREA = 16_000_000; // iOS total canvas-area limit (~16.7M px)
 
 type Status = 'loading' | 'ready' | 'error';
 
-export default function EjariCanvas({ bytes, height = 640, fill = false, fluid = false }: {
+export default function EjariCanvas({ bytes, height = 640, fill = false, fluid = false, noScroll = false }: {
   bytes: Uint8Array | null;
   height?: number;
   /** Full-height scrollable layout for full-screen viewers (pages centred on a
@@ -44,6 +44,10 @@ export default function EjariCanvas({ bytes, height = 640, fill = false, fluid =
    *  page scrolls as one — no internal scroll box. Desktop keeps the capped box.
    *  Ignored when `fill` is set. */
   fluid?: boolean;
+  /** Inline embed that grows to the document's FULL height with no internal
+   *  scrollbar on EVERY viewport (the host page scrolls as one). Ignored when
+   *  `fill` is set; takes precedence over `fluid`. */
+  noScroll?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>('loading');
@@ -129,19 +133,24 @@ export default function EjariCanvas({ bytes, height = 640, fill = false, fluid =
   }
 
   const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
+  // No-scroll grows to content, so a full-height placeholder box would leave a
+  // large gap before the pages arrive — use a modest loading height instead.
+  const loadingH = noScroll ? 360 : height;
   return (
     <div
-      className={fluid ? styles.fluidFrame : undefined}
-      style={fluid
-        ? ({ '--ejari-max': `${height}px` } as unknown as CSSProperties)
-        : { ...frame, maxHeight: height, overflow: 'auto', background: '#fff' }}
+      className={fluid && !noScroll ? styles.fluidFrame : undefined}
+      style={noScroll
+        ? { ...frame, background: '#fff' }
+        : fluid
+          ? ({ '--ejari-max': `${height}px` } as unknown as CSSProperties)
+          : { ...frame, maxHeight: height, overflow: 'auto', background: '#fff' }}
     >
       <div ref={hostRef} />
       {status === 'loading' && (
-        <div style={{ height, display: 'grid', placeItems: 'center', color: '#888', fontSize: 13 }}>Preparing contract…</div>
+        <div style={{ height: loadingH, display: 'grid', placeItems: 'center', color: '#888', fontSize: 13 }}>Preparing contract…</div>
       )}
       {status === 'error' && (
-        <div style={{ height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Preview unavailable.</div>
+        <div style={{ height: loadingH, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Preview unavailable.</div>
       )}
     </div>
   );

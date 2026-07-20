@@ -23,6 +23,11 @@ const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
 });
 
+const ReceiptButtons = dynamic(() => import('@/components/upnow/PaymentReceiptPdf').then(m => ({ default: m.ReceiptButtons })), {
+  ssr: false,
+  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing receipts…</div>,
+});
+
 interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
 interface Detail {
@@ -140,6 +145,14 @@ export default function ContractReviewPage() {
   // Combine the addendum into the contract PDF the tenant reads/signs.
   const addendums: EjariAddendum[] = d.addendums ?? [];
 
+  // System-generated payment receipts (proof of payment) — the same generator the
+  // RP / landlord views use, fed from the token-scoped plan the backend now returns
+  // on the customer link. Shown only when there are payment / fee rows to receipt.
+  const receipt: ReceiptContract | null =
+    d.plan && (d.plan.payments.length > 0 || (d.plan.fees?.length ?? 0) > 0)
+      ? ({ ...d.contract, payments: d.plan.payments, fees: d.plan.fees, pdcConfirmed: d.pdcConfirmed } as unknown as ReceiptContract)
+      : null;
+
   // Landlord links get a dedicated layout: the contract + every document in full
   // preview (no download) with a sticky sign menu — the lessor's equivalent of
   // the customer review-and-sign page.
@@ -190,22 +203,9 @@ export default function ContractReviewPage() {
               </div>
             )
           ) : (
-            <EjariInline data={ejari} addendums={addendums} height={680} fluid />
+            <EjariInline data={ejari} addendums={addendums} noScroll />
           )}
         </div>
-
-        {/* Any extra signed/official copies attached — hidden on the move-out signing view */}
-        {inspType !== 'move_out' && d.documents.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {d.documents.map(x => (
-              <button key={x.documentKey} type="button"
-                onClick={() => openDocViewer({ fileUrl: x.fileUrl, caption: (x.displayName ?? x.documentKey).replace(/_/g, ' ') })}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-[#e8e6e0] text-[#2e9f82] cursor-pointer">
-                <FileText size={13} /> {(x.displayName ?? x.documentKey).replace(/_/g, ' ')}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Sign the contract */}
         {showContract && (
@@ -215,6 +215,16 @@ export default function ContractReviewPage() {
             ) : (
               <SignBox token={token} contractId={id} kind="contract" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
             )}
+          </Card>
+        )}
+
+        {/* System-generated payment receipts — after signing; surfaced as
+             View / Download actions (no inline preview), since the tenancy
+             contract is the only inline preview. Contract links only. */}
+        {!inspType && receipt && (
+          <Card title="Payment receipts" icon={FileText}>
+            <p className="text-xs text-[#6b6860] mb-3">Your system-generated payment receipts for this tenancy.</p>
+            <ReceiptButtons contract={receipt} />
           </Card>
         )}
 

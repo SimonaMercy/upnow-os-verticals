@@ -15,11 +15,14 @@ import { useReactPdfDoc } from './useReactPdfDoc';
 import { InlineDownloadRow } from './InlineDownloadRow';
 import EjariCanvas from './EjariCanvas';
 
-export default function EjariInline({ data, addendums = [], height = 640, fluid = false, showDownload = false }: {
+export default function EjariInline({ data, addendums = [], height = 640, fluid = false, noScroll = false, showDownload = false }: {
   data: EjariContractData; addendums?: EjariAddendum[]; height?: number;
   /** Flow to full height on mobile so the host page scrolls as one (no internal
    *  scroll box). Desktop keeps the capped, internally-scrolling card. */
   fluid?: boolean;
+  /** Grow to the contract's FULL height with no internal scrollbar on every
+   *  viewport (the host page scrolls as one). Takes precedence over `fluid`. */
+  noScroll?: boolean;
   /** Render a "⬇ Download PDF" row above the preview (the tenancy contract is the
    *  customer's own document — clean, no watermark). */
   showDownload?: boolean;
@@ -45,7 +48,7 @@ export default function EjariInline({ data, addendums = [], height = 640, fluid 
   return (
     <>
       {showDownload && <InlineDownloadRow url={url} fileName={`Tenancy-contract-${data.ref ?? 'contract'}.pdf`} />}
-      <EjariCanvas bytes={bytes} height={height} fluid={fluid} />
+      <EjariCanvas bytes={bytes} height={height} fluid={fluid} noScroll={noScroll} />
     </>
   );
 }
