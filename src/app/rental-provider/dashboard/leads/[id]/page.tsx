@@ -29,6 +29,7 @@ import { getRequiredDocs, type DocReq } from '@/lib/docRequirements';
 import { openDocViewer } from '@/lib/docViewer';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/components/upnow/DocumentReaderModal';
+import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
@@ -1351,13 +1352,20 @@ function DocsSection({
   return (
     <>
       <div>
-        <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><FileText size={13} /> KYC documents · {received} of {required.length} required received</span>
-          {allUploaded.length > 0 && (
-            <button type="button" className="linkbtn" onClick={() => setReaderOpen(true)}>
-              <Eye size={11} /> View all documents ({allUploaded.length})
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {allUploaded.length > 0 && (
+              <button type="button" className="linkbtn" onClick={() => setReaderOpen(true)}>
+                <Eye size={11} /> View all documents ({allUploaded.length})
+              </button>
+            )}
+            {/* External upload link — send the lead's customer a no-login link to
+                upload the requested documents (in addition to their own journey). */}
+            {canUpload && lead.convertedTenant?.id && (
+              <DocsLinkButton tenantId={lead.convertedTenant.id} label="Request documents" />
+            )}
+          </div>
         </div>
         <div className="doclist">{required.map(ReqRow)}</div>
         {optional.length > 0 && (
