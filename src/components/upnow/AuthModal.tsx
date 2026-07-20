@@ -356,13 +356,37 @@ export function AuthModal({
   );
 
   // Role choice row — icon + title + arrow. Customer is emphasized (green).
+  // Attribute sign-up intent for the UTM funnel — modelled as a page-visit
+  // event to /signup/<role> so it lands in page_visits with the same UTM the
+  // visitor arrived on. Lets us tie traffic → who chose to become a
+  // customer / rental provider / service provider.
+  const trackSignupIntent = (role: SelfRegisterRole) => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const payload: Record<string, string> = { path: `/signup/${role.replace(/_/g, '-')}` };
+      for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+        const v = params.get(k);
+        if (v) payload[k] = v;
+      }
+      if (document.referrer) payload.referrer = document.referrer;
+      void fetch('/api/track/visit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => undefined);
+    } catch {
+      /* telemetry never throws */
+    }
+  };
+
   const roleButton = (role: SelfRegisterRole, emphasized: boolean) => {
     const meta = ROLE_META[role];
     const Icon = meta.icon;
     return (
       <button
         key={role}
-        onClick={() => { setSignupRole(role); setSignupStep('form'); setSignupValue(''); setSignupError(null); }}
+        onClick={() => { trackSignupIntent(role); setSignupRole(role); setSignupStep('form'); setSignupValue(''); setSignupError(null); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 14, padding: 14, width: '100%',
           border: `1.5px solid ${emphasized ? '#2e9f82' : '#e8ece9'}`, borderRadius: 14,
