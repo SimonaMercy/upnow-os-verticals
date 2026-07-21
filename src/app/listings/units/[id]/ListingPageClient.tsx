@@ -3,7 +3,9 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useAuth, dashboardPath, type UserRole } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { SiteHeader } from '@/components/upnow/SiteHeader';
+import { Footer } from '@/components/upnow/Footer';
 import {
   MapPin, X, ChevronLeft, ChevronRight, BedDouble, Bath, Maximize2,
   Layers, Wind, CheckCircle2, Check, Shield, Clock,
@@ -382,11 +384,13 @@ function fmtSlot(t: string) {
 /* ── Book Viewing Modal ─────────────────────────────────────────────────── */
 const BOOKING_INTENT_KEY = 'upnow_booking_intent';
 
-function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit: PublicUnit; property: PublicProperty; preferredStartDays?: number[]; onClose: () => void }) {
-  const [date, setDate] = useState('');
+function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: PublicProperty; onClose: () => void }) {
+  // Default to today so the time list immediately reflects the current date —
+  // past slots are filtered out (see TIME_SLOTS filter below), leaving only
+  // upcoming times.
+  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState('');
   const [notes, setNotes] = useState('');
-  const [moveInDate, setMoveInDate] = useState(() => nextAllowedDate(preferredStartDays));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null); // confirmed scheduledAt ISO string
@@ -404,7 +408,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([null, null, null, null, null, null]);
 
   // Shared API call — used by both manual submit and auto-submit after login redirect
-  async function submitBooking(d: string, t: string, n: string, mi?: string): Promise<boolean> {
+  async function submitBooking(d: string, t: string, n: string): Promise<boolean> {
     setError(null);
     setSubmitting(true);
     try {
@@ -422,7 +426,6 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
           unitId: unit.id,
           scheduledAt,
           notes: n || undefined,
-          desiredMoveIn: mi || undefined,
         }),
       });
       if (!res.ok) {
@@ -463,8 +466,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
           setDate(intent.date);
           setTime(intent.time ?? '');
           setNotes(intent.notes ?? '');
-          setMoveInDate(intent.moveInDate ?? '');
-          submitBooking(intent.date, intent.time ?? '', intent.notes ?? '', intent.moveInDate ?? '');
+          submitBooking(intent.date, intent.time ?? '', intent.notes ?? '');
         }
       }
     } catch { /* ignore */ }
@@ -479,7 +481,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
       setAuthStep('register');
       return;
     }
-    await submitBooking(date, time, notes, moveInDate);
+    await submitBooking(date, time, notes);
   }
 
   // Step 1 — unified: try login first, auto-register if no account found
@@ -582,7 +584,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
         const msg = Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Verification failed';
         throw new Error(msg);
       }
-      const booked = await submitBooking(date, time, notes, moveInDate);
+      const booked = await submitBooking(date, time, notes);
       if (booked) setAuthStep('register-success');
       else setAuthError('Verified! But could not submit the viewing request. Please try again.');
     } catch (err) {
@@ -868,7 +870,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
           <label className="block text-sm font-medium text-[#3d3b35] mb-2">
             Preferred time <span className="text-[#9b9890] font-normal">(optional)</span>
           </label>
-          <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[200px] pr-1">
+          <div className="grid grid-cols-2 gap-1.5">
             {TIME_SLOTS.filter(slot => {
               if (date !== today) return true;
               const [h] = slot.split(':').map(Number);
@@ -878,7 +880,7 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
                 key={slot}
                 type="button"
                 onClick={() => setTime(time === slot ? '' : slot)}
-                className="w-full py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shrink-0"
+                className="w-full py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer"
                 style={{
                   borderColor: time === slot ? '#2e9f82' : '#e8e6e0',
                   backgroundColor: time === slot ? '#edf7f3' : '#fff',
@@ -890,19 +892,6 @@ function BookModal({ unit, property, preferredStartDays = [], onClose }: { unit:
             ))}
           </div>
         </div>
-      </div>
-
-      {/* Preferred move-in date — optional; restricted to the RP's contract-start days */}
-      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
-        Preferred move-in date <span className="text-[#9b9890] font-normal">(optional)</span>
-      </label>
-      {preferredStartDays.length > 0 && (
-        <p className="text-xs text-[#9b9890] mb-1.5">
-          This landlord starts contracts on the {preferredStartDays.map(d => `${d}${['st','nd','rd'][((d % 10) - 1)] || 'th'}`).join(', ')} of the month.
-        </p>
-      )}
-      <div className="mb-4">
-        <MiniCalendar value={moveInDate} onChange={setMoveInDate} allowedDays={preferredStartDays} compact />
       </div>
 
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
@@ -1366,42 +1355,6 @@ function ModalShell({ children, onClose }: { children: React.ReactNode; onClose:
   );
 }
 
-/* ── Header auth section ──────────────────────────────────────────────────── */
-function HeaderAuthSection() {
-  const { isAuthenticated, user, signOut } = useAuth();
-
-  if (isAuthenticated && user) {
-    const displayName = user.name ?? [user.firstName, user.lastName].filter(Boolean).join(' ');
-    const initials = (displayName?.charAt(0) ?? 'U').toUpperCase();
-    const dest = dashboardPath(user.role as UserRole);
-    return (
-      <div className="flex items-center gap-3">
-        <Link href={dest} className="text-sm font-medium hover:text-[#1a1916] transition-colors">
-          Dashboard
-        </Link>
-        <button
-          onClick={() => { signOut(); }}
-          className="text-sm hover:text-[#1a1916] transition-colors"
-        >
-          Sign Out
-        </button>
-        <Link href={dest} className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: '#2e9f82' }}>
-          {initials}
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <Link href="/login" className="hover:text-[#1a1916] transition-colors">Sign In</Link>
-      <Link href="/register" className="py-2 px-4 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90" style={{ backgroundColor: '#2e9f82' }}>
-        Register
-      </Link>
-    </>
-  );
-}
-
 /* ── Main page component ─────────────────────────────────────────────────── */
 export default function ListingPageClient({ unit, property, media = [], preferredStartDays = [], allowedInstallments = [] }: { unit: PublicUnit; property: PublicProperty; media?: UnitMediaItem[]; preferredStartDays?: number[]; allowedInstallments?: number[] }) {
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -1479,24 +1432,7 @@ export default function ListingPageClient({ unit, property, media = [], preferre
 
   return (
     <div className="min-h-screen bg-white">
-      {/* ── Navbar ─────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-[#e8e6e0]">
-        <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
-          <Link href="/listings" className="flex items-center gap-2.5">
-            <span style={{
-              width: 24, height: 24, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg, #1f8a6e 0%, #34c79f 100%)',
-              color: '#fff', display: 'grid', placeItems: 'center',
-              fontSize: 13, fontWeight: 800,
-            }}>U</span>
-            <span className="font-extrabold text-lg text-[#1a1916] tracking-tight">UpNow</span>
-          </Link>
-          <div className="hidden sm:flex items-center gap-4 text-sm text-[#6b6860]">
-            <Link href="/listings" className="hover:text-[#1a1916] transition-colors">Browse Listings</Link>
-            <HeaderAuthSection />
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
       <div className="max-w-[1380px] mx-auto px-4 sm:px-6 lg:px-10 pt-4 pb-24">
         {/* ── Breadcrumb ──────────────────────────────────────────────────── */}
@@ -1718,8 +1654,9 @@ export default function ListingPageClient({ unit, property, media = [], preferre
       )}
 
       {/* Modals */}
-      {modal === 'book' && <BookModal unit={unit} property={property} preferredStartDays={preferredStartDays} onClose={() => setModal(null)} />}
+      {modal === 'book' && <BookModal unit={unit} property={property} onClose={() => setModal(null)} />}
       {modal === 'inquire' && <InquireModal unit={unit} property={property} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} onClose={() => setModal(null)} />}
+      <Footer />
     </div>
   );
 }

@@ -19,7 +19,8 @@ import {
   MapPin, ShieldCheck, AlarmClockCheck, SlidersHorizontal, Lock, Sparkles, Pencil, Info, X,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Navbar } from '@/components/upnow/Navbar';
+import { SiteHeader } from '@/components/upnow/SiteHeader';
+import { Footer } from '@/components/upnow/Footer';
 import { serviceImg } from '@/lib/serviceImages';
 import { AddressMapPicker, type PickedAddress } from '@/components/upnow/AddressMapPicker';
 
@@ -419,7 +420,7 @@ export default function BookServicePage() {
   if (confirmedBooking) {
     return (
       <div className="min-h-screen" style={{ background: '#fff' }}>
-        <Navbar />
+        <SiteHeader />
         <div className="min-h-[70vh] flex items-center justify-center px-6">
           <div className="max-w-md w-full text-center rounded-[18px] border bg-white p-10" style={{ borderColor: LINE, boxShadow: 'var(--shadow-card)' }}>
             <div className="w-16 h-16 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: '#d8f2e8' }}>
@@ -713,7 +714,7 @@ export default function BookServicePage() {
 
   return (
     <div className="min-h-screen" style={{ background: '#fff' }}>
-      <Navbar />
+      <SiteHeader />
       {/* Hero band — same lst-hero as /services and /listings */}
       <section className="lst-hero">
         <div className="l-wrap">
@@ -1067,6 +1068,7 @@ export default function BookServicePage() {
           ]}
         />
       )}
+      <Footer />
     </div>
   );
 }

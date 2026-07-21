@@ -94,7 +94,9 @@ export default function ContractDocumentsPage() {
       receipt={c as unknown as ReceiptContract}
       watermark={watermark}
       signatureCertificate={cert}
-      headerRight={c.tenant?.id ? <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} /> : undefined}
+      headerRight={c.tenant?.id ? (
+        <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} />
+      ) : undefined}
       signerName={c.landlord?.companyName || c.landlord?.name || 'Landlord'}
       signerDefaultName={c.landlord?.name || c.landlord?.companyName || ''}
       landlordSigned={sigs.some(s => s.role === 'landlord')}
