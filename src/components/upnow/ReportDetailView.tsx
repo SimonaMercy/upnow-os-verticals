@@ -303,16 +303,19 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
 
   'rent-collection': {
-    title: 'Rent Collection (Rent Roll)',
-    description: 'The collection matrix — every customer down the side, the twelve months of the year across the top. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total per customer and a monthly totals row. Pick the year above.',
+    title: 'Cash Management',
+    description: 'The collection matrix — every unit down the side, the twelve months of the year across the top, with each unit\'s annual rent. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total, and year-to-date expected vs received. Pick the year above.',
     endpoint: '/api/reports/rent-collection',
     dataNote: NEEDS_CHEQUE_DATA,
     layout: 'matrix',
     controlKey: 'year',
     columns: [],
     totals: [
-      { key: 'customers', label: 'Customers', type: 'number' },
+      { key: 'customers', label: 'Units', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
       { key: 'scheduledFils', label: 'Total rent', type: 'aed' },
+      { key: 'ytdExpectedFils', label: 'YTD expected', type: 'aed' },
+      { key: 'ytdReceivedFils', label: 'YTD received', type: 'aed' },
       { key: 'collectedFils', label: 'Collected', type: 'aed' },
       { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
@@ -944,6 +947,8 @@ export function ReportDetailView({
   const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || yearForMatrix(getReportsYear()));
   // Tenant scope — show active customers only (default) or include ended tenants.
   const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
+  // Cash Management: client-side property filter ('' = all properties).
+  const [propertyFilter, setPropertyFilter] = useState('');
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [drillFilter, setDrillFilter] = useState<string | null>(null);
   const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
@@ -1086,21 +1091,31 @@ export function ReportDetailView({
   }, [def, feeDetailed, granularity]);
   const activeRows: Record<string, unknown>[] = feeDetailed ? (data?.items ?? []) : (data?.rows ?? []);
 
+  // Distinct property names for the Cash Management property dropdown.
+  const propertyOptions = useMemo(() => {
+    if (def.layout !== 'matrix') return [];
+    return [...new Set(activeRows.map(r => String(r.buildingName ?? '')).filter(Boolean))].sort(
+      (a, b) => a.localeCompare(b));
+  }, [def.layout, activeRows]);
+
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return activeRows;
     if (def.layout === 'matrix') {
-      return activeRows.filter(row =>
+      let rows = activeRows;
+      if (propertyFilter) rows = rows.filter(row => String(row.buildingName ?? '') === propertyFilter);
+      if (needle) rows = rows.filter(row =>
         ['customer', 'unitLabel', 'buildingName', 'contractRef'].some(
           k => String(row[k] ?? '').toLowerCase().includes(needle)));
+      return rows;
     }
+    if (!needle) return activeRows;
     if (def.layout === 'countMatrix') {
       return activeRows.filter(row => String(row.label ?? '').toLowerCase().includes(needle));
     }
     return activeRows.filter(row =>
       activeColumns.some(c => String(row[c.key] ?? '').toLowerCase().includes(needle)),
     );
-  }, [activeRows, activeColumns, search, def]);
+  }, [activeRows, activeColumns, search, def, propertyFilter]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
@@ -1165,13 +1180,16 @@ export function ReportDetailView({
   const matrixView = useMemo(() => {
     if (def.layout !== 'matrix' || !data) return null;
     const monthCount = (data.months ?? []).length;
-    if (!search.trim()) return { columnTotals: data.columnTotals ?? [], totals: data.totals };
+    if (!search.trim() && !propertyFilter) return { columnTotals: data.columnTotals ?? [], totals: data.totals };
     const colTotals = new Array(monthCount).fill(0);
-    let scheduled = 0, collected = 0, outstanding = 0, bounced = 0;
+    let scheduled = 0, collected = 0, outstanding = 0, bounced = 0, annualRent = 0, ytdExpected = 0, ytdReceived = 0;
     sorted.forEach(row => {
       scheduled += Number(row.totalFils ?? 0);
       collected += Number(row.collectedFils ?? 0);
       outstanding += Number(row.outstandingFils ?? 0);
+      annualRent += Number(row.annualRentFils ?? 0);
+      ytdExpected += Number(row.ytdExpectedFils ?? 0);
+      ytdReceived += Number(row.ytdReceivedFils ?? 0);
       const cells = (row.cells as { amountFils: number; status: string | null }[] | undefined) ?? [];
       cells.forEach((c, ci) => {
         if (ci < monthCount) colTotals[ci] += Number(c.amountFils) || 0;
@@ -1182,14 +1200,17 @@ export function ReportDetailView({
       columnTotals: colTotals,
       totals: {
         customers: sorted.length,
+        annualRentFils: annualRent,
         scheduledFils: scheduled,
+        ytdExpectedFils: ytdExpected,
+        ytdReceivedFils: ytdReceived,
         collectedFils: collected,
         outstandingFils: outstanding,
         bouncedFils: bounced,
         collectionRate: scheduled > 0 ? Math.round((collected / scheduled) * 1000) / 10 : 0,
       } as Record<string, number>,
     };
-  }, [def.layout, data, search, sorted]);
+  }, [def.layout, data, search, sorted, propertyFilter]);
 
   // Count-matrix (renewal-vacancy): when a search narrows the visible
   // properties, recompute the per-month footer, grand total and KPI tiles from
@@ -1279,24 +1300,40 @@ export function ReportDetailView({
       return raw ?? '';
     };
 
-    // Matrix layout: customer + unit + property, then a column per month, then total.
+    // Matrix layout: unit + property + annual rent, a column per month, then
+    // total and the year-to-date expected / received columns.
     if (def.layout === 'matrix') {
       const months = data.months ?? [];
-      const headers = ['Customer', 'Unit', 'Property', ...months, 'Total'];
+      const headers = ['Unit', 'Property', 'Start', 'End', 'Annual rent', ...months, 'Total', 'YTD Expected', 'YTD Received'];
       const rows = sorted.map(row => {
         const cells = (row.cells as { amountFils: number }[]) ?? [];
         return [
-          String(row.customer ?? ''),
           String(row.unitLabel ?? ''),
           String(row.buildingName ?? ''),
+          row.contractStartDate ? String(row.contractStartDate) : '',
+          row.contractEndDate ? String(row.contractEndDate) : '',
+          (Number(row.annualRentFils) / 100).toFixed(2),
           ...cells.map(c => (Number(c.amountFils) / 100).toFixed(2)),
           (Number(row.totalFils) / 100).toFixed(2),
+          (Number(row.ytdExpectedFils) / 100).toFixed(2),
+          (Number(row.ytdReceivedFils) / 100).toFixed(2),
         ];
       });
       rows.push([
-        'Total', '', '',
+        'Total', '', '', '',
+        (Number(matrixView?.totals?.annualRentFils ?? data.totals?.annualRentFils ?? 0) / 100).toFixed(2),
         ...(matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
         (Number(matrixView?.totals?.scheduledFils ?? data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
+        (Number(matrixView?.totals?.ytdExpectedFils ?? data.totals?.ytdExpectedFils ?? 0) / 100).toFixed(2),
+        (Number(matrixView?.totals?.ytdReceivedFils ?? data.totals?.ytdReceivedFils ?? 0) / 100).toFixed(2),
+      ]);
+      // Cumulative — running total of the monthly column totals.
+      let csvRun = 0;
+      const csvCum = (matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (csvRun += Number(t) || 0));
+      rows.push([
+        'Cumulative', '', '', '', '',
+        ...csvCum.map(t => (t / 100).toFixed(2)),
+        (csvRun / 100).toFixed(2), '', '',
       ]);
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
@@ -1609,6 +1646,26 @@ export function ReportDetailView({
         </div>
       )}
 
+      {/* Property filter (Cash Management matrix) — client-side, narrows to one building */}
+      {def.layout === 'matrix' && propertyOptions.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+          <span className="text-xs text-[#6b6860] font-medium">Property:</span>
+          <select
+            value={propertyFilter}
+            onChange={e => setPropertyFilter(e.target.value)}
+            className="text-xs font-semibold border border-[#e8e6e0] rounded-lg px-3 py-1.5 bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer max-w-[280px]">
+            <option value="">All properties</option>
+            {propertyOptions.map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          {propertyFilter && (
+            <button onClick={() => setPropertyFilter('')}
+              className="text-[11px] text-[#9b9890] hover:text-[#6b6860] underline">Clear</button>
+          )}
+        </div>
+      )}
+
       {/* Year selector (rent-roll matrix) */}
       {def.controlKey === 'year' && (
         <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
@@ -1778,11 +1835,14 @@ export function ReportDetailView({
             <table className="text-sm border-collapse min-w-full">
               <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">Customer</th>
+                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">By Unit</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Annual rent</th>
                   {(data?.months ?? []).map(m => (
-                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap">{m}</th>
+                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">{m}</th>
                   ))}
                   <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">YTD Expected</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">YTD Received</th>
                 </tr>
               </thead>
               <tbody>
@@ -1791,15 +1851,23 @@ export function ReportDetailView({
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
                       <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left">
-                        <div className="font-medium text-[#1a1916] leading-tight">{String(row.customer ?? '—')}</div>
-                        <div className="text-[11px] text-[#9b9890] leading-tight">{[row.unitLabel, row.buildingName].filter(Boolean).map(String).join(' · ')}</div>
+                        <div className="font-medium text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                        <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>
+                        {Boolean(row.contractStartDate || row.contractEndDate) && (
+                          <div className="text-[11px] text-[#9b9890] leading-tight">
+                            {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
+                          </div>
+                        )}
                       </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.annualRentFils))}</td>
                       {cells.map((c, ci) => (
-                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
                           {fmtAmt(c.amountFils)}
                         </td>
                       ))}
                       <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums font-medium text-[#15803d] whitespace-nowrap">{fmtAmt(Number(row.ytdReceivedFils))}</td>
                     </tr>
                   );
                 })}
@@ -1807,11 +1875,32 @@ export function ReportDetailView({
               <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
                 <tr>
                   <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.annualRentFils ?? data?.totals?.annualRentFils)}</td>
                   {(matrixView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
-                    <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{fmtAmt(t)}</td>
+                    <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
                   ))}
                   <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.scheduledFils ?? data?.totals?.scheduledFils)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.ytdExpectedFils ?? data?.totals?.ytdExpectedFils)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap text-[#15803d]">{fmtAmt(matrixView?.totals?.ytdReceivedFils ?? data?.totals?.ytdReceivedFils)}</td>
                 </tr>
+                {/* Cumulative — each month is the running total of every prior month */}
+                {(() => {
+                  const colTot = matrixView?.columnTotals ?? data?.columnTotals ?? [];
+                  let run = 0;
+                  const cum = colTot.map(t => (run += Number(t) || 0));
+                  return (
+                    <tr className="border-t border-[#e8e6e0] font-medium text-[#6b6860]">
+                      <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-2.5 text-left font-semibold">Cumulative</td>
+                      <td className="px-4 py-2.5 border-l border-[#e8e6e0]" />
+                      {cum.map((t, ti) => (
+                        <td key={ti} className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
+                      ))}
+                      <td className="px-4 py-2.5 text-right tabular-nums border-l border-[#e8e6e0] font-semibold text-[#1a1916]">{fmtAmt(run)}</td>
+                      <td className="px-4 py-2.5 border-l border-[#e8e6e0]" />
+                      <td className="px-4 py-2.5" />
+                    </tr>
+                  );
+                })()}
               </tfoot>
             </table>
           </div>
