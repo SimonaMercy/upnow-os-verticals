@@ -22,7 +22,7 @@ import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts 
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'executive-cashflow' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market' | 'operations-pipeline';
+type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'executive-cashflow' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market' | 'operations-pipeline';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -57,7 +57,7 @@ interface ReportDef {
    * section (using its summary columns as the header) with its drilldown
    * children listed inline beneath — everything on one page, no modal.
    */
-  layout?: 'table' | 'grouped' | 'matrix' | 'countMatrix';
+  layout?: 'table' | 'grouped' | 'matrix' | 'countMatrix' | 'chequeMatrix';
   /** Optional caution banner shown above the report (e.g. data-quality notes). */
   dataNote?: string;
   /** When set, render the building + leasing-model (direct/sub) multi-select
@@ -320,6 +320,21 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+  },
+
+  'cheques-management': {
+    title: 'Cheques Management',
+    description: 'The cheque schedule — one row per current active lease (live today; upcoming and ended leases are excluded), showing the building, unit and lease duration together, then each rent cheque\'s due date (earliest to latest), a column per month counting how many cheques land in it, and the total number of cheques. Rent (rental-roll) cheques only; cancelled cheques are excluded. Leases counts the rows; Units the distinct units behind them. Pick the year above and narrow by property.',
+    endpoint: '/api/reports/cheques-management',
+    dataNote: NEEDS_CHEQUE_DATA,
+    layout: 'chequeMatrix',
+    controlKey: 'year',
+    columns: [],
+    totals: [
+      { key: 'leases', label: 'Leases', type: 'number' },
+      { key: 'units', label: 'Units', type: 'number' },
+      { key: 'totalCheques', label: 'Total cheques', type: 'number' },
     ],
   },
 
@@ -771,8 +786,8 @@ const FEE_DETAIL_COLUMNS: Column[] = [
 // Inventory / occupancy reports aren't listed — they have no ended-tenant noise.
 const TENANT_SCOPED = new Set<ReportSlug>([
   'receivables', 'security-deposits', 'cheque-register', 'collection-rate',
-  'executive-cashflow', 'tenant-ledger', 'rent-collection', 'leasing-activity',
-  'fee-taxation', 'cashflow-forecast',
+  'executive-cashflow', 'tenant-ledger', 'rent-collection',
+  'leasing-activity', 'fee-taxation', 'cashflow-forecast',
 ]);
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
@@ -930,7 +945,7 @@ export function ReportDetailView({
   const slug = slugProp as ReportSlug;
   const def = REPORTS[slug];
 
-  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; year?: number; buildings?: BuildingOption[]; items?: Record<string, unknown>[] } | null>(null);
+  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; items?: Record<string, unknown>[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -1091,16 +1106,16 @@ export function ReportDetailView({
   }, [def, feeDetailed, granularity]);
   const activeRows: Record<string, unknown>[] = feeDetailed ? (data?.items ?? []) : (data?.rows ?? []);
 
-  // Distinct property names for the Cash Management property dropdown.
+  // Distinct property names for the Cash Management / Cheques Management dropdown.
   const propertyOptions = useMemo(() => {
-    if (def.layout !== 'matrix') return [];
+    if (def.layout !== 'matrix' && def.layout !== 'chequeMatrix') return [];
     return [...new Set(activeRows.map(r => String(r.buildingName ?? '')).filter(Boolean))].sort(
       (a, b) => a.localeCompare(b));
   }, [def.layout, activeRows]);
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (def.layout === 'matrix') {
+    if (def.layout === 'matrix' || def.layout === 'chequeMatrix') {
       let rows = activeRows;
       if (propertyFilter) rows = rows.filter(row => String(row.buildingName ?? '') === propertyFilter);
       if (needle) rows = rows.filter(row =>
@@ -1211,6 +1226,23 @@ export function ReportDetailView({
       } as Record<string, number>,
     };
   }, [def.layout, data, search, sorted, propertyFilter]);
+
+  // Cheque-schedule matrix: per-month cheque counts and total are always
+  // recomputed from the visible rows, so the footer + tiles follow the property
+  // filter and search without a refetch.
+  const chequeView = useMemo(() => {
+    if (def.layout !== 'chequeMatrix' || !data) return null;
+    const colTotals = new Array(12).fill(0);
+    let totalCheques = 0;
+    const unitIds = new Set<number>();
+    sorted.forEach(row => {
+      const mc = (row.monthCounts as number[] | undefined) ?? [];
+      mc.forEach((n, i) => { if (i < 12) colTotals[i] += Number(n) || 0; });
+      totalCheques += Number(row.totalCheques ?? 0);
+      if (row.unitId != null) unitIds.add(Number(row.unitId));
+    });
+    return { columnTotals: colTotals, totals: { leases: sorted.length, units: unitIds.size, totalCheques } as Record<string, number> };
+  }, [def.layout, data, sorted]);
 
   // Count-matrix (renewal-vacancy): when a search narrows the visible
   // properties, recompute the per-month footer, grand total and KPI tiles from
@@ -1334,6 +1366,38 @@ export function ReportDetailView({
         'Cumulative', '', '', '', '',
         ...csvCum.map(t => (t / 100).toFixed(2)),
         (csvRun / 100).toFixed(2), '', '',
+      ]);
+      downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
+      return;
+    }
+
+    // Cheque-schedule matrix: building + unit + customer, one column per cheque
+    // date (up to the widest lease), a column per month (cheque count), then the
+    // total cheque count.
+    if (def.layout === 'chequeMatrix') {
+      const months = data.months ?? [];
+      const maxCheques = data.maxCheques ?? 0;
+      const chequeCols = Array.from({ length: maxCheques }, (_, i) => `Cheque ${i + 1}`);
+      const headers = ['Building', 'Unit', 'Start', 'End', 'Customer', ...chequeCols, ...months, 'Total cheques'];
+      const rows = sorted.map(row => {
+        const dates = (row.chequeDates as string[]) ?? [];
+        const counts = (row.monthCounts as number[]) ?? [];
+        return [
+          String(row.buildingName ?? ''),
+          String(row.unitLabel ?? ''),
+          row.contractStartDate ? String(row.contractStartDate) : '',
+          row.contractEndDate ? String(row.contractEndDate) : '',
+          String(row.customer ?? ''),
+          ...Array.from({ length: maxCheques }, (_, i) => dates[i] ?? ''),
+          ...counts.map(n => String(Number(n) || 0)),
+          String(Number(row.totalCheques) || 0),
+        ];
+      });
+      rows.push([
+        'Total', '', '', '', '',
+        ...Array.from({ length: maxCheques }, () => ''),
+        ...(chequeView?.columnTotals ?? data.columnTotals ?? []).map(t => String(Number(t) || 0)),
+        String(Number(chequeView?.totals?.totalCheques ?? data.totals?.totalCheques) || 0),
       ]);
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
@@ -1646,8 +1710,8 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Property filter (Cash Management matrix) — client-side, narrows to one building */}
-      {def.layout === 'matrix' && propertyOptions.length > 0 && (
+      {/* Property filter (Cash / Cheques Management matrix) — client-side, narrows to one building */}
+      {(def.layout === 'matrix' || def.layout === 'chequeMatrix') && propertyOptions.length > 0 && (
         <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
           <span className="text-xs text-[#6b6860] font-medium">Property:</span>
           <select
@@ -1702,6 +1766,7 @@ export function ReportDetailView({
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 mb-6">
           {visibleTotals.map(t => {
             const raw = (def.layout === 'matrix' && matrixView ? matrixView.totals
+              : def.layout === 'chequeMatrix' && chequeView ? chequeView.totals
               : def.layout === 'countMatrix' && countMatrixView ? countMatrixView.totals
               : data.totals)[t.key];
             return (
@@ -1909,6 +1974,69 @@ export function ReportDetailView({
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#b45309]" /> Pending</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#dc2626]" /> Bounced</span>
             <span className="flex items-center gap-1.5"><span className="text-[#d4d2cc]">·</span> No cheque due</span>
+          </div>
+        </div>
+      ) : def.layout === 'chequeMatrix' ? (
+        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+          <div className="overflow-x-auto">
+            <table className="text-sm border-collapse min-w-full">
+              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <tr>
+                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[200px]">Unit / Building / Duration</th>
+                  <th className="px-3 py-3 text-left font-semibold whitespace-nowrap">Customer</th>
+                  {Array.from({ length: data?.maxCheques ?? 0 }, (_, i) => (
+                    <th key={i} className={`px-3 py-3 text-right font-semibold whitespace-nowrap ${i === 0 ? 'border-l border-[#e8e6e0]' : ''}`}>Cheque {i + 1}</th>
+                  ))}
+                  {(data?.months ?? []).map((m, mi) => (
+                    <th key={m} className="px-3 py-3 text-center font-semibold whitespace-nowrap border-l border-[#f0ede8]">
+                      <div>{m}</div>
+                      <div className="text-[9px] font-normal text-[#c8c6c0] normal-case">Month {mi + 1}</div>
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total cheques</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((row, i) => {
+                  const dates = (row.chequeDates as string[]) ?? [];
+                  const counts = (row.monthCounts as number[]) ?? [];
+                  return (
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+                      <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left whitespace-nowrap">
+                        <div className="text-[15px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                        <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '—')}</div>
+                        {Boolean(row.contractStartDate || row.contractEndDate) && (
+                          <div className="text-[11px] text-[#9b9890] leading-tight">
+                            {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-left text-[#6b6860] whitespace-nowrap">{String(row.customer ?? '—')}</td>
+                      {Array.from({ length: data?.maxCheques ?? 0 }, (_, ci) => (
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'border-l border-[#f0ede8]' : ''} ${dates[ci] ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
+                          {dates[ci] ?? '·'}
+                        </td>
+                      ))}
+                      {counts.map((n, ci) => (
+                        <td key={ci} className={`px-3 py-2.5 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${n ? 'text-[#1a1916] font-medium' : 'text-[#d4d2cc]'}`}>
+                          {n ? fmtNumber(n) : '·'}
+                        </td>
+                      ))}
+                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+                <tr>
+                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left" colSpan={2 + (data?.maxCheques ?? 0)}>Total</td>
+                  {(chequeView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
+                    <td key={ti} className="px-3 py-3 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8]">{Number(t) ? fmtNumber(Number(t)) : '·'}</td>
+                  ))}
+                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtNumber(chequeView?.totals?.totalCheques ?? data?.totals?.totalCheques)}</td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </div>
       ) : def.layout === 'countMatrix' ? (

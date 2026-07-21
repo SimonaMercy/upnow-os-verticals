@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, AlertCircle, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, Wrench, FileBarChart, ScrollText,
-  Banknote, TrendingUp, ClipboardList, ListChecks,
+  Banknote, TrendingUp, ClipboardList, ListChecks, CalendarDays,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -50,6 +50,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'rent-vs-market',     title: 'Rent vs Market',           description: 'Current rent vs market benchmark per unit — uplift recoverable at renewal.', Icon: TrendingUp, available: true, group: 'leasing' },
   // ── Rent & Collections ─────────────────────────────────────────────────
   { slug: 'rent-collection',    title: 'Cash Management', description: 'Collection matrix — every unit down, months across, with annual rent and year-to-date expected vs received.',          Icon: BarChart2,    available: true,  group: 'collections' },
+  { slug: 'cheques-management', title: 'Cheques Management', description: 'Cheque schedule — one row per active lease with each rent cheque\'s due date and a 12-month grid of how many cheques land each month.', Icon: CalendarDays, available: true,  group: 'collections' },
   { slug: 'receivables',        title: 'Receivables Summary',      description: 'Outstanding cheques aged 0-30 / 31-60 / 61-90 / 90+.',                Icon: Wallet,       available: true,  group: 'collections' },
   { slug: 'executive-cashflow', title: 'Executive Cashflow',        description: 'The month-by-month cashflow dashboard — rent expected vs received, pending and bounced, penalty income, and Net Income, with year-to-date totals. Anchored on the cheque date.', Icon: TrendingUp, available: true, group: 'collections' },
   { slug: 'cashflow-forecast',  title: 'Cash Inflow Forecast',     description: 'Post-dated cheques landing each month, plus the overdue backlog.',    Icon: Banknote,     available: true,  group: 'collections' },
