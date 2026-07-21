@@ -216,6 +216,7 @@ export function AuthModal({
     setSignupSubmitting(true);
     try {
       const res = await register(signupRole, payload);
+      trackSignupFunnel(signupRole, 'registered'); // account created → funnel completion
       if (res.requiresVerification) {
         // Bring the OTP step inline instead of navigating to /verify(-email).
         setSignupIdentifier(payload.email ?? payload.phone!);
@@ -357,19 +358,25 @@ export function AuthModal({
   );
 
   // Role choice row — icon + title + arrow. Customer is emphasized (green).
-  // Attribute sign-up intent for the UTM funnel — modelled as a page-visit
-  // event to /signup/<role> so it lands in page_visits with the same UTM the
-  // visitor arrived on. Lets us tie traffic → who chose to become a
-  // customer / rental provider / service provider.
-  const trackSignupIntent = (role: SelfRegisterRole) => {
+  // Sign-up funnel attribution — modelled as page-visit events so they land in
+  // page_visits with the same UTM + session_id the visitor carried. 'intent' =
+  // picked a role tile; 'registered' = account created. Same session_id ties the
+  // anonymous journey → the account. Lets us measure traffic → who chose (and
+  // completed) customer / rental-provider / service-provider sign-up.
+  const trackSignupFunnel = (role: SelfRegisterRole, stage: 'intent' | 'registered') => {
     try {
       const params = new URLSearchParams(window.location.search);
-      const payload: Record<string, string> = { path: `/signup/${role.replace(/_/g, '-')}` };
+      const seg = role.replace(/_/g, '-');
+      const payload: Record<string, string> = {
+        path: stage === 'registered' ? `/signup/${seg}/registered` : `/signup/${seg}`,
+      };
       for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
         const v = params.get(k);
         if (v) payload[k] = v;
       }
       if (document.referrer) payload.referrer = document.referrer;
+      const sid = getSessionId();
+      if (sid) payload.session_id = sid;
       void fetch('/api/track/visit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -387,7 +394,7 @@ export function AuthModal({
     return (
       <button
         key={role}
-        onClick={() => { trackSignupIntent(role); setSignupRole(role); setSignupStep('form'); setSignupValue(''); setSignupError(null); }}
+        onClick={() => { trackSignupFunnel(role, 'intent'); setSignupRole(role); setSignupStep('form'); setSignupValue(''); setSignupError(null); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 14, padding: 14, width: '100%',
           border: `1.5px solid ${emphasized ? '#2e9f82' : '#e8ece9'}`, borderRadius: 14,
