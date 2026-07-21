@@ -7,9 +7,8 @@ import {
   ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
   Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw, Paperclip, X, ExternalLink,
 } from 'lucide-react';
-import { triggerBrowserDownload } from '@/lib/downloadDoc';
 import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
-import RentalFinalSettlementDoc from '@/components/contract/RentalFinalSettlementDoc';
+import RentalFinalSettlementDoc, { type RFSData } from '@/components/contract/RentalFinalSettlementDoc';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -85,13 +84,24 @@ interface SectionDef {
 }
 const SECTIONS: SectionDef[] = [
   { id: 'utility',     num: 3, title: 'Outstanding Utility & Service Charges', hint: 'DEWA / cooling / gas / community / telecom', cats: ['utility'], addCat: 'utility', addType: 'due', capKey: 'utilities', reseed: 'utilities' },
-  { id: 'restoration', num: 4, title: 'Property Restoration Charges', hint: 'repairs, cleaning, missing keys — from the move-out inspection', cats: ['restoration'], addCat: 'restoration', addType: 'deduction', capKey: 'restoration', reseed: 'restoration' },
+  { id: 'restoration', num: 4, title: 'Property Charges', hint: 'repairs, cleaning, missing keys — from the move-out inspection', cats: ['restoration'], addCat: 'restoration', addType: 'deduction', capKey: 'restoration', reseed: 'restoration' },
   { id: 'additional',  num: 5, title: 'Additional Recoverable Charges', hint: 'breach, early termination, overstay, dispute, admin', cats: ['penalty_breach', 'early_termination', 'overstay', 'dispute', 'admin'], addCat: 'dispute', addType: 'deduction', capKey: 'penalties', reseed: 'penalties' },
   { id: 'rent',        num: 7, title: 'Outstanding Rent & Adjustments', hint: 'rent accrued to move-out, plus any other adjustment', cats: ['rent_due', 'other'], addCat: 'other', addType: 'deduction', capKey: 'rent', reseed: 'rent' },
 ];
 
 const penaltyKeyToCategory = (key: string): LineCategory =>
   key === 'earlyTermination' ? 'early_termination' : key === 'lateMoveout' ? 'overstay' : 'penalty_breach';
+
+// §5 Additional Recoverable Charges — the CEO's fixed types. Each line picks one
+// so it lands in the right statement row (a manually-added charge is no longer
+// silently filed under "Dispute").
+const ADDITIONAL_CATS: { value: LineCategory; label: string }[] = [
+  { value: 'penalty_breach', label: 'Breach' },
+  { value: 'overstay', label: 'Overstay' },
+  { value: 'early_termination', label: 'Early Termination' },
+  { value: 'dispute', label: 'Dispute' },
+  { value: 'admin', label: 'Admin' },
+];
 
 
 // ─── Page ───────────────────────────────────────────────────────────────────
@@ -373,21 +383,15 @@ export default function SettlementPage() {
       if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to mark paid'); return; }
       await load();
       try {
-        const sres = await fetch(`/api/contracts/${contractId}/settlement`, { credentials: 'include' });
-        if (sres.ok) {
-          const sd = await sres.json() as ApiSettlement;
+        const rfs = buildRfsData();
+        if (rfs) {
           const [{ storeContractPdf }, mod] = await Promise.all([
             import('@/lib/storeContractPdf'),
-            import('@/components/contract/DepositSettlementPdf'),
+            import('@/components/contract/RentalFinalSettlementPdf'),
           ]);
           await storeContractPdf({
-            contractId: Number(contractId), documentKey: 'deposit_settlement', category: 'payment', displayName: 'Deposit Settlement',
-            element: createElement(mod.default, { data: {
-              ref: `CID-${contractId}`, property: meta?.property ?? '', unit: meta?.unit ?? '', tenantName: meta?.tenantName ?? '',
-              depositHeld: sd.depositHeld, lines: sd.lines, chargesTotal: sd.chargesTotal, refundAmount: sd.refundAmount,
-              payments: sd.payments, paymentsReceivedTotal: sd.paymentsReceivedTotal, balance: sd.balance,
-              paidAt: sd.paidAt, rpSignature: sd.rpSignature, tenantSignature: sd.tenantSignature, notes: sd.notes,
-            } }),
+            contractId: Number(contractId), documentKey: 'final_settlement', category: 'payment', displayName: 'Final Settlement',
+            element: createElement(mod.default, { data: rfs }),
           });
         }
       } catch { /* PDF snapshot is best-effort */ }
@@ -395,27 +399,47 @@ export default function SettlementPage() {
     finally { setActing(null); }
   }
 
+  // The RENTAL FINAL SETTLEMENT statement data — the same object the on-screen
+  // doc renders — shared by the Statement view, the PDF download and the
+  // mark-paid snapshot so all three stay identical.
+  function buildRfsData(): RFSData | null {
+    if (!statement) return null;
+    return {
+      contract: {
+        landlordName: statement.contract.landlordName,
+        rpSignatoryName: statement.contract.rpSignatoryName,
+        tenantName: statement.contract.tenantName,
+        propertyAddress: statement.contract.propertyAddress,
+        unit: statement.contract.unit,
+        contractNo: statement.contract.contractNo,
+        propertyType: statement.contract.propertyType,
+        contractAmount: statement.contract.contractAmount,
+        startDate: statement.contract.startDate,
+        endDate: statement.contract.endDate,
+        actualMoveOutDate: statement.contract.actualMoveOutDate ?? (moveOut || null),
+      },
+      depositRow: (statement.contractSummary ?? []).find(r => r.kind === 'deposit') ?? null,
+      paymentHistory: statement.paymentHistory ?? [],
+      lines: rows.filter(r => r.label.trim() || Number(r.amount) > 0)
+        .map(r => ({ label: r.label.trim() || 'Adjustment', amount: Math.max(0, Number(r.amount) || 0), net: rowNet(r), category: r.category, type: r.type, inspectionContractId: r.inspectionContractId })),
+      depositHeld: depositNum,
+      paymentsReceived: payRows.filter(r => Number(r.amount) > 0)
+        .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
+      otherAdjustments: 0,
+      settlementDate: stamps.paidAt,
+    };
+  }
+
+  // Save the RENTAL FINAL SETTLEMENT as a PDF that is EXACTLY the on-screen
+  // statement — printed via the browser's own engine (handles the Tailwind v4
+  // oklch palette that rasterisers can't). Isolates #rfs-print-root via print CSS.
   async function downloadSettlementPdf() {
-    try {
-      const sres = await fetch(`/api/contracts/${contractId}/settlement`, { credentials: 'include' });
-      if (!sres.ok) return;
-      const sd = await sres.json() as ApiSettlement;
-      const [{ pdf }, mod] = await Promise.all([
-        import('@react-pdf/renderer'),
-        import('@/components/contract/DepositSettlementPdf'),
-      ]);
-      const pdfData = {
-        ref: `CID-${contractId}`, property: meta?.property ?? '', unit: meta?.unit ?? '', tenantName: meta?.tenantName ?? '',
-        depositHeld: sd.depositHeld, lines: sd.lines, chargesTotal: sd.chargesTotal, refundAmount: sd.refundAmount,
-        payments: sd.payments, paymentsReceivedTotal: sd.paymentsReceivedTotal, balance: sd.balance,
-        paidAt: sd.paidAt, rpSignature: sd.rpSignature, tenantSignature: sd.tenantSignature, notes: sd.notes,
-      };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const blob = await pdf(createElement(mod.default, { data: pdfData as any }) as any).toBlob();
-      const url = URL.createObjectURL(blob);
-      triggerBrowserDownload(url, `Deposit-settlement-CID-${contractId}.pdf`);
-      setTimeout(() => URL.revokeObjectURL(url), 15000);
-    } catch { /* best-effort download */ }
+    if (view !== 'statement') { setView('statement'); await new Promise(r => setTimeout(r, 500)); }
+    const rfs = buildRfsData();
+    const prevTitle = document.title;
+    if (rfs) document.title = `Final Settlement - ${rfs.contract.contractNo || `CID-${contractId}`}`;
+    window.print();
+    setTimeout(() => { document.title = prevTitle; }, 1500);
   }
 
   if (loading) {
@@ -426,6 +450,18 @@ export default function SettlementPage() {
 
   return (
     <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-4xl'} mx-auto px-4 py-8 space-y-5 transition-[max-width]`}>
+      {/* Print CSS: when the browser prints (Download PDF), show ONLY the statement
+          document — exactly the on-screen layout, no dashboard chrome. */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          body * { visibility: hidden !important; }
+          #rfs-print-root, #rfs-print-root * { visibility: visible !important; }
+          #rfs-print-root { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; }
+          #rfs-print-root > div { border: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+          #rfs-print-root .rounded-lg { break-inside: avoid; }
+          @page { size: A4; margin: 10mm; }
+        }
+      ` }} />
       {/* Topbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
@@ -525,6 +561,14 @@ export default function SettlementPage() {
                   return (
                     <div key={r.key} className="border-b border-[#f4f2ee] last:border-b-0 py-1.5">
                       <div className="flex items-center gap-1.5">
+                        {sec.id === 'additional' && !locked && (
+                          <select value={ADDITIONAL_CATS.some(a => a.value === r.category) ? r.category : 'dispute'}
+                            onChange={e => updateRow(r.key, { category: e.target.value as LineCategory })}
+                            title="Charge type"
+                            className="shrink-0 w-[104px] text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-lg px-1 py-1 bg-white focus:outline-none focus:border-[#2e9f82]">
+                            {ADDITIONAL_CATS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                          </select>
+                        )}
                         <input type="text" value={r.label} disabled={locked} placeholder="Description"
                           onChange={e => updateRow(r.key, { label: e.target.value })}
                           className="flex-1 min-w-0 text-[13px] text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:border-transparent disabled:bg-transparent disabled:px-0" />
@@ -750,34 +794,13 @@ export default function SettlementPage() {
       </div>
       </>)}
 
-      {/* Statement view — the RENTAL FINAL SETTLEMENT document (9-section CEO form) */}
+      {/* Statement view — the RENTAL FINAL SETTLEMENT document (9-section CEO form).
+          #rfs-print-root is the isolated target for the browser-print PDF export. */}
       {view === 'statement' && (
         statement ? (
-          <RentalFinalSettlementDoc data={{
-            contract: {
-              landlordName: statement.contract.landlordName,
-              rpSignatoryName: statement.contract.rpSignatoryName,
-              tenantName: statement.contract.tenantName,
-              propertyAddress: statement.contract.propertyAddress,
-              unit: statement.contract.unit,
-              contractNo: statement.contract.contractNo,
-              propertyType: statement.contract.propertyType,
-              contractAmount: statement.contract.contractAmount,
-              startDate: statement.contract.startDate,
-              endDate: statement.contract.endDate,
-              actualMoveOutDate: statement.contract.actualMoveOutDate ?? (moveOut || null),
-            },
-            depositRow: (statement.contractSummary ?? []).find(r => r.kind === 'deposit') ?? null,
-            paymentHistory: statement.paymentHistory ?? [],
-            lines: rows.filter(r => r.label.trim() || Number(r.amount) > 0)
-              .map(r => ({ label: r.label.trim() || 'Adjustment', amount: Math.max(0, Number(r.amount) || 0), net: rowNet(r), category: r.category, type: r.type, inspectionContractId: r.inspectionContractId })),
-            depositHeld: depositNum,
-            paymentsReceived: payRows.filter(r => Number(r.amount) > 0)
-              .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
-            otherAdjustments: 0,
-            settlementDate: stamps.paidAt,
-            supportingDocs: { inspectionReport: false, utilityBills: true, invoices: true, otherDocuments: true },
-          }} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
+          <div id="rfs-print-root">
+            <RentalFinalSettlementDoc data={buildRfsData()!} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
+          </div>
         ) : (
           <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
             <Loader2 className="animate-spin inline mr-2" size={16} /> Preparing statement…

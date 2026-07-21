@@ -255,7 +255,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
         {/* §3 §4 §5 charge columns */}
         <div className="grid md:grid-cols-3 gap-4">
           <ChargeCol n={3} title="Outstanding Utility & Service Charges" rows={utilRowsShown} total={utilitiesTotal} />
-          <ChargeCol n={4} title="Property Restoration Charges" rows={restorationRows} total={restorationTotal}
+          <ChargeCol n={4} title="Property Charges" rows={restorationRows} total={restorationTotal}
             footer={restorationInspId != null && moveOutReportHref
               ? <a href={moveOutReportHref(restorationInspId)} target="_blank" rel="noreferrer" className="text-[11px] font-medium text-[#1f6b4f] hover:underline">↗ From move-out inspection report</a>
               : (restorationTotal > 0 ? <span className="text-[11px] text-[#9b9890]">From move-out inspection</span> : undefined)} />
@@ -270,7 +270,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
               <SummaryRow label="Security Deposit (Held)" value={money(data.depositHeld)} />
               <div className="px-3 pt-1 text-[10px] font-bold text-[#9b9890] uppercase tracking-wide">Less: Deductions</div>
               <SummaryRow label="Outstanding Utility & Service Charges" value={money(utilitiesTotal)} />
-              <SummaryRow label="Property Restoration Charges" value={money(restorationTotal)} />
+              <SummaryRow label="Property Charges" value={money(restorationTotal)} />
               <SummaryRow label="Additional Recoverable Charges" value={money(additionalTotal)} />
               <SummaryRow label="Total Deductions" value={money(totalDeductions)} tone="text-[#b91c1c]" strong border />
               <SummaryRow label="Net Deposit Balance" value={money(netDepositBalance)} tone={netDepositBalance < 0 ? 'text-[#b91c1c]' : 'text-[#1a7a5a]'} strong border />
