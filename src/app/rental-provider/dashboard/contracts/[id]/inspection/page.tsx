@@ -858,9 +858,13 @@ function InspectionWorkspace() {
   const portalToken = pathname?.startsWith('/portal/') ? (pathname.split('/')[2] ?? null) : null;
   // Back to the contract page — works even when opened directly (router.back()
   // is a no-op with no history). Keeps the manager vs RP route context.
+  // Back returns to wherever we came from (Operations pipeline when opened from
+  // there, via ?from=…), falling back to the lease record.
+  const backFrom = searchParams.get('from') || '';
   const backHref = portalToken
     ? `/portal/${portalToken}/contract/${params?.id}`
-    : ((pathname ?? '').replace(/\/inspection\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${params?.id}/v2`);
+    : (backFrom || ((pathname ?? '').replace(/\/inspection\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${params?.id}/v2`));
+  const backLabel = backFrom.includes('/operations') ? 'Back to operations' : 'Back to contract';
 
   const [meta, setMeta]   = useState<ContractMeta | null>(null);
   const [data, setData]   = useState<InspectionData>(makeBlankData);
@@ -1176,7 +1180,7 @@ function InspectionWorkspace() {
               redirects here) — drop the link so it doesn't loop. */}
           {portalToken ? null : (
             <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
-              <ArrowLeft size={15} /> Back to contract
+              <ArrowLeft size={15} /> {backLabel}
             </Link>
           )}
           {/* Draft autosave status — reassures the inspector their work is saved as

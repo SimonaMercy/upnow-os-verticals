@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, createElement } from 'react';
-import { useParams, usePathname } from 'next/navigation';
+import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import Link from 'next/link';
 import {
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
 import RentalFinalSettlementDoc, { type RFSData } from '@/components/contract/RentalFinalSettlementDoc';
+import { triggerBrowserDownload } from '@/lib/downloadDoc';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -107,13 +108,57 @@ const ADDITIONAL_CATS: { value: LineCategory; label: string }[] = [
 ];
 
 
+// Generate + copy a no-login magic link the customer uses to review & sign the
+// settlement (purpose='settlement'). Shown once the settlement is sent — the
+// customer can only load/sign it after that (getSettlementForTenant is null on draft).
+function CustomerSigningLink({ tenantId, contractId }: { tenantId: number; contractId: number | string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [link, setLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  const copy = () => { navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => {}); };
+  const gen = async () => {
+    setState('loading');
+    try {
+      const r = await fetch('/api/portal/generate', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId, contractId: Number(contractId), purpose: 'settlement', signerRole: 'tenant' }),
+      });
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      setLink(d.link ?? ''); setState('done');
+      if (d.link) { try { await navigator.clipboard.writeText(d.link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } }
+    } catch { setState('error'); }
+  };
+  if (state === 'done' && link) {
+    return (
+      <div className="flex items-center gap-1.5 w-full max-w-lg">
+        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
+          className="flex-1 text-[11px] px-2 py-1.5 rounded-lg border border-[#fdba74] bg-white text-[#1a1916] min-w-0" />
+        <button type="button" onClick={copy} className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-[#2e9f82] text-white">{copied ? 'Copied ✓' : 'Copy'}</button>
+        <a href={link} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] flex items-center gap-1"><ExternalLink size={12} /> Open</a>
+      </div>
+    );
+  }
+  return (
+    <button type="button" onClick={gen} disabled={state === 'loading'}
+      className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-[#9a3412] border border-[#fdba74] rounded-full px-3 py-1.5 hover:bg-[#ffedd5] disabled:opacity-60">
+      <Send size={12} /> {state === 'loading' ? 'Generating…' : state === 'error' ? 'Retry' : 'Get customer signing link'}
+    </button>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function SettlementPage() {
   const params = useParams<{ id: string }>();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const contractId = params?.id;
-  const backHref = (pathname ?? '').replace(/\/settlement\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${contractId}/v2`;
+  // Back goes to wherever we came from (Operations pipeline when opened from there,
+  // via ?from=…), falling back to the lease record for a direct/bookmarked visit.
+  const from = searchParams?.get('from') || '';
+  const backHref = from || ((pathname ?? '').replace(/\/settlement\/?$/, '/v2') || `/rental-provider/dashboard/contracts/${contractId}/v2`);
+  const backLabel = from.includes('/operations') ? 'Back to operations' : 'Back to contract';
   // Link any lease in this dashboard context (RP or manager) — e.g. the lease that
   // holds a bounced cheque behind a penalty line.
   const dashBase = (pathname ?? '/rental-provider/dashboard/contracts').replace(/\/contracts\/[^/]+\/settlement.*$/, '');
@@ -127,6 +172,7 @@ export default function SettlementPage() {
   const { canForRp } = useManagerPermissions();
   const isManagerView = (pathname ?? '').startsWith('/dashboard/manager');
   const [landlordId, setLandlordId] = useState<number | null>(null);
+  const [tenantId, setTenantId] = useState<number | null>(null);
 
   const [meta, setMeta] = useState<ContractMeta | null>(null);
   const [view, setView] = useState<'worksheet' | 'statement'>('worksheet');
@@ -139,17 +185,18 @@ export default function SettlementPage() {
   const [available, setAvailable] = useState<{ key: string; label: string; amount: number }[]>([]);
   const [adminRules, setAdminRules] = useState<{ key: string; label: string; amount: number }[]>([]);
   const [caps, setCaps] = useState<ApiSettlement['discountCaps']>({ rent: null, penalties: null, restoration: null, utilities: null });
-  const [gaps, setGaps] = useState<ApiGap[]>([]);
   const [payRows, setPayRows] = useState<PayRow[]>([]);
   const [stamps, setStamps] = useState<{ sentAt: string | null; agreedAt: string | null; paidAt: string | null }>({ sentAt: null, agreedAt: null, paidAt: null });
+  const [sig, setSig] = useState<{ rp: string | null; tenant: string | null }>({ rp: null, tenant: null });
 
   const [isDirect, setIsDirect] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingPayments, setSavingPayments] = useState(false);
   const [reseeding, setReseeding] = useState<string | null>(null);
-  const [acting, setActing] = useState<null | 'send' | 'paid'>(null);
+  const [acting, setActing] = useState<null | 'send' | 'paid' | 'unsend'>(null);
   const [savedTick, setSavedTick] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Manager may finalize the settlement only with canSettleDeposits on this
@@ -196,9 +243,9 @@ export default function SettlementPage() {
     setAvailable(s.availablePenalties ?? []);
     setAdminRules(s.adminChargeRules ?? []);
     setCaps(s.discountCaps ?? { rent: null, penalties: null, restoration: null, utilities: null });
-    setGaps(s.gaps ?? []);
     setPayRows((s.payments ?? []).map(p => ({ key: uid(), amount: String(p.amount), method: p.method, reference: p.reference ?? '', receivedOn: p.receivedOn ?? '' })));
     setStamps({ sentAt: s.sentAt, agreedAt: s.agreedAt, paidAt: s.paidAt });
+    setSig({ rp: s.rpSignature ?? null, tenant: s.tenantSignature ?? null });
     if (s.statement) setStatement(s.statement);
   }, []);
 
@@ -218,6 +265,7 @@ export default function SettlementPage() {
           tenantName: c.tenant?.name ?? '',
         });
         setLandlordId(c.landlord?.id ?? null);
+        setTenantId(c.tenant?.id ?? null);
         setIsDirect(c.termination?.method === 'direct');
       }
       if (sRes.ok) {
@@ -234,7 +282,6 @@ export default function SettlementPage() {
   const sumDiscounts = rows.reduce((a, r) => a + Math.max(0, Number(r.discount) || 0), 0);
   const sumPayments = payRows.reduce((a, r) => a + (Math.max(0, Number(r.amount) || 0)), 0);
   const balance = Math.round((depositNum - sumLines + sumPayments) * 100) / 100;
-  const blockingGaps = gaps.filter(g => g.severity === 'blocking');
 
   const capFor = (sec: SectionDef): number => {
     const v = sec.capKey ? caps?.[sec.capKey] : null;
@@ -390,6 +437,18 @@ export default function SettlementPage() {
     finally { setActing(null); }
   }
 
+  // Pull a sent settlement back to draft so it's editable again — allowed only
+  // until the customer has agreed/signed (the backend blocks unsend once agreed).
+  async function reopenToDraft() {
+    setActing('unsend'); setError(null);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/settlement/unsend`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to reopen'); return; }
+      await load();
+    } catch { setError('Unexpected error reopening settlement'); }
+    finally { setActing(null); }
+  }
+
   async function markPaid(override?: { allowGaps?: boolean; allowOutstanding?: boolean }) {
     setActing('paid'); setError(null);
     if (isDirect && status === 'draft') {
@@ -450,19 +509,35 @@ export default function SettlementPage() {
         .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
       otherAdjustments: 0,
       settlementDate: stamps.paidAt,
+      rpSignature: sig.rp,
+      tenantSignature: sig.tenant,
+      rpSignedAt: sig.rp ? (stamps.sentAt ?? stamps.paidAt) : null,
+      tenantSignedAt: sig.tenant ? (stamps.agreedAt ?? stamps.paidAt) : null,
     };
   }
 
-  // Save the RENTAL FINAL SETTLEMENT as a PDF that is EXACTLY the on-screen
-  // statement — printed via the browser's own engine (handles the Tailwind v4
-  // oklch palette that rasterisers can't). Isolates #rfs-print-root via print CSS.
+  const rfs = buildRfsData();
+  const pdfFileName = `Final-settlement-${rfs?.contract.contractNo || `CID-${contractId}`}.pdf`;
+
+  // Download the RENTAL FINAL SETTLEMENT as a proper vector PDF — a real, clean A4
+  // document (@react-pdf), consistent on every browser, like the receipts and
+  // contracts. This is the SAME <RentalFinalSettlementPdf> stored on mark-paid, so
+  // the download and the archived copy always match. (No more window.print.)
   async function downloadSettlementPdf() {
-    if (view !== 'statement') { setView('statement'); await new Promise(r => setTimeout(r, 500)); }
-    const rfs = buildRfsData();
-    const prevTitle = document.title;
-    if (rfs) document.title = `Final Settlement - ${rfs.contract.contractNo || `CID-${contractId}`}`;
-    window.print();
-    setTimeout(() => { document.title = prevTitle; }, 1500);
+    if (!rfs) return;
+    setDownloading(true);
+    try {
+      const [{ pdf }, mod] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/contract/RentalFinalSettlementPdf'),
+      ]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blob = await pdf(createElement(mod.default, { data: rfs }) as any).toBlob();
+      const url = URL.createObjectURL(blob);
+      triggerBrowserDownload(url, pdfFileName);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch { setError('Could not generate the settlement PDF. Please try again.'); }
+    finally { setDownloading(false); }
   }
 
   if (loading) {
@@ -473,22 +548,10 @@ export default function SettlementPage() {
 
   return (
     <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-4xl'} mx-auto px-4 py-8 space-y-5 transition-[max-width]`}>
-      {/* Print CSS: when the browser prints (Download PDF), show ONLY the statement
-          document — exactly the on-screen layout, no dashboard chrome. */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          body * { visibility: hidden !important; }
-          #rfs-print-root, #rfs-print-root * { visibility: visible !important; }
-          #rfs-print-root { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; }
-          #rfs-print-root > div { border: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
-          #rfs-print-root .rounded-lg { break-inside: avoid; }
-          @page { size: A4; margin: 10mm; }
-        }
-      ` }} />
       {/* Topbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
-          <ArrowLeft size={15} /> Back to contract
+          <ArrowLeft size={15} /> {backLabel}
         </Link>
         <div className="flex items-center gap-2">
           <div className="flex rounded-full border border-[#e8e6e0] p-0.5 text-xs font-semibold">
@@ -501,8 +564,9 @@ export default function SettlementPage() {
               <FileText size={13} /> Statement
             </button>
           </div>
-          <button type="button" onClick={downloadSettlementPdf} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
-            <Download size={13} /> Download PDF
+          <button type="button" onClick={downloadSettlementPdf} disabled={!statement || downloading}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60">
+            {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
           </button>
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sm.cls}`}>{sm.label}</span>
         </div>
@@ -530,10 +594,26 @@ export default function SettlementPage() {
         </div>
       )}
       {status === 'sent' && (
-        <div className="flex items-start gap-2 text-sm bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-4 py-3">
-          <AlertCircle size={15} className="text-[#c2410c] shrink-0 mt-0.5" />
-          <div><p className="font-semibold text-[#9a3412]">Awaiting customer agreement</p>
-            <p className="text-xs text-[#c2410c] mt-0.5">Sent {fmtDateTime(stamps.sentAt)} — now locked for editing.</p></div>
+        <div className="bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-4 py-3 space-y-2.5">
+          <div className="flex items-start gap-3 text-sm">
+            <AlertCircle size={15} className="text-[#c2410c] shrink-0 mt-0.5" />
+            <div className="flex-1"><p className="font-semibold text-[#9a3412]">Awaiting customer agreement</p>
+              <p className="text-xs text-[#c2410c] mt-0.5">Sent {fmtDateTime(stamps.sentAt)} — locked for editing until the customer agrees. Reopen to make changes.</p></div>
+            {canSettle && (
+              <button onClick={() => void reopenToDraft()} disabled={acting !== null}
+                className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-[#9a3412] border border-[#fdba74] rounded-full px-3 py-1.5 hover:bg-[#ffedd5] disabled:opacity-60">
+                {acting === 'unsend' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Reopen to edit
+              </button>
+            )}
+          </div>
+          {/* No-login signing link — RP shares it (e.g. WhatsApp) so the customer
+              reviews & signs the settlement without an account. */}
+          {canSettle && tenantId != null && contractId && (
+            <div className="flex items-center gap-2 flex-wrap pl-[27px]">
+              <span className="text-xs font-medium text-[#9a3412] shrink-0">Or send a no-login link to review &amp; sign:</span>
+              <CustomerSigningLink tenantId={tenantId} contractId={contractId} />
+            </div>
+          )}
         </div>
       )}
       {error && <div className="flex items-start gap-2 text-sm text-[#dc2626] bg-[#fef2f2] rounded-xl px-4 py-3 whitespace-pre-line"><AlertCircle size={15} className="shrink-0 mt-0.5" /> {error}</div>}
@@ -771,11 +851,11 @@ export default function SettlementPage() {
       {isDirect && status === 'draft' && (
         <p className="text-xs text-[#6b6860]">Customer has vacated — you can record the refund and close the lease directly.</p>
       )}
-      <div className="flex flex-wrap items-center gap-3 pb-10">
+      <div className="flex flex-wrap items-start justify-end gap-3 pb-10">
         {!locked && canSettle && (
           <>
             <button onClick={() => void save()} disabled={saving || acting !== null}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
+              className="mr-auto flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
               {saving && acting === null ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save draft
             </button>
             <button onClick={() => void sendToCustomer()} disabled={saving || acting !== null}
@@ -785,26 +865,17 @@ export default function SettlementPage() {
           </>
         )}
         {canSettle && (status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
-          <div className="flex flex-col gap-1.5">
-            <button onClick={() => void markPaid()} disabled={acting !== null || balance < -0.005 || blockingGaps.length > 0}
+          <div className="flex flex-col items-end gap-1.5">
+            <button onClick={() => void markPaid({ allowGaps: true })} disabled={acting !== null || balance < -0.005}
               className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
               {acting === 'paid' ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />}
               {balance > 0 ? 'Mark refund paid' : 'Mark settled & close'}
             </button>
-            {blockingGaps.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-[#b91c1c]">{blockingGaps.length} unresolved item(s) must be fixed — or close anyway.</span>
-                <button onClick={() => void markPaid({ allowGaps: true, allowOutstanding: balance < -0.005 })} disabled={acting !== null}
-                  className="self-start flex items-center gap-1.5 text-xs font-semibold text-[#b91c1c] border border-[#fecaca] rounded-full px-3 py-1.5 hover:bg-[#fef2f2] disabled:opacity-60">
-                  Close anyway →
-                </button>
-              </div>
-            )}
-            {blockingGaps.length === 0 && balance < -0.005 && (
-              <div className="flex flex-col gap-1">
+            {balance < -0.005 && (
+              <div className="flex flex-col items-end gap-1">
                 <span className="text-xs text-[#b91c1c]">Record the {aed(Math.abs(balance))} still owed, or:</span>
-                <button onClick={() => void markPaid({ allowOutstanding: true })} disabled={acting !== null}
-                  className="self-start flex items-center gap-1.5 text-xs font-semibold text-[#b91c1c] border border-[#fecaca] rounded-full px-3 py-1.5 hover:bg-[#fef2f2] disabled:opacity-60">
+                <button onClick={() => void markPaid({ allowOutstanding: true, allowGaps: true })} disabled={acting !== null}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-[#b91c1c] border border-[#fecaca] rounded-full px-3 py-1.5 hover:bg-[#fef2f2] disabled:opacity-60">
                   Close with balance owed →
                 </button>
               </div>
@@ -818,12 +889,10 @@ export default function SettlementPage() {
       </>)}
 
       {/* Statement view — the RENTAL FINAL SETTLEMENT document (9-section CEO form).
-          #rfs-print-root is the isolated target for the browser-print PDF export. */}
+          The on-screen design; Download PDF renders the matching vector PDF. */}
       {view === 'statement' && (
-        statement ? (
-          <div id="rfs-print-root">
-            <RentalFinalSettlementDoc data={buildRfsData()!} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
-          </div>
+        rfs ? (
+          <RentalFinalSettlementDoc data={rfs} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
         ) : (
           <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
             <Loader2 className="animate-spin inline mr-2" size={16} /> Preparing statement…

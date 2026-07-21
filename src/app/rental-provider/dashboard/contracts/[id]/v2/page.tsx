@@ -1828,7 +1828,7 @@ type ContractNote = {
  *  relevant to where it's shown (documents vs the contract review/sign page),
  *  and shows the link so the RP can copy/share it directly (e.g. WhatsApp). */
 function SendTenantLinkButton({ tenantId, contractId, section = 'documents', label = 'Get / send link', role = 'tenant', disabled = false }: {
-  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out'; label?: string; role?: 'tenant' | 'inspector' | 'landlord'; disabled?: boolean;
+  tenantId: number; contractId: number; section?: 'documents' | 'contract' | 'move_in' | 'move_out' | 'settlement'; label?: string; role?: 'tenant' | 'inspector' | 'landlord'; disabled?: boolean;
 }) {
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
   const [link, setLink] = useState('');
@@ -4951,6 +4951,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const contractsBase = pathname.startsWith('/dashboard/manager')
     ? '/dashboard/manager/contracts'
     : '/rental-provider/dashboard/contracts';
+  // Preserve the origin: sub-pages (settlement / inspection) read `from` so their
+  // Back button returns to wherever we are now — the Operations pipeline detail
+  // when opened from there, otherwise the lease record. (Fixes "back always goes
+  // to the lease" when a record is worked from Operations.)
+  const fromQ = `from=${encodeURIComponent(pathname)}`;
   // Manager permission gate for the Edit affordance — RP owners always see it,
   // managers only when they hold canManageAgreements for this contract's landlord.
   const { canForRp: managerCanForRp } = useManagerPermissions();
@@ -5715,9 +5720,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     onCancelTermination,
     onUploadMoveInDoc, onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
     signActionUrl: `${contractsBase}/${contract.id}`,
-    inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in`,
-    moveOutInspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_out`,
-    settlementUrl: `${contractsBase}/${contract.id}/settlement`,
+    inspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_in&${fromQ}`,
+    moveOutInspectionUrl: `${contractsBase}/${contract.id}/inspection?type=move_out&${fromQ}`,
+    settlementUrl: `${contractsBase}/${contract.id}/settlement?${fromQ}`,
     printUrl: `${contractsBase}/${contract.id}/print`,
     contractsBase,
     perms,
@@ -6318,6 +6323,22 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                   section="move_out"
                   role="inspector"
                   label="Send inspector link"
+                />
+              </div>
+            )}
+            {/* Settlement signing link — once the settlement has been SENT, the
+                 customer can review + sign it via a no-login magic link (the
+                 backend serves it only after send). Mirrors the move-out link. */}
+            {selStep.key === 'settlement' && contract.tenant.id && derived.settlementStatus === 'sent' && perms.settleDeposits && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+                  Customer settlement signing link
+                </div>
+                <SendTenantLinkButton
+                  tenantId={contract.tenant.id}
+                  contractId={contract.id}
+                  section="settlement"
+                  label="Send settlement link"
                 />
               </div>
             )}

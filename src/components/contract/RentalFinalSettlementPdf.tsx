@@ -6,7 +6,7 @@
  */
 'use client';
 
-import { Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
 import type { RFSData } from './RentalFinalSettlementDoc';
 
 const money = (n: number | null | undefined) =>
@@ -34,21 +34,30 @@ const s = StyleSheet.create({
   secHead: { flexDirection: 'row', alignItems: 'center', backgroundColor: GREEN, borderTopLeftRadius: 3, borderTopRightRadius: 3, paddingVertical: 3, paddingHorizontal: 5 },
   secBadge: { width: 11, height: 11, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 7, fontFamily: 'Helvetica-Bold', textAlign: 'center', paddingTop: 1.5, marginRight: 4 },
   secTitle: { color: '#fff', fontSize: 8, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', letterSpacing: 0.4 },
+  // Compact header for the narrow §3/§4/§5 charge columns so the longest title
+  // ("Outstanding Utility & Service Charges") stays on ONE line.
+  secBadgeSm: { width: 9, height: 9, fontSize: 6, paddingTop: 1, marginRight: 3 },
+  secTitleSm: { fontSize: 6.5, letterSpacing: 0.15 },
   box: { borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 3, marginBottom: 8 },
-  // §1 fields
+  // §1 fields — column layout + flexGrow value box so every box in a row is the
+  // SAME height (a long Customer Name no longer towers over the short date boxes).
   fieldWrap: { flexDirection: 'row', flexWrap: 'wrap', padding: 6 },
-  field: { width: '25%', paddingHorizontal: 3, paddingVertical: 3 },
+  field: { width: '25%', paddingHorizontal: 3, paddingVertical: 3, flexDirection: 'column' },
   fieldLabel: { fontSize: 6.5, color: '#9b9890', textTransform: 'uppercase', letterSpacing: 0.3 },
-  fieldVal: { fontSize: 8.5, marginTop: 1.5, borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 2, paddingVertical: 2.5, paddingHorizontal: 3 },
-  fieldValAccent: { borderColor: '#c5e8df', backgroundColor: '#f0faf6', fontFamily: 'Helvetica-Bold' },
+  fieldValBox: { marginTop: 1.5, borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 2, paddingVertical: 2.5, paddingHorizontal: 3, flexGrow: 1, minHeight: 16, justifyContent: 'center' },
+  fieldValBoxAccent: { borderColor: '#c5e8df', backgroundColor: '#f0faf6' },
+  fieldValText: { fontSize: 8.5 },
+  fieldValTextAccent: { fontFamily: 'Helvetica-Bold' },
   // §2 table
   th: { flexDirection: 'row', backgroundColor: '#faf9f6', paddingVertical: 2.5, paddingHorizontal: 5 },
   thc: { fontSize: 6.5, color: '#6b6860', fontFamily: 'Helvetica-Bold', textTransform: 'uppercase' },
   tr: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 5, borderTopWidth: 0.5, borderTopColor: '#f0ede8' },
   band: { backgroundColor: '#f4f2ee', paddingVertical: 2.5, paddingHorizontal: 5 },
   bandTxt: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#4a4842', textTransform: 'uppercase' },
-  cDesc: { width: '21%' }, cDate: { width: '12%' }, cAmt: { width: '15%', textAlign: 'right' },
-  cMethod: { width: '12%' }, cRef: { width: '17%' }, cStatus: { width: '12%' }, cPen: { width: '11%', textAlign: 'right' },
+  // paddingRight on every column keeps adjacent cells from touching (esp. the
+  // right-aligned Amount butting into Method, and long cheque refs into Status).
+  cDesc: { width: '20%', paddingRight: 4 }, cDate: { width: '11%', paddingRight: 4 }, cAmt: { width: '14%', textAlign: 'right', paddingRight: 8 },
+  cMethod: { width: '14%', paddingRight: 4 }, cRef: { width: '18%', paddingRight: 4 }, cStatus: { width: '12%', paddingRight: 4 }, cPen: { width: '11%', textAlign: 'right' },
   // charge columns
   colRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   col: { flexGrow: 1, flexBasis: 0, borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 3 },
@@ -59,22 +68,29 @@ const s = StyleSheet.create({
   // §6/§7 rows
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 6 },
   sumRowB: { borderTopWidth: 1, borderTopColor: '#e8e6e0' },
-  // signatures
+  // signatures — mirror the tenancy contract's signature box
   sigRow: { flexDirection: 'row', gap: 24, padding: 8 },
   sigCol: { flexGrow: 1, flexBasis: 0 },
-  sigHead: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: GREEN, textTransform: 'uppercase', marginBottom: 8 },
-  sigLine: { borderBottomWidth: 1, borderBottomColor: '#c8c6be', height: 16, marginBottom: 2 },
-  sigLabel: { fontSize: 6.5, color: '#9b9890' },
+  sigArea: { height: 34, justifyContent: 'flex-end', alignItems: 'flex-start' },
+  sigFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderTopWidth: 1, borderTopColor: '#c8c6be', paddingTop: 3, marginTop: 2 },
+  sigHead: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: GREEN, textTransform: 'uppercase' },
+  sigName: { fontSize: 8.5, marginTop: 1.5 },
+  sigLabel: { fontSize: 6.5, color: '#9b9890', textTransform: 'uppercase' },
+  sigImg: { height: 28, maxWidth: 140, objectFit: 'contain', objectPosition: 'left' },
+  sigTyped: { fontSize: 15, color: '#1a1916', fontFamily: 'Helvetica-Oblique' },
+  sigNotSigned: { fontSize: 8, color: '#b8b5ad', fontFamily: 'Helvetica-Oblique' },
+  sigDate: { fontSize: 8.5, color: '#1a7a5a', fontFamily: 'Helvetica-Bold', marginTop: 1 },
+  sigDateBlank: { fontSize: 8.5, color: '#9b9890', marginTop: 1 },
 });
 
 const statusColor = (st?: string) =>
   st === 'Cleared' ? '#1a7a5a' : st === 'Bounced' ? RED : (st === 'Not Received' || st === 'Pending') ? '#c2410c' : '#6b6860';
 
-function SecHead({ n, title }: { n: number | string; title: string }) {
+function SecHead({ n, title, small }: { n: number | string; title: string; small?: boolean }) {
   return (
     <View style={s.secHead}>
-      {n !== '' && <Text style={s.secBadge}>{n}</Text>}
-      <Text style={s.secTitle}>{title}</Text>
+      {n !== '' && <Text style={[s.secBadge, ...(small ? [s.secBadgeSm] : [])]}>{n}</Text>}
+      <Text style={[s.secTitle, ...(small ? [s.secTitleSm] : [])]}>{title}</Text>
     </View>
   );
 }
@@ -82,14 +98,16 @@ function Field({ label, value, accent }: { label: string; value: string; accent?
   return (
     <View style={s.field}>
       <Text style={s.fieldLabel}>{label}</Text>
-      <Text style={[s.fieldVal, ...(accent ? [s.fieldValAccent] : [])]}>{value || '—'}</Text>
+      <View style={[s.fieldValBox, ...(accent ? [s.fieldValBoxAccent] : [])]}>
+        <Text style={[s.fieldValText, ...(accent ? [s.fieldValTextAccent] : [])]}>{value || '—'}</Text>
+      </View>
     </View>
   );
 }
 function ChargeCol({ n, title, rows, total, footer }: { n: number; title: string; rows: { label: string; amount: number }[]; total: number; footer?: string }) {
   return (
     <View style={s.col}>
-      <SecHead n={n} title={title} />
+      <SecHead n={n} title={title} small />
       <View style={s.colBody}>
         {rows.map((r, i) => (
           <View key={i} style={s.clineRow}>
@@ -108,6 +126,33 @@ function SumRow({ label, value, tone, strong, border }: { label: string; value: 
     <View style={[s.sumRow, ...(border ? [s.sumRowB] : [])]}>
       <Text style={{ fontFamily: strong ? 'Helvetica-Bold' : 'Helvetica', color: strong ? GREEN : '#4a4842' }}>{label}</Text>
       <Text style={{ fontFamily: 'Helvetica-Bold', color: tone ?? '#1a1916' }}>{value}</Text>
+    </View>
+  );
+}
+// One signing party — mirrors the tenancy contract's signature box: the captured
+// signature (drawn image or typed name) sits over a line, "Not yet signed" as the
+// placeholder, with the party label + name + signed date beneath.
+function SigCol({ head, name, signature, signedAt }: { head: string; name: string; signature?: string | null; signedAt?: string | null }) {
+  const img = !!signature && signature.startsWith('data:image');
+  const typed = !img && !!signature && !!signature.trim();
+  const signed = img || typed;
+  return (
+    <View style={s.sigCol}>
+      <View style={s.sigArea}>
+        {img && <Image src={signature!} style={s.sigImg} />}
+        {typed && <Text style={s.sigTyped}>{signature}</Text>}
+        {!signed && <Text style={s.sigNotSigned}>Not yet signed</Text>}
+      </View>
+      <View style={s.sigFoot}>
+        <View style={{ flexGrow: 1, flexShrink: 1, paddingRight: 6 }}>
+          <Text style={s.sigHead}>{head}</Text>
+          <Text style={s.sigName}>{name || '—'}</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={s.sigLabel}>Date</Text>
+          <Text style={signed && signedAt ? s.sigDate : s.sigDateBlank}>{signed && signedAt ? fmtDate(signedAt) : '____________'}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -220,8 +265,8 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
           ))}
         </View>
 
-        {/* §3 §4 §5 */}
-        <View style={s.colRow}>
+        {/* §3 §4 §5 — keep the three charge columns together across a page break */}
+        <View style={s.colRow} wrap={false}>
           <ChargeCol n={3} title="Outstanding Utility & Service Charges" rows={utilRows} total={utilitiesTotal} />
           <ChargeCol n={4} title="Property Charges" rows={restorationRows} total={restorationTotal} footer={restorationTotal > 0 ? (hasInspection ? 'From move-out inspection report' : 'From move-out inspection') : undefined} />
           <ChargeCol n={5} title="Additional Recoverable Charges" rows={additionalRows} total={additionalTotal} />
@@ -249,22 +294,12 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
           </View>
         </View>
 
-        {/* §9 Signatures */}
+        {/* §9 Signatures — the actual captured e-signatures when signed. */}
         <View style={[s.box, { marginTop: 8 }]} wrap={false}>
           <SecHead n={9} title="Signatures" />
           <View style={s.sigRow}>
-            <View style={s.sigCol}>
-              <Text style={s.sigHead}>Rental Provider / Property Manager</Text>
-              <Text style={{ fontSize: 8.5, marginBottom: 6 }}>{c.rpSignatoryName || c.landlordName || '—'}</Text>
-              <Text style={s.sigLabel}>Signature</Text><View style={s.sigLine} />
-              <Text style={s.sigLabel}>Date</Text><View style={s.sigLine} />
-            </View>
-            <View style={s.sigCol}>
-              <Text style={s.sigHead}>Customer</Text>
-              <Text style={{ fontSize: 8.5, marginBottom: 6 }}>{c.tenantName || '—'}</Text>
-              <Text style={s.sigLabel}>Signature</Text><View style={s.sigLine} />
-              <Text style={s.sigLabel}>Date</Text><View style={s.sigLine} />
-            </View>
+            <SigCol head="Rental Provider / Property Manager" name={c.rpSignatoryName || c.landlordName || '—'} signature={data.rpSignature} signedAt={data.rpSignedAt} />
+            <SigCol head="Customer" name={c.tenantName || '—'} signature={data.tenantSignature} signedAt={data.tenantSignedAt} />
           </View>
         </View>
       </Page>

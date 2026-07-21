@@ -55,6 +55,14 @@ interface Props {
   onRemoveCategory?: (sectionId: string) => void;
   generalNotes?: string;
   onGeneralNotes?: (v: string) => void;
+  /** When provided (and editable), the "Inspected By" field becomes an editable
+   *  input. It defaults to whoever saved/submitted the report (stamped server-side),
+   *  and can be overridden here with the actual inspector's name. */
+  onInspectorName?: (v: string) => void;
+  /** Move-out only: when provided (and editable), the Move-Out Date box becomes an
+   *  editable date input. The move-out date can shift while the inspection is out
+   *  for signature, so this stays available until the inspection is approved. */
+  onMoveOutDate?: (v: string) => void;
   signatures?: ReportSignatures;
   signSlot?: ReactNode;
   /** Move-out only: override whether the Cost column / totals show. Defaults to
@@ -77,6 +85,13 @@ function fmtDate(d?: string | null): string {
   return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 const cap = (v: string) => (v ? v[0].toUpperCase() + v.slice(1) : '');
+/** A bare YYYY-MM-DD for a native date <input> (Dubai-local), or '' if unparseable. */
+function toDateInput(d?: string | null): string {
+  if (!d) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' });
+}
 
 const CAT_ICON: Record<string, typeof Home> = {
   doors: DoorClosed, closet: Shirt, wardrobe: Shirt, windows: AppWindow, walls_ceiling: Layers,
@@ -90,7 +105,7 @@ const COND_OPTS: Exclude<Condition, ''>[] = ['good', 'fair', 'poor'];
 export function InspectionReportView({
   doc, meta, phase, audience, dates, editable = false,
   onPatch, onAddCategory, onAddComponent, onRemoveComponent, onRemoveCategory,
-  generalNotes, onGeneralNotes, signatures, signSlot, showPrices,
+  generalNotes, onGeneralNotes, onInspectorName, onMoveOutDate, signatures, signSlot, showPrices,
   onAddItemPhotos, onRemoveItemPhoto, uploadingItemId, hideSignatures,
 }: Props) {
   const isMoveIn = phase === 'move_in';
@@ -115,7 +130,14 @@ export function InspectionReportView({
         </div>
         <div className={s.dates}>
           <DateBox icon={<Calendar />} k="Move-In Date" v={fmtDate(dates?.moveInDate)} />
-          {!isMoveIn && <DateBox icon={<Calendar />} k="Move-Out Date" v={fmtDate(dates?.moveOutDate)} />}
+          {!isMoveIn && (
+            /* The move-out date can shift while the inspection is out for signature,
+               so it stays editable (caller passes onMoveOutDate) even when the rest
+               of the report is locked from editing. */
+            onMoveOutDate
+              ? <EditableDateBox icon={<Calendar />} k="Move-Out Date" value={toDateInput(dates?.moveOutDate)} onChange={onMoveOutDate} />
+              : <DateBox icon={<Calendar />} k="Move-Out Date" v={fmtDate(dates?.moveOutDate)} />
+          )}
           <DateBox icon={<ClipboardCheck />} k="Inspection Type" v={isMoveIn ? 'Move-In' : 'Move-Out'} />
         </div>
       </div>
@@ -129,7 +151,12 @@ export function InspectionReportView({
           ['Tenant Name', meta.tenantName], ['Phone', meta.tenantPhone], ['Email', meta.tenantEmail],
         ]} />
         <DetailCard icon={<Users />} title="Inspection Team" rows={[
-          ['Inspected By', meta.inspectorName || '—'], ['Company', meta.inspectorCompany || '—'], ['Role', meta.inspectorRole || 'Property Representative'],
+          ['Inspected By', editable && onInspectorName
+            ? <input value={meta.inspectorName} placeholder="Inspector name"
+                onChange={(e) => onInspectorName(e.target.value)} aria-label="Inspected by"
+                style={{ font: 'inherit', fontWeight: 600, color: '#1a1916', border: '1px solid #e8e6e0', borderRadius: 6, padding: '2px 6px', width: '100%', minWidth: 0, background: '#fff' }} />
+            : (meta.inspectorName || '—')],
+          ['Role', meta.inspectorRole || 'Property Representative'],
         ]} />
       </div>
 
@@ -284,11 +311,8 @@ export function InspectionReportView({
         </table>
       </div>
 
-      {/* Footer totals */}
-      <div className={s.foot}>
-        <div className={`${s.ft} ${s.replace}`}><span className={s.k}>{isMoveIn ? 'Total Items Flagged' : 'Total Items to be Replaced'}</span><span className={s.v}>{isMoveIn ? totals.defective : totals.itemsToReplace}</span></div>
-        {showMoney && <div className={`${s.ft} ${s.cost}`}><span className={s.k}>Total Estimated Cost (AED)</span><span className={`${s.v} ${s.tabnum}`}>{AED(totals.estCostAed)}</span></div>}
-      </div>
+      {/* The estimated-cost + item-count totals already live in the summary tiles
+          above — no duplicated footer totals here. */}
 
       {/* General Notes */}
       <div className={s.notesWrap}>
@@ -411,12 +435,27 @@ function DateBox({ icon, k, v }: { icon: ReactNode; k: string; v: string }) {
   );
 }
 
-function DetailCard({ icon, title, rows }: { icon: ReactNode; title: string; rows: [string, string][] }) {
+/** Move-out date box that doubles as an editable native date input on the fillable
+ *  surface — the move-out date can shift right up until the inspection is approved. */
+function EditableDateBox({ icon, k, value, onChange }: { icon: ReactNode; k: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className={s.datebox}>
+      <span className={`${s.dbi} ${s.ico}`}>{icon}</span>
+      <div>
+        <div className={s.k}>{k}</div>
+        <input type="date" value={value} onChange={(e) => onChange(e.target.value)}
+          style={{ font: 'inherit', fontWeight: 700, color: '#1a1916', border: 'none', background: 'transparent', padding: 0, width: '100%', cursor: 'pointer' }} />
+      </div>
+    </div>
+  );
+}
+
+function DetailCard({ icon, title, rows }: { icon: ReactNode; title: string; rows: [string, ReactNode][] }) {
   return (
     <div className={s.card}>
       <h3><span className={s.ico}>{icon}</span>{title}</h3>
       {rows.map(([k, v]) => (
-        <div key={k} className={s.kv}><span className={s.k}>{k}</span><span className={s.sep}>:</span><span className={s.v}>{v || '—'}</span></div>
+        <div key={k} className={s.kv}><span className={s.k}>{k}</span><span className={s.sep}>:</span><span className={s.v}>{(typeof v === 'string' ? v : null) || v || '—'}</span></div>
       ))}
     </div>
   );

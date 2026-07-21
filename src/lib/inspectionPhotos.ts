@@ -27,23 +27,32 @@ export function displayInspectionPhotoUrl(u: string | null | undefined): string 
 
 /**
  * Upload one image for a checklist item; returns the attachment ref to append to
- * `item.itemAttachments`, or null on failure. Logged-in RP/manager path only
- * (`/api/documents/upload-url`); the caller persists the inspection afterwards.
+ * `item.itemAttachments`, or null on failure. Works both for the logged-in
+ * RP/manager (`/api/documents/upload-url`) and the on-site inspector magic-link
+ * (`opts.portalToken` → the token-scoped presigned-upload endpoint, which needs
+ * the inspection `type`). The caller persists the inspection afterwards.
  */
 export async function uploadInspectionItemPhoto(
   contractId: number | string,
   itemId: string,
   file: File,
+  opts?: { portalToken?: string | null; type?: 'move_in' | 'move_out' },
 ): Promise<InspectionPhotoRef | null> {
   try {
-    const body = {
-      ownerType: 'tenancy_contract',
-      ownerId: Number(contractId),
-      documentKey: `insp_item_${itemId}_${Date.now()}_${uid()}`,
-      mimeType: file.type,
-      originalName: file.name,
-    };
-    const urlRes = await fetch('/api/documents/upload-url', {
+    const portalToken = opts?.portalToken ?? null;
+    const documentKey = `insp_item_${itemId}_${Date.now()}_${uid()}`;
+    const body = portalToken
+      ? { type: opts?.type ?? 'move_in', documentKey, mimeType: file.type, originalName: file.name }
+      : {
+          ownerType: 'tenancy_contract',
+          ownerId: Number(contractId),
+          documentKey,
+          mimeType: file.type,
+          originalName: file.name,
+        };
+    const urlRes = await fetch(portalToken
+      ? `/api/portal/${portalToken}/contracts/${Number(contractId)}/inspection/upload-url`
+      : '/api/documents/upload-url', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

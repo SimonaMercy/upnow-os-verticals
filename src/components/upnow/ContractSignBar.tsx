@@ -22,6 +22,7 @@ export function ContractSignBar({
   onSign,
   reviewNote,
   requireConfirm = true,
+  confirmText,
 }: {
   /** Party label shown on the bar, e.g. "Landlord". */
   signerRole?: string;
@@ -37,6 +38,9 @@ export function ContractSignBar({
   reviewNote?: string;
   /** Require the "I have reviewed…" checkbox before signing. */
   requireConfirm?: boolean;
+  /** Overrides the confirm sentence before ESIGN_CONSENT_TEXT (defaults to the
+   *  tenancy-contract wording). Use for other signed docs (e.g. settlement). */
+  confirmText?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
@@ -119,7 +123,7 @@ export function ContractSignBar({
             {requireConfirm && (
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#1a1916', cursor: 'pointer', marginBottom: 10 }}>
                 <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
-                <span>I have reviewed all the documents above and agree to execute this contract as the {signerRole.toLowerCase()}. {ESIGN_CONSENT_TEXT}</span>
+                <span>{confirmText ?? `I have reviewed all the documents above and agree to execute this contract as the ${signerRole.toLowerCase()}.`} {ESIGN_CONSENT_TEXT}</span>
               </label>
             )}
             <input

@@ -11,6 +11,7 @@
  * 0.00, unknown text cells show "—".
  */
 
+import { Fragment } from 'react';
 import { Building2, User } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -46,6 +47,11 @@ export interface RFSData {
   otherAdjustments?: number;
   settlementDate?: string | null;
   supportingDocs?: { inspectionReport?: boolean; utilityBills?: boolean; invoices?: boolean; otherDocuments?: boolean };
+  // Captured e-signatures (data-URL image or typed name) + when each side signed.
+  rpSignature?: string | null;
+  tenantSignature?: string | null;
+  rpSignedAt?: string | null;
+  tenantSignedAt?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,6 +113,39 @@ function SummaryRow({ label, value, tone, strong, border }: { label: string; val
     <div className={`flex items-center justify-between gap-2 px-3 py-2 ${border ? 'border-t border-[#e8e6e0]' : ''}`}>
       <span className={`text-[12px] ${strong ? 'font-bold text-[#1f6b4f]' : 'text-[#4a4842]'}`}>{label}</span>
       <span className={`text-[13px] tabular-nums ${strong ? 'font-bold' : 'font-semibold'} ${tone ?? 'text-[#1a1916]'}`}>{value}</span>
+    </div>
+  );
+}
+const isSigImg = (s?: string | null): boolean => !!s && s.startsWith('data:image');
+// One signing party — mirrors the tenancy contract's signature box: the captured
+// signature (drawn image or typed name) sits over a line, with "Not yet signed"
+// as the placeholder (electronic signing, not a blank hand-sign line), and the
+// party label + name + signed date beneath.
+function SignatureSide({ icon, role, name, signature, signedAt }: { icon: React.ReactNode; role: string; name: string; signature?: string | null; signedAt?: string | null }) {
+  const img = isSigImg(signature);
+  const typed = !img && !!(signature && signature.trim());
+  const signed = img || typed;
+  return (
+    <div>
+      <div className="h-12 flex items-end">
+        {img
+          ? <img src={signature!} alt="Signature" className="max-h-11 object-contain object-left" />
+          : typed
+            ? <span className="text-[22px] leading-none text-[#1a1916]" style={{ fontFamily: 'Segoe Script, "Snell Roundhand", cursive' }}>{signature}</span>
+            : <span className="text-[12px] italic text-[#b8b5ad] pb-1">Not yet signed</span>}
+      </div>
+      <div className="border-t border-[#c8c6be] pt-2 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#1f6b4f] uppercase tracking-wide">{icon} {role}</div>
+          <div className="text-[12px] text-[#1a1916] truncate">{name || '—'}</div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-[10px] text-[#9b9890] uppercase tracking-wide">Date</div>
+          <div className={`text-[12px] ${signed && signedAt ? 'text-[#1a7a5a] font-medium' : 'text-[#9b9890]'}`}>
+            {signed && signedAt ? fmtDate(signedAt) : '____________'}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -222,8 +261,8 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
                   </tr>
                 )}
                 {data.paymentHistory.map((band, bi) => (
-                  <>
-                    <tr key={`b${bi}`} className="bg-[#f4f2ee]">
+                  <Fragment key={bi}>
+                    <tr className="bg-[#f4f2ee]">
                       <td colSpan={7} className="px-3 py-1 text-[11px] font-bold text-[#4a4842] uppercase tracking-wide">
                         {band.contractNo && band.contractId != null
                           ? <>{band.band ?? 'YEAR'}{'  ·  '}
@@ -245,7 +284,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
                         <td className="px-3 py-1.5 text-right tabular-nums text-[#b91c1c]">{r.penalty ? money(r.penalty) : ''}</td>
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -288,26 +327,15 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
           </div>
         </div>
 
-        {/* §9 Signatures */}
+        {/* §9 Signatures — the actual captured e-signatures when signed, blank
+            signing lines when a side hasn't signed yet. */}
         <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
           <SectionHead n={9} title="Signatures" />
           <div className="p-4 grid sm:grid-cols-2 gap-6">
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#1f6b4f] uppercase tracking-wide"><Building2 size={12} /> Rental Provider / Property Manager</div>
-              <div className="mt-3 space-y-3">
-                <div><div className="text-[10px] text-[#9b9890]">Name</div><div className="text-[13px] text-[#1a1916] border-b border-[#c8c6be] pb-1">{c.rpSignatoryName || c.landlordName || '—'}</div></div>
-                <div><div className="text-[10px] text-[#9b9890]">Signature</div><div className="h-6 border-b border-[#c8c6be]" /></div>
-                <div><div className="text-[10px] text-[#9b9890]">Date</div><div className="h-5 border-b border-[#c8c6be]" /></div>
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#1f6b4f] uppercase tracking-wide"><User size={12} /> Customer</div>
-              <div className="mt-3 space-y-3">
-                <div><div className="text-[10px] text-[#9b9890]">Name</div><div className="text-[13px] text-[#1a1916] border-b border-[#c8c6be] pb-1">{c.tenantName || '—'}</div></div>
-                <div><div className="text-[10px] text-[#9b9890]">Signature</div><div className="h-6 border-b border-[#c8c6be]" /></div>
-                <div><div className="text-[10px] text-[#9b9890]">Date</div><div className="h-5 border-b border-[#c8c6be]" /></div>
-              </div>
-            </div>
+            <SignatureSide icon={<Building2 size={12} />} role="Rental Provider / Property Manager"
+              name={c.rpSignatoryName || c.landlordName || '—'} signature={data.rpSignature} signedAt={data.rpSignedAt} />
+            <SignatureSide icon={<User size={12} />} role="Customer"
+              name={c.tenantName || '—'} signature={data.tenantSignature} signedAt={data.tenantSignedAt} />
           </div>
         </div>
       </div>

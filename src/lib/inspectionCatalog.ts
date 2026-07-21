@@ -129,6 +129,10 @@ export interface InspectionDoc {
   accompaniedBy?: string;
   inspectionDate?: string;
   moveInDate?: string;
+  /** Move-out only: the recorded move-out date, editable until the inspection is
+   *  approved (counter-signed). Falls back to the contract's termination/end date
+   *  when unset. Shown on the report + PDF. */
+  moveOutDate?: string;
 
   categories: InspectionCategory[];
 
