@@ -46,7 +46,7 @@ function toRfsData(s: PortalSettlement): RFSData | null {
     settlementDate: s.paidAt,
     rpSignature: s.rpSignature,
     tenantSignature: s.tenantSignature,
-    rpSignedAt: s.rpSignature ? (s.sentAt ?? s.paidAt) : null,
+    rpSignedAt: s.sentAt ?? s.paidAt,
     tenantSignedAt: s.tenantSignature ? (s.agreedAt ?? s.paidAt) : null,
   };
 }
@@ -100,7 +100,7 @@ export default function PortalSettlementPage() {
         </div>
       </header>
 
-      <main style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 120px' }}>
+      <main style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 48px' }}>
         {loading ? (
           <div style={{ display: 'grid', placeItems: 'center', padding: '80px 0', color: '#6b6860' }}>
             <Loader2 className="animate-spin" size={26} /> <span style={{ marginTop: 10, fontSize: 13 }}>Loading your settlement…</span>
@@ -128,13 +128,14 @@ export default function PortalSettlementPage() {
 
             <div style={{ marginTop: 20 }}>
               <ContractSignBar
+                inline
                 signerRole="Customer"
                 signerName={data.contract.tenantName ?? null}
                 defaultName={data.contract.tenantName ?? ''}
                 alreadySigned={signed}
                 requireConfirm
                 confirmText="I have reviewed the final settlement statement above and agree to it as the customer."
-                reviewNote="You've reviewed the final settlement statement above."
+                submitLabel="Agree & sign"
                 onSign={agree}
               />
             </div>

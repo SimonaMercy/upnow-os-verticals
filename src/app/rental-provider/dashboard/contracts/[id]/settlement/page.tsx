@@ -511,7 +511,7 @@ export default function SettlementPage() {
       settlementDate: stamps.paidAt,
       rpSignature: sig.rp,
       tenantSignature: sig.tenant,
-      rpSignedAt: sig.rp ? (stamps.sentAt ?? stamps.paidAt) : null,
+      rpSignedAt: stamps.sentAt ?? stamps.paidAt,
       tenantSignedAt: sig.tenant ? (stamps.agreedAt ?? stamps.paidAt) : null,
     };
   }

@@ -298,7 +298,7 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
         <View style={[s.box, { marginTop: 8 }]} wrap={false}>
           <SecHead n={9} title="Signatures" />
           <View style={s.sigRow}>
-            <SigCol head="Rental Provider / Property Manager" name={c.rpSignatoryName || c.landlordName || '—'} signature={data.rpSignature} signedAt={data.rpSignedAt} />
+            <SigCol head="Rental Provider / Property Manager" name={c.rpSignatoryName || c.landlordName || '—'} signature={data.rpSignature || (c.rpSignatoryName ? c.rpSignatoryName.split(' (')[0] : undefined)} signedAt={data.rpSignedAt} />
             <SigCol head="Customer" name={c.tenantName || '—'} signature={data.tenantSignature} signedAt={data.tenantSignedAt} />
           </View>
         </View>

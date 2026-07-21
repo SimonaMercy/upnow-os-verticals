@@ -50,7 +50,7 @@ function toRfsData(s: ApiSettlement): RFSData | null {
     settlementDate: s.paidAt,
     rpSignature: s.rpSignature,
     tenantSignature: s.tenantSignature,
-    rpSignedAt: s.rpSignature ? (s.sentAt ?? s.paidAt) : null,
+    rpSignedAt: s.sentAt ?? s.paidAt,
     tenantSignedAt: s.tenantSignature ? (s.agreedAt ?? s.paidAt) : null,
   };
 }

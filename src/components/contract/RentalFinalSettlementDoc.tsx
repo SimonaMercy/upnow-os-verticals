@@ -333,7 +333,8 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
           <SectionHead n={9} title="Signatures" />
           <div className="p-4 grid sm:grid-cols-2 gap-6">
             <SignatureSide icon={<Building2 size={12} />} role="Rental Provider / Property Manager"
-              name={c.rpSignatoryName || c.landlordName || '—'} signature={data.rpSignature} signedAt={data.rpSignedAt} />
+              name={c.rpSignatoryName || c.landlordName || '—'}
+              signature={data.rpSignature || (c.rpSignatoryName ? c.rpSignatoryName.split(' (')[0] : undefined)} signedAt={data.rpSignedAt} />
             <SignatureSide icon={<User size={12} />} role="Customer"
               name={c.tenantName || '—'} signature={data.tenantSignature} signedAt={data.tenantSignedAt} />
           </div>

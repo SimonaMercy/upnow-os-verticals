@@ -23,6 +23,8 @@ export function ContractSignBar({
   reviewNote,
   requireConfirm = true,
   confirmText,
+  inline = false,
+  submitLabel,
 }: {
   /** Party label shown on the bar, e.g. "Landlord". */
   signerRole?: string;
@@ -41,6 +43,11 @@ export function ContractSignBar({
   /** Overrides the confirm sentence before ESIGN_CONSENT_TEXT (defaults to the
    *  tenancy-contract wording). Use for other signed docs (e.g. settlement). */
   confirmText?: string;
+  /** Render the consent + signature pad INLINE (in normal flow, below the form)
+   *  instead of a sticky bottom bar + pop-up sheet. */
+  inline?: boolean;
+  /** Label for the submit button (defaults to "Sign contract"). */
+  submitLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
@@ -58,7 +65,7 @@ export function ContractSignBar({
   // Size the pad's backing store to its CSS box × DPR so strokes stay crisp and
   // un-squashed; refit on resize/rotate (which also clears it).
   useEffect(() => {
-    if (!open) return;
+    if (!open && !inline) return;
     const c = canvasRef.current;
     if (!c) return;
     const fit = () => {
@@ -73,7 +80,7 @@ export function ContractSignBar({
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [open]);
+  }, [open, inline]);
 
   const pos = (e: React.PointerEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const down = (e: React.PointerEvent) => { drawing.current = true; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
@@ -98,6 +105,62 @@ export function ContractSignBar({
 
   const signed = alreadySigned || done;
 
+  // Shared consent + signature-pad body — used both inline and in the pop-up sheet.
+  const body = (
+    <>
+      {reviewNote && <p style={{ fontSize: 12.5, color: '#6b6860', margin: '0 0 10px' }}>{reviewNote}</p>}
+      {requireConfirm && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#1a1916', cursor: 'pointer', marginBottom: 10 }}>
+          <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
+          <span>{confirmText ?? `I have reviewed all the documents above and agree to execute this contract as the ${signerRole.toLowerCase()}.`} {ESIGN_CONSENT_TEXT}</span>
+        </label>
+      )}
+      <input
+        value={name} onChange={e => setName(e.target.value)} placeholder="Full name"
+        style={{ width: '100%', fontSize: 14, padding: '9px 11px', border: '1px solid #e3e0d9', borderRadius: 10, marginBottom: 10, boxSizing: 'border-box' }}
+      />
+      <p style={{ fontSize: 11.5, color: '#6b6860', margin: '0 0 4px' }}>Draw your signature</p>
+      <canvas
+        ref={canvasRef}
+        style={{ width: '100%', height: 168, border: '1px solid #d8d6d0', borderRadius: 10, background: '#fafaf8', touchAction: 'none', cursor: 'crosshair', display: 'block' }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+        <button onClick={clear} style={{ background: 'none', border: 0, fontSize: 12, color: '#6b6860', cursor: 'pointer' }}>Clear</button>
+        <button
+          onClick={submit} disabled={busy}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#2e9f82', color: '#fff', border: 0, borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} {submitLabel ?? 'Sign contract'}
+        </button>
+      </div>
+      {err && <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 8 }}>{err}</p>}
+    </>
+  );
+
+  // Inline mode: consent + signature pad in normal flow (below the form).
+  if (inline) {
+    if (signed) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#ecf7f1', border: '1px solid #bfe3d6', borderRadius: 16, padding: '14px 18px' }}>
+          <CheckCircle2 size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1a1916' }}>Signed as {signerRole}</div>
+            {signerName && <div style={{ fontSize: 12, color: '#6b6860' }}>{signerName}</div>}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div style={{ background: '#fff', border: '1px solid #e3e0d9', borderRadius: 16, padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 15, fontWeight: 800, color: '#1a1916', marginBottom: 12 }}>
+          <PenLine size={16} style={{ color: '#2e9f82' }} /> Sign as {signerRole}
+        </div>
+        {body}
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Expanding sheet (above the bar) */}
@@ -119,33 +182,7 @@ export function ContractSignBar({
               <span style={{ fontSize: 14, fontWeight: 800, color: '#1a1916' }}>Sign as {signerRole}</span>
               <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#9b9890', padding: 4 }}><X size={18} /></button>
             </div>
-            {reviewNote && <p style={{ fontSize: 12.5, color: '#6b6860', margin: '0 0 10px' }}>{reviewNote}</p>}
-            {requireConfirm && (
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#1a1916', cursor: 'pointer', marginBottom: 10 }}>
-                <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
-                <span>{confirmText ?? `I have reviewed all the documents above and agree to execute this contract as the ${signerRole.toLowerCase()}.`} {ESIGN_CONSENT_TEXT}</span>
-              </label>
-            )}
-            <input
-              value={name} onChange={e => setName(e.target.value)} placeholder="Full name"
-              style={{ width: '100%', fontSize: 14, padding: '9px 11px', border: '1px solid #e3e0d9', borderRadius: 10, marginBottom: 10, boxSizing: 'border-box' }}
-            />
-            <p style={{ fontSize: 11.5, color: '#6b6860', margin: '0 0 4px' }}>Draw your signature</p>
-            <canvas
-              ref={canvasRef}
-              style={{ width: '100%', height: 168, border: '1px solid #d8d6d0', borderRadius: 10, background: '#fafaf8', touchAction: 'none', cursor: 'crosshair', display: 'block' }}
-              onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
-              <button onClick={clear} style={{ background: 'none', border: 0, fontSize: 12, color: '#6b6860', cursor: 'pointer' }}>Clear</button>
-              <button
-                onClick={submit} disabled={busy}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#2e9f82', color: '#fff', border: 0, borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}
-              >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Sign contract
-              </button>
-            </div>
-            {err && <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 8 }}>{err}</p>}
+            {body}
           </div>
         </div>
       )}
