@@ -11,7 +11,7 @@
  * 0.00, unknown text cells show "—".
  */
 
-import { Building2, User, Wallet } from 'lucide-react';
+import { Building2, User } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 export interface RFSContract {
@@ -165,8 +165,6 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
   const amountPayable = finalBalance < 0 ? -finalBalance : 0;
   const isRefund = finalBalance >= 0;
 
-  const docs = data.supportingDocs ?? {};
-
   return (
     <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
       {/* Header */}
@@ -287,40 +285,6 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
               <SummaryRow label="Other Adjustments (if any)" value={money(data.otherAdjustments ?? 0)} />
               <SummaryRow label={isRefund ? 'NET REFUND TO CUSTOMER' : 'AMOUNT PAYABLE BY CUSTOMER'} value={money(isRefund ? netRefund : amountPayable)} tone={isRefund ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'} strong border />
             </div>
-          </div>
-        </div>
-
-        {/* Final Settlement Result — headline outcome, directly under the summary */}
-        <div className={`rounded-lg border-2 overflow-hidden ${isRefund ? 'border-[#c5e8df] bg-[#f0faf6]' : 'border-[#fecaca] bg-[#fef2f2]'}`}>
-          <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-4">
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#4a4842]">
-                <Wallet size={13} /> Final Settlement Result
-              </div>
-              <p className="text-[11px] text-[#6b6860] mt-1 leading-snug max-w-md">
-                {isRefund
-                  ? 'Security deposit refundable to the customer after all deductions (Sections 3–6) and outstanding rent (Section 7).'
-                  : 'Deductions (Sections 3–6) and outstanding rent (Section 7) exceed the deposit held — the balance is payable by the customer.'}
-              </p>
-              {data.settlementDate && <p className="text-[11px] text-[#6b6860] mt-1 flex items-center gap-1">Settled {fmtDate(data.settlementDate)}</p>}
-            </div>
-            <div className="text-right">
-              <div className="text-[11px] font-semibold text-[#6b6860] uppercase tracking-wide">{isRefund ? 'Net Refund to Customer (AED)' : 'Amount Payable by Customer (AED)'}</div>
-              <div className={`text-[34px] font-extrabold tabular-nums leading-none mt-1 ${isRefund ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'}`}>{money(isRefund ? netRefund : amountPayable)}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* §8 Supporting docs */}
-        <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
-          <SectionHead n={8} title="Supporting Documents" />
-          <div className="p-3 flex flex-wrap gap-4 text-[12px]">
-            {[['Inspection Report', docs.inspectionReport], ['Utility Bills', docs.utilityBills], ['Invoices', docs.invoices], ['Other Documents', docs.otherDocuments]].map(([label, on]) => (
-              <span key={label as string} className="flex items-center gap-1.5 text-[#4a4842]">
-                <span className={`inline-flex items-center justify-center w-4 h-4 rounded border text-[10px] font-bold ${on ? 'bg-[#1f6b4f] border-[#1f6b4f] text-white' : 'border-[#c8c6be] text-transparent'}`}>✓</span>
-                {label as string}
-              </span>
-            ))}
           </div>
         </div>
 
