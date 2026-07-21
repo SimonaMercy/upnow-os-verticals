@@ -58,8 +58,10 @@ interface Row {
   prefill?: boolean; attachments?: LineAttachment[]; sourceContractId?: number; sourceContractNo?: string; inspectionContractId?: number;
 }
 
-// Standard utility rows prefilled under §3 so the RP just fills the amounts.
+// Standard rows prefilled under a section when it has no entries yet, so the
+// worksheet mirrors the final-settlement form (the RP just fills the amounts).
 const STD_UTILITIES = ['Electricity / Water', 'Cooling / District Cooling', 'Gas', 'Community Fees', 'Telecommunications'];
+const STD_RESTORATION = ['Repairs & Maintenance', 'Cleaning', 'Missing Keys / Remotes'];
 interface PayRow { key: string; amount: string; method: PayMethod; reference: string; receivedOn: string }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -165,11 +167,20 @@ export default function SettlementPage() {
         inspectionContractId: l.inspectionContractId,
       };
     });
-    // Prefill the standard utility list when §3 is still empty (editable drafts only).
-    const hasUtility = mapped.some(r => r.category === 'utility');
-    const rowsToSet = (!hasUtility && s.status === 'draft')
-      ? [...mapped, ...STD_UTILITIES.map(label => ({ key: uid(), label, amount: '', type: 'due' as LineType, category: 'utility' as LineCategory, source: 'manual', discount: '', discountReason: '', prefill: true } as Row))]
-      : mapped;
+    // Prefill each charge section with its standard rows when it's still empty
+    // (editable drafts only), so the worksheet mirrors the final-settlement form
+    // instead of showing a blank section. Empty prefills are dropped on save.
+    const mkPrefill = (label: string, category: LineCategory, type: LineType): Row =>
+      ({ key: uid(), label, amount: '', type, category, source: 'manual', discount: '', discountReason: '', prefill: true });
+    let rowsToSet = mapped;
+    if (s.status === 'draft') {
+      const additionalCats: LineCategory[] = ['penalty_breach', 'overstay', 'early_termination', 'dispute', 'admin'];
+      const extra: Row[] = [];
+      if (!mapped.some(r => r.category === 'utility')) extra.push(...STD_UTILITIES.map(l => mkPrefill(l, 'utility', 'due')));
+      if (!mapped.some(r => r.category === 'restoration')) extra.push(...STD_RESTORATION.map(l => mkPrefill(l, 'restoration', 'deduction')));
+      if (!additionalCats.some(cat => mapped.some(r => r.category === cat))) extra.push(...ADDITIONAL_CATS.map(a => mkPrefill(a.label, a.value, 'deduction')));
+      rowsToSet = [...mapped, ...extra];
+    }
     setRows(rowsToSet);
     setAvailable(s.availablePenalties ?? []);
     setAdminRules(s.adminChargeRules ?? []);
