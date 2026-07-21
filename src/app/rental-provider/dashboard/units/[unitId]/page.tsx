@@ -482,7 +482,7 @@ export default function UnitDetailPage() {
                   {lastMoveOut.recordedAt ? ` on ${fmtDate(lastMoveOut.recordedAt)}` : ''}. Use it as a reference for the unit&apos;s last known condition.
                 </p>
                 <Link
-                  href={`/rental-provider/dashboard/contracts/${lastMoveOut.contractId}/inspection?type=move_out`}
+                  href={`/rental-provider/dashboard/contracts/${lastMoveOut.contractId}/inspection/v2?type=move_out`}
                   className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] px-3 py-2 text-sm font-medium text-[#2e9f82] hover:bg-[#f0fdf8]"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />

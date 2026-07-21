@@ -17,6 +17,8 @@ import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractD
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
+import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import type { InspectionDoc } from '@/lib/inspectionCatalog';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
@@ -176,6 +178,22 @@ export default function ContractReviewPage() {
   const showMoveIn = (purpose === 'move_in' || purpose === 'all') && (d.moveInAvailable || isInspector);
   const showMoveOut = purpose === 'move_out';
 
+  // Meta for the shared v2 inspection report — the magic-link now renders the SAME
+  // component as the logged-in customer page. Tenant view: money + per-item photos
+  // are already stripped server-side (getInspectionForTenant).
+  const reportMeta: ReportMeta = {
+    property: d.contract.property?.buildingName ?? d.contract.property?.fullAddress ?? '',
+    unitNo: d.contract.unit?.number ?? '',
+    propertyType: d.contract.unit?.type ?? '',
+    floor: '',
+    tenantName: d.contract.tenant?.name ?? '',
+    tenantPhone: (d.contract.tenant as { phone?: string | null })?.phone ?? '',
+    tenantEmail: (d.contract.tenant as { email?: string | null })?.email ?? '',
+    inspectorName: insp?.inspectorName ?? '',
+    inspectorCompany: (insp as { inspectorCompany?: string } | null)?.inspectorCompany ?? '',
+    inspectorRole: (insp as { inspectorRole?: string } | null)?.inspectorRole ?? 'Property Representative',
+  };
+
   return (
     <div className="min-h-screen bg-[#f7f6f2]">
       <div className="max-w-3xl mx-auto px-4 py-8">
@@ -194,7 +212,19 @@ export default function ContractReviewPage() {
         <div className="mt-5">
           {inspType ? (
             insp && insp.rpSubmittedAt ? (
-              <InspectionPreview insp={insp} type={inspType} />
+              <InspectionReportView
+                doc={insp as unknown as InspectionDoc}
+                meta={reportMeta}
+                phase={inspType}
+                audience="customer"
+                dates={{
+                  inspectionDate: (insp as { reportGeneratedDate?: string; inspectionDate?: string }).reportGeneratedDate
+                    ?? (insp as { inspectionDate?: string }).inspectionDate ?? null,
+                  moveInDate: d.contract.startDate ?? null,
+                  moveOutDate: d.contract.endDate ?? null,
+                }}
+                hideSignatures
+              />
             ) : (
               <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
                 {isInspector

@@ -11,8 +11,9 @@
  */
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
+import { getSessionId } from '@/lib/trackingIds';
 
-export function PageViewTracker({ portal }: { portal: 'rp' | 'manager' | 'customer' | 'admin' | 'service_provider' }) {
+export function PageViewTracker({ portal }: { portal: 'rp' | 'manager' | 'customer' | 'admin' | 'service_provider' | 'technician' }) {
   const pathname = usePathname();
   const last = useRef<string | null>(null);
 
@@ -24,7 +25,7 @@ export function PageViewTracker({ portal }: { portal: 'rp' | 'manager' | 'custom
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: pathname, portal }),
+        body: JSON.stringify({ path: pathname, portal, session_id: getSessionId() || undefined }),
         keepalive: true,
       }).catch(() => undefined);
     } catch { /* telemetry never throws */ }

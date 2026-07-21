@@ -31,7 +31,7 @@ export type InspectionPhase = 'move_in' | 'move_out';
 
 export const CANONICAL_CATEGORY_KEYS = [
   'doors', 'closet', 'windows', 'walls_ceiling', 'flooring', 'electrical',
-  'kitchen', 'bathroom', 'ac_system', 'balcony_outdoor', 'deep_cleaning', 'painting', 'other',
+  'kitchen', 'bathroom', 'ac_system', 'balcony_outdoor', 'keys_access', 'deep_cleaning', 'painting', 'other',
 ] as const;
 export type CanonicalCategoryKey = (typeof CANONICAL_CATEGORY_KEYS)[number];
 export type CategoryKey = CanonicalCategoryKey | `custom:${string}`;
@@ -42,6 +42,10 @@ export type ItemStatus =
   | 'broken' | 'missing' | 'leaking' | 'blocked' | 'not_working'; // bad (defective)
 
 export type UnitOfMeasure = 'item' | 'sqm' | 'sqft' | 'meter' | 'hinge' | 'point' | 'unit' | 'set';
+
+/** Per-component VAT treatment (5%): none (flat) | exclusive (net, +5%) | inclusive (incl. 5%). */
+export type VatMode = 'none' | 'exclusive' | 'inclusive';
+export const VAT_RATE = 0.05;
 
 // ─── Document shape (§2.2) — jsonb on tenancy_contracts.move_*_inspection ──────
 
@@ -61,6 +65,8 @@ export interface InspectionItem {
   unitOfMeasure?: UnitOfMeasure;
   variantLabel?: string;
   priceBookEntryId?: number;
+  /** VAT treatment, frozen from the RP price book at scaffold time. */
+  vatMode?: VatMode;
 
   // Move-in axis (read-only "before" at move-out)
   inCondition?: Condition;
@@ -363,6 +369,17 @@ export const CATALOG: CatalogCategory[] = [
     statuses: ['clean', 'scratched', 'worn_out', 'broken'],
     seed: [
       { name: 'Overall painting status', unitOfMeasure: 'item', unitPriceAed: 500.0 },
+    ],
+  },
+  {
+    key: 'keys_access', label: 'Keys & Access', unitLabel: 'Handover Items',
+    statuses: ['working', 'not_working', 'loose', 'broken', 'missing'],
+    seed: [
+      { name: 'Front Door Keys', unitOfMeasure: 'set', unitPriceAed: 150.0 },
+      { name: 'Mailbox / Letterbox Key', unitOfMeasure: 'item', unitPriceAed: 80.0 },
+      { name: 'Building Access Card', unitOfMeasure: 'item', unitPriceAed: 150.0 },
+      { name: 'Gate / Garage Remote', unitOfMeasure: 'item', unitPriceAed: 200.0 },
+      { name: 'Parking Remote / FOB', unitOfMeasure: 'item', unitPriceAed: 200.0 },
     ],
   },
   {

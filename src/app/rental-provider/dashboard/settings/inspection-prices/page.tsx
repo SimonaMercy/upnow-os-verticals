@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, RotateCcw, Check, Loader2, X } from 'lucide-react';
-import { CATALOG, UnitOfMeasure } from '@/lib/inspectionCatalog';
+import { CATALOG, UnitOfMeasure, VatMode, VAT_RATE } from '@/lib/inspectionCatalog';
 
 interface PriceRow {
   id: number;
@@ -22,6 +22,21 @@ interface PriceRow {
   sortOrder: number;
   isActive: boolean;
   proposedPrice: boolean;
+  vatMode: VatMode;
+}
+
+const VAT_OPTS: { value: VatMode; label: string }[] = [
+  { value: 'none', label: 'No VAT' },
+  { value: 'exclusive', label: 'Excl.' },
+  { value: 'inclusive', label: 'Incl.' },
+];
+
+/** Small helper text under a price showing the net/VAT/gross breakdown for its mode. */
+function vatHint(mode: VatMode, price: number): string {
+  const p = Number(price) || 0;
+  if (mode === 'exclusive') return `+5% VAT → ${(p * (1 + VAT_RATE)).toFixed(2)} incl.`;
+  if (mode === 'inclusive') return `incl. 5% VAT · ${(p / (1 + VAT_RATE)).toFixed(2)} net`;
+  return 'no VAT';
 }
 
 const CAT_ORDER = CATALOG.map((c) => c.key);
@@ -79,7 +94,7 @@ export default function InspectionPricesPage() {
           id: row.id, categoryKey: row.categoryKey, subCategory: row.subCategory,
           componentName: row.componentName, variantLabel: row.variantLabel,
           unitOfMeasure: row.unitOfMeasure, unitPriceAed: row.unitPriceAed,
-          isActive: row.isActive, proposedPrice: row.proposedPrice,
+          isActive: row.isActive, proposedPrice: row.proposedPrice, vatMode: row.vatMode,
         }),
       });
       if (!res.ok) { setError('Save failed — check the price (max 2 decimals).'); return; }
@@ -190,6 +205,15 @@ export default function InspectionPricesPage() {
 
       {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
 
+      <div className="mb-4 rounded-2xl border border-[#e8e6e0] bg-white px-4 py-3">
+        <div className="text-sm font-semibold text-[#1a1916]">VAT per item</div>
+        <p className="text-xs text-[#6b6860] max-w-2xl">
+          Set how 5% VAT applies to each row: <span className="font-medium text-[#1a1916]">No VAT</span> (flat amount, default) ·
+          <span className="font-medium text-[#1a1916]"> Excl.</span> (price is net — 5% added at settlement) ·
+          <span className="font-medium text-[#1a1916]"> Incl.</span> (price already includes 5%). Each move-out damage line carries its item’s setting.
+        </p>
+      </div>
+
       <div className="space-y-4">
         {grouped.map(({ key, rows: catRows }) => (
           <div key={key} className="rounded-2xl border border-[#e8e6e0] bg-white overflow-hidden">
@@ -209,6 +233,7 @@ export default function InspectionPricesPage() {
                   <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890] border-b border-[#f4f3ef]">
                     <th className="py-2 px-3 font-semibold">Item</th>
                     <th className="py-2 px-3 font-semibold text-right">Unit Price (AED)</th>
+                    <th className="py-2 px-3 font-semibold text-center">VAT</th>
                     <th className="py-2 px-3 font-semibold text-center w-24">Active</th>
                   </tr>
                 </thead>
@@ -232,6 +257,20 @@ export default function InspectionPricesPage() {
                             onChange={(e) => patch(r.id, { unitPriceAed: e.target.value === '' ? 0 : Number(e.target.value) }, false)}
                             onBlur={() => { const row = rows.find((x) => x.id === r.id); if (row) void save(row); }}
                             className="w-24 text-right tabular-nums text-[13px] border border-[#e8e6e0] rounded-md px-2 py-1 focus:outline-none focus:border-[#2e9f82]" />
+                        </div>
+                        <div className="text-[10px] text-[#9b9890] mt-0.5 tabular-nums">
+                          {vatHint(r.vatMode, r.unitPriceAed)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <div className="inline-flex rounded-lg border border-[#e8e6e0] overflow-hidden align-middle">
+                          {VAT_OPTS.map((o) => (
+                            <button key={o.value} type="button" onClick={() => patch(r.id, { vatMode: o.value })}
+                              aria-pressed={r.vatMode === o.value}
+                              className={`px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer ${r.vatMode === o.value ? 'bg-[#2e9f82] text-white' : 'bg-white text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
+                              {o.label}
+                            </button>
+                          ))}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-center">

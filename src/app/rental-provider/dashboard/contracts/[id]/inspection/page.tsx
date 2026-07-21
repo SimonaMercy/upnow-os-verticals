@@ -2,7 +2,7 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback, useRef, createElement } from 'react';
-import { useParams, useSearchParams, usePathname } from 'next/navigation';
+import { useParams, useSearchParams, usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Plus, Trash2, Save, Printer, Download, ArrowLeft, CheckCircle, Loader2,
@@ -817,7 +817,36 @@ function LegendChip({ letter, label, color }: { letter: string; label: string; c
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+/**
+ * Route wrapper: the RP dashboard route is unified on the v2 category report, so
+ * a logged-in RP/manager is redirected to /inspection/v2. The inspector magic-link
+ * (/portal/<token>/…) still renders the token-scoped legacy workspace below.
+ */
 export default function InspectionPage() {
+  const pathname = usePathname();
+  const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const isPortal = pathname?.startsWith('/portal/') ?? false;
+  useEffect(() => {
+    if (isPortal || !params?.id) return;
+    const type = searchParams.get('type') === 'move_out' ? 'move_out' : 'move_in';
+    const isManager = pathname?.startsWith('/dashboard/manager/') ?? false;
+    const base = isManager
+      ? `/dashboard/manager/contracts/${params.id}`
+      : `/rental-provider/dashboard/contracts/${params.id}`;
+    const q = new URLSearchParams({ type });
+    const rp = searchParams.get('rp');
+    if (rp) q.set('rp', rp); // preserve manager sticky-landlord scope
+    router.replace(`${base}/inspection/v2?${q.toString()}`);
+  }, [isPortal, params, searchParams, pathname, router]);
+  if (!isPortal) {
+    return <div className="flex items-center justify-center h-[60vh] text-[#9b9890]"><Loader2 className="animate-spin mr-2" /> Opening inspection…</div>;
+  }
+  return <InspectionWorkspace />;
+}
+
+function InspectionWorkspace() {
   const params       = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const pathname     = usePathname();

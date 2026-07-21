@@ -15,14 +15,17 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
-import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock } from 'lucide-react';
+import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock, ClipboardCheck, LayoutGrid, Rows3 } from 'lucide-react';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { unitTypesForCategory, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
 import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
 import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
+import MoveTemplatesTab from '@/components/upnow/MoveTemplatesTab';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
+
+type TemplatesTab = 'addendum' | 'move';
 
 interface AddendumTemplate {
   id: number;
@@ -72,6 +75,9 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
   const [showForm, setShowForm] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<AddendumTemplate | null>(null);
   const [editTpl, setEditTpl] = useState<AddendumTemplate | null>(null);
+  const [tab, setTab] = useState<TemplatesTab>('addendum');
+  const [showMoveEditor, setShowMoveEditor] = useState(false);
+  const [addView, setAddView] = useState<'grid' | 'row'>('row');
 
   async function fetchAll() {
     setLoading(true); setErr(null);
@@ -87,6 +93,19 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => { void fetchAll(); }, []);
 
+  // Remember the last tab (Addendum / Move) + the Addendum-tab view (grid/row) across
+  // navigation + reloads: restore on mount, write on user action (write-on-action
+  // avoids any mount-order / strict-mode overwrite race).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const t = window.localStorage.getItem('templatesTab');
+    if (t === 'addendum' || t === 'move') setTab(t);
+    const v = window.localStorage.getItem('addendumTemplatesView');
+    if (v === 'grid' || v === 'row') setAddView(v);
+  }, []);
+  const selectTab = (t: TemplatesTab) => { setTab(t); try { window.localStorage.setItem('templatesTab', t); } catch {} };
+  const selectAddView = (v: 'grid' | 'row') => { setAddView(v); try { window.localStorage.setItem('addendumTemplatesView', v); } catch {} };
+
   async function handleDelete(id: number) {
     if (!confirm('Remove this template? Past contracts that use it will keep their copy.')) return;
     try {
@@ -99,17 +118,46 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
 
   return (
     <DashboardPage
-      title="Addendum Templates"
-      subtitle="Write reusable addendum templates. Mark one as the default for a property category or unit type and it pre-fills new layouts of that kind."
+      title="Templates"
+      subtitle="Reusable templates for your contracts. Addendum terms attach to a contract; move templates drive move-in / move-out inspections."
       actions={
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
-        >
-          <Plus size={16} /> New template
-        </button>
+        tab === 'addendum' ? (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
+          >
+            <Plus size={16} /> New addendum
+          </button>
+        ) : (
+          <button
+            onClick={() => setShowMoveEditor(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
+          >
+            <Plus size={16} /> New move template
+          </button>
+        )
       }
     >
+      {/* Tab switcher */}
+      <div className="mb-5 inline-flex rounded-xl border border-[#e8e6e0] bg-[#f4f3ef] p-1">
+        <button
+          onClick={() => selectTab('addendum')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'addendum' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
+        >
+          <FileText size={14} /> Addendum
+        </button>
+        <button
+          onClick={() => selectTab('move')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'move' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
+        >
+          <ClipboardCheck size={14} /> Move-in / Move-out
+        </button>
+      </div>
+
+      {tab === 'move' ? (
+        <MoveTemplatesTab manager={manager} createOpen={showMoveEditor} onCloseCreate={() => setShowMoveEditor(false)} />
+      ) : (
+      <>
       {err && (
         <div className="mb-5 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200 flex items-start gap-2">
           <AlertCircle size={15} className="mt-0.5 shrink-0" />{err}
@@ -137,6 +185,58 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
           </button>
         </div>
       ) : (
+        <>
+        {/* Toolbar: count + grid/row toggle */}
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs text-[#9b9890]">{templates.length} template{templates.length === 1 ? '' : 's'}</span>
+          <div className="inline-flex" style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 11, padding: 4, gap: 3 }}>
+            {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
+              <button key={v} onClick={() => selectAddView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={addView === v}
+                className="flex items-center justify-center"
+                style={{ width: 34, height: 34, borderRadius: 8, ...(addView === v ? { background: '#2e9f82', color: '#fff' } : { color: '#9b9890' }) }}>
+                <Icon size={17} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {addView === 'grid' ? (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+            {templates.map(t => (
+              <div key={t.id} className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] p-4 flex flex-col">
+                <div className="flex items-start gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-[#d8f2e8] flex items-center justify-center shrink-0">
+                    {t.terms ? <FileType2 size={16} className="text-[#2e9f82]" /> : <FileText size={16} className="text-[#2e9f82]" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-[#1a1916] leading-tight">{t.name}</p>
+                    {t.description && <p className="text-xs text-[#9b9890] mt-0.5 line-clamp-2">{t.description}</p>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                  <span className="px-2 py-0.5 rounded-md bg-[#f4f3ef] text-[#6b6860] text-[11px]">{t.terms ? 'Terms' : mimeLabel(t.mimeType ?? '')}</span>
+                  {defaultLabel(t.spaceCategory, t.unitType) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fef3c7] text-[#b45309] font-medium text-[11px]">
+                      <Star size={10} className="fill-[#b45309]" /> {defaultLabel(t.spaceCategory, t.unitType)}
+                    </span>
+                  )}
+                  {t.inUse && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#eef2ff] text-[#4f46e5] text-[10px] font-medium"><Lock size={10} /> In use</span>
+                  )}
+                </div>
+                <div className="mt-auto flex items-center justify-between pt-2 border-t border-[#f4f3ef]">
+                  <span className="text-[11px] text-[#9b9890]">{new Date(t.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                  <div className="flex items-center gap-1">
+                    {t.terms && <button onClick={() => setPreviewTpl(t)} title="Preview" className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6]"><ExternalLink size={15} /></button>}
+                    {t.fileUrl && <a href={t.fileUrl} target="_blank" rel="noopener noreferrer" title="Preview" className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6]"><ExternalLink size={15} /></a>}
+                    {t.terms && <button onClick={() => setEditTpl(t)} title="Edit" className="p-1.5 rounded-lg text-[#1a1916] hover:bg-[#f4f3ef]"><Pencil size={14} /></button>}
+                    <button onClick={() => handleDelete(t.id)} title="Remove" className="p-1.5 rounded-lg text-[#dc2626] hover:bg-red-50"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-[#f9f8f6] border-b border-[#e8e6e0]">
@@ -211,6 +311,8 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
             </tbody>
           </table>
         </div>
+        )}
+        </>
       )}
 
       {showForm && (
@@ -236,6 +338,8 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
             void fetchAll();
           }}
         />
+      )}
+      </>
       )}
     </DashboardPage>
   );

@@ -3471,10 +3471,10 @@ function DetailsDrawer({
             if (!isRenewal) {
               binderSeq.push({ kind: 'doc',  key: 'utility_registration', label: 'Utility Proof of Payment' });
               // Stored PDF once the inspection is counter-signed; live page until then.
-              binderSeq.push({ kind: 'doc', key: 'move_in_report', label: 'Move-in', fallbackHref: `${contractBase}/inspection?type=move_in`, fallbackSub: 'Move-in inspection report' });
+              binderSeq.push({ kind: 'doc', key: 'move_in_report', label: 'Move-in', fallbackHref: `${contractBase}/inspection/v2?type=move_in`, fallbackSub: 'Move-in inspection report' });
             }
             if (moveOutShown) {
-              binderSeq.push({ kind: 'doc', key: 'move_out_report', label: 'Move-out', fallbackHref: `${contractBase}/inspection?type=move_out`, fallbackSub: 'Move-out inspection report' });
+              binderSeq.push({ kind: 'doc', key: 'move_out_report', label: 'Move-out', fallbackHref: `${contractBase}/inspection/v2?type=move_out`, fallbackSub: 'Move-out inspection report' });
               binderSeq.push({ kind: 'doc',  key: 'utility_final_bill', label: 'Utility Final Bill' });
               binderSeq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', fallbackHref: `${contractBase}/settlement`, fallbackSub: 'Security deposit settlement' });
             }

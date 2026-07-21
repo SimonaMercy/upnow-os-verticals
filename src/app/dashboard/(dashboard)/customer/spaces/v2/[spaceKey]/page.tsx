@@ -3322,6 +3322,8 @@ interface MoveInInspectionData {
   moveInDate?: string;
   reportGeneratedDate?: string;
   areas?: MoveInInspectionArea[];
+  /** v2 category model (the current shape); mapped to areas for this summary. */
+  categories?: Array<{ sectionId?: string; label?: string; items?: Array<{ id?: string; componentName?: string; inCondition?: string }> }>;
   generalNotes?: string;
   photos?: Array<{ id: string; url: string; caption?: string }>;
   tenantSig?: string | null;
@@ -3392,7 +3394,7 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
   // counter-sign. Earlier rendering jumped straight to the signature canvas
   // even when no inspection had been generated; show an explicit waiting
   // card instead so the customer understands what's blocking them.
-  const inspectionReady = !!c.moveInInspection?.submitted || (!!insp && (insp.areas?.length ?? 0) > 0);
+  const inspectionReady = !!c.moveInInspection?.submitted || (!!insp && ((insp.areas?.length ?? 0) > 0 || (insp.categories?.length ?? 0) > 0));
   if (!loadingInsp && !inspectionReady) {
     return (
       <div style={{ background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 14, padding: '16px 18px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -3412,7 +3414,19 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
   const submittedLabel = submittedAt
     ? `Submitted ${new Date(submittedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE })}`
     : 'Submitted by rental provider';
-  const areas = insp?.areas ?? [];
+  // v2 stores categories[]; map to the legacy area-row shape this summary renders
+  // (condition good/fair/poor → G/F/D) so the customer sees a real preview.
+  const areas: MoveInInspectionArea[] = (insp?.areas && insp.areas.length)
+    ? insp.areas
+    : (insp?.categories ?? []).map((cat, i) => ({
+        id: cat.sectionId ?? `cat-${i}`,
+        name: cat.label ?? 'Section',
+        items: (cat.items ?? []).map((it, j) => ({
+          id: it.id ?? `it-${i}-${j}`,
+          name: it.componentName ?? '',
+          inCondition: it.inCondition === 'good' ? 'G' : it.inCondition === 'fair' ? 'F' : it.inCondition === 'poor' ? 'D' : '',
+        })),
+      }));
   const photoCount = insp?.photos?.length ?? 0;
 
   return (
