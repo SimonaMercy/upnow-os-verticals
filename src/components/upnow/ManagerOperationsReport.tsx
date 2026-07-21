@@ -6,15 +6,18 @@
  *   2. Scoreboard — output + delivered outcomes, each compared against the
  *      previous period (this week vs last week, this month vs last month…).
  *   3. Where the time goes — manager vs customer vs landlord days, compared.
- *   4. Daily progress — records progressed per day per person (chart + a
- *      day-by-day table; a zero is an idle day and is shown, not hidden).
- *   5. Operations by stage — one row per person, stages grouped under their
+ *   4. Operations by stage — one row per person, stages grouped under their
  *      pipeline, plus leases delivered. Every number clicks through to the
  *      records behind it with their full history and step durations.
- *   6. Waiting too long right now — live stuck records with who's holding
+ *   5. Waiting too long right now — live stuck records with who's holding
  *      them (manager / customer / landlord).
- *   7. Stage timing, average working day, and each person's actions date by
- *      date (unchanged evaluation sections).
+ *   6. Stage timing + average working day (evaluation sections).
+ *   7. Manager activity — date by date. EVERY audited action, not just the
+ *      four pipelines (create/update/delete across properties, units, listings,
+ *      documents, AMC, templates, team, settings, notes …). Repeated identical
+ *      actions on one record collapse into a single "×N" line; page-view
+ *      (reading) counts show per day; only genuinely-attributed actions appear
+ *      (nothing system-generated reads "by Landlord"). Paginated per person.
  *
  * Data: GET /api/reports/manager-operations for the current AND previous
  * period (deltas are computed client-side), plus GET
@@ -25,10 +28,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Printer, Loader2, AlertCircle, Download, ExternalLink, X } from 'lucide-react';
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-} from 'recharts';
+import { ArrowLeft, Printer, Loader2, AlertCircle, Download, ExternalLink, X, Eye } from 'lucide-react';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
@@ -49,6 +49,14 @@ interface ManagerAction {
   at: string; actorUserId: number; stage: string; record: string | null;
   contractId: number | null; leadId: number | null;
 }
+interface FieldChange { field: string; from: string | null; to: string | null }
+interface ActivityAction {
+  at: string; firstAt: string; count: number; actorUserId: number;
+  category: string; kind: string; label: string; detail: string | null;
+  changes: FieldChange[] | null; record: string | null;
+  contractId: number | null; leadId: number | null;
+}
+interface ActivityViews { actorUserId: number; day: string; pages: number; reports: number }
 interface RecordEvent { at: string; actorUserId: number | null; actor: string; label: string; gapDays: number | null }
 interface RecordLog {
   type: 'lead' | 'contract'; id: number; label: string; kind: string;
@@ -68,6 +76,7 @@ interface Payload {
   managers: Array<{ userId: number; name: string }>;
   stageMatrix: StageMatrix;
   managerActions: ManagerAction[]; managerActionsCapped: boolean;
+  activity: ActivityAction[]; activityCapped: boolean; activityViews: ActivityViews[];
   daily: DailyRow[]; dayMatrix?: DayMatrixRow[]; completions?: Completions;
   window?: { from: string; to: string };
   rows: StageRow[];
@@ -123,8 +132,6 @@ function rangesFor(preset: Preset, customFrom: string, customTo: string): { cur:
 /* ── house palette (validated in ReportCharts) — fixed order per person ───── */
 const PALETTE = ['#2e9f82', '#1e5fae', '#b45309', '#8250df'];
 const OTHERS = '#9b9890';
-const GRID = '#f0ede8';
-const TICK = { fontSize: 11, fill: '#9b9890' } as const;
 
 const SIDE_STYLE: Record<StageRow['side'], string> = {
   manager: 'bg-[#e0f2fe] text-[#0369a1]',
@@ -139,6 +146,21 @@ const stageTint = (stage: string): string => {
   if (stage.startsWith('Termination') || stage.startsWith('Move-out') || stage.startsWith('Deposit') || stage === 'Bill Clearance') return 'bg-[#fee2e2] text-[#b91c1c]';
   return 'bg-[#d8f2e8] text-[#1a7a5a]';
 };
+// Activity category chip tint — grouped into the same journey-area colours the
+// stage chips use, so the feed reads consistently across sections.
+const CATEGORY_TINT: Record<string, string> = {
+  Leads: 'bg-[#e0f2fe] text-[#0369a1]', Customers: 'bg-[#e0f2fe] text-[#0369a1]',
+  Signature: 'bg-[#ede9fe] text-[#5b21b6]',
+  Termination: 'bg-[#fee2e2] text-[#b91c1c]', Settlement: 'bg-[#fee2e2] text-[#b91c1c]',
+  Payments: 'bg-[#fef3c7] text-[#92400e]', Registration: 'bg-[#fef3c7] text-[#92400e]',
+  Properties: 'bg-[#d8f2e8] text-[#1a7a5a]', Units: 'bg-[#d8f2e8] text-[#1a7a5a]', Listings: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  Contracts: 'bg-[#d1f0ea] text-[#0f766e]', Inspection: 'bg-[#d1f0ea] text-[#0f766e]', Renewal: 'bg-[#d1f0ea] text-[#0f766e]',
+  Documents: 'bg-[#eef2f7] text-[#475569]',
+  Team: 'bg-[#f3eefe] text-[#6d28d9]', Templates: 'bg-[#f3eefe] text-[#6d28d9]', AMC: 'bg-[#f3eefe] text-[#6d28d9]', Settings: 'bg-[#f3eefe] text-[#6d28d9]',
+  Viewing: 'bg-[#f4f3ef] text-[#9b9890]', Session: 'bg-[#eef2f7] text-[#475569]',
+};
+const categoryTint = (c: string) => CATEGORY_TINT[c] ?? 'bg-[#f4f3ef] text-[#6b6860]';
+
 // Step-duration tone — long waits should jump out in the history view.
 const gapTone = (d: number | null) =>
   d == null ? '' : d >= 14 ? 'bg-[#fee2e2] text-[#991b1b]' : d >= 7 ? 'bg-[#fef3c7] text-[#92400e]' : 'bg-[#f4f3ef] text-[#6b6860]';
@@ -180,8 +202,6 @@ const fmtDate = (iso: string) =>
 /** 'YYYY-MM-DD' → '14 Jul' (the string is already a Dubai calendar day). */
 const fmtDayShort = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString('en-AE', { timeZone: 'UTC', day: 'numeric', month: 'short' });
-const fmtDayMed = (d: string) =>
-  new Date(`${d}T00:00:00Z`).toLocaleDateString('en-AE', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
 const dubaiDayOf = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
 
 function toCsvCell(v: unknown): string {
@@ -248,8 +268,10 @@ export function ManagerOperationsReport({
   const [error, setError] = useState<string | null>(null);
   /** Cell drill-down: which manager × stage the user clicked (null userId = team total). */
   const [drill, setDrill] = useState<{ userId: number | null; who: string; stage: string; count: number } | null>(null);
-  /** Day drill-down: what one person did on one day. */
-  const [dayDrill, setDayDrill] = useState<{ day: string; userId: number | null; who: string } | null>(null);
+  /** Which people have "view all" expanded in the activity feed (userId set). */
+  const [expandedActivity, setExpandedActivity] = useState<Set<number>>(new Set());
+  /** Activity row drill-down: the clicked action, to show what changed. */
+  const [activityDrill, setActivityDrill] = useState<{ action: ActivityAction; who: string } | null>(null);
   /** Scoreboard tile drill-down: the details behind each headline number. */
   const [tileDrill, setTileDrill] = useState<'steps' | 'delivered' | 'settlements' | 'idle' | null>(null);
 
@@ -292,43 +314,6 @@ export function ManagerOperationsReport({
    *  columns follow this order everywhere so a person keeps their hue. */
   const people = data?.stageMatrix.rows ?? [];
   const colorOf = (idx: number) => (idx < PALETTE.length ? PALETTE[idx] : OTHERS);
-
-  /** day → userId → records progressed that day (Σ stage cells). */
-  const dayTotals = useMemo(() => {
-    const m = new Map<string, Map<number, number>>();
-    for (const d of data?.dayMatrix ?? []) {
-      const byUid = new Map<number, number>();
-      for (const r of d.rows) byUid.set(r.userId, r.cells.reduce((s, v) => s + v, 0));
-      m.set(d.day, byUid);
-    }
-    return m;
-  }, [data]);
-
-  /** The period's day list (capped to the most recent 31 for chart + table). */
-  const dayList = useMemo(() => {
-    const today = dubaiToday();
-    const to = cur.to > today ? today : cur.to;
-    const all: string[] = [];
-    for (let d = cur.from; d <= to; d = addDays(d, 1)) all.push(d);
-    return { days: all.slice(-31), truncated: all.length > 31 };
-  }, [cur.from, cur.to]);
-
-  const chartData = useMemo(() =>
-    dayList.days.map(d => {
-      const byUid = dayTotals.get(d);
-      const row: Record<string, number | string> = { day: fmtDayShort(d) };
-      people.forEach((p, i) => {
-        const v = byUid?.get(p.userId) ?? 0;
-        const key = i < PALETTE.length ? p.name : 'Others';
-        row[key] = ((row[key] as number) ?? 0) + v;
-      });
-      return row;
-    }), [dayList, dayTotals, people]);
-  const chartSeries = useMemo(() => {
-    const named = people.slice(0, PALETTE.length).map((p, i) => ({ key: p.name, color: colorOf(i) }));
-    return people.length > PALETTE.length ? [...named, { key: 'Others', color: OTHERS }] : named;
-  }, [people]);
-  const chartHasData = chartData.some(r => chartSeries.some(s => (r[s.key] as number) > 0));
 
   const deliveredOf = (c: Completions | null) => (c ? c.totals.newLeases + c.totals.renewals : null);
   const delivered = deliveredOf(completions) ?? 0;
@@ -412,20 +397,33 @@ export function ManagerOperationsReport({
     return m;
   }, [completions]);
 
-  /* Date-wise log: person → day → actions (newest first). Uses the matrix
-     rows so the landlord's own operations work shows too. */
+  /* Date-wise activity log: person → day → actions (newest first). Uses the
+     full activity feed (all areas, repeats collapsed) and the matrix rows so
+     the landlord's own operations work shows too. Each day also carries the
+     page-view (reading) counts for that person. */
   const managerDays = useMemo(() => {
-    if (!data) return [] as Array<{ userId: number; name: string; total: number; days: Array<{ day: string; actions: ManagerAction[] }> }>;
+    if (!data) return [] as Array<{
+      userId: number; name: string; total: number;
+      days: Array<{ day: string; actions: ActivityAction[]; views: { pages: number; reports: number } | null }>;
+    }>;
+    // person → Dubai-day → { pages, reports }
+    const viewsByPersonDay = new Map<string, { pages: number; reports: number }>();
+    for (const v of data.activityViews ?? []) viewsByPersonDay.set(`${v.actorUserId}:${v.day}`, { pages: v.pages, reports: v.reports });
     return data.stageMatrix.rows.map(m => {
-      const mine = data.managerActions.filter(a => a.actorUserId === m.userId);
-      const byDay = new Map<string, ManagerAction[]>();
+      const mine = (data.activity ?? []).filter(a => a.actorUserId === m.userId);
+      const byDay = new Map<string, ActivityAction[]>();
       for (const a of mine) {
         const day = fmtDay(a.at);
         const arr = byDay.get(day) ?? [];
         arr.push(a);
         byDay.set(day, arr);
       }
-      return { userId: m.userId, name: m.name, total: mine.length, days: [...byDay.entries()].map(([day, actions]) => ({ day, actions })) };
+      const days = [...byDay.entries()].map(([day, actions]) => {
+        const isoDay = dubaiDayOf(actions[0].at);
+        return { day, actions, views: viewsByPersonDay.get(`${m.userId}:${isoDay}`) ?? null };
+      });
+      const collapsed = mine.reduce((s, a) => s + a.count, 0);
+      return { userId: m.userId, name: m.name, total: collapsed, days };
     });
   }, [data]);
 
@@ -460,14 +458,6 @@ export function ManagerOperationsReport({
       return { ...r, journey, visibleEvents };
     });
   }, [drill, data]);
-
-  /* Day drill-down: everything one person did on one Dubai day. */
-  const dayDrillActions = useMemo(() => {
-    if (!dayDrill || !data) return null;
-    return data.managerActions
-      .filter(a => (dayDrill.userId == null || a.actorUserId === dayDrill.userId) && dubaiDayOf(a.at) === dayDrill.day)
-      .sort((a, b) => a.at.localeCompare(b.at));
-  }, [dayDrill, data]);
 
   const downloadCsv = () => {
     if (!data) return;
@@ -609,96 +599,6 @@ export function ManagerOperationsReport({
                   <p className="mt-0.5"><Delta cur={v} prev={pv} vsLabel={vsLabel} goodDown unit="d" /></p>
                 </div>
               ))}
-            </div>
-          </section>
-
-          {/* ── 4. Daily progress ── */}
-          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
-            <div className="px-5 py-3.5 border-b border-[#f0ede8]">
-              <h2 className="text-sm font-bold text-[#1a1916]">Daily progress — records progressed per day, per person</h2>
-              <p className="text-xs text-[#6b6860] mt-0.5">
-                Each number is how many records that person moved forward that day (any stage). A zero is
-                an idle day — click any number for the exact actions behind it.
-                {dayList.truncated ? ' Showing the most recent 31 days of the period.' : ''}
-              </p>
-            </div>
-            {chartHasData ? (
-              <div className="px-3 pt-3">
-                <ResponsiveContainer width="100%" height={230}>
-                  <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid stroke={GRID} vertical={false} />
-                    <XAxis dataKey="day" tick={TICK} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                    <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} width={30} />
-                    <Tooltip cursor={{ fill: '#fafaf8' }} contentStyle={{ fontSize: 12, borderRadius: 12, border: `1px solid ${GRID}` }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    {chartSeries.map((s, i) => (
-                      <Bar
-                        key={s.key}
-                        dataKey={s.key}
-                        stackId="team"
-                        fill={s.color}
-                        stroke="#fff"
-                        strokeWidth={1}
-                        maxBarSize={28}
-                        radius={i === chartSeries.length - 1 ? [3, 3, 0, 0] : 0}
-                      />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <p className="px-5 py-6 text-sm text-[#9b9890]">No stage activity recorded in this period.</p>
-            )}
-            <div className="overflow-x-auto border-t border-[#f0ede8]">
-              <table className="text-sm min-w-full">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-[#fafaf8] px-5 py-2.5 text-left font-semibold min-w-[130px]">Day</th>
-                    {people.map((p, i) => (
-                      <th key={p.userId} className="px-4 py-2.5 text-right font-semibold whitespace-nowrap">
-                        <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: colorOf(i) }} />
-                        {p.name}
-                      </th>
-                    ))}
-                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e8e6e0]">Team</th>
-                  </tr>
-                </thead>
-                <tbody className="text-[#1a1916]">
-                  {[...dayList.days].reverse().map(d => {
-                    const byUid = dayTotals.get(d);
-                    const teamTotal = people.reduce((s, p) => s + (byUid?.get(p.userId) ?? 0), 0);
-                    return (
-                      <tr key={d} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
-                        <td className="sticky left-0 z-10 bg-white px-5 py-2 font-semibold whitespace-nowrap">{fmtDayMed(d)}</td>
-                        {people.map(p => {
-                          const v = byUid?.get(p.userId) ?? 0;
-                          return (
-                            <td key={p.userId} className={`px-4 py-2 text-right tabular-nums ${v ? '' : 'text-[#c8c6c0]'}`}>
-                              {v ? (
-                                <button
-                                  onClick={() => setDayDrill({ day: d, userId: p.userId, who: p.name })}
-                                  className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
-                                  title="See what they did that day">
-                                  {v}
-                                </button>
-                              ) : 0}
-                            </td>
-                          );
-                        })}
-                        <td className={`px-4 py-2 text-right tabular-nums font-bold border-l border-[#f0ede8] ${teamTotal ? '' : 'text-[#c8c6c0]'}`}>
-                          {teamTotal ? (
-                            <button
-                              onClick={() => setDayDrill({ day: d, userId: null, who: 'Team' })}
-                              className="underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer">
-                              {teamTotal}
-                            </button>
-                          ) : 0}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
             </div>
           </section>
 
@@ -942,47 +842,104 @@ export function ManagerOperationsReport({
             </div>
           </section>
 
-          {/* ── 9. Manager actions, date by date ── */}
+          {/* ── 9. Manager activity, date by date ── */}
           <section className="mt-5">
             <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-3.5">
-              <h2 className="text-sm font-bold text-[#1a1916]">Manager actions — date by date</h2>
+              <h2 className="text-sm font-bold text-[#1a1916]">Manager activity — date by date</h2>
               <p className="text-xs text-[#6b6860] mt-0.5">
-                Each person’s individual operations actions, grouped per day, newest first — every row names
-                the record and links to it{data.managerActionsCapped ? ' (showing the most recent — narrow the period for the rest)' : ''}.
+                The full day for each person, newest first — signing in, pages opened, and every create/edit/delete
+                across leads, contracts, payments, listings, documents, templates and settings. Repeated saves of the
+                same thing roll up into one “×5” line; <b>click any row to see exactly what changed</b>. Only
+                genuinely-attributed actions appear — system-generated entries (receipts, plan numbers) are never
+                credited to a person.
+                {data.activityCapped ? ' Showing the most recent activity — narrow the period for the rest.' : ''}
               </p>
             </div>
-            {managerDays.map(m => (
-              <div key={m.userId} className="bg-white rounded-2xl border border-[#e8e6e0] mt-3 overflow-hidden print:break-inside-avoid">
-                <div className="px-5 py-3 border-b border-[#f0ede8] bg-[#fafaf8] flex items-baseline justify-between">
-                  <h3 className="text-sm font-bold text-[#1a1916]">{m.name}</h3>
-                  <span className="text-xs text-[#9b9890]">{m.total} operations action{m.total === 1 ? '' : 's'} in this period</span>
-                </div>
-                {m.days.length === 0 ? (
-                  <p className="px-5 py-6 text-sm text-[#9b9890]">No operations actions in this period.</p>
-                ) : m.days.map(({ day, actions }) => (
-                  <div key={day}>
-                    <div className="px-5 py-1.5 bg-[#fafaf8] border-t border-[#f0ede8] flex items-baseline justify-between">
-                      <span className="text-xs font-bold text-[#3d3b35]">{day}</span>
-                      <span className="text-[11px] text-[#9b9890]">{actions.length} action{actions.length === 1 ? '' : 's'}</span>
-                    </div>
-                    {actions.map((a, i) => (
-                      <div key={i} className="px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm">
-                        <span className="text-[11px] text-[#9b9890] tabular-nums w-16 shrink-0">{fmtTime(a.at)}</span>
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${stageTint(a.stage)}`}>{a.stage}</span>
-                        <span className="text-[#1a1916] truncate">{a.record ?? '—'}</span>
-                        {(a.contractId ?? a.leadId) != null && (
-                          <Link
-                            href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
-                            className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline print:hidden shrink-0">
-                            Open <ExternalLink size={11} />
-                          </Link>
-                        )}
-                      </div>
-                    ))}
+            {managerDays.map(m => {
+              const totalEntries = m.days.reduce((s, d) => s + d.actions.length, 0);
+              const expanded = expandedActivity.has(m.userId);
+              const INITIAL = 12;
+              // Truncate to the first INITIAL entries (across days) unless expanded.
+              let shown = 0;
+              const visibleDays = expanded ? m.days : m.days.reduce<typeof m.days>((out, d) => {
+                if (shown >= INITIAL) return out;
+                const acts = d.actions.slice(0, INITIAL - shown);
+                shown += acts.length;
+                out.push({ ...d, actions: acts });
+                return out;
+              }, []);
+              return (
+                <div key={m.userId} className="bg-white rounded-2xl border border-[#e8e6e0] mt-3 overflow-hidden print:break-inside-avoid">
+                  <div className="px-5 py-3 border-b border-[#f0ede8] bg-[#fafaf8] flex items-baseline justify-between">
+                    <h3 className="text-sm font-bold text-[#1a1916]">{m.name}</h3>
+                    <span className="text-xs text-[#9b9890]">{m.total} action{m.total === 1 ? '' : 's'} in this period</span>
                   </div>
-                ))}
-              </div>
-            ))}
+                  {m.days.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-[#9b9890]">No recorded activity in this period.</p>
+                  ) : (
+                    <>
+                      {visibleDays.map(({ day, actions, views }) => (
+                        <div key={day}>
+                          <div className="px-5 py-1.5 bg-[#fafaf8] border-t border-[#f0ede8] flex items-baseline justify-between gap-3 flex-wrap">
+                            <span className="text-xs font-bold text-[#3d3b35]">{day}</span>
+                            <span className="text-[11px] text-[#9b9890] flex items-center gap-2">
+                              {(() => {
+                                const acts = actions.filter(a => a.category !== 'Viewing').reduce((s, a) => s + a.count, 0);
+                                return <span>{acts} action{acts === 1 ? '' : 's'}</span>;
+                              })()}
+                              {views && views.pages > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[#9b9890]">
+                                  <Eye size={11} /> {views.pages} page{views.pages === 1 ? '' : 's'}{views.reports ? ` · ${views.reports} report${views.reports === 1 ? '' : 's'}` : ''}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {actions.map((a, i) => (
+                            <div key={i} className="px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm hover:bg-[#fafaf8]">
+                              <button
+                                type="button"
+                                onClick={() => setActivityDrill({ action: a, who: m.name })}
+                                title="See what changed"
+                                className="flex-1 min-w-0 flex items-center gap-3 text-left cursor-pointer">
+                                <span className="text-[11px] text-[#9b9890] tabular-nums w-24 shrink-0">
+                                  {a.count > 1 ? `${fmtTime(a.firstAt)}–${fmtTime(a.at)}` : fmtTime(a.at)}
+                                </span>
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${categoryTint(a.category)}`}>{a.category}</span>
+                                <span className="text-[#1a1916] shrink-0 font-medium">{a.label}</span>
+                                {a.detail && <span className="text-[#b45309] shrink-0 tabular-nums truncate" title={a.detail}>— {a.detail}</span>}
+                                {a.count > 1 && (
+                                  <span className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums bg-[#f4f3ef] text-[#6b6860] shrink-0" title={`${a.count} times`}>×{a.count}</span>
+                                )}
+                                {a.record && <span className="text-[#6b6860] truncate">· {a.record}</span>}
+                              </button>
+                              {(a.contractId ?? a.leadId) != null && (
+                                <Link
+                                  href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline print:hidden shrink-0">
+                                  Open <ExternalLink size={11} />
+                                </Link>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {totalEntries > INITIAL && (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedActivity(prev => {
+                            const next = new Set(prev);
+                            if (next.has(m.userId)) next.delete(m.userId); else next.add(m.userId);
+                            return next;
+                          })}
+                          className="w-full px-5 py-2.5 border-t border-[#f0ede8] text-xs font-semibold text-[#2e9f82] hover:bg-[#fafaf8] print:hidden">
+                          {expanded ? 'Show less' : `View all ${totalEntries} entries`}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </section>
 
           <p className="text-[11px] text-[#9b9890] mt-3">
@@ -1055,45 +1012,6 @@ export function ManagerOperationsReport({
                         Worked at {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
                         {(r.contractId ?? r.leadId) != null ? ' — open the record for its full history.' : '.'}
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── day drill-down: what one person did on one day ── */}
-          {dayDrill && dayDrillActions && (
-            <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 sm:p-8 print:hidden" onClick={() => setDayDrill(null)}>
-              <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
-                onClick={e => e.stopPropagation()}>
-                <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-[#1a1916]">{dayDrill.who} — {fmtDayMed(dayDrill.day)}</h3>
-                    <p className="text-xs text-[#6b6860] mt-0.5">
-                      {dayDrillActions.length} stage action{dayDrillActions.length === 1 ? '' : 's'} that day, in order
-                    </p>
-                  </div>
-                  <button onClick={() => setDayDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
-                    <X size={15} />
-                  </button>
-                </div>
-                {dayDrillActions.length === 0 ? (
-                  <p className="px-5 py-10 text-sm text-[#9b9890] text-center">
-                    The individual actions behind this number are older than the loaded log — narrow the period to see them.
-                  </p>
-                ) : dayDrillActions.map((a, i) => (
-                  <div key={i} className="px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm">
-                    <span className="text-[11px] text-[#9b9890] tabular-nums w-16 shrink-0">{fmtTime(a.at)}</span>
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${stageTint(a.stage)}`}>{a.stage}</span>
-                    <span className="text-[#1a1916] truncate">{a.record ?? '—'}</span>
-                    {(a.contractId ?? a.leadId) != null && (
-                      <Link
-                        href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
-                        className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline shrink-0">
-                        Open <ExternalLink size={11} />
-                      </Link>
                     )}
                   </div>
                 ))}
@@ -1207,6 +1125,70 @@ export function ManagerOperationsReport({
               </div>
             </div>
           )}
+
+          {/* ── activity drill-down: exactly what one action changed ── */}
+          {activityDrill && (() => {
+            const a = activityDrill.action;
+            return (
+              <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 sm:p-8 print:hidden" onClick={() => setActivityDrill(null)}>
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                  <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${categoryTint(a.category)}`}>{a.category}</span>
+                        <h3 className="text-sm font-bold text-[#1a1916] truncate">{a.label}</h3>
+                      </div>
+                      <p className="text-xs text-[#6b6860] mt-1">
+                        {activityDrill.who} · {a.count > 1 ? `${a.count}× between ${fmtStamp(a.firstAt)} – ${fmtStamp(a.at)}` : fmtStamp(a.at)}
+                        {a.record ? <> · {a.record}</> : null}
+                      </p>
+                    </div>
+                    <button onClick={() => setActivityDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916] shrink-0">
+                      <X size={15} />
+                    </button>
+                  </div>
+                  <div className="px-5 py-4">
+                    {a.changes && a.changes.length > 0 ? (
+                      <>
+                        <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">What changed</p>
+                        <div className="rounded-xl border border-[#f0ede8] overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-semibold">Field</th>
+                                <th className="px-3 py-2 text-left font-semibold">Before</th>
+                                <th className="px-3 py-2 text-left font-semibold">After</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {a.changes.map((c, i) => (
+                                <tr key={i} className="border-t border-[#f0ede8]">
+                                  <td className="px-3 py-2 font-medium text-[#3d3b35] capitalize whitespace-nowrap">{c.field}</td>
+                                  <td className="px-3 py-2 text-[#9b9890] tabular-nums">{c.from ?? <span className="text-[#c8c6c0]">—</span>}</td>
+                                  <td className="px-3 py-2 text-[#1a1916] font-semibold tabular-nums">{c.to ?? <span className="text-[#b91c1c]">removed</span>}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : a.detail ? (
+                      <p className="text-sm text-[#1a1916]">{a.detail}</p>
+                    ) : a.category === 'Viewing' ? (
+                      <p className="text-sm text-[#6b6860]">Opened this page{a.count > 1 ? ` ${a.count} times` : ''}.</p>
+                    ) : null}
+                    {(a.contractId ?? a.leadId) != null && (
+                      <Link
+                        href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
+                        className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[#2e9f82] hover:underline">
+                        Open the record <ExternalLink size={12} />
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
