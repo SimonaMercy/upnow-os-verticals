@@ -27,6 +27,7 @@ import { UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { feeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import ds from '@/components/upnow/unitForm.module.css';
+import { useBackClose } from '@/lib/useSlideOver';
 
 /** Tiny class-name joiner (drops falsy values). */
 const dcx = (...a: (string | false | null | undefined)[]) => a.filter(Boolean).join(' ');
@@ -134,6 +135,9 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
   feeRules: Record<string, FeeRuleLite[]> | null;
   onClose: () => void; onSaved: () => void;
 }) {
+  // Browser Back closes this full-screen editor instead of navigating away; the
+  // overlay / close (X) / Cancel route through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
   // The fee rules for this layout's space category (fallback: residential).
   const rules = (plan.spaceCategory && feeRules?.[plan.spaceCategory]) || feeRules?.residential;
   // Fees driven by a rule (default off the rent); service charges has no rule.
@@ -325,7 +329,7 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
   };
 
   return (
-    <div className={ds.overlay} onClick={onClose}>
+    <div className={ds.overlay} onClick={dismiss}>
       <div className={dcx(ds.modalCard, ds.modalNarrow)} onClick={e => e.stopPropagation()}>
         <header className={ds.modalHeader}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -334,7 +338,7 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
               {bedLabel(plan.bedrooms)} · {sizeLabel(plan.sqftMin, plan.sqftMax)} sqft · applies to all {plan.unitCount} unit{plan.unitCount === 1 ? '' : 's'} on this layout
             </div>
           </div>
-          <button className={ds.closeBtn} onClick={onClose} aria-label="Close"><X size={16} /></button>
+          <button className={ds.closeBtn} onClick={dismiss} aria-label="Close"><X size={16} /></button>
         </header>
 
         <div className={ds.modalBody}>
@@ -514,7 +518,7 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
         </div>
         {err && <div style={{ padding: '0 22px 4px', fontSize: 12.5, color: '#b91c1c' }}>{err}</div>}
         <footer className={ds.modalFooter}>
-          <button className={ds.cancelBtn} onClick={onClose} disabled={saving}>Cancel</button>
+          <button className={ds.cancelBtn} onClick={dismiss} disabled={saving}>Cancel</button>
           <div className={ds.footSpacer} />
           <button className={ds.saveBtn} onClick={save} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Save to layout

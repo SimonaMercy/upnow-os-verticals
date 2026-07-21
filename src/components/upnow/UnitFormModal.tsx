@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Upload, Download, Sparkles, Layers, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SLIDEOVER_MS } from './PropertyFormModal';
+import { useSlideOver } from '@/lib/useSlideOver';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
 import { openDocViewer } from '@/lib/docViewer';
 import { type AddendumTerms } from '@/lib/addendumTerms';
@@ -571,18 +571,12 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
   // Addendum / amendment files staged for upload on save.
   const [addendums, setAddendums] = useState<File[]>([]);
 
-  // Swipe-in / swipe-out — the full-page takeover now slides in from the right
-  // and back out, matching PropertyFormModal (globals.css .slideover-*). This
-  // modal is conditionally mounted (parent: {unitModal && …}), so slide-in plays
-  // on mount; requestClose plays the reverse slide before calling onClose.
-  const [closing, setClosing] = useState(false);
-  const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    window.setTimeout(() => onClose(), SLIDEOVER_MS);
-  }, [onClose]);
+  // Swipe-in / swipe-out — the full-page takeover slides in from the right and
+  // back out, matching PropertyFormModal (globals.css .slideover-*). `dismiss`
+  // plays the reverse slide before calling onClose; the hook also wires the
+  // browser Back button to close the form instead of navigating away, keying its
+  // history entry on `open`.
+  const { closing, dismiss: requestClose } = useSlideOver(onClose, open);
 
   // Full-page shell — scroll-spy STEPS nav (mirrors the Add page).
   const [sec, setSec] = useState('details');

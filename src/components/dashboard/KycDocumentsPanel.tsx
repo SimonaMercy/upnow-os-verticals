@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/Button";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { SecureDocCanvas } from "@/components/upnow/SecureDocCanvas";
 import { currentDocWatermark } from "@/lib/docViewer";
+import { useBackClose } from "@/lib/useSlideOver";
 import { docNeedsExpiry } from "@/lib/docRequirements";
 import { DocExpiryField } from "@/components/upnow/DocExpiryField";
 
@@ -255,15 +256,18 @@ export function KycDocumentsPanel({
 
   useEffect(load, [profileApiPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Browser Back closes the document viewer instead of navigating away; ESC /
+  // backdrop / X route through the same path. Active only while it is open.
+  const dismissViewer = useBackClose(() => setViewerDocs(null), !!viewerDocs);
   // Close the document viewer on Escape.
   useEffect(() => {
     if (!viewerDocs) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setViewerDocs(null);
+      if (e.key === "Escape") dismissViewer();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [viewerDocs]);
+  }, [viewerDocs, dismissViewer]);
 
   // ── Upload handlers ────────────────────────────────────────────────────────
 
@@ -992,7 +996,7 @@ export function KycDocumentsPanel({
           className="fixed inset-0 z-[100] flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
-          onClick={() => setViewerDocs(null)}
+          onClick={dismissViewer}
         >
           <div className="absolute inset-0 bg-black/60" />
           <div
@@ -1006,7 +1010,7 @@ export function KycDocumentsPanel({
               </h3>
               <button
                 type="button"
-                onClick={() => setViewerDocs(null)}
+                onClick={dismissViewer}
                 aria-label="Close"
                 className="p-1 rounded-lg hover:bg-[var(--color-base-100)]"
                 style={{ color: "var(--color-neutral-500)" }}

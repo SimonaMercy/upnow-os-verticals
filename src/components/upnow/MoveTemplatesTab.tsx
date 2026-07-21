@@ -24,6 +24,7 @@ import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/Prope
 import { unitTypesForCategory, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
 import { CATALOG, CATALOG_BY_KEY, slug, type InspectionDoc, type InspectionCategory, type InspectionItem } from '@/lib/inspectionCatalog';
 import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import { useBackClose } from '@/lib/useSlideOver';
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -295,6 +296,8 @@ function templateToDoc(t: MoveTemplate): InspectionDoc {
 }
 
 function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemplate; onClose: () => void; onEdit: () => void }) {
+  // Browser Back closes this full-screen preview instead of navigating away. See useBackClose.
+  const dismiss = useBackClose(onClose);
   const [phase, setPhase] = useState<'move_in' | 'move_out'>('move_in');
   // Move-out has two audiences: the RP (always sees prices) and the customer
   // (prices shown only if the RP enables it). `customerPrices` is that switch.
@@ -354,7 +357,7 @@ function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemp
               </label>
             )}
             <button onClick={onEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-sm font-medium text-[#1a1916] hover:bg-[#f4f3ef]"><Pencil size={13} /> Edit</button>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
+            <button onClick={dismiss} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
           </div>
         </div>
 
@@ -374,7 +377,7 @@ function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemp
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[#eceae4] sticky bottom-0 bg-white rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-[#f4f3ef]">Close</button>
+          <button onClick={dismiss} className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-[#f4f3ef]">Close</button>
           <button onClick={onEdit} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"><Pencil size={14} /> Edit template</button>
         </div>
       </div>
@@ -387,6 +390,8 @@ function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemp
 function MoveTemplateEditor({
   manager, template, onClose, onSaved,
 }: { manager?: { rp: number }; template?: MoveTemplate; onClose: () => void; onSaved: () => void }) {
+  // Browser Back closes this full-screen editor instead of navigating away. See useBackClose.
+  const dismiss = useBackClose(onClose);
   const [name, setName] = useState(template?.name ?? '');
   const [description, setDescription] = useState(template?.description ?? '');
   const [spaceCategory, setSpaceCategory] = useState(template?.spaceCategory ?? '');
@@ -471,7 +476,7 @@ function MoveTemplateEditor({
             <h2 className="text-lg font-bold text-[#1a1916]">{template ? `Edit — ${template.name}` : 'New move template'}</h2>
             <p className="text-xs text-[#9b9890] mt-0.5">Build the move-in / move-out inspection structure. It applies to both phases; move-out adds amounts automatically.</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
+          <button onClick={dismiss} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
         </div>
 
         {/* Body */}
@@ -605,7 +610,7 @@ function MoveTemplateEditor({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[#eceae4] sticky bottom-0 bg-white rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-[#f4f3ef]">Cancel</button>
+          <button onClick={dismiss} className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-[#f4f3ef]">Cancel</button>
           <button onClick={submit} disabled={busy || !name.trim()}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-60">
             {busy ? <Loader2 size={16} className="animate-spin" /> : null}

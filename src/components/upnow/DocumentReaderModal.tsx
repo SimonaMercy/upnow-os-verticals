@@ -13,6 +13,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { FileText, X, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 import { SecureDocCanvas } from './SecureDocCanvas';
 import { currentDocWatermark } from '@/lib/docViewer';
+import { useBackClose } from '@/lib/useSlideOver';
 
 export type ReaderFile = { id: string | number; name: string; url: string; mimeType?: string | null };
 /** group → optional section heading in the sidebar (e.g. a lease ref). */
@@ -69,20 +70,23 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
     setFileIdx(seq[pos].idx);
   }, [seq, curPos]);
 
+  // Browser Back closes the reader instead of navigating away; ESC / backdrop / X
+  // route through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') dismiss();
       else if (e.key === 'ArrowLeft') goSeq(-1);
       else if (e.key === 'ArrowRight') goSeq(1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, goSeq]);
+  }, [dismiss, goSeq]);
 
   const select = (key: string) => { setActiveKey(key); setFileIdx(0); };
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,18,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isTight ? 0 : 22, zIndex: 70 }}>
+    <div onClick={dismiss} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,18,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isTight ? 0 : 22, zIndex: 70 }}>
       <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 940, height: isTight ? '100%' : '90vh', maxHeight: isTight ? '100%' : '90vh', background: '#fff', borderRadius: isTight ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 70px rgba(15,30,22,.42)' }}>
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '15px 18px', borderBottom: `1px solid ${C.line2}`, flex: '0 0 auto' }}>
@@ -91,7 +95,7 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
             <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>{title}</div>
             {summary && <div style={{ fontSize: 11.5, color: C.mute }}>{summary}</div>}
           </div>
-          <div onClick={onClose} style={{ width: 32, height: 32, flex: '0 0 32px', borderRadius: 9, border: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}><X size={17} /></div>
+          <div onClick={dismiss} style={{ width: 32, height: 32, flex: '0 0 32px', borderRadius: 9, border: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}><X size={17} /></div>
         </div>
 
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: isTight ? 'column' : 'row' }}>

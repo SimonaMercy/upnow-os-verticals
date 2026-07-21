@@ -9,6 +9,7 @@ import {
   Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, ChevronRight, X, ShieldCheck,
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
+import { useBackClose } from '@/lib/useSlideOver';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
 import { REPORT_TILES, GROUPS } from '@/components/upnow/reportCatalog';
 
@@ -610,6 +611,9 @@ function PermissionsPanel({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  // Browser Back closes this slide-over instead of navigating away; backdrop / X
+  // route through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
 
   const { data: perms, isLoading } = useQuery<ManagerPermissions>({
     queryKey: ['manager-perms', manager.userId],
@@ -652,7 +656,7 @@ function PermissionsPanel({
   return (
     <div
       className="fixed inset-0 z-50 flex"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && dismiss()}
       style={{ background: 'rgba(0,0,0,0.2)' }}
     >
       <div
@@ -664,7 +668,7 @@ function PermissionsPanel({
             <p className="font-semibold text-sm">{manager.user.name}</p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>Edit details & permissions</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--color-neutral-400)' }}>
+          <button onClick={dismiss} className="p-1.5 rounded-lg" style={{ color: 'var(--color-neutral-400)' }}>
             <X className="w-5 h-5" />
           </button>
         </div>

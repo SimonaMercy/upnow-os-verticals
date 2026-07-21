@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { openDocViewer } from '@/lib/docViewer';
+import { useBackClose } from '@/lib/useSlideOver';
 import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
@@ -284,6 +285,9 @@ export default function TenantContractDetailPage() {
 
   // Drawer
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null);
+  // Browser Back closes the detail drawer instead of navigating away; backdrop / X
+  // route through the same path. Active only while the drawer is open. See useBackClose.
+  const dismissDrawer = useBackClose(() => setActiveDrawer(null), activeDrawer != null);
 
   // Sign modal
   const [showSignModal, setShowSignModal] = useState(false);
@@ -601,7 +605,7 @@ export default function TenantContractDetailPage() {
           <>
             <style>{`@keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
             <div className="fixed inset-0 z-40" role="dialog" aria-modal="true">
-              <div className="absolute inset-0 bg-black/30" onClick={() => setActiveDrawer(null)} />
+              <div className="absolute inset-0 bg-black/30" onClick={dismissDrawer} />
               <div
                 className="absolute right-0 inset-y-0 w-full max-w-2xl bg-white shadow-2xl flex flex-col overflow-hidden"
                 style={{ animation: 'slideIn 0.22s ease-out' }}
@@ -609,7 +613,7 @@ export default function TenantContractDetailPage() {
                 {/* Drawer header */}
                 <div className="px-5 py-4 border-b border-[#f0ede8] flex items-center justify-between shrink-0">
                   <span className="text-sm font-bold text-[#1a1916]">Contract Details</span>
-                  <button onClick={() => setActiveDrawer(null)} className="text-[#9b9890] hover:text-[#1a1916] p-1.5 rounded-lg hover:bg-[#f4f3ef] transition-colors">
+                  <button onClick={dismissDrawer} className="text-[#9b9890] hover:text-[#1a1916] p-1.5 rounded-lg hover:bg-[#f4f3ef] transition-colors">
                     <X size={16} />
                   </button>
                 </div>

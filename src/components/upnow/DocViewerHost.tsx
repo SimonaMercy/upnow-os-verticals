@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { X, FileText, Files, RotateCw } from 'lucide-react';
 import { useDocViewerState, closeDocViewer, type DocViewerDoc } from '@/lib/docViewer';
 import { SecureDocCanvas } from './SecureDocCanvas';
+import { useBackClose } from '@/lib/useSlideOver';
 
 const captionOf = (d: DocViewerDoc) =>
   d.caption ?? d.displayName ?? d.documentKey?.replace(/_/g, ' ') ?? null;
@@ -28,9 +29,12 @@ export function DocViewerHost() {
   const [rotation, setRotation] = useState(0);
   useEffect(() => { setRotation(0); }, [state?.docs]);
 
+  // Browser Back closes the viewer instead of navigating away; ESC / backdrop / X
+  // route through the same path. Active only while a document is open. See useBackClose.
+  const dismiss = useBackClose(closeDocViewer, !!state);
   useEffect(() => {
     if (!state) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeDocViewer(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss(); };
     window.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -38,7 +42,7 @@ export function DocViewerHost() {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [state]);
+  }, [state, dismiss]);
 
   if (!state) return null;
   const { docs, title, watermark } = state;
@@ -47,7 +51,7 @@ export function DocViewerHost() {
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/60" onClick={closeDocViewer} />
+      <div className="absolute inset-0 bg-black/60" onClick={dismiss} />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e8e6e0]">
           <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2 min-w-0">
@@ -64,7 +68,7 @@ export function DocViewerHost() {
             >
               <RotateCw size={16} /> Rotate
             </button>
-            <button type="button" onClick={closeDocViewer} aria-label="Close" className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+            <button type="button" onClick={dismiss} aria-label="Close" className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
           </div>
         </div>
         <div

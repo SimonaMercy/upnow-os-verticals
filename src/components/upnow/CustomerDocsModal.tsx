@@ -13,6 +13,7 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { docLabel } from '@/lib/docLabel';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
+import { useBackClose } from '@/lib/useSlideOver';
 
 export type CustomerDoc = {
   id: number; documentKey: string; displayName: string | null; category: string | null;
@@ -93,11 +94,14 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
       .catch(e => setErr(e instanceof Error ? e.message : 'Failed to load'));
   }, [docs, tenantId, isManager, rpParam]);
 
+  // Browser Back closes the modal instead of navigating away; ESC / backdrop / X
+  // route through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [dismiss]);
 
   const shown = (excludeKyc ? (docs ?? []).filter(d => !isKycDoc(d)) : (docs ?? []));
   // Prefer explicitly-passed leases; otherwise the ones fetched alongside docs.
@@ -136,7 +140,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={dismiss} />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e8e6e0]">
           <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
@@ -152,7 +156,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                 <Eye size={12} /> View All
               </button>
             )}
-            <button type="button" onClick={onClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+            <button type="button" onClick={dismiss} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
           </div>
         </div>
         <div className="overflow-y-auto px-5 py-4">

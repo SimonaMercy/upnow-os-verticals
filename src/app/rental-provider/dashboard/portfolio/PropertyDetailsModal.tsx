@@ -18,16 +18,17 @@
  *   GET /api/documents?ownerType=property&ownerId=:id   (property documents)
  * Uploads reuse uploadOwnedDocument; deletes hit DELETE /documents/:id.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  X, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
+  X, ArrowLeft, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
   Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers, Info, Download,
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { downloadStoredDoc } from '@/lib/downloadDoc';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
-import { categoryDisplayLabel, SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
+import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
+import { useSlideOver } from '@/lib/useSlideOver';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
 import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
 import { UnitFormModal } from '@/components/upnow/UnitFormModal';
@@ -333,17 +334,10 @@ export function PropertyDetailsModal({
 
   // Swipe-in / swipe-out — same right-to-left slide as PropertyFormModal (see
   // globals.css .slideover-*). This modal is mounted only while open, so the
-  // slide-in plays on mount automatically; `requestClose` plays the reverse
-  // slide first, then calls the parent's onClose (which unmounts us) once it has
-  // finished. The ref guards against double-firing mid-slide.
-  const [closing, setClosing] = useState(false);
-  const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    window.setTimeout(() => onClose(), SLIDEOVER_MS);
-  }, [onClose]);
+  // slide-in plays on mount automatically; `dismiss` plays the reverse slide,
+  // then calls the parent's onClose (which unmounts us). The shared hook also
+  // wires the browser Back button to close the panel instead of navigating away.
+  const { closing, dismiss } = useSlideOver(onClose);
 
   // Track viewport so the layout collapses like the handoff (CSS can't do it via
   // inline styles).
@@ -588,11 +582,11 @@ export function PropertyDetailsModal({
       if (rentSplitAt) setRentSplitAt(null);
       else if (lb !== null) setLb(null);
       else if (reader !== null) setReader(null);
-      else requestClose();
+      else dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lb, reader, rentSplitAt, requestClose]);
+  }, [lb, reader, rentSplitAt, dismiss]);
 
   // ── summary numbers ─────────────────────────────────────
   const occFromUnits = units.filter((u) => u.availability === 'occupied').length;
@@ -652,7 +646,7 @@ export function PropertyDetailsModal({
     <>
       {/* ── MAIN CARD — full-screen panel that swipes in from the right ── */}
       <div
-        onClick={requestClose}
+        onClick={dismiss}
         className={`slideover-scrim${closing ? ' closing' : ''}`}
         style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,25,.46)', display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end', zIndex: 50 }}
       >
@@ -680,9 +674,9 @@ export function PropertyDetailsModal({
                 <Pencil size={14} /> Edit
               </button>
             )}
-            <button type="button" onClick={requestClose} aria-label="Close"
+            <button type="button" onClick={dismiss} aria-label="Back"
               style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
-              <X size={18} />
+              <ArrowLeft size={18} />
             </button>
           </header>
 

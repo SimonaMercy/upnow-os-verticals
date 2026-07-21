@@ -2,6 +2,7 @@
 
 import { X } from 'lucide-react';
 import { comparePaymentSchedule } from '@/lib/paymentPlan';
+import { useBackClose } from '@/lib/useSlideOver';
 
 /** A payment-plan breakdown (cost lines + cheque schedule) rendered in a modal.
  *  Originally the origin-lead offer snapshot; now also used for the contract's
@@ -57,6 +58,9 @@ export default function OfferReceiptModal({
   // (cheques, net) → Rent VAT → Fees VAT → Ejari → Admin → Commission → additional
   // charges. All base amounts NET; VAT is its own lines (rent VAT + fee VAT kept
   // SEPARATE). Same components as before, so the Total still reconciles.
+  // Browser Back closes the receipt instead of navigating away; backdrop / X
+  // route through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
   const feeVatFils = (plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0)
     + (plan.customFees ?? []).reduce((s, f) => s + (f.vatFils ?? 0), 0);
   const lines: { label: string; fils: number }[] = [];
@@ -73,7 +77,7 @@ export default function OfferReceiptModal({
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={onClose} />
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={dismiss} />
       <div style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '16px 18px', borderBottom: '1px solid #ece9e3' }}>
           <div>
@@ -82,7 +86,7 @@ export default function OfferReceiptModal({
               {subtitle}{contractRef ? ` · ${contractRef}` : ''}{plan.issuedAt ? ` · ${fmtD(plan.issuedAt)}` : ''}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#9b9890', padding: 4 }}><X size={18} /></button>
+          <button type="button" onClick={dismiss} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#9b9890', padding: 4 }}><X size={18} /></button>
         </div>
 
         {/* Cost breakdown */}

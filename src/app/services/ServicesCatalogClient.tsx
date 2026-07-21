@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { serviceImg } from '@/lib/serviceImages';
+import { useBackClose } from '@/lib/useSlideOver';
 import { SiteHeader } from '@/components/upnow/SiteHeader';
 import { Footer } from '@/components/upnow/Footer';
 import {
@@ -223,6 +224,9 @@ export default function ServicesCatalogClient() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Browser Back closes the mobile filter drawer instead of navigating away; scrim /
+  // X / sidebar route through the same path. Active only while open. See useBackClose.
+  const dismissMobile = useBackClose(() => setMobileOpen(false), mobileOpen);
 
   /* URL is the single source of truth for every filter (listings pattern). */
   const f: Filters = {
@@ -484,14 +488,14 @@ export default function ServicesCatalogClient() {
       {/* ── Mobile drawer — same as /listings ── */}
       {mobileOpen && (
         <>
-          <div className="drawer-scrim" onClick={() => setMobileOpen(false)} />
+          <div className="drawer-scrim" onClick={dismissMobile} />
           <div className="drawer open">
             <div className="drawer-head">
               <h3>Filters</h3>
-              <button className="dx" onClick={() => setMobileOpen(false)} aria-label="Close"><X size={18} /></button>
+              <button className="dx" onClick={dismissMobile} aria-label="Close"><X size={18} /></button>
             </div>
             <div className="drawer-body">
-              <ServiceFilterSidebar {...sidebarProps} onClose={() => setMobileOpen(false)} />
+              <ServiceFilterSidebar {...sidebarProps} onClose={dismissMobile} />
             </div>
           </div>
         </>

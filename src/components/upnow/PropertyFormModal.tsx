@@ -8,6 +8,7 @@ import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { PROPERTY_DOC_SLOTS, HEAD_LEASE_KEY, MGMT_AGREEMENT_KEY, LEASE_PROOF_KEYS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
 import { DocPreviewModal } from './DocPreviewModal';
 import { PropertyPhotos } from './PropertyPhotos';
+import { useSlideOver } from '@/lib/useSlideOver';
 
 // ─── Form section model (drives the modal's left-nav + scroll-spy) ──────────
 export type PropSectionId = 'cat' | 'loc' | 'det' | 'doc' | 'pho';
@@ -1514,7 +1515,9 @@ export function PropertyFields({
 // `.slideover-scrim-out` in globals.css so the parent is told to unmount only
 // after the swipe-out has finished playing. Shared with PropertyDetailsModal so
 // both the form and the detail preview swipe out for the same length of time.
-export const SLIDEOVER_MS = 380;
+// The slide timing + close/back behaviour now live in the shared hook; re-export
+// SLIDEOVER_MS so long-standing importers of it from this module keep working.
+export { SLIDEOVER_MS } from '@/lib/useSlideOver';
 
 export function PropertyFormModal({ open, initial, onClose, onSave, title, propertyId, unitCount }: Props) {
   const isEdit = !!initial?.spaceCategory;
@@ -1531,18 +1534,12 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
   // Bumped each open so PropertyFields remounts and re-derives its cascade.
   const [openSeq, setOpenSeq] = useState(0);
 
-  // Swipe-in / swipe-out: the panel slides in from the right on open. On close
-  // we play the reverse slide first (`closing`), then tell the parent to flip
-  // `open` false (which unmounts us) once the animation has finished. The ref
-  // guards against double-firing while the slide-out is mid-flight.
-  const [closing, setClosing] = useState(false);
-  const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    window.setTimeout(() => onClose(), SLIDEOVER_MS);
-  }, [onClose]);
+  // Swipe-in / swipe-out: the panel slides in from the right on open. `dismiss`
+  // plays the reverse slide, then tells the parent to flip `open` false. This
+  // component stays mounted and toggles `open`, so the hook keys its browser-Back
+  // history entry on `open` (pushed on open, cleared on close) — Back closes the
+  // form instead of navigating away from the dashboard.
+  const { closing, dismiss: requestClose } = useSlideOver(onClose, open);
 
   // Left-nav scroll-spy: the body is the scroll container; each section
   // registers its element here so clicking the nav scrolls to it and scrolling
@@ -1597,7 +1594,6 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     setErrors({}); setTitleDeed(null); setDrawings([]); setExtraDocs({}); setPropertyPhotos([]);
     setActiveSection('cat');
     setOpenSeq(s => s + 1);
-    setClosing(false); closingRef.current = false;
     if (propertyId) {
       apiGet<PropertyDoc[]>(`/documents?ownerType=property&ownerId=${propertyId}`)
         .then(ds => setExistingDocs(ds.filter(d => d.documentKey === 'title_deed' || d.documentKey.startsWith('building_drawing') || isExtraSlotDoc(d.documentKey))))

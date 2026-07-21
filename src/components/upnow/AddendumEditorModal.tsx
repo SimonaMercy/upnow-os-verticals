@@ -11,6 +11,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { X, Check, Loader2 } from 'lucide-react';
 import AddendumTermsEditor from './AddendumTermsEditor';
 import type { AddendumTerms } from '@/lib/addendumTerms';
+import { useBackClose } from '@/lib/useSlideOver';
 
 export default function AddendumEditorModal({
   value, onChange, onClose,
@@ -51,7 +52,10 @@ export default function AddendumEditorModal({
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  const primary = onPrimary ?? onClose;
+  // Browser Back closes this full-screen editor instead of navigating away; the
+  // close (X) routes through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
+  const primary = onPrimary ?? dismiss;
 
   return (
     <div className="fixed inset-0 z-[70] bg-white flex flex-col">
@@ -65,7 +69,7 @@ export default function AddendumEditorModal({
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: 'var(--primary,#2e9f82)' }}>
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {primaryLabel}
           </button>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] p-1.5 rounded-lg hover:bg-[#f4f3ef]" title="Close"><X size={18} /></button>
+          <button onClick={dismiss} className="text-[#9b9890] hover:text-[#1a1916] p-1.5 rounded-lg hover:bg-[#f4f3ef]" title="Close"><X size={18} /></button>
         </div>
       </div>
 

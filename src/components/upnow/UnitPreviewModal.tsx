@@ -23,16 +23,16 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
  * Documents are view-only here (the header "Edit" opens the unit form for
  * changes), matching the no-download document-viewer principle.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  X, ExternalLink, FileText, Eye, AlignLeft, Banknote, Users, History,
+  X, ArrowLeft, ExternalLink, FileText, Eye, AlignLeft, Banknote, Users, History,
   Image as ImageIcon, Check, Pencil, ChevronLeft, ChevronRight, Loader2,
   ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
-import { SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
+import { useSlideOver } from '@/lib/useSlideOver';
 
 /* ---------- types ---------- */
 
@@ -266,16 +266,10 @@ export function UnitPreviewModal({
 
   // Swipe-in / swipe-out — same right-to-left full-screen slide as
   // PropertyDetailsModal (see globals.css .slideover-*). Conditionally mounted,
-  // so slide-in plays on mount; requestClose plays the reverse slide first, then
-  // calls onClose (which unmounts us) once it has finished.
-  const [closing, setClosing] = useState(false);
-  const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    window.setTimeout(() => onClose(), SLIDEOVER_MS);
-  }, [onClose]);
+  // so slide-in plays on mount; `dismiss` plays the reverse slide, then calls
+  // onClose (which unmounts us). The shared hook also wires the browser Back
+  // button to close the panel instead of navigating away.
+  const { closing, dismiss } = useSlideOver(onClose);
   const [descOpen, setDescOpen] = useState(false);
   const descRef = useRef<HTMLDivElement>(null);
   const [descClamps, setDescClamps] = useState(false);        // does the clamped description overflow?
@@ -319,11 +313,11 @@ export function UnitPreviewModal({
       if (e.key !== 'Escape') return;
       if (lb !== null) setLb(null);
       else if (reader !== null) setReader(null);
-      else requestClose();
+      else dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lb, reader, requestClose]);
+  }, [lb, reader, dismiss]);
 
   // Show the "Read more" toggle only when the 3-line clamp actually truncates the
   // text — a char-count heuristic mis-fires for short-but-tall descriptions.
@@ -518,7 +512,7 @@ export function UnitPreviewModal({
   return (
     <>
       {/* ── MAIN CARD — full-screen panel that swipes in from the right ── */}
-      <div onClick={requestClose}
+      <div onClick={dismiss}
         className={`slideover-scrim${closing ? ' closing' : ''}`}
         style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,25,.46)', display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end', zIndex: 50 }}>
         <div onClick={(e) => e.stopPropagation()}
@@ -545,9 +539,9 @@ export function UnitPreviewModal({
                 <Pencil size={14} /> Edit
               </button>
             )}
-            <button type="button" onClick={requestClose} aria-label="Close"
+            <button type="button" onClick={dismiss} aria-label="Back"
               style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
-              <X size={18} />
+              <ArrowLeft size={18} />
             </button>
           </header>
 

@@ -22,6 +22,7 @@ import {
   UserCircle, CalendarX, Home,
 } from 'lucide-react';
 import { docLabel } from '@/lib/docLabel';
+import { useBackClose } from '@/lib/useSlideOver';
 import {
   fmtAed, SectionTitle, InspectionSection, SettlementLines, DocGroupLabel, DocList, ViewAllDocs,
   type ProofDoc, type InspectionView, type SettlementView, type DocLink,
@@ -312,12 +313,15 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
+  // Browser Back closes the modal instead of navigating away; ESC / backdrop / X
+  // route through the same path. See useBackClose.
+  const dismiss = useBackClose(onClose);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss(); };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
-  }, [onClose]);
+  }, [dismiss]);
 
   const c = detail?.customer;
   // Customer documents = genuinely customer-owned (KYC etc.) ONLY. Everything
@@ -334,7 +338,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={dismiss}>
       <div className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl bg-[#fbfbf9] shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] bg-white">
@@ -355,7 +359,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
                 <UserCircle size={13} /> Full profile
               </a>
             )}
-            <button onClick={onClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer p-1.5 rounded-lg hover:bg-[#f4f3ef]"><X size={18} /></button>
+            <button onClick={dismiss} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer p-1.5 rounded-lg hover:bg-[#f4f3ef]"><X size={18} /></button>
           </div>
         </div>
 

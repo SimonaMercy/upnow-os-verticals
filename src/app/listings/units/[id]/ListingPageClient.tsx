@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
+import { useBackClose } from '@/lib/useSlideOver';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 export interface UnitMediaItem {
@@ -145,11 +146,13 @@ const CATEGORY_BG: Record<string, string> = {
 function GalleryModal({
   images, index, onClose, onNav,
 }: { images: string[]; index: number; onClose: () => void; onNav: (i: number) => void }) {
+  // Browser Back closes the photo viewer instead of navigating away. See useBackClose.
+  const dismiss = useBackClose(onClose);
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.92)' }}>
       <button
         className="absolute top-4 right-4 text-white/80 hover:text-white rounded-full p-2 hover:bg-white/10 transition-colors z-10"
-        onClick={onClose}
+        onClick={dismiss}
       >
         <X size={24} />
       </button>

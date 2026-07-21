@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, ChevronDown, LayoutGrid, Rows3, SlidersHorizontal, X, Check, MapPin, Home, Building2, Factory, Mountain } from 'lucide-react';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
+import { useBackClose } from '@/lib/useSlideOver';
 
 /* ── Sub-category data ────────────────────────────────────────── */
 const SPACE_TYPES: Record<string, { label: string; value: string }[]> = {
@@ -496,6 +497,9 @@ export default function FilterBar(props: FilterBarProps) {
   const router  = useRouter();
   const sp      = useSearchParams();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Browser Back closes the mobile filter drawer instead of navigating away; scrim /
+  // X / sidebar-apply route through the same path. Active only while open. See useBackClose.
+  const dismissMobile = useBackClose(() => setMobileOpen(false), mobileOpen);
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : '';
@@ -635,16 +639,16 @@ export default function FilterBar(props: FilterBarProps) {
       {/* ── Mobile drawer ────────────────────────────────── */}
       {mobileOpen && (
         <>
-          <div className="drawer-scrim" onClick={() => setMobileOpen(false)} />
+          <div className="drawer-scrim" onClick={dismissMobile} />
           <div className="drawer open">
             <div className="drawer-head">
               <h3>Filters</h3>
-              <button className="dx" onClick={() => setMobileOpen(false)} aria-label="Close">
+              <button className="dx" onClick={dismissMobile} aria-label="Close">
                 <X size={18} />
               </button>
             </div>
             <div className="drawer-body">
-              <FilterSidebar {...props} onNavigate={navigate} onClose={() => setMobileOpen(false)} />
+              <FilterSidebar {...props} onNavigate={navigate} onClose={dismissMobile} />
             </div>
           </div>
         </>

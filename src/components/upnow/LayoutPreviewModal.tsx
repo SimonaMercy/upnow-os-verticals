@@ -23,13 +23,13 @@
  * iframe with the toolbar suppressed, images inline — no download, matching the
  * platform's no-download document principle.
  */
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
-  X, FileText, Eye, AlignLeft, Banknote, Layers, Building2, ScrollText,
+  X, ArrowLeft, FileText, Eye, AlignLeft, Banknote, Layers, Building2, ScrollText,
   Pencil, TrendingUp, ClipboardList,
 } from 'lucide-react';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
-import { SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
+import { useSlideOver } from '@/lib/useSlideOver';
 import type { Plan } from '@/components/upnow/LayoutFinancialsModal';
 
 /* ---------- types ---------- */
@@ -123,14 +123,9 @@ export function LayoutPreviewModal({
   onClose: () => void;
 }) {
   // Swipe-in / swipe-out — same right-to-left slide as the unit / property views.
-  const [closing, setClosing] = useState(false);
-  const closingRef = useRef(false);
-  const requestClose = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    window.setTimeout(() => onClose(), SLIDEOVER_MS);
-  }, [onClose]);
+  // The shared hook plays the reverse slide on `dismiss` and wires the browser
+  // Back button to close the panel instead of navigating away.
+  const { closing, dismiss } = useSlideOver(onClose);
 
   // In-app document viewer — shared by the floor-plan hero and the addendum
   // (view-only, no download; PDFs via iframe, images inline). Null = closed.
@@ -151,11 +146,11 @@ export function LayoutPreviewModal({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (viewer) setViewer(null);
-      else requestClose();
+      else dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewer, requestClose]);
+  }, [viewer, dismiss]);
 
   /* ---------- aggregates (from the units — always available) ---------- */
   const agg = useMemo(() => {
@@ -250,7 +245,7 @@ export function LayoutPreviewModal({
   return (
     <>
       {/* ── MAIN CARD — full-screen panel that swipes in from the right ── */}
-      <div onClick={requestClose}
+      <div onClick={dismiss}
         className={`slideover-scrim${closing ? ' closing' : ''}`}
         style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,25,.46)', display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end', zIndex: 55 }}>
         <div onClick={(e) => e.stopPropagation()}
@@ -277,9 +272,9 @@ export function LayoutPreviewModal({
                 <Pencil size={14} /> Edit layout
               </button>
             )}
-            <button type="button" onClick={requestClose} aria-label="Close"
+            <button type="button" onClick={dismiss} aria-label="Back"
               style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
-              <X size={18} />
+              <ArrowLeft size={18} />
             </button>
           </header>
 
