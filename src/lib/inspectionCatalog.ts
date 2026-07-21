@@ -148,6 +148,9 @@ export interface InspectionDoc {
   totals?: InspectionTotals;
 
   _generated?: boolean;
+  /** Move-out only: this doc was scaffolded by mirroring the saved move-in report
+   *  (§ move-out seeds its component list from move-in). Transient until first save. */
+  _seededFromMoveIn?: boolean;
   schemaVersion?: number;
 }
 
@@ -165,6 +168,7 @@ export interface InspectionPriceBookEntry {
   sortOrder: number;
   isActive: boolean;
   proposedPrice?: boolean;
+  vatMode?: VatMode;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -197,6 +201,7 @@ export interface ResolvedPrice {
   variantLabel?: string;
   subCategory?: string;
   proposedPrice?: boolean;
+  vatMode?: VatMode;
 }
 
 // ─── Status metadata (§3 global table) ─────────────────────────────────────────
@@ -662,6 +667,7 @@ function seedRowToResolved(r: PlatformSeedEntry): ResolvedPrice {
     variantLabel: r.variantLabel,
     subCategory: r.subCategory,
     proposedPrice: r.proposedPrice,
+    vatMode: 'none',
   };
 }
 
@@ -673,6 +679,7 @@ function entryToResolved(e: InspectionPriceBookEntry): ResolvedPrice {
     variantLabel: e.variantLabel ?? undefined,
     subCategory: e.subCategory ?? undefined,
     proposedPrice: e.proposedPrice,
+    vatMode: e.vatMode ?? 'none',
   };
 }
 

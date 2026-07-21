@@ -48,6 +48,11 @@ interface Props {
   editable?: boolean;
   onPatch?: (sectionId: string, itemId: string, patch: Partial<InspectionItem>) => void;
   onAddCategory?: () => void;
+  /** Editable move-out: add a sub-category/component to a category (opens the
+   *  restoration-list picker in the workspace). Also enables per-row remove. */
+  onAddComponent?: (sectionId: string) => void;
+  onRemoveComponent?: (sectionId: string, itemId: string) => void;
+  onRemoveCategory?: (sectionId: string) => void;
   generalNotes?: string;
   onGeneralNotes?: (v: string) => void;
   signatures?: ReportSignatures;
@@ -84,11 +89,14 @@ const COND_OPTS: Exclude<Condition, ''>[] = ['good', 'fair', 'poor'];
 
 export function InspectionReportView({
   doc, meta, phase, audience, dates, editable = false,
-  onPatch, onAddCategory, generalNotes, onGeneralNotes, signatures, signSlot, showPrices,
+  onPatch, onAddCategory, onAddComponent, onRemoveComponent, onRemoveCategory,
+  generalNotes, onGeneralNotes, signatures, signSlot, showPrices,
   onAddItemPhotos, onRemoveItemPhoto, uploadingItemId, hideSignatures,
 }: Props) {
   const isMoveIn = phase === 'move_in';
   const showMoney = phase === 'move_out' && (showPrices ?? audience === 'rp');
+  const totalCols = 6 + (showMoney ? 1 : 0);
+  const canAddComponent = editable && !!onAddComponent;
   const totals = useMemo(() => computeInspectionTotals(doc, phase), [doc, phase]);
   const categories = doc.categories ?? [];
 
@@ -152,15 +160,53 @@ export function InspectionReportView({
             </tr>
           </thead>
           <tbody>
+            {editable && categories.length === 0 && (
+              <tr>
+                <td colSpan={totalCols}>
+                  <div style={{ padding: '22px 8px', textAlign: 'center', color: '#9b9890', fontSize: 13 }}>
+                    No components yet. Use <b>Add Additional Category</b> above to build this {isMoveIn ? 'move-in' : 'move-out'} inspection from the restoration list.
+                  </div>
+                </td>
+              </tr>
+            )}
             {categories.map((cat, ci) => {
               const CatIcon = catIconFor(cat.key);
-              const n = cat.items.length || 1;
-              return cat.items.map((it, ri) => {
+              // A freshly-added (or emptied) category still shows its header row plus
+              // the add / remove affordances so it can be built up or discarded.
+              if (cat.items.length === 0) {
+                if (!editable) return null;
+                return (
+                  <tr key={`${cat.sectionId}:empty`} className={s.catLast}>
+                    <td className={s.catnumCell}><span className={s.catnumBig}>{ci + 1}</span></td>
+                    <td className={s.catnameCell}>
+                      <div className={s.catcell}>
+                        <span className={s.caticon}><CatIcon size={18} /></span>
+                        <div><div className={s.catname}>{cat.label || 'Untitled category'}</div><div className={s.catmeta}>{cat.unitLabel}</div></div>
+                      </div>
+                    </td>
+                    <td colSpan={totalCols - 2}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                        {canAddComponent && <AddComponentButton onClick={() => onAddComponent!(cat.sectionId)} />}
+                        {onRemoveCategory && (
+                          <button type="button" onClick={() => onRemoveCategory(cat.sectionId)}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                            <X size={12} /> Remove category
+                          </button>
+                        )}
+                        <span style={{ fontSize: 11, color: '#c0bdb8' }}>No components yet — add from the restoration list.</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
+              const n = cat.items.length;
+              const rows: ReactNode[] = cat.items.map((it, ri) => {
                 const cond = (isMoveIn ? it.inCondition : it.outCondition) ?? '';
                 const qty = quantityOf(it);
                 const rmk = it.remarks ?? '';
+                const isLast = ri === n - 1 && !canAddComponent;
                 return (
-                  <tr key={it.id} className={ri === cat.items.length - 1 ? s.catLast : undefined}>
+                  <tr key={it.id} className={isLast ? s.catLast : undefined}>
                     {ri === 0 && (
                       <>
                         <td className={s.catnumCell} rowSpan={n}><span className={s.catnumBig}>{ci + 1}</span></td>
@@ -172,7 +218,16 @@ export function InspectionReportView({
                         </td>
                       </>
                     )}
-                    <td className={s.compCell}><span className={s.rn}>{ci + 1}.{ri + 1}</span>{it.componentName}</td>
+                    <td className={s.compCell}>
+                      <span className={s.rn}>{ci + 1}.{ri + 1}</span>{it.componentName}
+                      {editable && onRemoveComponent && (
+                        <button type="button" aria-label="Remove component" title="Remove this component"
+                          onClick={() => onRemoveComponent(cat.sectionId, it.id)}
+                          style={{ marginLeft: 6, verticalAlign: 'middle', color: '#c8c6be', background: 'none', border: 'none', cursor: 'pointer', padding: 2, lineHeight: 0 }}>
+                          <X size={12} />
+                        </button>
+                      )}
+                    </td>
                     <td className={s.center}>
                       {editable ? (
                         <span className={s.condPick}>
@@ -214,6 +269,16 @@ export function InspectionReportView({
                   </tr>
                 );
               });
+              if (canAddComponent) {
+                rows.push(
+                  <tr key={`${cat.sectionId}:add`} className={s.catLast}>
+                    <td colSpan={totalCols}>
+                      <AddComponentButton onClick={() => onAddComponent!(cat.sectionId)} />
+                    </td>
+                  </tr>,
+                );
+              }
+              return rows;
             })}
           </tbody>
         </table>
@@ -322,6 +387,18 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
         </>
       )}
     </div>
+  );
+}
+
+/** Subtle "add a component to this category" affordance — the restoration-list
+ *  entry point on the editable move-out surface. The picker itself lives in the
+ *  RP workspace page (which holds the resolved price book). */
+function AddComponentButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', fontSize: 11.5, fontWeight: 600, color: '#2e9f82', background: '#f0faf6', border: '1px dashed #cfe8df', borderRadius: 7, cursor: 'pointer' }}>
+      <Plus size={13} /> Add sub-category / component
+    </button>
   );
 }
 
