@@ -132,21 +132,27 @@ export default function CategoryInspectionPage() {
     })();
   }, [contractId, phase]);
 
-  // Load the RP price book once so hand-added components resolve to the RP's own
-  // rates (best-effort — resolvePriceBookEntry falls back to the platform seed).
+  // Load the acting landlord's price book so hand-added components resolve to the
+  // RP's own rates (best-effort — resolvePriceBookEntry falls back to the seed).
   useEffect(() => {
-    // The price book is an RP-authenticated resource; the portal inspector falls
-    // back to the platform seed rates (resolvePriceBookEntry handles a null book).
+    // The portal inspector has no RP auth → seed fallback (null book is handled).
     if (portalToken) return;
+    // A manager reads the book through the /manager mirror scoped to THIS
+    // contract's landlord (the RP endpoint 403s for them); wait until the meta
+    // fetch has told us which landlord this is before requesting it.
+    if (isManagerView && landlordId == null) return;
+    const url = isManagerView
+      ? `/api/manager/inspection-price-book?rp=${landlordId}`
+      : '/api/inspection-price-book';
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/inspection-price-book', { credentials: 'include' });
+        const res = await fetch(url, { credentials: 'include' });
         if (res.ok && !cancelled) setPriceBook(await res.json());
       } catch { /* seed fallback */ }
     })();
     return () => { cancelled = true; };
-  }, [portalToken]);
+  }, [portalToken, isManagerView, landlordId]);
 
   const patchItem = useCallback((sectionId: string, itemId: string, patch: Partial<InspectionItem>) => {
     setDoc((d) => {
