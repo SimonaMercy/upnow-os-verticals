@@ -134,16 +134,19 @@ export default function CategoryInspectionPage() {
 
   // Load the acting landlord's price book so hand-added components resolve to the
   // RP's own rates (best-effort — resolvePriceBookEntry falls back to the seed).
+  // Every actor resolves to the SAME contract's book:
+  //   • RP owner   → /inspection-price-book (their own)
+  //   • manager    → /manager/inspection-price-book?rp=<landlord> (the mirror)
+  //   • inspector  → /portal/<token>/contracts/<id>/inspection-price-book (token)
   useEffect(() => {
-    // The portal inspector has no RP auth → seed fallback (null book is handled).
-    if (portalToken) return;
-    // A manager reads the book through the /manager mirror scoped to THIS
-    // contract's landlord (the RP endpoint 403s for them); wait until the meta
-    // fetch has told us which landlord this is before requesting it.
+    // A manager reads the book scoped to THIS contract's landlord (the RP endpoint
+    // 403s for them); wait until the meta fetch has told us which landlord this is.
     if (isManagerView && landlordId == null) return;
-    const url = isManagerView
-      ? `/api/manager/inspection-price-book?rp=${landlordId}`
-      : '/api/inspection-price-book';
+    const url = portalToken
+      ? `${apiBase}/inspection-price-book?type=${phase}`
+      : isManagerView
+        ? `/api/manager/inspection-price-book?rp=${landlordId}`
+        : '/api/inspection-price-book';
     let cancelled = false;
     (async () => {
       try {
@@ -152,7 +155,7 @@ export default function CategoryInspectionPage() {
       } catch { /* seed fallback */ }
     })();
     return () => { cancelled = true; };
-  }, [portalToken, isManagerView, landlordId]);
+  }, [portalToken, isManagerView, landlordId, apiBase, phase]);
 
   const patchItem = useCallback((sectionId: string, itemId: string, patch: Partial<InspectionItem>) => {
     setDoc((d) => {
