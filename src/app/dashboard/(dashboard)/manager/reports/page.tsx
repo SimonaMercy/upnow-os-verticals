@@ -25,6 +25,7 @@ import DataExports from '@/app/rental-provider/dashboard/reports/DataExports';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
+import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
 import { MissingDataView, MISSING_REPORTS } from '@/components/upnow/MissingDataView';
 
@@ -106,6 +107,19 @@ export default function ManagerReportsPage() {
         endpointBase="/api/manager/reports"
         extraQuery={`rp=${effectiveRp}`}
         onBack={() => navigate(null)}
+      />
+    );
+  }
+  // Operations by stage renders its own matrix component (not a standard table),
+  // scoped server-side to this manager's own activity and operation pipeline.
+  if (openSlug === 'operations-by-stage') {
+    return (
+      <OperationsByStageReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        contractsBase="/dashboard/manager/contracts"
+        leadsBase="/dashboard/manager/leads"
       />
     );
   }

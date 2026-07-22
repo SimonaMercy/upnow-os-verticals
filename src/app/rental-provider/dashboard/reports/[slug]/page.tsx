@@ -8,6 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { PaymentGroupingReport } from '@/components/upnow/PaymentGroupingReport';
 import { ManagerOperationsReport } from '@/components/upnow/ManagerOperationsReport';
+import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 
 export default function ReportDetailPage() {
@@ -20,6 +21,9 @@ export default function ReportDetailPage() {
   }
   if (params.slug === 'manager-operations') {
     return <ManagerOperationsReport backHref="/rental-provider/dashboard/reports" />;
+  }
+  if (params.slug === 'operations-by-stage') {
+    return <OperationsByStageReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
   }
   // The two headline reports render as exportable month sheets (the CEO's
   // reference-file format), each on its own slug.

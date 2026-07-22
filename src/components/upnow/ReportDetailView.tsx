@@ -22,7 +22,7 @@ import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts 
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'occupancy' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
+type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -60,10 +60,22 @@ interface ReportDef {
   layout?: 'table' | 'grouped' | 'matrix' | 'countMatrix' | 'chequeMatrix';
   /** Optional caution banner shown above the report (e.g. data-quality notes). */
   dataNote?: string;
-  /** When set, render the building + leasing-model (direct/sub) multi-select
-   *  filters (fee-taxation). The backend returns a `buildings` option list and
-   *  honours `buildings=` / `leaseTypes=` query params. */
+  /** When set, render the Property + leasing-model (direct/sub/management)
+   *  multi-select filters. The backend returns a `buildings` option list and
+   *  honours `buildings=` / `leaseTypes=` query params. Enabled on every report
+   *  that supports scoping by property + lease type. */
   buildingLeaseFilter?: boolean;
+  /** Fee & VAT only — the extra Overall/Detailed view toggle + Year/Quarter
+   *  grouping controls (and the per-contract detail table). Kept separate from
+   *  `buildingLeaseFilter` so the shared Property / Lease-type filter can be
+   *  turned on for a report without dragging in the fee-taxation-specific UI. */
+  feeTaxationControls?: boolean;
+  /** When set, render a Unit type dropdown in the filter bar. The backend returns
+   *  a `unitTypes` option list and honours a `unitType=` query param. */
+  unitTypeFilter?: boolean;
+  /** When set, render an Active · Expired · All lease-status segmented control.
+   *  The backend honours a `status=active|expired|all` query param (default all). */
+  leaseStatusFilter?: boolean;
   /** countMatrix only: the trailing summary columns after the 12 month cells,
    *  read from each row (and from `totals` for the footer/tiles) by `key`. When
    *  omitted the matrix keeps its renewal-vacancy default (Renewals · Vacant ·
@@ -79,6 +91,8 @@ interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'su
 type LeaseType = 'direct' | 'sub' | 'management';
 const ALL_LEASE_TYPES: LeaseType[] = ['direct', 'sub', 'management'];
 const LEASE_TYPE_LABELS: Record<LeaseType, string> = { direct: 'Direct', sub: 'Sub-lease', management: 'Management' };
+/** Prettify a raw unit_type token (e.g. 'retail_shop' → 'Retail Shop'). */
+const prettyUnitType = (t: string) => t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 interface Column {
   key: string;
@@ -126,6 +140,7 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Plan - Monthly',
   description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each lease is bucketed by the month its renewal falls due (the day after the term ends, so a lease ending 31 Jul renews in August); a unit that already renewed earlier in the year also shows in the month its new term began (stage Renewed). Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
   endpoint: '/api/reports/renewal-forecast',
+  buildingLeaseFilter: true,
   layout: 'grouped',
   controlKey: 'year',
   columns: [
@@ -164,10 +179,11 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
 const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scanned cheques. A cheque shows as collected once its due date has passed — flag any bounced cheque, and reconcile against bank statements for exact clearance. A few contracts with incomplete scans still use the rent schedule.';
 
 const REPORTS: Record<ReportSlug, ReportDef> = {
-  occupancy: {
-    title: 'Occupancy Report',
+  portfolio: {
+    title: 'Portfolio',
     description: 'Snapshot of how each property is performing — units, occupied counts, and the rent roll. "Rent Roll" is the latest lease on every occupied unit (so it reconciles with occupancy, including units on lapsed leases pending renewal); "Active leases" counts only contracts still in active status.',
     endpoint: '/api/reports/occupancy',
+    buildingLeaseFilter: true,
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'community', label: 'Community' },
@@ -197,6 +213,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Upcoming Renewals',
     description: 'Active leases whose term is ending within the chosen window — grouped by the month they come up for renewal. Each row is a month; expand it to see the individual leases and their renewal state. Adjust the window above.',
     endpoint: '/api/reports/lease-expiry',
+    buildingLeaseFilter: true,
     layout: 'grouped',
     controlKey: 'leaseExpiryWindow',
     columns: [
@@ -231,27 +248,42 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     },
   },
   'leases-by-year': {
-    title: 'Leases by Year',
-    description: 'The full annual lease register — every lease whose term was in force at any point during the selected year (it started on or before 31 Dec and had not ended before 1 Jan; open-ended leases count once started). Unlike Contract Registration Activity, which is anchored on the start month, this also includes leases that began in earlier years but were still running. The tiles show how many leases were in force and the annual rent they represent, how many commenced and how many ended during the year, and how many are still active now. Pick the year above.',
+    title: 'Leases - Monthly',
+    description: 'The year’s leases grouped by the month each one COMMENCED — every lease that started during the selected year (leases carried over from an earlier year are not included). Each row is a month; expand it to see the leases that began that month. All twelve months are listed, so a month with no new leases reads 0. The tiles show how many leases commenced and the annual rent they represent, how many of them have already ended, and how many are still active now. Pick the year above.',
     endpoint: '/api/reports/leases-by-year',
+    buildingLeaseFilter: true,
+    leaseStatusFilter: true,
+    layout: 'grouped',
     controlKey: 'year',
     columns: [
-      { key: 'contractRef', label: 'Contract' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
-      { key: 'startDate', label: 'Start', type: 'date' },
-      { key: 'endDate', label: 'End', type: 'date' },
+      { key: 'monthLabel', label: 'Commenced' },
+      { key: 'leases', label: 'Leases', align: 'right', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-      { key: 'status', label: 'Status', type: 'stage' },
+      { key: 'ended', label: 'Ended in year', align: 'right', type: 'number' },
+      { key: 'active', label: 'Active now', align: 'right', type: 'number' },
     ],
     totals: [
-      { key: 'leases', label: 'Leases in force', type: 'number', keep: true },
-      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
-      { key: 'startedThisYear', label: 'Commenced', type: 'number', keep: true },
+      { key: 'leases', label: 'Leases commenced', type: 'number', keep: true },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed', keep: true },
       { key: 'endedThisYear', label: 'Ended', type: 'number', keep: true },
       { key: 'active', label: 'Currently active', type: 'number' },
     ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'monthLabel',
+      countLabel: 'leases',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'startDate', label: 'Start', type: 'date' },
+        { key: 'endDate', label: 'End', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'status', label: 'Status', type: 'stage' },
+      ],
+    },
   },
   // Both slugs resolve to the same forecast (renewal-forecast is canonical;
   // renewal-pipeline kept so older links/bookmarks still work).
@@ -261,20 +293,15 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Security Deposits Report',
     description: 'Full deposit register and settlement ledger. A deposit is collected at lease start and refundable at lease end. Status shows where each one stands: Holding (live lease), Pending settlement (lease ended — needs to be refunded or deducted), or settled as Returned, Partial return or Forfeited. Refunded / Kept are the amounts that moved at settlement. The tiles up top answer how much you currently hold, how much is pending settlement, and what has been refunded to tenants vs kept. Pick a year to scope the register to deposits taken that year, or All years for the full register.',
     endpoint: '/api/reports/security-deposits',
+    buildingLeaseFilter: true,
     controlKey: 'yearRange',
     columns: [
-      { key: 'contractRef', label: 'Contract' },
+      { key: 'unitLabel', label: 'Unit No' },
       { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
-      { key: 'depositFils', label: 'Deposit', align: 'right', type: 'aed' },
-      { key: 'reference', label: 'Cheque / Ref' },
+      { key: 'buildingName', label: 'Building' },
+      { key: 'depositFils', label: 'Security Deposit', align: 'right', type: 'aed' },
       { key: 'state', label: 'Status', type: 'stage' },
-      { key: 'refundedFils', label: 'Refunded', align: 'right', type: 'aed' },
-      { key: 'deductedFils', label: 'Kept', align: 'right', type: 'aed' },
-      { key: 'settledOn', label: 'Settled on', type: 'date' },
-      { key: 'takenOn', label: 'Taken on', type: 'date' },
-      { key: 'leaseEnd', label: 'Refundable at', type: 'date' },
+      { key: 'reference', label: 'Payment' },
     ],
     totals: [
       { key: 'heldFils', label: 'Held now (with us)', type: 'aed', keep: true },
@@ -290,6 +317,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Cash Management',
     description: 'The collection matrix — every unit down the side, the twelve months of the year across the top, with each unit\'s annual rent. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total, and year-to-date expected vs received. Pick the year above.',
     endpoint: '/api/reports/rent-collection',
+    buildingLeaseFilter: true,
     dataNote: NEEDS_CHEQUE_DATA,
     layout: 'matrix',
     controlKey: 'year',
@@ -311,6 +339,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Cheques Management',
     description: 'The cheque schedule — one row per current active lease (live today; upcoming and ended leases are excluded), showing the building, unit and lease duration together, then each rent cheque\'s due date (earliest to latest), a column per month counting how many cheques land in it, and the total number of cheques. Rent (rental-roll) cheques only; cancelled cheques are excluded. Leases counts the rows; Units the distinct units behind them. Pick the year above and narrow by property.',
     endpoint: '/api/reports/cheques-management',
+    buildingLeaseFilter: true,
     dataNote: NEEDS_CHEQUE_DATA,
     layout: 'chequeMatrix',
     controlKey: 'year',
@@ -396,9 +425,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
 
   'new-leases-matrix': {
-    title: 'New Leases by Month',
+    title: 'Lease Summary - Yearly',
     description: 'A property × month grid of leases that COMMENCED (started) each month of the selected year — the matrix companion to Contract Registration Activity. Each cell counts the new leases that began that month for the property; the trailing columns give the property’s total new leases and the annual rent they represent. Anchored on the lease start date (real leases only — pending drafts excluded). Pick the year above.',
     endpoint: '/api/reports/new-leases-matrix',
+    buildingLeaseFilter: true,
     layout: 'countMatrix',
     controlKey: 'year',
     columns: [],
@@ -416,6 +446,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Renewal Plan - Yearly',
     description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year. Click a Vacant count to list those units.',
     endpoint: '/api/reports/renewal-vacancy',
+    buildingLeaseFilter: true,
     layout: 'countMatrix',
     controlKey: 'year',
     columns: [],
@@ -459,39 +490,37 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
 
   'portfolio-overview': {
-    title: 'Portfolio Overview',
-    description: 'Portfolio composition by unit type — how many units of each type, how many are occupied, and the annual asking rent they represent, split by residential / commercial. A current snapshot of what you own and what it\'s worth.',
+    title: 'Unit Mix',
+    description: 'Your unit mix — one row per property × unit type × bedrooms × layout × size, with the unit count, exactly as the Unit Mix on a property\'s detail page (details only, no amounts). Units of different sizes are listed separately.',
     endpoint: '/api/reports/portfolio-overview',
+    buildingLeaseFilter: true,
+    unitTypeFilter: true,
     columns: [
-      { key: 'spaceCategory', label: 'Category', type: 'stage' },
+      { key: 'buildingName', label: 'Property' },
       { key: 'unitType', label: 'Unit type', type: 'stage' },
+      { key: 'bedroomsPlan', label: 'Bedrooms · Plan' },
+      { key: 'sizeSqft', label: 'Sqft', align: 'right' },
       { key: 'units', label: 'Units', align: 'right', type: 'number' },
-      { key: 'occupied', label: 'Occupied', align: 'right', type: 'number' },
-      { key: 'vacant', label: 'Vacant', align: 'right', type: 'number' },
-      { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
-      { key: 'askingRentFils', label: 'Annual asking rent', align: 'right', type: 'aed' },
-      { key: 'avgAskingFils', label: 'Avg / unit', align: 'right', type: 'aed' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
       { key: 'units', label: 'Units', type: 'number' },
-      { key: 'occupied', label: 'Occupied', type: 'number' },
-      { key: 'vacant', label: 'Vacant', type: 'number' },
-      { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
-      { key: 'askingRentFils', label: 'Annual asking rent', type: 'aed' },
     ],
   },
 
   'vacancy-analysis': {
-    title: 'Vacancy Analysis',
-    description: 'Vacant units to action — each available unit with its annual asking rent (revenue at stake) and listing status, plus overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
+    title: 'Vacant Units',
+    description: 'Vacant units to action — each available unit with the annual rent it last let for, its market benchmark and current asking rent (revenue at stake), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
     endpoint: '/api/reports/vacancy-analysis',
+    buildingLeaseFilter: true,
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'unitLabel', label: 'Unit' },
       { key: 'unitType', label: 'Type', type: 'stage' },
       { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
       { key: 'listingStatus', label: 'Listing', type: 'stage' },
+      { key: 'lastAnnualRentFils', label: 'Last annual rent', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market rent', align: 'right', type: 'aed' },
       { key: 'askingRentFils', label: 'Asking rent / yr', align: 'right', type: 'aed' },
     ],
     totals: [
@@ -499,6 +528,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'listed', label: 'Listed', type: 'number' },
       { key: 'unlisted', label: 'Unlisted', type: 'number' },
+      { key: 'vacantLastRentFils', label: 'Last rent total / yr', type: 'aed' },
+      { key: 'vacantMarketFils', label: 'Market total / yr', type: 'aed' },
       { key: 'vacantAskingFils', label: 'Rent at stake / yr', type: 'aed' },
     ],
   },
@@ -507,6 +538,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Contract Registration Activity',
     description: 'Monthly leasing velocity — new leases commencing each month, the annual rent they represent, and Contract Registration status. Anchored on the lease start date. Note: historical renewals were imported without a renewal link, so they appear here as new leases.',
     endpoint: '/api/reports/leasing-activity',
+    buildingLeaseFilter: true,
     controlKey: 'dateRange',
     columns: [
       { key: 'label', label: 'Month' },
@@ -527,6 +559,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Rent vs Market',
     description: 'Each occupied unit\'s current rent against its market benchmark — the gap is the rent you can recover when the lease renews. Sorted by biggest uplift first. "At market" is within ±5% of the benchmark.',
     endpoint: '/api/reports/rent-vs-market',
+    buildingLeaseFilter: true,
     dataNote: 'The market benchmark is each unit\'s market price as maintained on the Units page — update it there if a benchmark looks stale. Units without a benchmark are listed but excluded from the uplift total.',
     columns: [
       { key: 'buildingName', label: 'Property' },
@@ -554,6 +587,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Fee & VAT (Taxation)',
     description: 'One-off fees and rent VAT per year, bucketed by the contract start date — net, VAT and the output VAT to file. Admin & commission are VAT-able (5%); Contract Registration is exempt; rent VAT applies to commercial/industrial leases. Scope the period with the date range, and narrow to specific buildings or a leasing model (direct vs sub-lease).',
     endpoint: '/api/reports/fee-taxation',
+    feeTaxationControls: true,
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
     dataNote: 'Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT = annual rent × the contract\'s stored VAT rate (commercial / industrial only; residential is exempt). Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
@@ -769,7 +803,7 @@ export function ReportDetailView({
   const slug = slugProp as ReportSlug;
   const def = REPORTS[slug];
 
-  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; items?: Record<string, unknown>[] } | null>(null);
+  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; unitTypes?: string[]; items?: Record<string, unknown>[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -788,6 +822,13 @@ export function ReportDetailView({
   const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
   // Cash Management: client-side property filter ('' = all properties).
   const [propertyFilter, setPropertyFilter] = useState('');
+  // Unit Mix: server-side Unit type filter ('' = all types).
+  const [unitTypeSel, setUnitTypeSel] = useState<string>(() => sp?.get('unitType') ?? '');
+  // Lease-status segment (leases-by-year): Active · Expired · All. Backend
+  // default is 'all', so only an explicit active/expired needs sending.
+  const [leaseStatus, setLeaseStatus] = useState<'active' | 'expired' | 'all'>(
+    () => (sp?.get('status') === 'active' ? 'active' : sp?.get('status') === 'expired' ? 'expired' : 'all'),
+  );
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [drillFilter, setDrillFilter] = useState<string | null>(null);
   const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
@@ -857,20 +898,24 @@ export function ReportDetailView({
       if (selectedBuildings.length) extra.set('buildings', selectedBuildings.join(','));
       if (selectedLeaseTypes.length > 0 && selectedLeaseTypes.length < ALL_LEASE_TYPES.length)
         extra.set('leaseTypes', selectedLeaseTypes.join(','));
-      if (granularity === 'quarter') extra.set('groupBy', 'quarter');
+      // Year/Quarter grouping is a Fee & VAT control only.
+      if (def.feeTaxationControls && granularity === 'quarter') extra.set('groupBy', 'quarter');
       const s = extra.toString();
       if (s) url += (url.includes('?') ? '&' : '?') + s;
     }
     // Tenant scope — only the tenant/financial reports honour it; default is
     // active-only on the backend, so only the explicit "all" needs sending.
     if (TENANT_SCOPED.has(slug) && scope === 'all') url += (url.includes('?') ? '&' : '?') + 'scope=all';
+    // Unit type filter (Unit Mix).
+    if (def.unitTypeFilter && unitTypeSel) url += (url.includes('?') ? '&' : '?') + 'unitType=' + encodeURIComponent(unitTypeSel);
+    if (def.leaseStatusFilter && leaseStatus !== 'all') url += (url.includes('?') ? '&' : '?') + 'status=' + leaseStatus;
     if (extraQuery) url += (url.includes('?') ? '&' : '?') + extraQuery;
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
 
   // Close the building filter menu on an outside click.
   useEffect(() => {
@@ -883,6 +928,11 @@ export function ReportDetailView({
   }, [buildingMenuOpen]);
 
   const buildingOptions = data?.buildings ?? [];
+  // Simple-bar cascade: when exactly one lease type is chosen, the Property
+  // dropdown lists only buildings of that leasing model.
+  const leaseFilteredBuildingOptions = selectedLeaseTypes.length === 1
+    ? buildingOptions.filter(b => b.leasingType === selectedLeaseTypes[0])
+    : buildingOptions;
   // Empty selection = ALL buildings. Boxes render checked in that state; the
   // first toggle expands to an explicit set, and re-selecting everything
   // collapses back to "all" (empty) so the report stays unfiltered.
@@ -920,10 +970,10 @@ export function ReportDetailView({
   // Fee-taxation Detailed view swaps the per-period summary for per-contract
   // line items, reusing the whole table pipeline (sort / search / CSV / render).
   // For every other report these collapse to def.columns / data.rows unchanged.
-  const feeDetailed = !!def?.buildingLeaseFilter && feeView === 'detailed';
+  const feeDetailed = !!def?.feeTaxationControls && feeView === 'detailed';
   const activeColumns = useMemo(() => {
     const base = feeDetailed ? FEE_DETAIL_COLUMNS : def.columns;
-    if (!def?.buildingLeaseFilter) return base;
+    if (!def?.feeTaxationControls) return base;
     // Period column header follows the chosen granularity.
     const periodLabel = granularity === 'quarter' ? 'Quarter' : 'Year';
     return base.map(c => (c.key === 'periodLabel' ? { ...c, label: periodLabel } : c));
@@ -1136,16 +1186,29 @@ export function ReportDetailView({
   const visibleColumns = useMemo(() => activeColumns.filter(c => !deadColKeys.has(c.key)), [activeColumns, deadColKeys]);
   const visibleTotals = useMemo(() => def.totals.filter(t => !deadTotalKeys.has(t.key)), [def, deadTotalKeys]);
 
-  // Fee-taxation stacks several filter bars; gather them into one aligned card so
-  // the labels line up in a column instead of a ragged stack. Reports with a
-  // single control bar keep their bare row (the wrapper collapses to display:contents).
-  const filtersPanel = !!def?.buildingLeaseFilter;
-  const ctrlRowCls = filtersPanel
-    ? 'flex items-center gap-2 flex-wrap px-4 py-3 print:hidden'
-    : 'flex items-center gap-2 mb-4 flex-wrap print:hidden';
+  // Filter-bar styling. Three modes:
+  //  • simpleFilterBar — every report with the Property + Lease-type dropdowns
+  //    except Fee & VAT: ALL controls (period/year/window + the two dropdowns)
+  //    flow inline in ONE wrapping row inside a single bordered card.
+  //  • fee-taxation — its many controls stack as aligned rows (divide-y card).
+  //  • no filter — the wrapper collapses (display:contents) and each control
+  //    keeps its own bare row.
+  const simpleFilterBar = !!def?.buildingLeaseFilter && !def?.feeTaxationControls;
+  const filtersPanel = !!def?.buildingLeaseFilter && !!def?.feeTaxationControls;
+  const ctrlRowCls = simpleFilterBar
+    ? 'flex items-center gap-2 flex-wrap print:hidden'
+    : filtersPanel
+      ? 'flex items-center gap-2 flex-wrap px-4 py-3 print:hidden'
+      : 'flex items-center gap-2 mb-4 flex-wrap print:hidden';
   const ctrlLabelCls = filtersPanel
     ? 'text-xs text-[#6b6860] font-semibold min-w-[104px]'
     : 'text-xs text-[#6b6860] font-medium';
+  // Simple-filter-bar group: a small label stacked directly above its field, so
+  // every filter (Year · Property · Lease type · Customers) lines up as one row
+  // of matching label-over-dropdown columns.
+  const fGroup = 'flex flex-col gap-1';
+  const fLabel = 'text-[10px] uppercase tracking-wide font-semibold text-[#9b9890] px-0.5';
+  const fSelect = 'text-xs font-semibold text-[#1a1916] bg-white border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82] cursor-pointer disabled:opacity-50';
 
   function handleCsv() {
     if (!data) return;
@@ -1319,7 +1382,7 @@ export function ReportDetailView({
               <ArrowLeft size={12} /> All Reports
             </Link>
           )}
-          <h1 className="text-2xl font-bold text-[#1a1916] flex items-center gap-2">
+          <h1 className="text-xl font-bold text-[#1a1916] flex items-center gap-2">
             {def.title}
             <InfoTip text={def.description} />
           </h1>
@@ -1344,7 +1407,7 @@ export function ReportDetailView({
 
       {/* Print-only header */}
       <div className="hidden print:block mb-6">
-        <h1 className="text-2xl font-bold">{def.title}</h1>
+        <h1 className="text-xl font-bold">{def.title}</h1>
         <p className="text-sm text-gray-600">{def.description}</p>
         {data && <p className="text-xs text-gray-500 mt-1">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>}
       </div>
@@ -1359,12 +1422,129 @@ export function ReportDetailView({
 
       {/* Filters — grouped into one aligned card for fee-taxation; a transparent
           (display:contents) wrapper everywhere else so single-bar reports are unchanged. */}
-      <div className={filtersPanel ? 'rounded-2xl border border-[#e8e6e0] bg-white divide-y divide-[#f0ede8] mb-6 print:hidden' : 'contents'}>
+      <div className={
+        simpleFilterBar
+          ? 'rounded-2xl border border-[#e8e6e0] bg-white flex flex-wrap items-end gap-x-4 gap-y-3 px-4 py-3 mb-6 print:hidden'
+          : filtersPanel
+            ? 'rounded-2xl border border-[#e8e6e0] bg-white divide-y divide-[#f0ede8] mb-6 print:hidden'
+            : 'contents'
+      }>
 
-      {/* Lease-expiry window control */}
-      {def.controlKey === 'leaseExpiryWindow' && (
-        <div className="flex items-center gap-2 mb-4 print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Window:</span>
+      {/* Consolidated filter bar — the time control + Property + Lease type +
+          Customer scope, each a label-over-dropdown column, all on one row.
+          Replaces the individual control blocks below (which are gated off when
+          simpleFilterBar is on). */}
+      {simpleFilterBar && (
+        <>
+          {def.controlKey === 'year' && (
+            <div className={fGroup}>
+              <span className={fLabel}>Year</span>
+              <select className={fSelect} value={year} onChange={e => setYear(Number(e.target.value))} aria-label="Year">
+                {Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i).map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          )}
+          {def.controlKey === 'yearRange' && (
+            <div className={fGroup}>
+              <span className={fLabel}>Year</span>
+              <select className={fSelect}
+                value={/^\d{4}-01-01$/.test(from) && to === `${from.slice(0, 4)}-12-31` ? from.slice(0, 4) : 'all'}
+                onChange={e => { const v = e.target.value; if (v === 'all') { setFrom(''); setTo(''); } else { setFrom(`${v}-01-01`); setTo(`${v}-12-31`); } }}
+                aria-label="Year">
+                <option value="all">All years</option>
+                {Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i).map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          )}
+          {def.controlKey === 'leaseExpiryWindow' && (
+            <div className={fGroup}>
+              <span className={fLabel}>Window</span>
+              <select className={fSelect} value={leaseWindow}
+                onChange={e => { const w = Number(e.target.value); setLeaseWindow(w); if (urlBase) router.replace(`${urlBase}/lease-expiry?window=${w}`); }}
+                aria-label="Window">
+                {[30, 60, 90, 180, 365].map(w => <option key={w} value={w}>{w} days</option>)}
+              </select>
+            </div>
+          )}
+          {def.controlKey === 'forecastMonths' && (
+            <div className={fGroup}>
+              <span className={fLabel}>Horizon</span>
+              <select className={fSelect} value={forecastMonths}
+                onChange={e => { const m = Number(e.target.value); setForecastMonths(m); if (urlBase) router.replace(`${urlBase}/${slug}?months=${m}`); }}
+                aria-label="Horizon">
+                {[3, 6, 12, 24].map(m => <option key={m} value={m}>{m} months</option>)}
+              </select>
+            </div>
+          )}
+          {def.controlKey === 'dateRange' && (
+            <div className={fGroup}>
+              <span className={fLabel}>Period</span>
+              <DateRangePicker from={from} to={to} placeholder="All time" onChange={(f, t) => { setFrom(f); setTo(t); }} />
+            </div>
+          )}
+          {/* Lease type FIRST — picking one narrows the Property list below to
+              matching buildings (and resets the property choice so it can't point
+              at a now-hidden building). */}
+          <div className={fGroup}>
+            <span className={fLabel}>Lease type</span>
+            <select className={fSelect} aria-label="Lease type"
+              value={selectedLeaseTypes.length === 1 ? selectedLeaseTypes[0] : 'all'}
+              onChange={e => { setSelectedLeaseTypes(e.target.value === 'all' ? [...ALL_LEASE_TYPES] : [e.target.value as LeaseType]); setSelectedBuildings([]); }}>
+              <option value="all">All lease types</option>
+              <option value="direct">Lease</option>
+              <option value="sub">Sub-lease</option>
+              <option value="management">Management</option>
+            </select>
+          </div>
+          <div className={fGroup}>
+            <span className={fLabel}>Property</span>
+            <select className={fSelect} aria-label="Property"
+              value={selectedBuildings.length === 1 ? String(selectedBuildings[0]) : 'all'}
+              onChange={e => setSelectedBuildings(e.target.value === 'all' ? [] : [Number(e.target.value)])}
+              disabled={leaseFilteredBuildingOptions.length === 0}>
+              <option value="all">All properties</option>
+              {leaseFilteredBuildingOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          {def.unitTypeFilter && (
+            <div className={fGroup}>
+              <span className={fLabel}>Unit type</span>
+              <select className={fSelect} aria-label="Unit type"
+                value={unitTypeSel}
+                onChange={e => setUnitTypeSel(e.target.value)}
+                disabled={(data?.unitTypes ?? []).length === 0}>
+                <option value="">All unit types</option>
+                {(data?.unitTypes ?? []).map(t => <option key={t} value={t}>{prettyUnitType(t)}</option>)}
+              </select>
+            </div>
+          )}
+          {TENANT_SCOPED.has(slug) && (
+            <div className={fGroup}>
+              <span className={fLabel}>Customers</span>
+              <select className={fSelect} aria-label="Customers" value={scope} onChange={e => setScope(e.target.value as 'active' | 'all')}>
+                <option value="active">Active only</option>
+                <option value="all">Incl. ended</option>
+              </select>
+            </div>
+          )}
+          {def.leaseStatusFilter && (
+            <div className={fGroup}>
+              <span className={fLabel}>Leases</span>
+              <select className={fSelect} aria-label="Lease status" value={leaseStatus} onChange={e => setLeaseStatus(e.target.value as 'active' | 'expired' | 'all')}>
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="expired">Expired</option>
+              </select>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Lease-expiry window control (non-simple reports only — the simple bar
+          above renders this as a dropdown). */}
+      {!simpleFilterBar && def.controlKey === 'leaseExpiryWindow' && (
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Window:</span>
           {[30, 60, 90, 180, 365].map(w => (
             <button
               key={w}
@@ -1376,10 +1556,10 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Renewal-forecast horizon control */}
-      {def.controlKey === 'forecastMonths' && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Horizon:</span>
+      {/* Renewal-forecast horizon control (non-simple reports only). */}
+      {!simpleFilterBar && def.controlKey === 'forecastMonths' && (
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Horizon:</span>
           {[3, 6, 12, 24].map(m => (
             <button
               key={m}
@@ -1392,8 +1572,8 @@ export function ReportDetailView({
       )}
 
       {/* Date-range control — single picker with preset shortcuts + two-month
-          calendar (shared across every date-range report). */}
-      {def.controlKey === 'dateRange' && (
+          calendar (shared across every date-range report). Non-simple only. */}
+      {!simpleFilterBar && def.controlKey === 'dateRange' && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>Period:</span>
           <DateRangePicker from={from} to={to}
@@ -1403,7 +1583,7 @@ export function ReportDetailView({
       )}
 
       {/* View (overall summary vs per-contract detail) + bucketing granularity. */}
-      {def.buildingLeaseFilter && (
+      {def.feeTaxationControls && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>View:</span>
           {([
@@ -1432,7 +1612,7 @@ export function ReportDetailView({
       )}
 
       {/* Building + leasing-model (direct/sub/management) filters — fee-taxation only. */}
-      {def.buildingLeaseFilter && (
+      {def.feeTaxationControls && (
         <div className={ctrlRowCls}>
           {/* Leasing model — true multi-select; all on = all. */}
           <span className={ctrlLabelCls}>Leasing model:</span>
@@ -1514,10 +1694,11 @@ export function ReportDetailView({
       )}
 
       {/* Year dropdown (deposit register — "yearly document"): maps the picked
-          year to a Jan 1 – Dec 31 from/to range, or clears it for All years. */}
-      {def.controlKey === 'yearRange' && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Year:</span>
+          year to a Jan 1 – Dec 31 from/to range, or clears it for All years.
+          Non-simple only. */}
+      {!simpleFilterBar && def.controlKey === 'yearRange' && (
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Year:</span>
           <select
             value={/^\d{4}-01-01$/.test(from) && to === `${from.slice(0, 4)}-12-31` ? from.slice(0, 4) : 'all'}
             onChange={e => {
@@ -1534,8 +1715,10 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Property filter (Cash / Cheques Management matrix) — client-side, narrows to one building */}
-      {(def.layout === 'matrix' || def.layout === 'chequeMatrix') && propertyOptions.length > 0 && (
+      {/* Property filter (Cash / Cheques Management matrix) — client-side, narrows to one
+          building. Superseded by the server-side Property + Lease-type filter when
+          buildingLeaseFilter is on, so it's only shown when that isn't. */}
+      {!def.buildingLeaseFilter && (def.layout === 'matrix' || def.layout === 'chequeMatrix') && propertyOptions.length > 0 && (
         <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
           <span className="text-xs text-[#6b6860] font-medium">Property:</span>
           <select
@@ -1554,10 +1737,10 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Year selector (rent-roll matrix) */}
-      {def.controlKey === 'year' && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Year:</span>
+      {/* Year selector (rent-roll matrix) — non-simple only. */}
+      {!simpleFilterBar && def.controlKey === 'year' && (
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Year:</span>
           {Array.from({ length: CURRENT_YEAR - 2021 }, (_, i) => 2023 + i).map(y => (
             <button key={y} onClick={() => setYear(y)}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${year === y ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
@@ -1567,8 +1750,9 @@ export function ReportDetailView({
         </div>
       )}
 
-      {/* Tenant scope — active customers only (default) vs include ended tenants. */}
-      {TENANT_SCOPED.has(slug) && (
+      {/* Tenant scope — active customers only (default) vs include ended tenants.
+          Non-simple only (the simple bar renders this as a dropdown). */}
+      {!simpleFilterBar && TENANT_SCOPED.has(slug) && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>Customers:</span>
           {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
@@ -1594,9 +1778,9 @@ export function ReportDetailView({
               : def.layout === 'countMatrix' && countMatrixView ? countMatrixView.totals
               : data.totals)[t.key];
             return (
-              <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
+              <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-2.5">
                 <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
-                <p className="text-base font-bold text-[#1a1916] mt-1">
+                <p className="text-sm font-bold text-[#1a1916] mt-0.5">
                   {t.type === 'aed' ? fmtAed(raw) : t.type === 'rate' ? `${Number(raw).toFixed(1)}%` : fmtNumber(raw)}
                 </p>
               </div>
@@ -1679,11 +1863,11 @@ export function ReportDetailView({
                 {/* Leases in this month */}
                 {!isCollapsed && (
                   <div className="overflow-x-auto border-t border-[#f0ede8]">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-xs">
                       <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                         <tr>
                           {dd.columns.map(c => (
-                            <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                            <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
                           ))}
                           {dd.contractIdKey && <th className="px-3 py-2.5 print:hidden" aria-hidden />}
                         </tr>
@@ -1692,7 +1876,7 @@ export function ReportDetailView({
                         {g.items.map((it, idx) => (
                           <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                             {dd.columns.map(c => (
-                              <td key={c.key} className={`px-4 py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                              <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
                                 <CellValue value={it[c.key]} type={c.type} />
                               </td>
                             ))}
@@ -1721,7 +1905,7 @@ export function ReportDetailView({
       ) : def.layout === 'matrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
-            <table className="text-sm border-collapse min-w-full">
+            <table className="text-xs border-collapse min-w-full">
               <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                 <tr>
                   <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">By Unit</th>
@@ -1739,7 +1923,7 @@ export function ReportDetailView({
                   const cells = (row.cells as { amountFils: number; status: string | null }[]) ?? [];
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
-                      <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left">
+                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left">
                         <div className="font-medium text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
                         <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>
                         {Boolean(row.contractStartDate || row.contractEndDate) && (
@@ -1748,15 +1932,15 @@ export function ReportDetailView({
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.annualRentFils))}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.annualRentFils))}</td>
                       {cells.map((c, ci) => (
                         <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
                           {fmtAmt(c.amountFils)}
                         </td>
                       ))}
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-medium text-[#15803d] whitespace-nowrap">{fmtAmt(Number(row.ytdReceivedFils))}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-medium text-[#15803d] whitespace-nowrap">{fmtAmt(Number(row.ytdReceivedFils))}</td>
                     </tr>
                   );
                 })}
@@ -1779,21 +1963,21 @@ export function ReportDetailView({
                   const cum = colTot.map(t => (run += Number(t) || 0));
                   return (
                     <tr className="border-t border-[#e8e6e0] font-medium text-[#6b6860]">
-                      <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-2.5 text-left font-semibold">Cumulative</td>
-                      <td className="px-4 py-2.5 border-l border-[#e8e6e0]" />
+                      <td className="sticky left-0 z-10 bg-[#fafaf8] px-3 py-2 text-left font-semibold">Cumulative</td>
+                      <td className="px-3 py-2 border-l border-[#e8e6e0]" />
                       {cum.map((t, ti) => (
                         <td key={ti} className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
                       ))}
-                      <td className="px-4 py-2.5 text-right tabular-nums border-l border-[#e8e6e0] font-semibold text-[#1a1916]">{fmtAmt(run)}</td>
-                      <td className="px-4 py-2.5 border-l border-[#e8e6e0]" />
-                      <td className="px-4 py-2.5" />
+                      <td className="px-3 py-2 text-right tabular-nums border-l border-[#e8e6e0] font-semibold text-[#1a1916]">{fmtAmt(run)}</td>
+                      <td className="px-3 py-2 border-l border-[#e8e6e0]" />
+                      <td className="px-3 py-2" />
                     </tr>
                   );
                 })()}
               </tfoot>
             </table>
           </div>
-          <div className="flex items-center gap-4 px-4 py-2.5 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
+          <div className="flex items-center gap-4 px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#15803d]" /> Collected</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#b45309]" /> Pending</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#dc2626]" /> Bounced</span>
@@ -1803,7 +1987,7 @@ export function ReportDetailView({
       ) : def.layout === 'chequeMatrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
-            <table className="text-sm border-collapse min-w-full">
+            <table className="text-xs border-collapse min-w-full">
               <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                 <tr>
                   <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[200px]">Unit / Building / Duration</th>
@@ -1826,8 +2010,8 @@ export function ReportDetailView({
                   const counts = (row.monthCounts as number[]) ?? [];
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
-                      <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left whitespace-nowrap">
-                        <div className="text-[15px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left whitespace-nowrap">
+                        <div className="text-[13px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
                         <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '—')}</div>
                         {Boolean(row.contractStartDate || row.contractEndDate) && (
                           <div className="text-[11px] text-[#9b9890] leading-tight">
@@ -1846,7 +2030,7 @@ export function ReportDetailView({
                           {n ? fmtNumber(n) : '·'}
                         </td>
                       ))}
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
                     </tr>
                   );
                 })}
@@ -1866,7 +2050,7 @@ export function ReportDetailView({
       ) : def.layout === 'countMatrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
-            <table className="text-sm border-collapse min-w-full">
+            <table className="text-xs border-collapse min-w-full">
               <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                 <tr>
                   <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">Property</th>
@@ -1887,18 +2071,18 @@ export function ReportDetailView({
                   const cells = (row.cells as number[]) ?? [];
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
-                      <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left font-medium text-[#1a1916] whitespace-nowrap">{String(row.label ?? '—')}</td>
+                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-medium text-[#1a1916] whitespace-nowrap">{String(row.label ?? '—')}</td>
                       {cells.map((n, ci) => (
                         <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${Number(n) ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
                           {Number(n) ? fmtNumber(Number(n)) : '·'}
                         </td>
                       ))}
                       {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-                        <td key={c.key} className={`px-4 py-2.5 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916] border-l border-[#f0ede8]' : 'text-[#6b6860]'}`}>
+                        <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916] border-l border-[#f0ede8]' : 'text-[#6b6860]'}`}>
                           {c.type === 'aed' ? fmtAed(Number(row[c.key] ?? 0)) : fmtNumber(Number(row[c.key] ?? 0))}
                         </td>
                       )) : (<>
-                        <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.total))}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.total))}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
                           {Number(row.vacant) ? (
                             <button
@@ -1910,7 +2094,7 @@ export function ReportDetailView({
                             </button>
                           ) : <span className="text-[#d4d2cc]">·</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-[#6b6860] whitespace-nowrap">{fmtNumber(Number(row.totalUnits))}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-[#6b6860] whitespace-nowrap">{fmtNumber(Number(row.totalUnits))}</td>
                       </>)}
                     </tr>
                   );
@@ -1954,7 +2138,7 @@ export function ReportDetailView({
             </table>
           </div>
           {!def.matrixTrailing && (
-            <div className="px-4 py-2.5 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
+            <div className="px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
               Months add up to Renewals — the units coming up for renewal in the selected year (each counted once, in its renewal month). Vacant and Total units are current inventory (each unit&rsquo;s live status), independent of the year. Click a Vacant count to list those units.
             </div>
           )}
@@ -1962,7 +2146,7 @@ export function ReportDetailView({
       ) : (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                 <tr>
                   {visibleColumns.map(c => (
@@ -2070,11 +2254,11 @@ export function ReportDetailView({
                 </div>
               </div>
               <div className="overflow-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-xs">
                   <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
                     <tr>
                       {dd.columns.map(c => (
-                        <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                        <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
                       ))}
                       {dd.contractIdKey && <th className="px-3 py-2.5" aria-hidden />}
                     </tr>
@@ -2083,7 +2267,7 @@ export function ReportDetailView({
                     {items.map((it, idx) => (
                       <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                         {dd.columns.map(c => (
-                          <td key={c.key} className={`px-4 py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                          <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
                             <CellValue value={it[c.key]} type={c.type} />
                           </td>
                         ))}
@@ -2126,11 +2310,11 @@ export function ReportDetailView({
               {vacantList.units.length === 0 ? (
                 <div className="px-5 py-8 text-center text-sm text-[#9b9890]">No vacant units.</div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-xs">
                   <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
                     <tr>
                       <th className="px-5 py-2.5 text-left font-semibold">Unit</th>
-                      <th className="px-4 py-2.5 text-left font-semibold">Type</th>
+                      <th className="px-3 py-2 text-left font-semibold">Type</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Asking rent</th>
                     </tr>
                   </thead>
@@ -2138,7 +2322,7 @@ export function ReportDetailView({
                     {vacantList.units.map(u => (
                       <tr key={u.unitId} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                         <td className="px-5 py-2.5 text-left font-medium text-[#1a1916]">{u.label}</td>
-                        <td className="px-4 py-2.5 text-left text-[#6b6860] capitalize">{(u.unitType ?? '—').replace(/_/g, ' ')}</td>
+                        <td className="px-3 py-2 text-left text-[#6b6860] capitalize">{(u.unitType ?? '—').replace(/_/g, ' ')}</td>
                         <td className="px-5 py-2.5 text-right tabular-nums text-[#1a1916]">{u.rentFils ? fmtAed(u.rentFils) : '—'}</td>
                       </tr>
                     ))}
