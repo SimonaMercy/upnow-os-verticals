@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * RP Settings → Inspection Prices — the per-RP inspection price book (§9.9 / R9/R10).
+ * RP → Restoration List — the per-RP inspection price book (§9.9 / R9/R10).
  * Edit the reference unit price / unit-of-measure per component; the move-in/out
  * scaffold reads these rates (seeded from the platform standard). RP-only.
  */
@@ -52,7 +52,13 @@ function catUnitLabel(key: string): string {
   return CAT_UNITLABEL[key] ?? 'Per Item';
 }
 
-export default function InspectionPricesPage() {
+/**
+ * The Restoration List editor. Rendered directly for the landlord (no `manager`
+ * prop → their own /inspection-price-book) and re-used by the Manager portal
+ * with `manager={{ rp }}`, which swaps every call to the landlord-scoped
+ * /manager/inspection-price-book?rp= endpoints (gated by canManageInspections).
+ */
+export function RestorationListWorkspace({ manager }: { manager?: { rp: number } }) {
   const router = useRouter();
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,32 +69,40 @@ export default function InspectionPricesPage() {
   const [addTo, setAddTo] = useState<{ categoryKey: string; subCategory: string | null; label: string } | null>(null);
   const [addingSection, setAddingSection] = useState(false);
 
+  // Landlord uses their own endpoint; a manager targets the acting landlord
+  // (?rp=) via the /manager mirror. List + upsert share one URL; reset appends.
+  const { listUrl, resetUrl } = useMemo(() => {
+    const base = manager ? '/api/manager/inspection-price-book' : '/api/inspection-price-book';
+    const rpQ = manager ? `?rp=${manager.rp}` : '';
+    return { listUrl: `${base}${rpQ}`, resetUrl: `${base}/reset${rpQ}` };
+  }, [manager]);
+
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch('/api/inspection-price-book', { credentials: 'include' });
+      const res = await fetch(listUrl, { credentials: 'include' });
       if (!res.ok) { setError('Could not load the price book.'); return; }
       setRows(await res.json());
     } catch { setError('Unexpected error loading the price book.'); }
     finally { setLoading(false); }
-  }, []);
+  }, [listUrl]);
 
   useEffect(() => {
     (async () => {
       setLoading(true); setError(null);
       try {
-        const res = await fetch('/api/inspection-price-book', { credentials: 'include' });
+        const res = await fetch(listUrl, { credentials: 'include' });
         if (!res.ok) { setError('Could not load the price book.'); return; }
         setRows(await res.json());
       } catch { setError('Unexpected error loading the price book.'); }
       finally { setLoading(false); }
     })();
-  }, []);
+  }, [listUrl]);
 
   const save = useCallback(async (row: PriceRow) => {
     setSavingId(row.id);
     try {
-      const res = await fetch('/api/inspection-price-book', {
+      const res = await fetch(listUrl, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: row.id, categoryKey: row.categoryKey, subCategory: row.subCategory,
@@ -101,7 +115,7 @@ export default function InspectionPricesPage() {
       setSavedId(row.id); setTimeout(() => setSavedId((s) => (s === row.id ? null : s)), 1500);
     } catch { setError('Save failed.'); }
     finally { setSavingId(null); }
-  }, []);
+  }, [listUrl]);
 
   const patch = useCallback((id: number, p: Partial<PriceRow>, persist = true) => {
     setRows((rs) => {
@@ -122,7 +136,7 @@ export default function InspectionPricesPage() {
     );
     if (dup) return `"${name}" already exists in this section.`;
     try {
-      const res = await fetch('/api/inspection-price-book', {
+      const res = await fetch(listUrl, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categoryKey, subCategory, componentName: name, unitOfMeasure: 'item', unitPriceAed }),
       });
@@ -138,7 +152,7 @@ export default function InspectionPricesPage() {
     const categoryKey = `custom:${sectionName.trim()}`;
     if (rows.some((r) => r.categoryKey === categoryKey)) return `A section named "${sectionName.trim()}" already exists.`;
     try {
-      const res = await fetch('/api/inspection-price-book', {
+      const res = await fetch(listUrl, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categoryKey, componentName: firstItem.trim(), unitOfMeasure: 'item', unitPriceAed }),
       });
@@ -152,7 +166,7 @@ export default function InspectionPricesPage() {
     if (!confirm('Reset the whole price book to the platform standard? Your custom prices and rows will be replaced.')) return;
     setResetting(true); setError(null);
     try {
-      const res = await fetch('/api/inspection-price-book/reset', { method: 'POST', credentials: 'include' });
+      const res = await fetch(resetUrl, { method: 'POST', credentials: 'include' });
       if (!res.ok) { setError('Reset failed.'); return; }
       setRows(await res.json());
     } catch { setError('Reset failed.'); }
@@ -314,6 +328,11 @@ export default function InspectionPricesPage() {
       )}
     </div>
   );
+}
+
+/** RP route — the landlord editing their own Restoration List. */
+export default function RestorationListPage() {
+  return <RestorationListWorkspace />;
 }
 
 /** Simple popup to add a new custom section (with its first item). */

@@ -205,8 +205,10 @@ export default function CategoryInspectionPage() {
 
   // Add a sub-category/component to a category, pricing it from the RP price book
   // (falling back to the platform seed). `seedRow` present → a standard component;
-  // absent → a custom, unpriced row the RP can note.
-  const addComponent = useCallback((sectionId: string, name: string, seedRow?: PriceBookSeedRow) => {
+  // absent → a custom row. A custom row may carry an explicit `customPriceAed` so
+  // it lands PRICED (frozen on the item) instead of null — otherwise it re-resolves
+  // live on every read, which would let later Restoration List edits shift it.
+  const addComponent = useCallback((sectionId: string, name: string, seedRow?: PriceBookSeedRow, customPriceAed?: number) => {
     if (!name.trim()) return;
     setDoc((d) => {
       if (!d) return d;
@@ -236,6 +238,9 @@ export default function CategoryInspectionPage() {
             item.unitCostAed = resolved.unitPriceAed;
             if (resolved.variantLabel != null) item.variantLabel = resolved.variantLabel;
             if (resolved.id != null) item.priceBookEntryId = resolved.id;
+          } else if (customPriceAed != null && Number.isFinite(customPriceAed) && customPriceAed >= 0) {
+            // Custom component with a hand-entered rate — freeze it on the item.
+            item.unitCostAed = customPriceAed;
           }
           return { ...cat, items: [...cat.items, item] };
         }),
@@ -565,7 +570,7 @@ export default function CategoryInspectionPage() {
         <AddComponentPicker
           cat={compPickerCat}
           priceBook={priceBook}
-          onAdd={(name, seedRow) => addComponent(compPickerCat.sectionId, name, seedRow)}
+          onAdd={(name, seedRow, customPriceAed) => addComponent(compPickerCat.sectionId, name, seedRow, customPriceAed)}
           onClose={() => setCompPickerSection(null)}
         />
       )}
@@ -722,34 +727,62 @@ function AddCategoryPicker({ existingKeys, onAdd, onClose }: {
 function AddComponentPicker({ cat, priceBook, onAdd, onClose }: {
   cat: InspectionCategory;
   priceBook: InspectionPriceBookEntry[] | null;
-  onAdd: (name: string, seedRow?: PriceBookSeedRow) => void;
+  onAdd: (name: string, seedRow?: PriceBookSeedRow, customPriceAed?: number) => void;
   onClose: () => void;
 }) {
   const [custom, setCustom] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
   const [added, setAdded] = useState<Set<string>>(new Set());
   const canon: CanonicalCategoryKey = canonicalKey(cat.key);
-  const seed = CATALOG_BY_KEY[canon]?.seed ?? [];
+
+  // The pickable components come from the RP's Restoration List (price book) for
+  // this category — NOT the static catalog. The price book is seeded from the
+  // platform standard, so it already holds every standard component plus the RP's
+  // own additions, each with the RP's own rate. The static catalog is used ONLY
+  // as a safety net — when the price book hasn't loaded (null) or has no row for
+  // this exact category (a legacy/aliased key, or an empty custom section) — so
+  // the picker is never empty. Exact-key match keeps the list in step with
+  // pricing, which also resolves on `categoryKey === cat.key`.
+  const rows: PriceBookSeedRow[] = useMemo(() => {
+    const fromList = (priceBook ?? [])
+      .filter((e) => e.isActive && e.categoryKey === cat.key)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+      .map((e): PriceBookSeedRow => ({
+        name: e.componentName,
+        unitOfMeasure: e.unitOfMeasure,
+        unitPriceAed: e.unitPriceAed,
+        subCategory: e.subCategory ?? undefined,
+        variantLabel: e.variantLabel ?? undefined,
+      }));
+    return fromList.length > 0 ? fromList : (CATALOG_BY_KEY[canon]?.seed ?? []);
+  }, [priceBook, cat.key, canon]);
+
   const usedNames = new Set(cat.items.map((i) => `${i.componentName}|${i.subCategory ?? ''}`));
 
   const price = (row: PriceBookSeedRow): number | undefined =>
     resolvePriceBookEntry(priceBook, cat.key as CategoryKey, row.subCategory ?? null, row.name, row.variantLabel ?? null)?.unitPriceAed;
 
+  const priceInvalid = customPrice.trim() !== '' && (!Number.isFinite(Number(customPrice)) || Number(customPrice) < 0);
   const addCustom = () => {
     const name = custom.trim();
-    if (!name) return;
-    onAdd(name);
-    setCustom('');
+    if (!name || priceInvalid) return;
+    const raw = customPrice.trim();
+    onAdd(name, undefined, raw === '' ? undefined : Number(raw));
+    setCustom(''); setCustomPrice('');
   };
 
   return (
     <ModalShell title={`Add to ${cat.label || 'category'}`} subtitle="From the restoration list, or a custom component" onClose={onClose}>
       <div className="space-y-1.5 mb-4 max-h-[46vh] overflow-y-auto">
-        {seed.map((row) => {
+        {rows.map((row) => {
           const rowKey = `${row.name}|${row.subCategory ?? ''}`;
+          // React key includes the variant so two variants of one component
+          // (same name+sub) don't collide; `rowKey` drives the added/used dedup.
+          const reactKey = `${rowKey}|${row.variantLabel ?? ''}`;
           const done = added.has(rowKey) || usedNames.has(rowKey);
           const p = price(row);
           return (
-            <button key={rowKey} disabled={done}
+            <button key={reactKey} disabled={done}
               onClick={() => { onAdd(row.name, row); setAdded((s) => new Set(s).add(rowKey)); }}
               className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-sm text-left ${done ? 'border-[#cfe8df] bg-[#f0faf6]' : 'border-[#e8e6e0] hover:border-[#2e9f82] hover:bg-[#fafaf8]'}`}>
               <span className="min-w-0">
@@ -763,12 +796,25 @@ function AddComponentPicker({ cat, priceBook, onAdd, onClose }: {
             </button>
           );
         })}
-        {seed.length === 0 && <p className="text-xs text-[#9b9890] px-1 py-2">No standard components for this category — add a custom one below.</p>}
+        {rows.length === 0 && <p className="text-xs text-[#9b9890] px-1 py-2">No standard components for this category — add a custom one below.</p>}
       </div>
-      <div className="flex items-center gap-2 border-t border-[#f0efe9] pt-3">
-        <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
-          placeholder="Custom component name…" className={CUSTOM_INPUT} />
-        <button onClick={addCustom} disabled={!custom.trim()} className={CUSTOM_ADD}><Plus size={14} /> Add</button>
+      <div className="border-t border-[#f0efe9] pt-3">
+        <div className="flex items-center gap-2">
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
+            placeholder="Custom component name…" className={CUSTOM_INPUT} />
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[11px] text-[#9b9890]">AED</span>
+            <input type="number" min={0} step={0.01} value={customPrice}
+              onChange={(e) => setCustomPrice(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
+              placeholder="Price"
+              className="w-20 px-2 py-2 rounded-lg border border-[#e8e6e0] text-sm text-right tabular-nums focus:outline-none focus:border-[#2e9f82]" />
+          </div>
+          <button onClick={addCustom} disabled={!custom.trim() || priceInvalid} className={CUSTOM_ADD}><Plus size={14} /> Add</button>
+        </div>
+        <p className="text-[11px] text-[#9b9890] mt-1.5">
+          {priceInvalid ? <span className="text-red-600">Enter a valid price (0 or more).</span>
+            : 'Set a price so the rate is saved with the report. Leave blank to add without a rate.'}
+        </p>
       </div>
     </ModalShell>
   );

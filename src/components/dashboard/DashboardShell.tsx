@@ -90,7 +90,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare },
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
     { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart },
-    { label: 'Restoration List', href: '/rental-provider/dashboard/settings/inspection-prices', icon: Receipt },
+    { label: 'Restoration List', href: '/rental-provider/dashboard/restoration-list', icon: Receipt },
     { divider: true },
     { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings },
   ],
@@ -122,6 +122,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
+    { label: 'Restoration List', href: '/dashboard/manager/restoration-list', icon: Receipt, requirePerm: 'canManageInspections' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports' },
     { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance' },
@@ -351,7 +352,7 @@ function Sidebar({
           const onPath = (base: string) => pathname === base || pathname.startsWith(base + '/');
           const matchesThis = onPath(item.href) || (item.match?.some(onPath) ?? false);
           // Most-specific wins: a parent (e.g. Settings) yields the highlight to a
-          // deeper nav item under it (e.g. Restoration List at /settings/inspection-prices).
+          // deeper nav item nested under its href.
           const moreSpecific = navHrefs.some((h) => h !== item.href && h.startsWith(item.href + '/') && onPath(h));
           const isActive = isOverview
             ? pathname === item.href
