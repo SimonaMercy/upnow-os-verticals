@@ -21,7 +21,7 @@ import { ArrowLeft, Printer, Loader2, AlertCircle, Download } from 'lucide-react
 import { REPORT_YEARS, CURRENT_YEAR } from '@/components/upnow/reportsYear';
 
 /* ── payload types (subset of ReportsService.OperationsByStageReport) ──────── */
-interface ManagerSheet { userId: number; name: string; monthly: number[][]; monthlyTotals: number[] }
+interface ManagerSheet { userId: number; name: string; isLandlord?: boolean; monthly: number[][]; monthlyTotals: number[] }
 interface Payload {
   generatedAt: string; from: string | null; to: string | null; scoped: boolean; year: number;
   stageMatrix: { stages: string[] };
@@ -78,12 +78,23 @@ export function OperationsByStageReport({
   const stages = data?.stageMatrix.stages ?? [];
   const yy = useMemo(() => String(year).slice(2), [year]);
 
-  // Sheets to render — one per manager. Idle people are dropped from the team
-  // view; the self-view always shows the single manager (even if empty).
-  const sheets = useMemo(
-    () => (data?.perManager ?? []).filter((p, _i, arr) => arr.length === 1 || p.monthlyTotals.some(v => v > 0)),
-    [data],
-  );
+  // Sheets to render.
+  //  • Manager self-view: the single manager's own sheet (even if empty).
+  //  • Landlord/team view: an "Overall" sheet for the whole account first, then
+  //    one sheet per manager. The account owner's own-activity row is folded
+  //    into Overall, never shown separately. Idle managers are dropped.
+  const sheets = useMemo<ManagerSheet[]>(() => {
+    if (!data) return [];
+    if (data.scoped) {
+      return data.perManager.filter((p, _i, arr) => arr.length === 1 || p.monthlyTotals.some(v => v > 0));
+    }
+    const list: ManagerSheet[] = [];
+    if (data.monthlyTotals.some(v => v > 0)) {
+      list.push({ userId: -1, name: 'Overall — whole account', monthly: data.monthly, monthlyTotals: data.monthlyTotals });
+    }
+    list.push(...data.perManager.filter(p => !p.isLandlord && p.monthlyTotals.some(v => v > 0)));
+    return list;
+  }, [data]);
 
   const downloadCsv = () => {
     if (!data) return;
@@ -122,7 +133,7 @@ export function OperationsByStageReport({
           <p className="text-sm text-[#6b6860] mt-0.5 max-w-[80ch]">
             {data?.scoped
               ? 'The records you progressed at each stage, month by month — your own activity and operation pipeline. Signatures marked “on file” are never counted.'
-              : 'Records each manager progressed at each stage, month by month — one sheet per manager. Signatures marked “on file” are never counted.'}
+              : 'Records progressed at each stage, month by month — an overall sheet for your whole account, then one per manager. Signatures marked “on file” are never counted.'}
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
