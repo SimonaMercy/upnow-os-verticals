@@ -258,7 +258,7 @@ export function ManagerOperationsReport({
   contractsBase = '/rental-provider/dashboard/contracts',
   leadsBase = '/rental-provider/dashboard/leads',
 }: { backHref?: string; contractsBase?: string; leadsBase?: string }) {
-  const [preset, setPreset] = useState<Preset>('week');
+  const [preset, setPreset] = useState<Preset>('today');
   const [customFrom, setCustomFrom] = useState(() => addDays(dubaiToday(), -29));
   const [customTo, setCustomTo] = useState(() => dubaiToday());
   const [data, setData] = useState<Payload | null>(null);
