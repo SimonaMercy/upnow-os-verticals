@@ -115,7 +115,7 @@ export const PERM_GROUPS = [
       { key: 'canManageContractLifecycle', label: 'Issue / activate / cancel leases', meta: 'can_manage_contract_lifecycle' },
       { key: 'canManageRenewals',    label: 'Manage contract renewals',     meta: 'can_manage_renewals' },
       { key: 'canManageTermination', label: 'Terminate leases',             meta: 'can_manage_termination' },
-      { key: 'canManageInspections', label: 'Move-in / move-out inspections', meta: 'can_manage_inspections' },
+      { key: 'canManageInspections', label: 'Inspections & Restoration List', meta: 'can_manage_inspections' },
       { key: 'canSignDocuments',     label: 'Sign tenancy contracts',       meta: 'can_sign_documents' },
       { key: 'canSignAddenda',       label: 'Sign addenda & amendments',    meta: 'can_sign_addenda' },
       { key: 'canManageEjari',       label: 'Register / manage Contract Registration',      meta: 'can_manage_ejari' },
