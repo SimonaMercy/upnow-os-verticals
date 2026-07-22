@@ -47,10 +47,11 @@ export default function ManagerReportsPage() {
   const [search, setSearch] = useState('');
   const [openSlug, setOpenSlug] = useState<string | null>(slugParam);
 
-  // Keep state in sync with the URL (exception chips navigate via ?slug=).
-  useEffect(() => { setOpenSlug(slugParam); }, [slugParam]);
-  // If the selected landlord changes, drop back to the grid.
-  useEffect(() => { setOpenSlug(null); }, [effectiveRp]);
+  // Keep the open report in sync with the URL (exception chips navigate via
+  // ?slug=). The landlord switcher preserves ?slug=, so switching landlord
+  // re-scopes the SAME report to the new landlord — its child re-fetches via
+  // extraQuery=rp — instead of dropping back to the grid.
+  useEffect(() => { setOpenSlug(slugParam); }, [slugParam, effectiveRp]);
 
   const navigate = (slug: string | null) => {
     setOpenSlug(slug);
