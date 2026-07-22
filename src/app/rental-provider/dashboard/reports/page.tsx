@@ -23,8 +23,9 @@ export default function ReportsPage() {
   const [search, setSearch] = useState('');
   const year = useReportsYear();
   const filtered = REPORT_TILES.filter(r =>
-    r.title.toLowerCase().includes(search.toLowerCase())
-    || r.description.toLowerCase().includes(search.toLowerCase()),
+    !r.hidden
+    && (r.title.toLowerCase().includes(search.toLowerCase())
+      || r.description.toLowerCase().includes(search.toLowerCase())),
   );
   // Grouped sections; a section disappears entirely when the search leaves
   // it with no matching reports.

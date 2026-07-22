@@ -20,6 +20,9 @@ export interface ReportTile {
   group: GroupKey;
   /** RP-hub only — never shown in (or served to) the manager portal. */
   rpOnly?: boolean;
+  /** Temporarily hide the tile from every hub (route still works if reached
+   *  directly). Flip off to bring the report back. */
+  hidden?: boolean;
 }
 
 /** Section order + headers for the grouped hub. Coming-soon reports sit
@@ -43,6 +46,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'leases-by-year',     title: 'Leases - Monthly',           description: 'The annual lease register grouped by commencement month — expand a month to see the leases that began then, with customer, unit, term dates, rent and status.', Icon: FileText, available: true, group: 'leasing' },
   { slug: 'new-leases-matrix',  title: 'Lease Summary - Yearly',       description: 'Property × month grid of leases commencing each month of the year (the matrix companion to Contract Registration Activity), with new-lease counts and annual rent per property.', Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'lease-activity',     title: 'Lease Activity',      description: 'Month-by-month operations sheet — renewals due, new & renewal contracts, deposits, notices, customer & landlord online signatures, Contract Registration completed vs pending, move-outs, and average days to signature. Exportable to CSV in the executive format.', Icon: ScrollText, available: true, group: 'leasing' },
+  { slug: 'leasing-funnel',     title: 'Leasing Funnel by Manager',      description: 'The leasing journey as a month-by-month funnel — how many contracts reached each stage: Lead Received, Viewing Done, KYC Verified, Deposit Collected, Renewal Notice Sent, Customer & Landlord Signed, Contract Registration pending vs done, Activated, Move-out Inspection and Settlement Signed. Exportable to CSV.', Icon: ListChecks, available: true, group: 'operations' },
   // ── Renewals & Expiry ──────────────────────────────────────────────────
   { slug: 'lease-expiry',       title: 'Upcoming Renewals',        description: 'Leases ending within 30 / 60 / 90 / 180 / 365 days, grouped by the month they come up for renewal.', Icon: CalendarClock, available: true, group: 'renewals' },
   { slug: 'renewal-forecast',   title: 'Renewal Plan - Monthly',    description: 'Every lease up for renewal in a year, month by month with annual rent — expand a month for the per-customer detail.',  Icon: RefreshCw,    available: true,  group: 'renewals' },
@@ -58,6 +62,6 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'payment-grouping',   title: 'Payment Grouping (custom)', description: 'Build your own statement — drag payment types into categories you name; Contract Registration splits into DLD + service. Per-year, session-only.', Icon: Banknote, available: true, group: 'financial', rpOnly: true },
   // ── Manager activity ───────────────────────────────────────────────────
   { slug: 'manager-operations', title: 'Manager Operations Report', description: 'The manager evaluation report — today / this week / this month compared to the previous period, day-by-day figures per manager, leases delivered, every stage as a clickable column, stage timing with customer & landlord wait separated, and what’s stuck right now. “On file” signatures are not counted. Landlord-only.', Icon: ListChecks, available: true, group: 'operations', rpOnly: true },
-  { slug: 'operations-by-stage', title: 'Operations by Stage', description: 'Records each manager progressed, stage by stage — the operations pipeline matrix on its own. Click any number to see the records behind it with their history. Managers can open it to see their own activity and pipeline. “On file” signatures are not counted.', Icon: ListChecks, available: true, group: 'operations' },
+  { slug: 'operations-by-stage', title: 'Operations by Stage', description: 'Records each manager progressed, stage by stage — the operations pipeline matrix on its own. Click any number to see the records behind it with their history. Managers can open it to see their own activity and pipeline. “On file” signatures are not counted.', Icon: ListChecks, available: true, group: 'operations', hidden: true },
 ];
 

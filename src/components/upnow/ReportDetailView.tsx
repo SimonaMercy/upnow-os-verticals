@@ -76,6 +76,16 @@ interface ReportDef {
   /** When set, render an Active · Expired · All lease-status segmented control.
    *  The backend honours a `status=active|expired|all` query param (default all). */
   leaseStatusFilter?: boolean;
+  /** Turn one column of a flat table into a deep link to the record the row
+   *  represents — no drill-down needed. `idKey` is the row field holding the
+   *  target id; the cell in `colKey` becomes the link. target 'unit' links are
+   *  only rendered when a `unitsBase` is supplied (the manager portal has no
+   *  unit detail route, so they'd 404 there). */
+  rowLink?: { idKey: string; colKey: string; target?: 'contract' | 'unit' };
+  /** countMatrix only: make each month cell clickable → a popup of the records
+   *  behind that property×month count. Items come from row[itemsKey][cellIndex]
+   *  (itemsKey defaults 'cellItems'), rendered with these columns. */
+  cellDrill?: { itemsKey?: string; countLabel: string; contractIdKey?: string; columns: Column[] };
   /** countMatrix only: the trailing summary columns after the 12 month cells,
    *  read from each row (and from `totals` for the footer/tiles) by `key`. When
    *  omitted the matrix keeps its renewal-vacancy default (Renewals · Vacant ·
@@ -196,6 +206,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
       { key: 'rentRollFils', label: 'Rent Roll', align: 'right', type: 'aed' },
       { key: 'activeContractedRentFils', label: 'Active leases', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market rent / yr', align: 'right', type: 'aed' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
@@ -207,7 +218,20 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'rentRollFils', label: 'Rent Roll', type: 'aed' },
       { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market rent / yr', type: 'aed' },
     ],
+    // Click a property to list its units with live status + rent.
+    drilldown: {
+      childKey: 'units',
+      titleKey: 'buildingName',
+      countLabel: 'units',
+      columns: [
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'unitType', label: 'Type', type: 'stage' },
+        { key: 'availability', label: 'Status', type: 'stage' },
+        { key: 'currentRentFils', label: 'Current rent', align: 'right', type: 'aed' },
+      ],
+    },
   },
   'lease-expiry': {
     title: 'Upcoming Renewals',
@@ -303,6 +327,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'state', label: 'Status', type: 'stage' },
       { key: 'reference', label: 'Payment' },
     ],
+    rowLink: { idKey: 'contractId', colKey: 'unitLabel', target: 'contract' },
     totals: [
       { key: 'heldFils', label: 'Held now (with us)', type: 'aed', keep: true },
       { key: 'dueForSettlementFils', label: 'Pending settlement', type: 'aed', keep: true },
@@ -421,6 +446,22 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'moveOuts', label: 'Move-outs', type: 'number' },
       { key: 'avgDaysToSign', label: 'Avg days to sign', type: 'number' },
     ],
+    // Click a month to see the leases that commenced it (the "New contracts"
+    // figure). The other columns are cross-cut metrics on the same leases.
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'label',
+      countLabel: 'new contracts',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'startDate', label: 'Start', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      ],
+    },
   },
 
 
@@ -436,6 +477,17 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'newLeases', label: 'New leases', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
     ],
+    cellDrill: {
+      countLabel: 'new lease',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'startDate', label: 'Start', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      ],
+    },
     totals: [
       { key: 'newLeases', label: 'New leases', type: 'number', keep: true },
       { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
@@ -450,6 +502,17 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     layout: 'countMatrix',
     controlKey: 'year',
     columns: [],
+    cellDrill: {
+      countLabel: 'renewal',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'endDate', label: 'Lease ends', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      ],
+    },
     totals: [
       { key: 'leased', label: 'Renewals', type: 'number', keep: true },
       { key: 'vacant', label: 'Total Vacant', type: 'number', keep: true },
@@ -487,6 +550,22 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'netIncomeFils', label: 'Net Income', type: 'aed', keep: true },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
     ],
+    // Click a month to see the individual rent cheques anchored in it.
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'label',
+      countLabel: 'cheques',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'chequeNumber', label: 'Cheque #' },
+        { key: 'dueDate', label: 'Due', type: 'date' },
+        { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+        { key: 'status', label: 'Status', type: 'stage' },
+      ],
+    },
   },
 
   'portfolio-overview': {
@@ -506,6 +585,18 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'properties', label: 'Properties', type: 'number' },
       { key: 'units', label: 'Units', type: 'number' },
     ],
+    // Click a mix row to list the individual units folded into it.
+    drilldown: {
+      childKey: 'unitList',
+      titleKey: 'buildingName',
+      countLabel: 'units',
+      columns: [
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'unitType', label: 'Type', type: 'stage' },
+        { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
+        { key: 'sizeSqft', label: 'Sqft', align: 'right' },
+      ],
+    },
   },
 
   'vacancy-analysis': {
@@ -523,6 +614,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'marketRentFils', label: 'Market rent', align: 'right', type: 'aed' },
       { key: 'askingRentFils', label: 'Asking rent / yr', align: 'right', type: 'aed' },
     ],
+    rowLink: { idKey: 'unitId', colKey: 'unitLabel', target: 'unit' },
     totals: [
       { key: 'vacant', label: 'Vacant units', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
@@ -542,17 +634,32 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     controlKey: 'dateRange',
     columns: [
       { key: 'label', label: 'Month' },
-      { key: 'newLeases', label: 'New leases', align: 'right', type: 'number' },
+      { key: 'newLeases', label: 'Leases', align: 'right', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent signed', align: 'right', type: 'aed' },
       { key: 'ejariRegistered', label: 'Contract Registration completed', align: 'right', type: 'number' },
       { key: 'ejariPending', label: 'Awaiting Contract Registration', align: 'right', type: 'number' },
     ],
     totals: [
-      { key: 'newLeases', label: 'New leases', type: 'number' },
+      { key: 'newLeases', label: 'Leases', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent signed', type: 'aed' },
       { key: 'ejariRegistered', label: 'Contract Registration completed', type: 'number' },
       { key: 'ejariPending', label: 'Awaiting Contract Registration', type: 'number' },
     ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'label',
+      countLabel: 'leases',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'startDate', label: 'Start', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'ejari', label: 'Registration', type: 'stage' },
+      ],
+    },
   },
 
   'rent-vs-market': {
@@ -573,6 +680,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'position', label: 'Position', type: 'stage' },
       { key: 'leaseEnd', label: 'Lease ends', type: 'date' },
     ],
+    rowLink: { idKey: 'contractId', colKey: 'unitLabel', target: 'contract' },
     totals: [
       { key: 'units', label: 'Occupied units', type: 'number' },
       { key: 'belowMarket', label: 'Below market', type: 'number' },
@@ -616,6 +724,23 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'rentVatFils', label: 'Rent VAT', type: 'aed' },
       { key: 'totalVatFils', label: 'Total VAT', type: 'aed' },
     ],
+    // Summary (overall) view: click a period row to see the contracts behind it
+    // — the same per-contract lines as the Detailed view, filtered to the period
+    // and joined synthetically from data.items (see the row-click handler).
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'periodLabel',
+      countLabel: 'contracts',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'contractRef', label: 'Contract' },
+        { key: 'buildingName', label: 'Property' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
+      ],
+    },
   },
 };
 
@@ -785,6 +910,9 @@ export interface ReportDetailViewProps {
   onBack?: () => void;
   /** Base for 'Open contract' links in drill-downs. */
   contractsBase?: string;
+  /** Base for 'Open unit' links (e.g. vacant-unit rows). Omit in portals with
+   *  no unit detail route (manager) — unit links are then not rendered. */
+  unitsBase?: string;
   /** When set, control changes sync to the URL (RP slug routes only). */
   urlBase?: string;
 }
@@ -796,6 +924,7 @@ export function ReportDetailView({
   backHref = '/rental-provider/dashboard/reports',
   onBack,
   contractsBase = '/rental-provider/dashboard/contracts',
+  unitsBase,
   urlBase,
 }: ReportDetailViewProps) {
   const router = useRouter();
@@ -832,6 +961,8 @@ export function ReportDetailView({
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [drillFilter, setDrillFilter] = useState<string | null>(null);
   const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
+  // Generic matrix cell → records popup (property×month counts, per-cheque cells).
+  const [cellModal, setCellModal] = useState<{ title: string; countLabel: string; columns: Column[]; contractIdKey?: string; items: Record<string, unknown>[] } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Fee-taxation building + leasing-model filters. [] buildings = all; lease
   // types default to both selected (= all). Inline reclassify bumps refreshTick
@@ -979,6 +1110,10 @@ export function ReportDetailView({
     return base.map(c => (c.key === 'periodLabel' ? { ...c, label: periodLabel } : c));
   }, [def, feeDetailed, granularity]);
   const activeRows: Record<string, unknown>[] = feeDetailed ? (data?.items ?? []) : (data?.rows ?? []);
+  // The drill-down chevron column shows only where rows are actually drillable.
+  // Fee & VAT drills from its SUMMARY rows (into data.items); its Detailed rows
+  // link the contract directly, so no chevron column there.
+  const showDrillCol = !!def?.drilldown && !(slug === 'fee-taxation' && feeDetailed);
 
   // Distinct property names for the Cash Management / Cheques Management dropdown.
   const propertyOptions = useMemo(() => {
@@ -1008,21 +1143,30 @@ export function ReportDetailView({
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
+    // Numeric columns compare as numbers even when the backend sent the value as
+    // a string (otherwise "1000" sorts before "900"). Text columns use a
+    // numeric-aware, case-insensitive collation so "Villa 10" follows "Villa 2"
+    // and capitalisation doesn't split the alphabetical order. Blanks last.
+    const col = activeColumns.find(c => c.key === sortKey);
+    const numericCol = ['aed', 'number', 'rate', 'delta'].includes(col?.type ?? '');
     const copy = [...filtered];
     copy.sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
-      if (av === null || av === undefined) return 1;
-      if (bv === null || bv === undefined) return -1;
-      if (typeof av === 'number' && typeof bv === 'number') {
-        return sortDir === 'asc' ? av - bv : bv - av;
+      const aEmpty = av === null || av === undefined || av === '';
+      const bEmpty = bv === null || bv === undefined || bv === '';
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      if (numericCol || (typeof av === 'number' && typeof bv === 'number')) {
+        const d = Number(av) - Number(bv);
+        return sortDir === 'asc' ? d : -d;
       }
-      return sortDir === 'asc'
-        ? String(av).localeCompare(String(bv))
-        : String(bv).localeCompare(String(av));
+      const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+      return sortDir === 'asc' ? cmp : -cmp;
     });
     return copy;
-  }, [filtered, sortKey, sortDir]);
+  }, [filtered, sortKey, sortDir, activeColumns]);
 
   function toggleSort(key: string) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -1920,11 +2064,17 @@ export function ReportDetailView({
               </thead>
               <tbody>
                 {sorted.map((row, i) => {
-                  const cells = (row.cells as { amountFils: number; status: string | null }[]) ?? [];
+                  const cells = (row.cells as { amountFils: number; status: string | null; chequeNumber?: string | null; dueDate?: string | null; chequeCount?: number }[]) ?? [];
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
                       <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left">
-                        <div className="font-medium text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                        {row.contractId != null ? (
+                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="font-medium text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline" title="Open contract">
+                            {String(row.unitLabel ?? '—')}<ExternalLink size={11} className="print:hidden" />
+                          </Link>
+                        ) : (
+                          <div className="font-medium text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                        )}
                         <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>
                         {Boolean(row.contractStartDate || row.contractEndDate) && (
                           <div className="text-[11px] text-[#9b9890] leading-tight">
@@ -1935,7 +2085,25 @@ export function ReportDetailView({
                       <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.annualRentFils))}</td>
                       {cells.map((c, ci) => (
                         <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
-                          {fmtAmt(c.amountFils)}
+                          {c.amountFils ? (
+                            <button
+                              type="button"
+                              onClick={() => setCellModal({
+                                title: `${String(row.unitLabel ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`,
+                                countLabel: 'cheque',
+                                columns: [
+                                  { key: 'chequeNumber', label: 'Cheque #' },
+                                  { key: 'dueDate', label: 'Due', type: 'date' },
+                                  { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+                                  { key: 'status', label: 'Status', type: 'stage' },
+                                ],
+                                items: [{ chequeNumber: c.chequeNumber ?? null, dueDate: c.dueDate ?? null, amountFils: c.amountFils, status: c.status }],
+                              })}
+                              className="hover:underline cursor-pointer print:no-underline"
+                              title="See the cheque behind this amount">
+                              {fmtAmt(c.amountFils)}{c.chequeCount && c.chequeCount > 1 ? ` (${c.chequeCount})` : ''}
+                            </button>
+                          ) : fmtAmt(c.amountFils)}
                         </td>
                       ))}
                       <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
@@ -2008,10 +2176,17 @@ export function ReportDetailView({
                 {sorted.map((row, i) => {
                   const dates = (row.chequeDates as string[]) ?? [];
                   const counts = (row.monthCounts as number[]) ?? [];
+                  const cheques = (row.cheques as { chequeNumber: string | null; dueDate: string | null; amountFils: number; status: string | null; monthIndex: number }[] | undefined) ?? [];
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
                       <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left whitespace-nowrap">
-                        <div className="text-[13px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                        {row.contractId != null ? (
+                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="text-[13px] font-semibold text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline" title="Open contract">
+                            {String(row.unitLabel ?? '—')}<ExternalLink size={11} className="print:hidden" />
+                          </Link>
+                        ) : (
+                          <div className="text-[13px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
+                        )}
                         <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '—')}</div>
                         {Boolean(row.contractStartDate || row.contractEndDate) && (
                           <div className="text-[11px] text-[#9b9890] leading-tight">
@@ -2025,11 +2200,32 @@ export function ReportDetailView({
                           {dates[ci] ?? '·'}
                         </td>
                       ))}
-                      {counts.map((n, ci) => (
+                      {counts.map((n, ci) => {
+                        const monthCheques = cheques.filter(c => c.monthIndex === ci);
+                        return (
                         <td key={ci} className={`px-3 py-2.5 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${n ? 'text-[#1a1916] font-medium' : 'text-[#d4d2cc]'}`}>
-                          {n ? fmtNumber(n) : '·'}
+                          {n && monthCheques.length ? (
+                            <button
+                              type="button"
+                              onClick={() => setCellModal({
+                                title: `${String(row.unitLabel ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`,
+                                countLabel: 'cheque',
+                                columns: [
+                                  { key: 'chequeNumber', label: 'Cheque #' },
+                                  { key: 'dueDate', label: 'Due', type: 'date' },
+                                  { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+                                  { key: 'status', label: 'Status', type: 'stage' },
+                                ],
+                                items: monthCheques,
+                              })}
+                              className="hover:underline cursor-pointer print:no-underline"
+                              title="See the cheques landing this month">
+                              {fmtNumber(n)}
+                            </button>
+                          ) : n ? fmtNumber(n) : '·'}
                         </td>
-                      ))}
+                        );
+                      })}
                       <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
                     </tr>
                   );
@@ -2069,14 +2265,30 @@ export function ReportDetailView({
               <tbody>
                 {sorted.map((row, i) => {
                   const cells = (row.cells as number[]) ?? [];
+                  const cellItems = def.cellDrill
+                    ? (row[def.cellDrill.itemsKey ?? 'cellItems'] as Record<string, unknown>[][] | undefined)
+                    : undefined;
                   return (
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
                       <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-medium text-[#1a1916] whitespace-nowrap">{String(row.label ?? '—')}</td>
-                      {cells.map((n, ci) => (
-                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${Number(n) ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
-                          {Number(n) ? fmtNumber(Number(n)) : '·'}
+                      {cells.map((n, ci) => {
+                        const num = Number(n);
+                        const its = cellItems?.[ci];
+                        const drillable = def.cellDrill && num > 0 && Array.isArray(its) && its.length > 0;
+                        return (
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${num ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
+                          {drillable ? (
+                            <button
+                              type="button"
+                              onClick={() => setCellModal({ title: `${String(row.label ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`, countLabel: def.cellDrill!.countLabel, columns: def.cellDrill!.columns, contractIdKey: def.cellDrill!.contractIdKey, items: its! })}
+                              className="font-medium text-[#2e9f82] hover:underline cursor-pointer print:no-underline print:text-[#1a1916]"
+                              title={`See the ${def.cellDrill!.countLabel} behind this number`}>
+                              {fmtNumber(num)}
+                            </button>
+                          ) : num ? fmtNumber(num) : '·'}
                         </td>
-                      ))}
+                        );
+                      })}
                       {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
                         <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916] border-l border-[#f0ede8]' : 'text-[#6b6860]'}`}>
                           {c.type === 'aed' ? fmtAed(Number(row[c.key] ?? 0)) : fmtNumber(Number(row[c.key] ?? 0))}
@@ -2158,23 +2370,49 @@ export function ReportDetailView({
                       {sortKey === c.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                     </th>
                   ))}
-                  {def.drilldown && <th className="px-3 py-3 print:hidden" aria-hidden />}
+                  {showDrillCol && <th className="px-3 py-3 print:hidden" aria-hidden />}
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((row, i) => {
-                  const items = def.drilldown ? (row[def.drilldown.childKey] as unknown[] | undefined) : undefined;
+                  // Fee & VAT summary rows carry no nested items — synthesise the
+                  // drill from data.items filtered to this period, so clicking a
+                  // period opens the contracts behind it.
+                  const feeSummaryRow = slug === 'fee-taxation' && !feeDetailed;
+                  const feeItems = feeSummaryRow
+                    ? (data?.items ?? []).filter(it => it.periodLabel === row.periodLabel)
+                    : null;
+                  const items = feeSummaryRow ? feeItems : def.drilldown ? (row[def.drilldown.childKey] as unknown[] | undefined) : undefined;
                   const canDrill = slug === 'manager-performance'
                     ? true // full-page profile fetches its own paginated feed
                     : !!def.drilldown && Array.isArray(items) && items.length > 0;
+                  const drillTarget = feeSummaryRow ? { ...row, items: feeItems } : row;
                   return (
                     <tr
                       key={i}
-                      onClick={canDrill ? () => setDrill(row) : undefined}
+                      onClick={canDrill ? () => setDrill(drillTarget) : undefined}
                       className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
-                      {visibleColumns.map(c => (
+                      {visibleColumns.map(c => {
+                        // Generic row deep-link: this column links to the contract
+                        // (or unit) the row represents. Unit links need a unitsBase.
+                        const rl = def.rowLink;
+                        const rlId = rl && c.key === rl.colKey ? row[rl.idKey] : null;
+                        const rlHref = rlId == null ? null
+                          : rl!.target === 'unit'
+                            ? (unitsBase ? `${unitsBase}/${rlId}` : null)
+                            : `${contractsBase}/${rlId}/v2`;
+                        return (
                         <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
-                          {feeDetailed && c.key === 'contractRef' && row.contractId != null ? (
+                          {rlHref ? (
+                            <Link
+                              href={rlHref}
+                              onClick={e => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
+                              title={rl!.target === 'unit' ? 'Open unit' : 'Open contract'}>
+                              <CellValue value={row[c.key]} type={c.type} />
+                              <ExternalLink size={12} className="print:hidden" />
+                            </Link>
+                          ) : feeDetailed && c.key === 'contractRef' && row.contractId != null ? (
                             <Link
                               href={`${contractsBase}/${row.contractId}/v2`}
                               onClick={e => e.stopPropagation()}
@@ -2187,8 +2425,9 @@ export function ReportDetailView({
                             <CellValue value={row[c.key]} type={c.type} />
                           )}
                         </td>
-                      ))}
-                      {def.drilldown && (
+                        );
+                      })}
+                      {showDrillCol && (
                         <td className="px-3 py-3 text-right text-[#c8c6c0] print:hidden">
                           {canDrill && <ChevronRight size={15} className="inline" />}
                         </td>
@@ -2329,6 +2568,58 @@ export function ReportDetailView({
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generic matrix cell → records popup (property×month counts, per-cheque cells) */}
+      {cellModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={() => setCellModal(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
+              <div>
+                <h3 className="text-base font-bold text-[#1a1916]">{cellModal.title}</h3>
+                <p className="text-xs text-[#6b6860] mt-0.5">{cellModal.items.length} {cellModal.countLabel}{cellModal.items.length === 1 ? '' : 's'}</p>
+              </div>
+              <button onClick={() => setCellModal(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                  <tr>
+                    {cellModal.columns.map(c => (
+                      <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                    ))}
+                    {cellModal.contractIdKey && <th className="px-3 py-2.5" aria-hidden />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cellModal.items.map((it, idx) => (
+                    <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                      {cellModal.columns.map(c => (
+                        <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                          <CellValue value={it[c.key]} type={c.type} />
+                        </td>
+                      ))}
+                      {cellModal.contractIdKey && (
+                        <td className="px-3 py-2.5 text-right">
+                          {it[cellModal.contractIdKey] != null && (
+                            <Link
+                              href={`${contractsBase}/${it[cellModal.contractIdKey]}/v2`}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                              title="Open contract">
+                              Open <ExternalLink size={12} />
+                            </Link>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

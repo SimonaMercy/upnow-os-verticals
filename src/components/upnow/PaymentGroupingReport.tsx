@@ -3,8 +3,11 @@
 /**
  * Custom payment-grouping report (RP Reports hub). The RP drags payment-type
  * cards between categories they can rename / add / delete, and the per-category
- * subtotals recompute live for the selected year. Ejari is split into its
- * government (DLD, AED 172.50) and service portions as two independent cards.
+ * subtotals recompute live for the selected year. Defaults mirror the contract
+ * page's four groups — Rental Income, Security Deposit, Management Fee (admin,
+ * commission + Rules penalties) and Third Party (Contract Registration, VAT,
+ * sub-lease / service pass-throughs). Contract Registration is one card (not
+ * split); VAT separates into Rental VAT and Fees VAT.
  *
  * Session-only — the layout resets on reload (no persistence by design). Print
  * produces the grouped statement.
@@ -14,7 +17,12 @@ import Link from 'next/link';
 import { GripVertical, X, Pencil, Printer, RotateCcw, Check, Loader2, FolderPlus, ArrowLeft, FileSpreadsheet } from 'lucide-react';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 
-const GOVT_EJARI_FEE = 172.5;
+// A `vat` payment is "Fees VAT" (the combined VAT cheque on admin/commission
+// fees) when its description says so — a pass-through that sits under Third
+// Party. Every other `vat` cheque is Rental VAT and belongs with Rental Income,
+// exactly as the contract page splits them.
+const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
+  (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
 
 interface PaymentRow {
   id: string;
@@ -34,41 +42,73 @@ interface PaymentRow {
   startDate?: string | null; endDate?: string | null; fromYear?: number | null; toYear?: number | null;
 }
 
-// Draggable "items" — payment-type buckets. Ejari is split into two.
+// Draggable "items" — one per payment type. Labels mirror the contract page's
+// fee labels. Contract Registration (Ejari) is a SINGLE item (no DLD/service
+// split); Rental VAT and Fees VAT are separate items, as on the contract page.
 const ITEM_LABELS: Record<string, string> = {
   rental_income:   'Rental Income',
-  vat:             'VAT (rent + fees)',
-  ejari_dld:       'Contract Registration · DLD registration',
-  ejari_service:   'Contract Registration · service (handling)',
+  vat_rental:      'Rental VAT',
+  security_deposit:'Security Deposit (held)',
+  // Management Fee — RP-charged fees + every Settings → Rules penalty / charge.
   admin_fee:       'Admin fee',
   commission:      'Commission',
-  security_deposit:'Security Deposit (held)',
+  bounced_cheque_fee:       'Bounced cheque',
+  cheque_replacement_fee:   'Cheque hold / replacement',
+  cheque_deferral_fee:      'Cheque deferral',
+  late_renewal_fee:         'Late renewal',
+  early_termination_fee:    'Early termination',
+  late_moveout_fee:         'Late move-out',
+  unauthorized_sharing_fee: 'Sharing without notice / NOC',
+  access_card_fee:          'Access card / remote replacement',
+  contract_name_change_fee: 'Contract name change',
+  unit_transfer_fee:        'Unit transfer',
+  // Third Party — pass-through fees the RP collects on behalf of others.
+  ejari_fee:       'Contract Registration fee',
+  vat_fees:        'Fees VAT',
   maintenance_fee: 'Maintenance',
   service_charge:  'Service Charge',
   refund:          'Refund',
   other:           'Other',
 };
 // 'other' payments are split into one item PER distinct description (e.g.
-// "Fire Fighting", "5% VAT on Rent") so each can be dragged on its own; their
+// "Service Charge", "5% VAT on Rent") so each can be dragged on its own; their
 // item key is `other:<description>`.
 const OTHER_PREFIX = 'other:';
 const itemLabel = (k: string) =>
   k.startsWith(OTHER_PREFIX) ? k.slice(OTHER_PREFIX.length) : (ITEM_LABELS[k] ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
 
+// The single draggable item a payment row belongs to. VAT splits into Rental
+// vs Fees VAT (like the contract page); every distinct 'other' description is
+// its own item. Ejari is one item — NOT split into DLD + service.
+const itemKeyOf = (d: { paymentType: string; description?: string | null }): string => {
+  if (d.paymentType === 'vat') return isFeesVat(d) ? 'vat_fees' : 'vat_rental';
+  if (d.paymentType === 'other') return `${OTHER_PREFIX}${(d.description ?? '').trim() || 'Other'}`;
+  return d.paymentType;
+};
+
 interface Category { id: string; name: string }
+// Category set + order mirror the contract page's payment grouping, so the
+// report reconciles one-to-one with what each contract shows.
 const DEFAULT_CATEGORIES: Category[] = [
   { id: 'rental_income', name: 'Rental Income' },
-  { id: 'govt',          name: 'Government Fees' },
+  { id: 'deposits',      name: 'Security Deposit' },
   { id: 'management',    name: 'Management Fee' },
-  { id: 'deposits',      name: 'Security Deposits' },
-  { id: 'others',        name: 'Others' },
+  { id: 'third_party',   name: 'Third Party' },
+  // Catch-all: any payment type not mapped to the four groups above surfaces
+  // here (nothing is ever silently dropped). The RP can drag it where it belongs.
+  { id: 'other',         name: 'Other' },
 ];
 const DEFAULT_ASSIGN: Record<string, string> = {
-  rental_income: 'rental_income',
-  vat: 'govt', ejari_dld: 'govt',
-  ejari_service: 'management', admin_fee: 'management', commission: 'management',
+  rental_income: 'rental_income', vat_rental: 'rental_income',
   security_deposit: 'deposits',
-  maintenance_fee: 'others', service_charge: 'others', refund: 'others', other: 'others',
+  admin_fee: 'management', commission: 'management',
+  bounced_cheque_fee: 'management', cheque_replacement_fee: 'management', cheque_deferral_fee: 'management',
+  late_renewal_fee: 'management', early_termination_fee: 'management', late_moveout_fee: 'management',
+  unauthorized_sharing_fee: 'management', access_card_fee: 'management',
+  contract_name_change_fee: 'management', unit_transfer_fee: 'management',
+  ejari_fee: 'third_party', vat_fees: 'third_party',
+  maintenance_fee: 'third_party', service_charge: 'third_party', refund: 'third_party',
+  // Generic 'other' payments (and any unrecognised type) fall through to the 'Other' catch-all.
 };
 const OWNERSHIP_LABEL: Record<string, string> = { direct: 'Own Property', sub: 'Sub-lease', management: 'Property Management' };
 
@@ -149,6 +189,9 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
   // Specific-property filter (by building name) — independent of the lease-type filter.
   const [building, setBuilding] = useState<string>('all');
 
+  // Card → transactions popup: which payment-type item is open (null = none).
+  const [detail, setDetail] = useState<string | null>(null);
+
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [assign, setAssign] = useState<Record<string, string>>(DEFAULT_ASSIGN);
   const [dragItem, setDragItem] = useState<string | null>(null);
@@ -180,11 +223,13 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     for (const d of rows) for (const y of yearsOf(d)) if (Number.isFinite(y) && y > 0) s.add(y);
     return [...s].sort((a, b) => b - a);
   }, [rows]);
-  // Default to 2026 when it has data, otherwise the most recent year.
+  // Default the year scope to the current year (or the most recent year with
+  // data if the current one is empty), so the report opens on a bounded period.
   const didSetYear = useRef(false);
   useEffect(() => {
     if (!didSetYear.current && years.length) {
-      setYear(String(years.includes(2026) ? 2026 : years[0]));
+      const cur = new Date().getFullYear();
+      setYear(String(years.includes(cur) ? cur : years[0]));
       didSetYear.current = true;
     }
   }, [years]);
@@ -206,7 +251,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     if (building !== 'all' && !buildings.includes(building)) setBuilding('all');
   }, [buildings, building]);
 
-  // Per-item totals for the selected year (Ejari split into DLD + service).
+  // Per-item totals for the selected year (one bucket per payment type).
   const itemTotals = useMemo(() => {
     const t: Record<string, number> = {};
     const add = (k: string, v: number) => { if (v) t[k] = (t[k] ?? 0) + v; };
@@ -218,24 +263,15 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       // Date window takes precedence over the Year dropdown when set.
       if (dateActive) { if (!dateInRange(d, from, to)) continue; }
       else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
-      const amt = Number(d.amount) || 0;
-      if (d.paymentType === 'ejari_fee') {
-        add('ejari_dld', Math.min(GOVT_EJARI_FEE, amt));
-        add('ejari_service', Math.max(0, amt - GOVT_EJARI_FEE));
-      } else if (d.paymentType === 'other') {
-        // One draggable item per distinct "other" description.
-        add(`${OTHER_PREFIX}${(d.description ?? '').trim() || 'Other'}`, amt);
-      } else {
-        add(d.paymentType, amt);
-      }
+      add(itemKeyOf(d), Number(d.amount) || 0);
     }
     return t;
   }, [rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
 
-  // Items present in the data, each resolved to a category (unknown → 'others'
-  // or the first category if 'others' was deleted).
+  // Items present in the data, each resolved to a category. Unmapped / unknown
+  // types fall to the 'Other' catch-all (or the last category if it was deleted).
   const items = useMemo(() => Object.keys(itemTotals).sort((a, b) => (itemTotals[b] - itemTotals[a])), [itemTotals]);
-  const fallbackCat = () => (categories.find(c => c.id === 'others') ?? categories[0])?.id;
+  const fallbackCat = () => (categories.find(c => c.id === 'other') ?? categories[categories.length - 1] ?? categories[0])?.id;
   const catOf = (item: string) => {
     const a = assign[item] ?? DEFAULT_ASSIGN[item] ?? fallbackCat();
     return categories.some(c => c.id === a) ? a : fallbackCat();
@@ -251,6 +287,22 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
 
   const catTotal = (catId: string) => (itemsByCat[catId] ?? []).reduce((s, it) => s + (itemTotals[it] ?? 0), 0);
   const grandTotal = items.reduce((s, it) => s + (itemTotals[it] ?? 0), 0);
+
+  // The individual transactions behind one payment-type card — same filters and
+  // per-type matching (VAT rental/fees, per-description 'other') as the totals.
+  const detailRows = useMemo(() => {
+    if (!detail) return [];
+    const out: Array<{ row: PaymentRow; amount: number }> = [];
+    for (const d of rows) {
+      if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
+      if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
+      if (dateActive) { if (!dateInRange(d, from, to)) continue; }
+      else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      const amt = Number(d.amount) || 0;
+      if (amt && itemKeyOf(d) === detail) out.push({ row: d, amount: amt });
+    }
+    return out.sort((a, b) => b.amount - a.amount);
+  }, [detail, rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
 
   // ── Drag & drop (native) ──
   const onDrop = (catId: string) => {
@@ -286,7 +338,8 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
   // ── Detailed Excel export (one sheet per category + a Summary sheet) ──
   const [exporting, setExporting] = useState(false);
   // Flatten rows into category-tagged transaction lines — same year/ownership
-  // filter, Ejari split and per-description 'other' breakdown as the on-screen view.
+  // filter and per-type bucketing (VAT rental/fees, per-description 'other') as
+  // the on-screen view.
   const exportEntries = () => {
     const out: Array<{ cat: string; item: string; row: PaymentRow; amount: number; desc: string }> = [];
     for (const d of rows) {
@@ -295,19 +348,12 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       if (dateActive) { if (!dateInRange(d, from, to)) continue; }
       else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
       const amt = Number(d.amount) || 0;
-      const push = (itemKey: string, amount: number, desc: string) => {
-        if (!amount) return;
-        out.push({ cat: catOf(itemKey), item: itemLabel(itemKey), row: d, amount, desc });
-      };
-      if (d.paymentType === 'ejari_fee') {
-        push('ejari_dld', Math.min(GOVT_EJARI_FEE, amt), 'Contract Registration · DLD registration');
-        push('ejari_service', Math.max(0, amt - GOVT_EJARI_FEE), 'Contract Registration · service (handling)');
-      } else if (d.paymentType === 'other') {
-        const desc = (d.description ?? '').trim() || 'Other';
-        push(`${OTHER_PREFIX}${desc}`, amt, desc);
-      } else {
-        push(d.paymentType, amt, d.description ?? itemLabel(d.paymentType));
-      }
+      if (!amt) continue;
+      const itemKey = itemKeyOf(d);
+      const desc = d.paymentType === 'other'
+        ? ((d.description ?? '').trim() || 'Other')
+        : (d.description ?? itemLabel(itemKey));
+      out.push({ cat: catOf(itemKey), item: itemLabel(itemKey), row: d, amount: amt, desc });
     }
     return out;
   };
@@ -378,7 +424,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     <div className="mb-5">
       <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
       <h1 className="text-2xl font-bold text-[#1a1916]">Payment Grouping</h1>
-      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Contract Registration splits into its DLD government portion and service handling. Totals recompute for the chosen year or custom date range. Session-only; use Print to export.</p>
+      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Grouped like the contract page: Rental Income, Security Deposit, Management Fee and Third Party. Totals recompute for the chosen year or custom date range. Session-only; use Print to export.</p>
     </div>
   );
 
@@ -491,8 +537,10 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
                   <div key={it} draggable
                     onDragStart={() => setDragItem(it)}
                     onDragEnd={() => { setDragItem(null); setDropCat(null); }}
-                    className={`flex items-center gap-2 rounded-xl border border-[#eeece6] bg-[#fcfbf8] px-3 py-2 cursor-grab active:cursor-grabbing ${dragItem === it ? 'opacity-40' : ''}`}>
-                    <GripVertical size={14} className="text-[#c5c3bc] shrink-0 print:hidden" />
+                    onClick={() => setDetail(it)}
+                    title="See the transactions behind this total"
+                    className={`flex items-center gap-2 rounded-xl border border-[#eeece6] bg-[#fcfbf8] px-3 py-2 cursor-pointer hover:border-[#2e9f82]/50 hover:bg-[#f7fdfb] ${dragItem === it ? 'opacity-40' : ''}`}>
+                    <GripVertical size={14} className="text-[#c5c3bc] shrink-0 cursor-grab active:cursor-grabbing print:hidden" onClick={e => e.stopPropagation()} />
                     <span className="text-[13px] font-medium text-[#1a1916] flex-1 truncate">{itemLabel(it)}</span>
                     <span className="text-[13px] font-semibold text-[#3d3b35] tabular-nums">{fmtAed(itemTotals[it] ?? 0)}</span>
                   </div>
@@ -522,6 +570,64 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
           )}
         </div>
       </div>
+
+      {/* ── card drill-down: the transactions behind one payment-type total ── */}
+      {detail && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 sm:p-8 print:hidden" onClick={() => setDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-[#1a1916]">{itemLabel(detail)} <span className="text-[#9b9890] font-medium">· {periodLabel}</span></h3>
+                <p className="text-xs text-[#6b6860] mt-0.5">
+                  {detailRows.length} transaction{detailRows.length === 1 ? '' : 's'} · {fmtAed(detailRows.reduce((s, e) => s + e.amount, 0))}
+                </p>
+              </div>
+              <button onClick={() => setDetail(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+                <X size={15} />
+              </button>
+            </div>
+            {detailRows.length === 0 ? (
+              <p className="px-5 py-10 text-sm text-[#9b9890] text-center">No transactions in this period.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-[57px]">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-semibold">Contract</th>
+                    <th className="px-3 py-2 text-left font-semibold">Unit</th>
+                    <th className="px-3 py-2 text-left font-semibold">Customer</th>
+                    <th className="px-3 py-2 text-left font-semibold">Property</th>
+                    <th className="px-3 py-2 text-left font-semibold">Date</th>
+                    <th className="px-3 py-2 text-left font-semibold">Status</th>
+                    <th className="px-4 py-2 text-right font-semibold">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRows.map(({ row: d, amount }, idx) => {
+                    const cid = d.contractRef ? /CID-(\d+)/.exec(d.contractRef)?.[1] : null;
+                    return (
+                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        <td className="px-4 py-2 text-left">
+                          {cid ? (
+                            <Link href={`/rental-provider/dashboard/contracts/${cid}/v2`} className="font-medium text-[#2e9f82] hover:underline">
+                              {d.contractRef}
+                            </Link>
+                          ) : (d.contractRef ?? d.depositRef ?? '—')}
+                        </td>
+                        <td className="px-3 py-2 text-left text-[#1a1916]">{d.unit ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#1a1916]">{d.tenant ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#6b6860]">{d.building ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#6b6860] tabular-nums">{(d.transactionDate ?? d.recordedDate ?? '—').slice(0, 10)}</td>
+                        <td className="px-3 py-2 text-left text-[#6b6860] capitalize">{d.status ?? '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold text-[#1a1916]">{fmtAed(amount)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -28,11 +28,13 @@ import {
 } from '@/components/upnow/reportsYear';
 
 // ─── report row shapes (as returned by the endpoints) ─────────────────────────
+interface DrillItem { [k: string]: unknown }
 interface LeaseRow {
   label: string; due: number; newLeases: number; deposits: number;
   renewalNotices: number; renewalContracts: number; tenantSigns: number;
   landlordSigns: number; ejariRegistered: number; ejariPending: number;
   moveOuts: number; avgDaysToSign: number | null;
+  items?: DrillItem[];   // the new leases behind this month (drill-down)
 }
 interface BuildingOpt { id: number; name: string; leasingType: 'direct' | 'sub' | 'management'; contracts: number; }
 interface LeaseReport { year: number; rows: LeaseRow[]; totals: Omit<LeaseRow, 'label'>; buildings?: BuildingOpt[]; }
@@ -41,8 +43,21 @@ interface CashRow {
   label: string; expectedFils: number; receivedFils: number; pendingFils: number;
   bouncedFils: number; penaltyFils: number; netIncomeFils: number;
   clearedCount: number; pendingCount: number; bouncedCount: number;
+  items?: DrillItem[];   // the rent cheques behind this month (drill-down)
 }
 interface CashReport { year: number; rows: CashRow[]; totals: Omit<CashRow, 'label'>; buildings?: BuildingOpt[]; }
+
+// A cell drill-down: the records behind one sheet figure.
+interface SheetDrillCol { key: string; label: string; money?: boolean; date?: boolean }
+interface SheetDrill { title: string; countLabel: string; columns: SheetDrillCol[]; items: DrillItem[] }
+
+interface FunnelRow {
+  label: string; leadReceived: number; viewingDone: number; kycVerified: number;
+  depositCollected: number; renewalNoticeSent: number; customerSigned: number;
+  landlordSigned: number; registrationPending: number; registrationDone: number;
+  activated: number; moveOutInspection: number; settlementSigned: number;
+}
+interface FunnelReport { year: number; rows: FunnelRow[]; totals: Omit<FunnelRow, 'label'>; buildings?: BuildingOpt[]; }
 
 function useReport<T>(endpointBase: string, slug: string, extraQuery: string, year: number) {
   const [data, setData] = useState<T | null>(null);
@@ -76,6 +91,22 @@ const LEASE_COLS: { key: keyof LeaseRow; label: string }[] = [
   { key: 'moveOuts', label: 'Move-outs' },
   { key: 'avgDaysToSign', label: 'Avg days to sign' },
 ];
+// The leasing funnel — the CEO's month × stage sheet, lead through settlement.
+const FUNNEL_COLS: { key: keyof FunnelRow; label: string }[] = [
+  { key: 'label', label: 'Month' },
+  { key: 'leadReceived', label: 'Lead Received' },
+  { key: 'viewingDone', label: 'Viewing Done' },
+  { key: 'kycVerified', label: 'KYC Verified' },
+  { key: 'depositCollected', label: 'Deposit Collected' },
+  { key: 'renewalNoticeSent', label: 'Renewal Notice Sent' },
+  { key: 'customerSigned', label: 'Customer Signed' },
+  { key: 'landlordSigned', label: 'Landlord Signed' },
+  { key: 'registrationPending', label: 'Registration Pending' },
+  { key: 'registrationDone', label: 'Registration Done' },
+  { key: 'activated', label: 'Activated' },
+  { key: 'moveOutInspection', label: 'Move-out Inspection' },
+  { key: 'settlementSigned', label: 'Settlement Signed' },
+];
 const CASH_COLS: { key: keyof CashRow; label: string; money?: boolean }[] = [
   { key: 'label', label: 'Month' },
   { key: 'expectedFils', label: 'Expected', money: true },
@@ -95,11 +126,14 @@ const aed = (fils: number | null | undefined) => Math.round(Number(fils ?? 0) / 
 const datestamp = () => new Date().toISOString().slice(0, 10);
 
 // ─── the sheet table — compact enough that a full year never scrolls ──────────
-function SheetTable<R extends { label: string }>({ cols, rows, totals, render }: {
+function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, rows, totals, render, drillKey, onDrill }: {
   cols: { key: keyof R; label: string }[];
   rows: R[];
   totals: Record<string, unknown>;
   render: (row: R | null, key: keyof R) => string;
+  /** When set, this column's cell becomes a button opening the row's records. */
+  drillKey?: keyof R;
+  onDrill?: (row: R) => void;
 }) {
   return (
     <div className="rounded-xl border border-[#e8e6e0] bg-white overflow-x-auto">
@@ -118,9 +152,17 @@ function SheetTable<R extends { label: string }>({ cols, rows, totals, render }:
             <tr key={r.label} className="border-b border-[#f0ede8] last:border-0 hover:bg-[#fafaf8]">
               {cols.map((c, i) => {
                 const v = render(r, c.key);
+                const canDrill = drillKey != null && c.key === drillKey && onDrill && (r.items?.length ?? 0) > 0 && v !== '' && v !== '0';
                 return (
                   <td key={String(c.key)} className={`px-2 py-[5px] whitespace-nowrap tabular-nums ${i === 0 ? 'text-left font-semibold text-[#1a1916]' : `text-right ${v === '0' || v === '' ? 'text-[#c8c6c0]' : 'text-[#4a4742]'}`}`}>
-                    {v === '' && i > 0 ? '—' : v}
+                    {canDrill ? (
+                      <button
+                        onClick={() => onDrill!(r)}
+                        className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer print:no-underline print:text-[#4a4742]"
+                        title="See the records behind this number">
+                        {v}
+                      </button>
+                    ) : v === '' && i > 0 ? '—' : v}
                   </td>
                 );
               })}
@@ -170,6 +212,14 @@ function exportLeaseCsv(report: LeaseReport) {
     }),
   ]);
   downloadCsv(`lease-activity-${datestamp()}.csv`, LEASE_COLS.map(c => c.label), rows);
+}
+
+function exportFunnelCsv(report: FunnelReport) {
+  const rows = report.rows.map(r => [
+    r.label, ...FUNNEL_COLS.slice(1).map(c => String(r[c.key] ?? 0)),
+  ]);
+  rows.push(['Year total', ...FUNNEL_COLS.slice(1).map(c => String(report.totals[c.key as keyof Omit<FunnelRow, 'label'>] ?? 0))]);
+  downloadCsv(`leasing-funnel-${report.year}.csv`, FUNNEL_COLS.map(c => c.label), rows);
 }
 
 async function exportCashXlsx(report: CashReport) {
@@ -226,6 +276,11 @@ const SHEETS = {
     subtitle: 'Rent expected vs received, pending, bounced, penalties and Net Income, month by month.',
     exportLabel: 'Export Excel',
   },
+  'leasing-funnel': {
+    title: 'Leasing Funnel by Manager',
+    subtitle: 'Contracts reaching each stage of the leasing journey — lead to settlement — month by month. Signature columns count real online signatures only.',
+    exportLabel: 'Export CSV',
+  },
 } as const;
 export type SheetSlug = keyof typeof SHEETS;
 export const SHEET_SLUGS = Object.keys(SHEETS) as SheetSlug[];
@@ -247,16 +302,23 @@ export default function ReportSheetView({
   // Property / leasing-model filters ('all' = no filter).
   const [buildingId, setBuildingId] = useState<number | 'all'>('all');
   const [leaseType, setLeaseType] = useState<'all' | 'direct' | 'sub' | 'management'>('all');
-  const isLease = slug === 'lease-activity';
+  const isCash = slug === 'executive-cashflow';
+  const isFunnel = slug === 'leasing-funnel';
+  // Cell drill-down popup (records behind a sheet figure).
+  const [drill, setDrill] = useState<SheetDrill | null>(null);
+  // "Open contract" base — matches the portal (RP vs manager) via the endpoint.
+  const contractsBase = endpointBase.includes('manager')
+    ? '/dashboard/manager/contracts'
+    : '/rental-provider/dashboard/contracts';
 
   // Compose the query — portal scope (rp=N), whole-portfolio money on the cashflow
   // sheet (scope=all), plus the property + leasing-model filters.
   const params = new URLSearchParams(extraQuery);
-  if (!isLease) params.set('scope', 'all');
+  if (isCash) params.set('scope', 'all');
   if (buildingId !== 'all') params.set('buildings', String(buildingId));
   if (leaseType !== 'all') params.set('leaseTypes', leaseType);
   const query = params.toString();
-  const { data, loading, error } = useReport<LeaseReport | CashReport>(endpointBase, slug, query, year);
+  const { data, loading, error } = useReport<LeaseReport | CashReport | FunnelReport>(endpointBase, slug, query, year);
   const cfg = SHEETS[slug];
   // Property options are filter-independent (the backend always returns the full
   // set), so the picker stays stable while the figures narrow.
@@ -266,8 +328,9 @@ export default function ReportSheetView({
     if (!data) return;
     setExporting(true);
     try {
-      if (isLease) exportLeaseCsv(data as LeaseReport);
-      else await exportCashXlsx(data as CashReport);
+      if (isCash) await exportCashXlsx(data as CashReport);
+      else if (isFunnel) exportFunnelCsv(data as FunnelReport);
+      else exportLeaseCsv(data as LeaseReport);
     } finally {
       setExporting(false);
     }
@@ -330,11 +393,36 @@ export default function ReportSheetView({
         </div>
       </div>
 
-      {loading || error || !data ? <StateCard loading={loading} error={error} /> : isLease ? (
+      {loading || error || !data ? <StateCard loading={loading} error={error} /> : isFunnel ? (
+        <SheetTable
+          cols={FUNNEL_COLS}
+          rows={(data as FunnelReport).rows}
+          totals={(data as FunnelReport).totals as unknown as Record<string, unknown>}
+          render={(row, key) => {
+            if (!row) return '';
+            const v = row[key];
+            return v == null ? '' : String(v);
+          }}
+        />
+      ) : !isCash ? (
         <SheetTable
           cols={LEASE_COLS}
           rows={(data as LeaseReport).rows}
           totals={(data as LeaseReport).totals as unknown as Record<string, unknown>}
+          drillKey="newLeases"
+          onDrill={row => setDrill({
+            title: `${row.label} · New contracts`,
+            countLabel: 'lease',
+            columns: [
+              { key: 'contractRef', label: 'Contract' },
+              { key: 'unitLabel', label: 'Unit' },
+              { key: 'buildingName', label: 'Property' },
+              { key: 'tenantName', label: 'Customer' },
+              { key: 'startDate', label: 'Start', date: true },
+              { key: 'annualRentFils', label: 'Annual rent', money: true },
+            ],
+            items: row.items ?? [],
+          })}
           render={(row, key) => {
             if (!row) return '';
             const v = row[key];
@@ -355,6 +443,21 @@ export default function ReportSheetView({
             cols={CASH_COLS}
             rows={(data as CashReport).rows}
             totals={(data as CashReport).totals as unknown as Record<string, unknown>}
+            drillKey="label"
+            onDrill={row => setDrill({
+              title: `${row.label} · Rent cheques`,
+              countLabel: 'cheque',
+              columns: [
+                { key: 'contractRef', label: 'Contract' },
+                { key: 'unitLabel', label: 'Unit' },
+                { key: 'tenantName', label: 'Customer' },
+                { key: 'chequeNumber', label: 'Cheque #' },
+                { key: 'dueDate', label: 'Due', date: true },
+                { key: 'amountFils', label: 'Amount', money: true },
+                { key: 'status', label: 'Status' },
+              ],
+              items: row.items ?? [],
+            })}
             render={(row, key) => {
               if (!row) return '';
               const col = CASH_COLS.find(c => c.key === key);
@@ -365,6 +468,58 @@ export default function ReportSheetView({
           />
           <p className="text-[10px] text-[#9b9890] mt-2">All amounts in AED. Anchored on the cheque date; cancelled cheques excluded; includes customers who have since moved out. Net Income = received rent + penalty income.</p>
         </>
+      )}
+
+      {/* Cell drill-down: the records behind a sheet figure */}
+      {drill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={() => setDrill(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
+              <div>
+                <h3 className="text-base font-bold text-[#1a1916]">{drill.title}</h3>
+                <p className="text-xs text-[#6b6860] mt-0.5">{drill.items.length} {drill.countLabel}{drill.items.length === 1 ? '' : 's'}</p>
+              </div>
+              <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">✕</button>
+            </div>
+            <div className="overflow-auto">
+              {drill.items.length === 0 ? (
+                <p className="px-5 py-8 text-center text-sm text-[#9b9890]">No records for this period.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                    <tr>
+                      {drill.columns.map(c => (
+                        <th key={c.key} className={`px-3 py-2 font-semibold ${c.money ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                      ))}
+                      <th className="px-3 py-2.5" aria-hidden />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drill.items.map((it, idx) => (
+                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        {drill.columns.map(c => {
+                          const raw = it[c.key];
+                          const text = raw == null ? '—'
+                            : c.money ? `AED ${fmtAed(Number(raw))}`
+                            : c.date ? String(raw).slice(0, 10)
+                            : String(raw);
+                          return (
+                            <td key={c.key} className={`px-3 py-2 ${c.money ? 'text-right tabular-nums' : 'text-left'} ${c.key === 'status' ? 'capitalize' : ''} text-[#1a1916]`}>{text}</td>
+                          );
+                        })}
+                        <td className="px-3 py-2.5 text-right">
+                          {it.contractId != null && (
+                            <a href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open ↗</a>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

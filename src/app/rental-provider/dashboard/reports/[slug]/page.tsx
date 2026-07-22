@@ -25,6 +25,21 @@ export default function ReportDetailPage() {
   if (params.slug === 'operations-by-stage') {
     return <OperationsByStageReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
   }
+  // Leasing Funnel reuses the same per-manager month-sheet + drill-down, with a
+  // different report slug + labels.
+  if (params.slug === 'leasing-funnel') {
+    return (
+      <OperationsByStageReport
+        endpointBase="/api/reports"
+        reportPath="leasing-funnel"
+        title="Leasing Funnel by Manager"
+        csvBase="leasing-funnel"
+        subtitleTeam="Contracts reaching each stage of the leasing journey — lead to settlement — month by month. An overall sheet for the whole account, then one per manager (each contract credited to the manager who ran it). Click any number for the records behind it. Signatures marked “on file” are never counted."
+        subtitleScoped="The contracts you ran reaching each stage of the leasing journey — lead to settlement — month by month. Click any number for the records behind it. Signatures marked “on file” are never counted."
+        backHref="/rental-provider/dashboard/reports"
+      />
+    );
+  }
   // The two headline reports render as exportable month sheets (the CEO's
   // reference-file format), each on its own slug.
   if ((SHEET_SLUGS as string[]).includes(params.slug)) {
@@ -41,6 +56,7 @@ export default function ReportDetailPage() {
       endpointBase="/api/reports"
       backHref="/rental-provider/dashboard/reports"
       contractsBase="/rental-provider/dashboard/contracts"
+      unitsBase="/rental-provider/dashboard/units"
       urlBase="/rental-provider/dashboard/reports"
     />
   );

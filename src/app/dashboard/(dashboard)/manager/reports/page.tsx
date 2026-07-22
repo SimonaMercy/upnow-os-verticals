@@ -98,6 +98,24 @@ export default function ManagerReportsPage() {
       />
     );
   }
+  // Leasing Funnel — same per-manager month-sheet + drill-down component, scoped
+  // server-side to this manager's own responsible-manager funnel. Placed before
+  // the SHEET_SLUGS check so it renders the interactive component, not a sheet.
+  if (openSlug === 'leasing-funnel') {
+    return (
+      <OperationsByStageReport
+        endpointBase="/api/manager/reports"
+        reportPath="leasing-funnel"
+        title="Leasing Funnel by Manager"
+        csvBase="leasing-funnel"
+        subtitleScoped="The contracts you ran reaching each stage of the leasing journey — lead to settlement — month by month. Click any number for the records behind it. Signatures marked “on file” are never counted."
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        contractsBase="/dashboard/manager/contracts"
+        leadsBase="/dashboard/manager/leads"
+      />
+    );
+  }
   // The two headline reports render as exportable month sheets, each on its own
   // slug — the manager per-report allow-list gates them server-side like any
   // other report.
@@ -139,6 +157,7 @@ export default function ManagerReportsPage() {
   // ── Hub: executive overview + grouped catalog (same as the RP hub) ──
   const filtered = REPORT_TILES.filter(r =>
     !r.rpOnly // landlord-only reports (e.g. Manager Performance) never appear here
+    && !r.hidden
     && (r.title.toLowerCase().includes(search.toLowerCase())
       || r.description.toLowerCase().includes(search.toLowerCase())),
   );
