@@ -155,7 +155,7 @@ export default function ContractsListPage() {
                           {c.tenant.email && <p className="text-[11px] text-[#9b9890] truncate">{c.tenant.email}</p>}
                         </td>
                         <td className="px-4 py-3 text-[#6b6860]">
-                          <p className="truncate">{c.unit.name ?? (c.unit.number ? `Unit ${c.unit.number}` : '—')}</p>
+                          <p className="truncate">{c.unit.number ? `Unit ${c.unit.number}` : (c.unit.name ?? '—')}</p>
                           {c.property?.buildingName && <p className="text-[11px] text-[#9b9890] truncate">{c.property.buildingName}</p>}
                         </td>
                         <td className="px-4 py-3 text-[12px] text-[#6b6860]">

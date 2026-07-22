@@ -578,7 +578,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const displayName = lead.convertedTenant?.user?.name ?? lead.customerName;
   const email  = lead.leadEmail ?? lead.convertedTenant?.user?.email ?? null;
   const phone  = lead.leadPhone ?? lead.convertedTenant?.user?.phone ?? null;
-  const unitLabel = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : '—');
+  const unitLabel = lead.unit?.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit?.unitName ?? '—');
   const building  = lead.unit?.property?.buildingName ?? null;
   const node = stageNode(lead.stage);
   const effNode = selNode ?? node;              // journey step currently on screen
@@ -1069,7 +1069,7 @@ function StageBody(props: StageBodyProps) {
     /* ── Viewing ── */
     case 'viewing_scheduled': {
       const v = pendingViewing ?? latestViewing;
-      const unitLabel = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : 'the unit');
+      const unitLabel = lead.unit?.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit?.unitName ?? 'the unit');
       const building = lead.unit?.property?.buildingName ?? null;
       return (
         <>
@@ -1201,7 +1201,7 @@ function StageBody(props: StageBodyProps) {
             <span className="dp-ic"><BadgeCheck size={18} /></span>
             <div>
               <div className="dp-t">Contract created</div>
-              <div className="dp-s">{lead.unit ? `${lead.unit.unitName ?? `Unit ${lead.unit.unitNumber}`}` : ''}{annualRentAed != null ? ` · ${aedWhole(annualRentAed)}/yr` : ''} · now in Operations</div>
+              <div className="dp-s">{lead.unit ? `${lead.unit.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit.unitName ?? '')}` : ''}{annualRentAed != null ? ` · ${aedWhole(annualRentAed)}/yr` : ''} · now in Operations</div>
             </div>
           </div>
           <button className="btn btn-jade btn-block" onClick={onOpenLease}>Open lease <ArrowRight size={15} /></button>

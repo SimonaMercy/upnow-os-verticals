@@ -1168,7 +1168,7 @@ export default function AdminUserDetailPage() {
                           {p.units.map((un) => (
                             <Link key={un.id} href={`/dashboard/admin/units/${un.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors hover:brightness-95" style={ROW_STYLE}>
                               <Home size={13} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                              <span className="text-xs font-medium truncate flex-1" style={{ color: 'var(--color-neutral-800)' }}>{un.unitName || `Unit ${un.unitNumber}`}</span>
+                              <span className="text-xs font-medium truncate flex-1" style={{ color: 'var(--color-neutral-800)' }}>{un.unitNumber ? `Unit ${un.unitNumber}` : (un.unitName || `Unit #${un.id}`)}</span>
                               <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>{titleCase(un.unitType)}{un.rentalPrice != null ? ` · ${aed(un.rentalPrice)}` : ''}</span>
                               <Pill value={un.availability} />
                             </Link>

@@ -660,7 +660,7 @@ function LeadRow({
   const displayName  = lead.convertedTenant?.user?.name ?? lead.customerName;
   const email        = lead.leadEmail ?? lead.convertedTenant?.user?.email ?? null;
   const phone        = lead.leadPhone ?? lead.convertedTenant?.user?.phone ?? null;
-  const unitLabel    = lead.unit?.unitName ?? (lead.unit ? `Unit ${lead.unit.unitNumber}` : null);
+  const unitLabel    = lead.unit?.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit?.unitName ?? null);
   const building     = lead.unit?.property?.buildingName ?? null;
   // Annual rent — the firm plan's rent once issued, else the unit's listed price.
   const annualRentAed = lead.paymentPlan ? Math.round(lead.paymentPlan.rentFils / 100)

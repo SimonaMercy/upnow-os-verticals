@@ -4827,7 +4827,7 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
   const isRenewal = contract.contractType === 'renewal';
   const winding = contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
   const building = contract.property.buildingName ?? 'Property';
-  const unitLabel = contract.unit.name ?? (contract.unit.number ? `Unit ${contract.unit.number}` : '—');
+  const unitLabel = contract.unit.number ? `Unit ${contract.unit.number}` : (contract.unit.name ?? '—');
   const location = [contract.property.community, contract.property.emirate].filter(Boolean).join(' , ')
     || contract.property.fullAddress || '—';
   const landlordName = contract.landlord.name ?? contract.landlord.companyName ?? '—';

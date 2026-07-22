@@ -402,7 +402,10 @@ export default function MySpacesPage() {
                   ? { label: 'Applied', value: fmtShort(row.lead.createdAt) }
                   : { label: 'Contract', value: `CID-${row.contract.id}` };
             const buildingName = unit?.property?.buildingName ?? '';
-            const unitLabel = unit?.unitName ?? (unit ? `Unit ${unit.unitNumber}` : 'Property');
+            // Show the Unit No (a stable identifier) — NOT unitName, which holds a
+            // marketing/listing description ("Spacious unit in Bur Dubai...") that is
+            // identical across a building's units and makes cards indistinguishable.
+            const unitLabel = unit?.unitNumber ? `Unit ${unit.unitNumber}` : (unit?.unitName ?? 'Property');
             const photo = DUMMY_PHOTOS[idx % DUMMY_PHOTOS.length];
             const tone: 'action' | 'waiting' | 'settled' = sc.isAction ? 'action' : isActive ? 'settled' : 'waiting';
             const toneCfg = {
@@ -515,7 +518,7 @@ export default function MySpacesPage() {
             {pastContractRows.map(c => (
               <InactiveCard
                 key={`pc-${c.id}`}
-                label={c.unit?.name ?? (c.unit?.number ? `Unit ${c.unit.number}` : 'Property')}
+                label={c.unit?.number ? `Unit ${c.unit.number}` : (c.unit?.name ?? 'Property')}
                 subLabel={c.property?.buildingName ?? undefined}
                 dateStr={c.endDate ? new Date(c.endDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE }) : ''}
                 reason={c.status === 'terminated' ? 'Lease terminated' : 'Lease ended'}
@@ -524,7 +527,7 @@ export default function MySpacesPage() {
             {inactiveGroups.map(g => (
               <InactiveCard
                 key={`iv-${g.leadId}`}
-                label={g.unit?.unitName ?? (g.unit ? `Unit ${g.unit.unitNumber}` : 'Property')}
+                label={g.unit?.unitNumber ? `Unit ${g.unit.unitNumber}` : (g.unit?.unitName ?? 'Property')}
                 subLabel={g.unit?.property?.buildingName}
                 dateStr={new Date(g.primary.scheduledAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })}
                 reason={g.primary.outcome === 'not_interested' ? 'Not interested' : g.primary.status === 'no_show' ? 'No show' : 'Cancelled'}
@@ -533,7 +536,7 @@ export default function MySpacesPage() {
             {inactiveDirectLeads.map(l => (
               <InactiveCard
                 key={`id-${l.id}`}
-                label={l.unit?.unitName ?? (l.unit ? `Unit ${l.unit.unitNumber}` : 'Property')}
+                label={l.unit?.unitNumber ? `Unit ${l.unit.unitNumber}` : (l.unit?.unitName ?? 'Property')}
                 subLabel={l.unit?.property?.buildingName}
                 dateStr={new Date(l.createdAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })}
                 reason="Application rejected"

@@ -166,7 +166,7 @@ function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: Viewing; on
     } finally { setSaving(false); }
   }
 
-  const unitLabel = viewing.unit?.unitName ?? (viewing.unit ? `Unit ${viewing.unit.unitNumber}` : 'Property');
+  const unitLabel = viewing.unit?.unitNumber ? `Unit ${viewing.unit.unitNumber}` : (viewing.unit?.unitName ?? 'Property');
   const building = viewing.unit?.property?.buildingName ?? '';
 
   return (
@@ -236,7 +236,7 @@ function NotInterestedModal({ viewing, onClose, onSuccess }: { viewing: Viewing;
     } finally { setSaving(false); }
   }
 
-  const unitLabel = viewing.unit?.unitName ?? (viewing.unit ? `Unit ${viewing.unit.unitNumber}` : 'this property');
+  const unitLabel = viewing.unit?.unitNumber ? `Unit ${viewing.unit.unitNumber}` : (viewing.unit?.unitName ?? 'this property');
   const building = viewing.unit?.property?.buildingName ?? '';
 
   return (
@@ -285,7 +285,7 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
   const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: APP_TIME_ZONE });
   const timeStr = dt.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE });
 
-  const unitLabel = group.unit?.unitName ?? (group.unit ? `Unit ${group.unit.unitNumber}` : 'Property');
+  const unitLabel = group.unit?.unitNumber ? `Unit ${group.unit.unitNumber}` : (group.unit?.unitName ?? 'Property');
   const building = group.unit?.property?.buildingName ?? '';
   const address = group.unit?.property?.fullAddress ?? '';
 
@@ -494,7 +494,7 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
 function InactiveCard({ viewing }: { viewing: Viewing }) {
   const dt = new Date(viewing.scheduledAt);
   const dateStr = dt.toLocaleDateString('en-AE', { weekday: 'short', month: 'short', day: 'numeric', timeZone: APP_TIME_ZONE });
-  const unitLabel = viewing.unit?.unitName ?? (viewing.unit ? `Unit ${viewing.unit.unitNumber}` : 'Property');
+  const unitLabel = viewing.unit?.unitNumber ? `Unit ${viewing.unit.unitNumber}` : (viewing.unit?.unitName ?? 'Property');
   const building = viewing.unit?.property?.buildingName ?? '';
   const isNotInterested = viewing.outcome === 'not_interested';
 
