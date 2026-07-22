@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Search, X, BarChart2, Lock, CalendarRange, LineChart, ArrowUpRight } from 'lucide-react';
+import { Search, X, BarChart2, Lock, CalendarRange, LineChart } from 'lucide-react';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow/reportsYear';
 import DataExports from '@/app/rental-provider/dashboard/reports/DataExports';
@@ -157,32 +157,6 @@ export default function ManagerReportsPage() {
             <option value="all">All years</option>
           </select>
         </label>
-      </div>
-
-      {/* Quick links — the two headline sheet reports, straight to their views */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        {SHEET_SLUGS.map(slug => {
-          const r = REPORT_TILES.find(t => t.slug === slug)!;
-          return (
-            <button
-              key={slug}
-              type="button"
-              onClick={() => navigate(slug)}
-              className="group bg-white rounded-2xl border border-[#e8e6e0] p-5 shadow-sm hover:border-[#2e9f82] hover:shadow-md transition-all text-left">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#f0faf6] flex items-center justify-center shrink-0 group-hover:bg-[#2e9f82] transition-colors">
-                  <r.Icon size={18} className="text-[#2e9f82] group-hover:text-white transition-colors" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-bold text-[#1a1916] leading-tight flex items-center gap-1.5">
-                    {r.title} <ArrowUpRight size={13} className="text-[#9b9890] group-hover:text-[#2e9f82]" />
-                  </h3>
-                  <p className="text-xs text-[#6b6860] mt-1 line-clamp-2">{r.description}</p>
-                </div>
-              </div>
-            </button>
-          );
-        })}
       </div>
 
       <DataExports manager={{ rp: effectiveRp }} />

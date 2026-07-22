@@ -22,7 +22,7 @@ import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts 
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'occupancy' | 'receivables' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'cheque-register' | 'collection-rate' | 'executive-cashflow' | 'tenant-ledger' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'cashflow-forecast' | 'rent-vs-market' | 'operations-pipeline';
+type ReportSlug = 'occupancy' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -123,8 +123,8 @@ function InfoTip({ text, align = 'left' }: { text: string; align?: 'left' | 'rig
 }
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
-  title: 'Renewal Details Per Year',
-  description: 'The detailed companion to Renewal Summary Per Year — the same renewals for the selected year, but month by month with the individual leases. Each lease is bucketed by the month its renewal falls due (the day after the term ends, so a lease ending 31 Jul renews in August); a unit that already renewed earlier in the year also shows in the month its new term began (stage Renewed). Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Summary.',
+  title: 'Renewal Plan - Monthly',
+  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each lease is bucketed by the month its renewal falls due (the day after the term ends, so a lease ending 31 Jul renews in August); a unit that already renewed earlier in the year also shows in the month its new term began (stage Renewed). Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
   endpoint: '/api/reports/renewal-forecast',
   layout: 'grouped',
   controlKey: 'year',
@@ -193,35 +193,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
     ],
   },
-  receivables: {
-    title: 'Receivables Summary',
-    description: 'Outstanding rent cheques, aged into buckets so you see what is overdue and by how long. Admin / Contract Registration / commission fees are tracked in the Fee & VAT report.',
-    endpoint: '/api/reports/receivables',
-    dataNote: NEEDS_CHEQUE_DATA,
-    columns: [
-      { key: 'contractRef', label: 'Contract' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
-      { key: 'description', label: 'Description' },
-      { key: 'chequeNumber', label: 'Cheque #' },
-      { key: 'dueDate', label: 'Due', type: 'date' },
-      { key: 'ageDays', label: 'Age (days)', align: 'right', type: 'number' },
-      { key: 'bucket', label: 'Bucket', type: 'bucket' },
-      { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
-    ],
-    totals: [
-      { key: 'overdueFils', label: 'Overdue (arrears)', type: 'aed', keep: true },
-      { key: 'upcomingFils', label: 'Upcoming PDCs', type: 'aed' },
-      { key: 'currentFils', label: 'Due today', type: 'aed' },
-      { key: 'overdue30Fils', label: 'Overdue 1-30', type: 'aed' },
-      { key: 'overdue60Fils', label: 'Overdue 31-60', type: 'aed' },
-      { key: 'overdue90Fils', label: 'Overdue 61-90', type: 'aed' },
-      { key: 'overdue90PlusFils', label: 'Overdue 90+', type: 'aed' },
-      { key: 'undatedFils', label: 'No due date', type: 'aed' },
-      { key: 'totalOutstandingFils', label: 'Total (incl. upcoming)', type: 'aed' },
-    ],
-  },
   'lease-expiry': {
     title: 'Lease Expiry Report',
     description: 'Active contracts whose end date is approaching, with their current renewal state.',
@@ -248,7 +219,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'leases-by-year': {
     title: 'Leases by Year',
-    description: 'The full annual lease register — every lease whose term was in force at any point during the selected year (it started on or before 31 Dec and had not ended before 1 Jan; open-ended leases count once started). Unlike Leasing Activity, which is anchored on the start month, this also includes leases that began in earlier years but were still running. The tiles show how many leases were in force and the annual rent they represent, how many commenced and how many ended during the year, and how many are still active now. Pick the year above.',
+    description: 'The full annual lease register — every lease whose term was in force at any point during the selected year (it started on or before 31 Dec and had not ended before 1 Jan; open-ended leases count once started). Unlike Contract Registration Activity, which is anchored on the start month, this also includes leases that began in earlier years but were still running. The tiles show how many leases were in force and the annual rent they represent, how many commenced and how many ended during the year, and how many are still active now. Pick the year above.',
     endpoint: '/api/reports/leases-by-year',
     controlKey: 'year',
     columns: [
@@ -411,52 +382,9 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
 
 
-  'operations-pipeline': {
-    title: 'Operations Pipeline',
-    tagline: 'Every deal in progress, stage by stage — with each signature tracked separately.',
-    description: 'The Operations page in report form — a live snapshot of every record still being worked. Each section is one stage of a pipeline, in workflow order (Lead → New Lease → Renewal → Terminated); a record sits in the first stage that still has work, exactly like the Operations board. Unlike the board’s single Signatures lane, the customer and landlord signatures are separate stages AND separate columns, so you can see exactly whose signature each lease is waiting on. A signature recorded as merely “on file” is NOT counted as signed — it shows as its own On file badge and the lease stays in its signature stage. Records leave the report automatically as their work completes.',
-    endpoint: '/api/reports/operations-pipeline',
-    layout: 'grouped',
-    columns: [
-      { key: 'stageLabel', label: 'Stage' },
-      { key: 'records', label: 'Records', align: 'right', type: 'number' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-    ],
-    totals: [
-      { key: 'inPipeline', label: 'In progress', type: 'number', keep: true },
-      { key: 'leads', label: 'Leads', type: 'number', keep: true },
-      { key: 'newLeases', label: 'New leases', type: 'number', keep: true },
-      { key: 'renewals', label: 'Renewals', type: 'number', keep: true },
-      { key: 'terminated', label: 'Terminations', type: 'number', keep: true },
-      { key: 'awaitingCustomerSig', label: 'Awaiting customer signature', type: 'number', keep: true },
-      { key: 'awaitingLandlordSig', label: 'Awaiting landlord signature', type: 'number', keep: true },
-      { key: 'pipelineRentFils', label: 'Annual rent (contracts)', type: 'aed' },
-    ],
-    drilldown: {
-      childKey: 'items',
-      titleKey: 'stageLabel',
-      titleLabel: 'Stage',
-      countLabel: 'records',
-      contractIdKey: 'contractId',
-      columns: [
-        { key: 'ref', label: 'Contract' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'buildingName', label: 'Property' },
-        { key: 'startDate', label: 'Start', type: 'date' },
-        { key: 'endDate', label: 'End', type: 'date' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'tenantSignature', label: 'Customer signature', type: 'stage' },
-        { key: 'landlordSignature', label: 'Landlord signature', type: 'stage' },
-        { key: 'progress', label: 'Progress', align: 'right' },
-        { key: 'ageDays', label: 'Idle days', align: 'right', type: 'number' },
-      ],
-    },
-  },
-
   'new-leases-matrix': {
     title: 'New Leases by Month',
-    description: 'A property × month grid of leases that COMMENCED (started) each month of the selected year — the matrix companion to Leasing Activity. Each cell counts the new leases that began that month for the property; the trailing columns give the property’s total new leases and the annual rent they represent. Anchored on the lease start date (real leases only — pending drafts excluded). Pick the year above.',
+    description: 'A property × month grid of leases that COMMENCED (started) each month of the selected year — the matrix companion to Contract Registration Activity. Each cell counts the new leases that began that month for the property; the trailing columns give the property’s total new leases and the annual rent they represent. Anchored on the lease start date (real leases only — pending drafts excluded). Pick the year above.',
     endpoint: '/api/reports/new-leases-matrix',
     layout: 'countMatrix',
     controlKey: 'year',
@@ -472,7 +400,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     ],
   },
   'renewal-vacancy': {
-    title: 'Renewal Summary Per Year',
+    title: 'Renewal Plan - Yearly',
     description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year. Click a Vacant count to list those units.',
     endpoint: '/api/reports/renewal-vacancy',
     layout: 'countMatrix',
@@ -483,32 +411,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'vacant', label: 'Total Vacant', type: 'number', keep: true },
       { key: 'totalUnits', label: 'Total Units', type: 'number', keep: true },
       { key: 'properties', label: 'Properties', type: 'number' },
-    ],
-  },
-
-  'cheque-register': {
-    title: 'PDC / Cheque Register',
-    description: 'Every cheque on file with its lifecycle — pending, cleared, bounced or cancelled. Post-dated cheques are simply those with a future cheque date. The date range filters by cheque date.',
-    endpoint: '/api/reports/cheque-register',
-    dataNote: NEEDS_CHEQUE_DATA,
-    controlKey: 'dateRange',
-    columns: [
-      { key: 'chequeDate', label: 'Cheque date', type: 'date' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
-      { key: 'chequeNumber', label: 'Cheque #' },
-      { key: 'paymentType', label: 'Type', type: 'stage' },
-      { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
-      { key: 'status', label: 'Status', type: 'stage' },
-    ],
-    totals: [
-      { key: 'cheques', label: 'Cheques', type: 'number' },
-      { key: 'clearedFils', label: 'Cleared', type: 'aed' },
-      { key: 'pendingFils', label: 'Pending', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
-      { key: 'cancelledFils', label: 'Cancelled', type: 'aed' },
-      { key: 'totalFils', label: 'Total', type: 'aed' },
     ],
   },
 
@@ -539,59 +441,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'penaltyFils', label: 'Penalty', type: 'aed' },
       { key: 'netIncomeFils', label: 'Net Income', type: 'aed', keep: true },
-      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
-    ],
-  },
-
-  'collection-rate': {
-    title: 'Collection Rate Report',
-    description: 'Monthly rent collection performance — cheques due each month, how much cleared (collected), what is still pending, what bounced, and the collection rate. Anchored on the cheque date; use the date range to scope the period.',
-    endpoint: '/api/reports/collection-rate',
-    dataNote: NEEDS_CHEQUE_DATA,
-    controlKey: 'dateRange',
-    columns: [
-      { key: 'label', label: 'Month' },
-      { key: 'scheduled', label: 'Cheques due', align: 'right', type: 'number' },
-      { key: 'scheduledFils', label: 'Scheduled', align: 'right', type: 'aed' },
-      { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
-      { key: 'outstandingFils', label: 'Outstanding', align: 'right', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
-      { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
-    ],
-    totals: [
-      { key: 'scheduled', label: 'Cheques due', type: 'number' },
-      { key: 'scheduledFils', label: 'Scheduled', type: 'aed' },
-      { key: 'collectedFils', label: 'Collected', type: 'aed' },
-      { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
-      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
-    ],
-  },
-
-  'tenant-ledger': {
-    title: 'Customer Ledger',
-    description: 'Per-customer rent cashflow — what was scheduled, collected, is still outstanding and bounced, with each customer\'s collection rate and last payment. Sorted by who owes the most. Use the date range to scope the period.',
-    endpoint: '/api/reports/tenant-ledger',
-    dataNote: NEEDS_CHEQUE_DATA,
-    controlKey: 'dateRange',
-    columns: [
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
-      { key: 'cheques', label: 'Cheques', align: 'right', type: 'number' },
-      { key: 'scheduledFils', label: 'Scheduled', align: 'right', type: 'aed' },
-      { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
-      { key: 'outstandingFils', label: 'Outstanding', align: 'right', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
-      { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
-      { key: 'lastPaymentDate', label: 'Last payment', type: 'date' },
-    ],
-    totals: [
-      { key: 'customers', label: 'Customers', type: 'number' },
-      { key: 'scheduledFils', label: 'Scheduled', type: 'aed' },
-      { key: 'collectedFils', label: 'Collected', type: 'aed' },
-      { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
     ],
   },
@@ -642,7 +491,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
 
   'leasing-activity': {
-    title: 'Leasing Activity',
+    title: 'Contract Registration Activity',
     description: 'Monthly leasing velocity — new leases commencing each month, the annual rent they represent, and Contract Registration status. Anchored on the lease start date. Note: historical renewals were imported without a renewal link, so they appear here as new leases.',
     endpoint: '/api/reports/leasing-activity',
     controlKey: 'dateRange',
@@ -659,43 +508,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'ejariRegistered', label: 'Contract Registration completed', type: 'number' },
       { key: 'ejariPending', label: 'Awaiting Contract Registration', type: 'number' },
     ],
-  },
-
-  'cashflow-forecast': {
-    title: 'Cash Inflow Forecast',
-    description: 'When cash actually lands — every post-dated cheque bucketed by the month it falls due. Past-due pending cheques show as Overdue (that is arrears, not future cash); cheques beyond the horizon collapse into Later.',
-    endpoint: '/api/reports/cashflow-forecast',
-    dataNote: NEEDS_CHEQUE_DATA,
-    layout: 'grouped',
-    controlKey: 'forecastMonths',
-    columns: [
-      { key: 'monthLabel', label: 'Month' },
-      { key: 'cheques', label: 'Cheques', align: 'right', type: 'number' },
-      { key: 'amountFils', label: 'Inflow', align: 'right', type: 'aed' },
-    ],
-    totals: [
-      { key: 'overdueFils', label: 'Overdue (arrears)', type: 'aed', keep: true },
-      { key: 'next90Fils', label: 'Next 90 days', type: 'aed' },
-      { key: 'horizonFils', label: 'Within horizon', type: 'aed' },
-      { key: 'laterFils', label: 'Beyond horizon', type: 'aed' },
-      { key: 'totalPendingFils', label: 'Total pending', type: 'aed' },
-      { key: 'cheques', label: 'Cheques', type: 'number' },
-    ],
-    drilldown: {
-      childKey: 'items',
-      titleKey: 'monthLabel',
-      countLabel: 'cheques',
-      contractIdKey: 'contractId',
-      columns: [
-        { key: 'dueDate', label: 'Due', type: 'date' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'buildingName', label: 'Property' },
-        { key: 'chequeNumber', label: 'Cheque #' },
-        { key: 'paymentType', label: 'Type', type: 'stage' },
-        { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
-      ],
-    },
   },
 
   'rent-vs-market': {
@@ -785,9 +597,8 @@ const FEE_DETAIL_COLUMNS: Column[] = [
 // only" vs "all" scope toggle (backend ?scope=all includes ended tenants).
 // Inventory / occupancy reports aren't listed — they have no ended-tenant noise.
 const TENANT_SCOPED = new Set<ReportSlug>([
-  'receivables', 'security-deposits', 'cheque-register', 'collection-rate',
-  'executive-cashflow', 'tenant-ledger', 'rent-collection',
-  'leasing-activity', 'fee-taxation', 'cashflow-forecast',
+  'security-deposits', 'executive-cashflow', 'rent-collection',
+  'leasing-activity', 'fee-taxation',
 ]);
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
