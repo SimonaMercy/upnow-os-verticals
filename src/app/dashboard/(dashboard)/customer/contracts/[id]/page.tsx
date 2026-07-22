@@ -95,7 +95,7 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
-  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null };
+  tenant: { id: number | null; name: string | null; companyName?: string | null; email: string | null; phone: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
   unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
@@ -648,7 +648,7 @@ export default function TenantContractDetailPage() {
                         </div>
                         <div>
                           <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Tenant / Lessee</p>
-                          <Row label="Name"  value={contract.tenant.name} />
+                          <Row label="Name"  value={contract.tenant.companyName ?? contract.tenant.name} />
                           <Row label="Email" value={contract.tenant.email} />
                           <Row label="Phone" value={contract.tenant.phone} />
                         </div>

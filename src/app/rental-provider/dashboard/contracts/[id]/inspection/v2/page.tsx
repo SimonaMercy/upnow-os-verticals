@@ -111,7 +111,8 @@ export default function CategoryInspectionPage() {
             unitNo: c.unit?.number ?? c.unit?.unitNumber ?? '',
             propertyType: c.unit?.unitType ?? c.unit?.type ?? '',
             floor: c.unit?.floor != null ? String(c.unit.floor) : '',
-            tenantName: c.tenant?.name ?? '',
+            // Company tenants: the party name is the company, not the signatory.
+            tenantName: c.tenant?.companyName || c.tenant?.name || '',
             tenantPhone: c.tenant?.phone ?? '',
             tenantEmail: c.tenant?.email ?? '',
           });

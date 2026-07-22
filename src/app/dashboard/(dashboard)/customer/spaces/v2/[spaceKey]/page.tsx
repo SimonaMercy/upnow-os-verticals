@@ -209,6 +209,9 @@ interface ApiContractPayment {
 interface ApiContract {
   id: number;
   ref?: string | null;
+  /** Company tenant party name — set when the tenant is a company, so documents
+   *  show the company rather than the individual signatory. */
+  tenantCompanyName?: string | null;
   status: string;
   contractType?: string | null;
   parentContractId?: number | null;
@@ -3001,7 +3004,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payment plan · {paymentSlots.length} payment{paymentSlots.length === 1 ? '' : 's'}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>Issued {fmtDateShort(plan.issuedAt)}</span>
-            <button type="button" onClick={() => printPaymentPlan(resolved, personName(user) || '—')}
+            <button type="button" onClick={() => printPaymentPlan(resolved, resolved.contract?.tenantCompanyName || personName(user) || '—')}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
               <Printer size={12} /> Print / Save PDF
             </button>

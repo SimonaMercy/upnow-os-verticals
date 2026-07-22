@@ -186,7 +186,7 @@ export default function ContractReviewPage() {
     unitNo: d.contract.unit?.number ?? '',
     propertyType: d.contract.unit?.type ?? '',
     floor: (d.contract.unit as { floor?: string | number | null } | undefined)?.floor != null ? String((d.contract.unit as { floor?: string | number }).floor) : '',
-    tenantName: d.contract.tenant?.name ?? '',
+    tenantName: d.contract.tenant?.companyName || d.contract.tenant?.name || '',
     tenantPhone: (d.contract.tenant as { phone?: string | null })?.phone ?? '',
     tenantEmail: (d.contract.tenant as { email?: string | null })?.email ?? '',
     inspectorName: insp?.inspectorName ?? '',

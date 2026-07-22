@@ -7,7 +7,7 @@ import { Loader2 } from 'lucide-react';
 interface ContractDetail {
   id: number; ref: string;
   startDate: string; endDate: string;
-  tenant: { name: string | null; phone: string | null; emiratesId?: string | null };
+  tenant: { name: string | null; companyName?: string | null; phone: string | null; emiratesId?: string | null };
   landlord: { name: string | null; companyName: string | null; phone: string | null };
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
   unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null; sizeSqm: number | null };
@@ -143,7 +143,7 @@ export default function HandoverFormPage() {
           </div>
           <div style={{ display: 'flex' }}>
             <span style={{ fontSize: 8, color: '#000', flex: 1, paddingRight: 8 }}>{landlordName}</span>
-            <span style={{ fontSize: 8, color: '#000', flex: 1 }}>{contract.tenant.name ?? ''}</span>
+            <span style={{ fontSize: 8, color: '#000', flex: 1 }}>{contract.tenant.companyName || contract.tenant.name || ''}</span>
           </div>
           <div style={{ display: 'flex', marginTop: 4 }}>
             <Row label="Building / Property" labelAr="المبنى / العقار" cols={2} />

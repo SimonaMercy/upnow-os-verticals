@@ -927,7 +927,7 @@ function InspectionWorkspace() {
         setMeta({
           property:    c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit:        c.unit?.number ?? c.unit?.unitNumber ?? '',
-          tenantName:  c.tenant?.name ?? '',
+          tenantName:  c.tenant?.companyName || c.tenant?.name || '',
           tenantPhone: c.tenant?.phone ?? '',
           tenantId:    c.tenant?.id ?? null,
           moveInDate:  startDate,

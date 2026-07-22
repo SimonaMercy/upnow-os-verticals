@@ -262,7 +262,7 @@ export default function SettlementPage() {
         setMeta({
           property: c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit: c.unit?.number ?? c.unit?.unitNumber ?? '',
-          tenantName: c.tenant?.name ?? '',
+          tenantName: c.tenant?.companyName || c.tenant?.name || '',
         });
         setLandlordId(c.landlord?.id ?? null);
         setTenantId(c.tenant?.id ?? null);

@@ -133,7 +133,9 @@ export default function TenantInspectionPage() {
         const me = meRes.ok ? await meRes.json() : null;
         const composedName = [me?.firstName, me?.lastName].filter(Boolean).join(' ').trim();
         const rawName = (me?.name ?? '').trim();
-        const tenantName = composedName || (/^\+?[\d\s()-]{6,}$/.test(rawName) ? '' : rawName);
+        const personName = composedName || (/^\+?[\d\s()-]{6,}$/.test(rawName) ? '' : rawName);
+        // Company tenants: the party name is the company, not the signatory.
+        const tenantName = (c?.tenantCompanyName as string | undefined)?.trim() || personName;
         setMeta({
           tenantName, tenantPhone: me?.phone ?? '',
           unitNumber: c?.unit?.unitNumber ?? c?.unit?.number ?? '',
