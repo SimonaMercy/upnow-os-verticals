@@ -3862,7 +3862,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <p style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: '5px 0 2px', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{building}</p>
             {(unitNum || unitName) && (
               <p style={{ fontSize: 30, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 10px', letterSpacing: '-0.025em', lineHeight: 1 }}>
-                {unitName ?? `Unit ${unitNum}`}
+                {unitNum ? `Unit ${unitNum}` : unitName}
               </p>
             )}
             <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -4926,7 +4926,10 @@ function EndStateAction({ primaryLabel, primaryHref }: { primaryLabel: string; p
 function TopBar({ resolved }: { resolved: Resolved }) {
   const u = resolved.unit;
   const building = u?.property?.buildingName ?? '—';
-  const unit = u ? (u.unitName ?? `Unit ${u.unitNumber}`) : '';
+  // Identify the unit by its number first (matches contracts/reports/property
+  // surfaces app-wide). unitName is a free-text label that often holds a
+  // listing headline, so it's only a fallback when there's no unit number.
+  const unit = u ? (u.unitNumber ? `Unit ${u.unitNumber}` : (u.unitName ?? '')) : '';
   const loc = [u?.property?.community?.name, u?.property?.emirate?.name].filter(Boolean).join(', ');
   return (
     <div style={{ background: 'var(--paper)', borderBottom: '1px solid var(--mist-strong)', padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, position: 'sticky', top: 0, zIndex: 10 }}>
