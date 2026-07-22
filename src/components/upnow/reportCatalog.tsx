@@ -9,7 +9,7 @@ import {
   Banknote, TrendingUp, ListChecks, CalendarDays,
 } from 'lucide-react';
 
-export type GroupKey = 'portfolio' | 'leasing' | 'collections' | 'financial' | 'operations' | 'missingdata';
+export type GroupKey = 'portfolio' | 'leasing' | 'renewals' | 'collections' | 'financial' | 'operations' | 'missingdata';
 
 export interface ReportTile {
   slug: string;
@@ -25,11 +25,12 @@ export interface ReportTile {
 /** Section order + headers for the grouped hub. Coming-soon reports sit
  *  greyed-out inside their natural group rather than in a separate dump. */
 export const GROUPS: { key: GroupKey; title: string; blurb: string; Icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
-  { key: 'portfolio',   title: 'Portfolio & Occupancy',  blurb: 'What you own and how full it is.',                      Icon: FileBarChart },
-  { key: 'leasing',     title: 'Leasing & Renewals',     blurb: 'Tenancy lifecycle — expiries, renewals, new leases.',   Icon: RefreshCw },
-  { key: 'collections', title: 'Rent & Collections',     blurb: 'Money in — rent roll, cheques, receivables, cashflow.', Icon: Wallet },
-  { key: 'financial',   title: 'Financial & Compliance', blurb: 'Deposits, fees, VAT and statements.',                   Icon: ScrollText },
-  { key: 'operations',  title: 'Manager activity',       blurb: 'How your managers are performing, day by day.',          Icon: Users },
+  { key: 'portfolio',   title: 'Portfolio & Occupancy',  blurb: 'What you own and how full it is.',                          Icon: FileBarChart },
+  { key: 'leasing',     title: 'Leasing Activity',       blurb: 'New leases signed — registers, matrices and monthly activity.', Icon: FileText },
+  { key: 'renewals',    title: 'Renewals & Expiry',      blurb: 'The forward book — expiries, renewal plans and rent uplift.',   Icon: RefreshCw },
+  { key: 'collections', title: 'Rent & Collections',     blurb: 'Money in — rent roll, cheques, receivables, cashflow.',     Icon: Wallet },
+  { key: 'financial',   title: 'Financial & Compliance', blurb: 'Deposits, fees, VAT and statements.',                       Icon: ScrollText },
+  { key: 'operations',  title: 'Manager Activity',       blurb: 'How your managers are performing, day by day.',             Icon: Users },
 ];
 
 export const REPORT_TILES: ReportTile[] = [
@@ -37,15 +38,16 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'portfolio',          title: 'Portfolio',         description: 'Units, occupied counts, and the rent roll per property.',              Icon: Building2,    available: true,  group: 'portfolio' },
   { slug: 'portfolio-overview', title: 'Unit Mix',       description: 'Units by type, occupancy, and annual asking rent.',                    Icon: FileBarChart, available: true,  group: 'portfolio' },
   { slug: 'vacancy-analysis',   title: 'Vacant Units',         description: 'Vacant units with last rent, market rent and asking rent at stake.',              Icon: MapPin,       available: true,  group: 'portfolio' },
-  // ── Leasing & Renewals ─────────────────────────────────────────────────
-  { slug: 'renewal-vacancy',    title: 'Renewal Plan - Yearly',     description: 'Per-property summary for a year — occupied units by renewal month + Vacant + Total units, straight from each unit\'s Available/Occupied status. Click Vacant to list the units.', Icon: Building2, available: true, group: 'leasing' },
-  { slug: 'renewal-forecast',   title: 'Renewal Plan - Monthly',    description: 'Every lease up for renewal in a year, month by month with annual rent — expand a month for the per-customer detail.',  Icon: RefreshCw,    available: true,  group: 'leasing' },
-  { slug: 'lease-expiry',       title: 'Upcoming Renewals',        description: 'Leases ending within 30 / 60 / 90 / 180 / 365 days, grouped by the month they come up for renewal.', Icon: CalendarClock, available: true, group: 'leasing' },
+  // ── Leasing Activity ───────────────────────────────────────────────────
+  { slug: 'leasing-activity',   title: 'Contract Registration Activity', description: 'New leases per month, rent signed, and Contract Registration status.',                 Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'leases-by-year',     title: 'Leases - Monthly',           description: 'The annual lease register grouped by commencement month — expand a month to see the leases that began then, with customer, unit, term dates, rent and status.', Icon: FileText, available: true, group: 'leasing' },
   { slug: 'new-leases-matrix',  title: 'Lease Summary - Yearly',       description: 'Property × month grid of leases commencing each month of the year (the matrix companion to Contract Registration Activity), with new-lease counts and annual rent per property.', Icon: CalendarClock, available: true, group: 'leasing' },
-  { slug: 'leasing-activity',   title: 'Contract Registration Activity', description: 'New leases per month, rent signed, and Contract Registration status.',                 Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'lease-activity',     title: 'Lease Activity',      description: 'Month-by-month operations sheet — renewals due, new & renewal contracts, deposits, notices, customer & landlord online signatures, Contract Registration completed vs pending, move-outs, and average days to signature. Exportable to CSV in the executive format.', Icon: ScrollText, available: true, group: 'leasing' },
-  { slug: 'rent-vs-market',     title: 'Rent vs Market',           description: 'Current rent vs market benchmark per unit — uplift recoverable at renewal.', Icon: TrendingUp, available: true, group: 'leasing' },
+  // ── Renewals & Expiry ──────────────────────────────────────────────────
+  { slug: 'lease-expiry',       title: 'Upcoming Renewals',        description: 'Leases ending within 30 / 60 / 90 / 180 / 365 days, grouped by the month they come up for renewal.', Icon: CalendarClock, available: true, group: 'renewals' },
+  { slug: 'renewal-forecast',   title: 'Renewal Plan - Monthly',    description: 'Every lease up for renewal in a year, month by month with annual rent — expand a month for the per-customer detail.',  Icon: RefreshCw,    available: true,  group: 'renewals' },
+  { slug: 'renewal-vacancy',    title: 'Renewal Plan - Yearly',     description: 'Per-property summary for a year — occupied units by renewal month + Vacant + Total units, straight from each unit\'s Available/Occupied status. Click Vacant to list the units.', Icon: Building2, available: true, group: 'renewals' },
+  { slug: 'rent-vs-market',     title: 'Rent vs Market',           description: 'Current rent vs market benchmark per unit — uplift recoverable at renewal.', Icon: TrendingUp, available: true, group: 'renewals' },
   // ── Rent & Collections ─────────────────────────────────────────────────
   { slug: 'rent-collection',    title: 'Cash Management', description: 'Collection matrix — every unit down, months across, with annual rent and year-to-date expected vs received.',          Icon: BarChart2,    available: true,  group: 'collections' },
   { slug: 'cheques-management', title: 'Cheques Management', description: 'Cheque schedule — one row per active lease with each rent cheque\'s due date and a 12-month grid of how many cheques land each month.', Icon: CalendarDays, available: true,  group: 'collections' },

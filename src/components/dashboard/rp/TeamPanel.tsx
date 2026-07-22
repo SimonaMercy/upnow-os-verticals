@@ -10,15 +10,20 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
-import { REPORT_TILES } from '@/components/upnow/reportCatalog';
-import { SHEET_SLUGS } from '@/components/upnow/ReportSheetView';
+import { REPORT_TILES, GROUPS } from '@/components/upnow/reportCatalog';
 
 /** Reports a manager can be granted access to — the live ones a manager can
  *  actually open (rpOnly reports 403 in the manager portal, so granting them
- *  is dead UI). The two headline sheets are pinned first. */
+ *  is dead UI). Kept with their catalog group so the checklist can mirror the
+ *  Reports page grouping. */
 const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available && !r.rpOnly)
-  .map((r) => ({ slug: r.slug, title: r.title }))
-  .sort((a, b) => Number((SHEET_SLUGS as string[]).includes(b.slug)) - Number((SHEET_SLUGS as string[]).includes(a.slug)));
+  .map((r) => ({ slug: r.slug, title: r.title, group: r.group }));
+
+/** The checklist grouped the same way — and in the same order — as the Reports
+ *  page, dropping any group that has no grantable reports. */
+const REPORT_GROUPS = GROUPS
+  .map((g) => ({ title: g.title, reports: AVAILABLE_REPORTS.filter((r) => r.group === g.key) }))
+  .filter((g) => g.reports.length > 0);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -302,6 +307,10 @@ function ReportAccessChecklist({
 }: { selected: string[]; onChange: (slugs: string[]) => void }) {
   const toggle = (slug: string) =>
     onChange(selected.includes(slug) ? selected.filter((s) => s !== slug) : [...selected, slug]);
+  const toggleGroup = (slugs: string[], on: boolean) =>
+    onChange(on
+      ? Array.from(new Set([...selected, ...slugs]))
+      : selected.filter((s) => !slugs.includes(s)));
   return (
     <div>
       <p className="text-[11px] mb-2" style={{ color: 'var(--color-neutral-400)' }}>
@@ -309,18 +318,39 @@ function ReportAccessChecklist({
           ? 'All reports — leave unchecked for full access, or pick specific reports.'
           : `${selected.length} of ${AVAILABLE_REPORTS.length} reports selected.`}
       </p>
-      <div className="grid grid-cols-1 gap-1.5 max-h-80 overflow-y-auto pr-1">
-        {AVAILABLE_REPORTS.map((r) => (
-          <label key={r.slug} className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-neutral-700)' }}>
-            <input
-              type="checkbox"
-              checked={selected.includes(r.slug)}
-              onChange={() => toggle(r.slug)}
-              style={{ accentColor: 'var(--color-primary)' }}
-            />
-            {r.title}
-          </label>
-        ))}
+      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+        {REPORT_GROUPS.map((g) => {
+          const slugs = g.reports.map((r) => r.slug);
+          const allOn = slugs.every((s) => selected.includes(s));
+          return (
+            <div key={g.title}>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>{g.title}</p>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(slugs, !allOn)}
+                  className="text-[10px] font-medium"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {allOn ? 'Clear' : 'Select all'}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {g.reports.map((r) => (
+                  <label key={r.slug} className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-neutral-700)' }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(r.slug)}
+                      onChange={() => toggle(r.slug)}
+                      style={{ accentColor: 'var(--color-primary)' }}
+                    />
+                    {r.title}
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
