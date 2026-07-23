@@ -75,7 +75,6 @@ interface UnitRow {
   unitSizeSqm: string;
   furnishing: string;
   rentalPrice: string;
-  marketPrice: string;
   securityDeposit: string;
   adminFee: string;
   ejariFeeFils: string;
@@ -105,7 +104,7 @@ function emptyRow(expanded = true): UnitRow {
     expanded,
     unitName: '', unitType: '', unitTier: 'standard', unitNumber: '',
     floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '', unitSizeSqft: '', unitSizeSqm: '',
-    furnishing: 'Unfurnished', rentalPrice: '', marketPrice: '',
+    furnishing: 'Unfurnished', rentalPrice: '',
     securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '', serviceCharges: '',
     view: '', amenities: [], minLeaseMonths: '12', noticePeriodDays: '60',
     rentEscalationPct: '',
@@ -507,8 +506,6 @@ export default function AddListingPage() {
             unitSizeSqft:    r.unitSizeSqft   ? Number(r.unitSizeSqft)   : undefined,
             unitSizeSqm:     r.unitSizeSqm    ? Number(r.unitSizeSqm)    : undefined,
             rentalPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
-            // One price: market = the annual rent (kept in lock-step).
-            marketPrice:      r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
             securityDeposit:  r.securityDeposit ? Number(r.securityDeposit) : undefined,
             adminFee:         r.adminFee        ? Number(r.adminFee)        : undefined,
             ejariFeeFils:     r.ejariFeeFils    ? Number(r.ejariFeeFils)    : undefined,
@@ -1486,9 +1483,8 @@ function UnitCard({
             </div>
           </div>
 
-          {/* Row 5: Annual rent — the single price (also the market/list price;
-              a discount becomes the contract's annual rent). Mirrored into
-              marketPrice on submit, so we don't expose a second field. */}
+          {/* Row 5: Annual rent — the unit's asking/list price (a discount at
+              contract time becomes the contract's annual rent). */}
           <div>
             <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
             <input type="number" min="0" step="any"

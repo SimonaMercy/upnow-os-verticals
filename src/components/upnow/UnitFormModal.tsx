@@ -206,7 +206,6 @@ export interface UnitFormData {
   furnishing: string;
   amenities: string[];
   rentalPrice: string;
-  marketPrice: string;
   securityDeposit: string;
   adminFee: string;
   ejariFeeFils: string;
@@ -302,7 +301,7 @@ const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
   floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '',
   unitSizeSqft: '', unitSizeSqm: '', view: '',
-  furnishing: 'Unfurnished', amenities: [], rentalPrice: '', marketPrice: '',
+  furnishing: 'Unfurnished', amenities: [], rentalPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
   serviceCharges: '', minLeaseMonths: '12', noticePeriodDays: '60',
   rentEscalationPct: '',
@@ -682,10 +681,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
       return;
     }
     setSaving(true);
-    // Market rent is the benchmark the risk & rent-vs-market reports compare the
-    // in-place rent against. It defaults to the asking rent when left blank, but
-    // the RP can set a distinct value — the two need not move in lock-step.
-    const payload = { ...form, marketPrice: form.marketPrice.trim() || form.rentalPrice };
+    const payload = { ...form };
     try { await onSave(payload, floorPlan, propertyStandalone === false ? titleDeed : null, addendums); requestClose(); }
     finally { setSaving(false); }
   };
@@ -862,11 +858,6 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               <input type="number" min="0" step="any" className={cn(ds.input, errors.rentalPrice && ds.inputErr)} placeholder="e.g. 85000"
                 value={form.rentalPrice} onChange={e => upd('rentalPrice', e.target.value)} />
               {errors.rentalPrice && <p className={ds.errText}>{errors.rentalPrice}</p>}
-            </div>
-            <div className={ds.field}>
-              <label className={ds.lbl}>Market Rent (AED)</label>
-              <input type="number" min="0" step="any" className={ds.input} placeholder="Defaults to the annual rent"
-                value={form.marketPrice} onChange={e => upd('marketPrice', e.target.value)} />
             </div>
           </div>
 

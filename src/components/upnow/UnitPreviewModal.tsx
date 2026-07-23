@@ -54,7 +54,6 @@ interface Unit {
   furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
-  marketPrice: number | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;
@@ -102,7 +101,6 @@ interface PriceHistory {
   unitId: number;
   unitNumber: string | null;
   currentRentalPrice: number | null;
-  currentMarketPrice: number | null;
   leaseCount: number;
   repriceCount: number;
   timeline: PriceEvent[];

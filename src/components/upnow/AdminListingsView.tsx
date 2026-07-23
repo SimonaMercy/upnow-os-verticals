@@ -66,7 +66,6 @@ interface UnitDetail {
   numBalconies: number;
   view: string | null;
   numAcs: number;
-  marketPrice: number | null;
   rentalPrice: number | null;
   serviceCharges: number | null;
   securityDeposit: number | null;
@@ -527,7 +526,6 @@ function UnitDetailPanel({ row, acting, onApprove, onReject }: {
                 <Field label="Service charges" value={aed(detail.serviceCharges)} />
                 <Field label="Admin fee" value={aed(detail.adminFee)} />
                 <Field label="Commission" value={aed(detail.commission)} />
-                <Field label="Market price" value={aed(detail.marketPrice)} />
               </div>
             </Section>
 

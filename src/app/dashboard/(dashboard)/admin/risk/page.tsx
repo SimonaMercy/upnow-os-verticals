@@ -50,7 +50,7 @@ interface SlowRefundRow { settlementId: number; contractId: number; rpName: stri
 interface DeductionRow { settlementId: number; contractId: number; rpName: string; depositHeldAed: number; deductionAed: number; deductionRatio: number; }
 interface DoubleChargeRow { contractId: number; rpName: string; depositCount: number; totalAed: number; }
 interface DepositAlerts { trap: TrapRow[]; slowRefund: SlowRefundRow[]; excessiveDeduction: DeductionRow[]; doubleCharge: DoubleChargeRow[]; }
-interface HikeRow { contractId: number; rpName: string; priorRent: number; newRent: number; hikePct: number; marketPrice: number | null; }
+interface HikeRow { contractId: number; rpName: string; priorRent: number; newRent: number; hikePct: number; askingRent: number | null; }
 interface EvictionRow { contractId: number; rpName: string; status: string; payingTenant: boolean; paidAed: number; terminationRequestedAt: string | null; }
 interface FairnessAlerts { renewalHikes: HikeRow[]; directEvictions: EvictionRow[]; }
 interface Flag {
@@ -521,7 +521,7 @@ export default function AdminRiskPage() {
             <AlertList title="Abusive renewal hikes" icon={TrendingUp} accent={AMBER} count={fairness?.renewalHikes.length ?? 0} rows={fairness?.renewalHikes ?? []} emptyText="No above-market renewal hikes."
               render={(r: HikeRow) => (
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · {fmtAED(r.priorRent)} → {fmtAED(r.newRent)}{r.marketPrice ? ` · mkt ${fmtAED(r.marketPrice)}` : ''}</div></div>
+                  <div className="min-w-0"><div className="font-semibold truncate text-[#1a1916]">{r.rpName}</div><div className="text-[11px] text-[#9b9890]">Contract #{r.contractId} · {fmtAED(r.priorRent)} → {fmtAED(r.newRent)}{r.askingRent ? ` · ask ${fmtAED(r.askingRent)}` : ''}</div></div>
                   <div className="text-right flex-shrink-0"><div className="font-bold text-[#b45309]">+{r.hikePct}%</div></div>
                 </div>
               )} />

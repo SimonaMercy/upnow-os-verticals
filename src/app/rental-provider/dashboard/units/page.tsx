@@ -90,8 +90,6 @@ const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'default',     label: 'Sort: default' },
   { value: 'sqft_desc',   label: 'Size: largest' },
   { value: 'sqft_asc',    label: 'Size: smallest' },
-  { value: 'market_desc', label: 'Market price: high' },
-  { value: 'market_asc',  label: 'Market price: low' },
   { value: 'rent_desc',   label: 'Asking rent: high' },
   { value: 'rent_asc',    label: 'Asking rent: low' },
 ];
@@ -329,7 +327,6 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const sortVal = (p: Plan): number | null => {
     switch (sortField) {
       case 'sqft':   return p.avgSqft ?? p.sqftMax ?? null;
-      case 'market': return p.marketFrom;
       case 'rent':   return p.rentFrom;
       default:       return null;
     }
@@ -376,7 +373,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       buildingName: buildingNameOf(u.propertyId), spaceCategory: null, unitType: u.unitType ?? null,
       bedrooms: u.bedrooms ?? null, bathrooms: u.bathrooms ?? null,
       sqftMin: 0, sqftMax: 0, sqmMin: 0, sqmMax: 0, avgSqft: null,
-      priceFrom: null, rentFrom: null, rentTo: null, marketFrom: null, marketTo: null, marketGap: null, aedPerSqft: null,
+      priceFrom: null, rentFrom: null, rentTo: null, aedPerSqft: null,
       securityDeposit: null, adminFee: null, ejariFee: null, commission: null, serviceCharges: null,
       leaseTerms: null, termsVersion: null, unpricedCount: 0, unitCount: 1, sampleUnitId: u.id,
       floorPlanUrl: u.floorPlanUrl ?? null, flags: [],
@@ -390,7 +387,6 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const unitSortVal = (u: UnitRecord): number | null => {
     switch (sortField) {
       case 'sqft':   return u.unitSizeSqft ?? null;
-      case 'market': return u.marketPrice ?? null;
       case 'rent':   return u.rentalPrice ?? null;
       default:       return null;
     }
@@ -582,7 +578,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const leaseRange = start && end ? `${start} → ${end}` : start ? `from ${start}` : end ? `until ${end}` : '';
     const size = u.unitSizeSqft ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
       : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
-    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice ?? u.marketPrice, busy: busyUnit === u.id };
+    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, busy: busyUnit === u.id };
   };
 
   // Listing / edit / delete actions — shared by the unit row and card. (The row

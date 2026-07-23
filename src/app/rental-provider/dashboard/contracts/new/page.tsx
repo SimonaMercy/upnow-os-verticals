@@ -37,7 +37,6 @@ interface Unit {
   id: number;
   unitNumber: string;
   unitName: string | null;
-  marketPrice: number | null;
   rentalPrice: number | null;
   securityDeposit: number | null;
   adminFee: number | null;
@@ -492,7 +491,7 @@ export default function NewContractPage() {
       setError('Please fill in contract dates.'); return;
     }
     const selectedUnit = units.find(u => String(u.id) === form.unitId);
-    const listedRent = Number(selectedUnit?.rentalPrice ?? selectedUnit?.marketPrice ?? 0);
+    const listedRent = Number(selectedUnit?.rentalPrice ?? 0);
     if (listedRent <= 0) {
       setError('The selected unit has no rental price set. Please update the unit first.'); return;
     }
@@ -502,7 +501,7 @@ export default function NewContractPage() {
       const su = units.find(u => String(u.id) === form.unitId);
       // If the lead has an issued plan, use those amounts so the contract matches.
       // Otherwise compute from the unit defaults.
-      const rentFromUnit = Number(su?.rentalPrice ?? su?.marketPrice ?? 0);
+      const rentFromUnit = Number(su?.rentalPrice ?? 0);
       const discRaw = Number(form.discountValue) || 0;
       const discAmt = form.discountType === 'percent' ? Math.round(rentFromUnit * discRaw) / 100
                     : form.discountType === 'fixed'   ? Math.min(discRaw, rentFromUnit)
@@ -585,7 +584,7 @@ export default function NewContractPage() {
   // Prefer the lead's issued payment plan as the source of truth (so the contract matches what
   // the RP shared with the tenant). Fall back to the unit defaults when no plan is supplied.
   const listedRent    = planFromLead ? (planFromLead.rentFils + (planFromLead.discountFils ?? 0)) / 100
-                                     : Number(selectedUnit?.rentalPrice ?? selectedUnit?.marketPrice ?? 0);
+                                     : Number(selectedUnit?.rentalPrice ?? 0);
   // Discount comes from the lead's issued plan when present (read-only), else
   // from the form controls. annualRent is always the NET (post-discount) rent.
   const discRaw       = Number(form.discountValue) || 0;
@@ -780,9 +779,9 @@ export default function NewContractPage() {
                               {u.bedrooms ? ` · ${u.bedrooms}BR` : ''}
                               {u.unitType ? ` · ${u.unitType.charAt(0).toUpperCase() + u.unitType.slice(1)}` : ''}
                             </span>
-                            {(u.rentalPrice || u.marketPrice) && (
+                            {u.rentalPrice != null && (
                               <span className="block text-xs text-[#6b6860] mt-0.5">
-                                AED {Number(u.rentalPrice ?? u.marketPrice).toLocaleString()}/yr
+                                AED {Number(u.rentalPrice).toLocaleString()}/yr
                               </span>
                             )}
                           </div>

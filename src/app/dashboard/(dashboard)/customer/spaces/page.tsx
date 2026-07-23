@@ -18,7 +18,6 @@ interface SpaceUnit {
   unitName: string | null;
   unitType?: string | null;
   bedrooms?: number | null;
-  marketPrice?: number | null;
   rentalPrice?: number | null;
   property?: {
     id: number;
@@ -392,7 +391,7 @@ export default function MySpacesPage() {
             const location = [community, emirate].filter(Boolean).join(', ') || null;
             // Beds only apply to residential units — a leased shop/office shows "—".
             const bedrooms = isResidentialUnitType(unit?.unitType) ? unit?.bedrooms : null;
-            const annual = c?.annualRent ?? unit?.rentalPrice ?? unit?.marketPrice ?? null;
+            const annual = c?.annualRent ?? unit?.rentalPrice ?? null;
             const annualIsAsking = !c?.annualRent && annual != null;
             const periodLabel = c?.startDate && c?.endDate
               ? { label: 'Period', value: `${fmtShort(c.startDate)} -> ${fmtShort(c.endDate)}` }

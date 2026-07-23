@@ -29,7 +29,6 @@ export interface UnitRecord {
   furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
-  marketPrice: number | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;
@@ -138,7 +137,6 @@ export function unitFormToDto(data: UnitFormData) {
     // default) for a shop / warehouse / plot, which the form hides anyway.
     furnishing: residential ? clearable(data.furnishing) : null,
     rentalPrice: data.rentalPrice ? Number(data.rentalPrice) : undefined,
-    marketPrice: num(data.marketPrice),
     securityDeposit: data.securityDeposit ? Number(data.securityDeposit) : undefined,
     adminFee: data.adminFee ? Number(data.adminFee) : undefined,
     ejariFeeFils: data.ejariFeeFils ? Number(data.ejariFeeFils) : undefined,
@@ -180,11 +178,6 @@ export function unitToFormInitial(u: UnitRecord): UnitFormData {
     furnishing:       u.furnishing ?? 'Unfurnished',
     amenities:        amenitiesFromUnit(u),
     rentalPrice:      u.rentalPrice != null ? String(u.rentalPrice) : '',
-    // Market Rent defaults to the annual rent on save, so a stored value equal to
-    // the rent is just that default — seed the field BLANK (its placeholder reads
-    // "Defaults to the annual rent") instead of repeating the rent as a second
-    // value in Unit Edit. A genuinely different market rent is still shown.
-    marketPrice:      u.marketPrice != null && Number(u.marketPrice) !== Number(u.rentalPrice) ? String(u.marketPrice) : '',
     securityDeposit:  u.securityDeposit != null ? String(u.securityDeposit) : '',
     adminFee:         u.adminFee != null ? String(u.adminFee) : '',
     ejariFeeFils:     u.ejariFeeFils != null ? String(u.ejariFeeFils) : '',

@@ -237,7 +237,7 @@ export const MISSING_REPORTS: Record<string, MissingReportConfig> = {
     unitLabel: 'Units',
     columns: [{ key: 'property', label: 'Property' }, { key: 'unit', label: 'Unit' }, { key: 'type', label: 'Type' }],
     chips: [
-      { key: 'noRentalPrice', label: 'Rental price' }, { key: 'noMarketPrice', label: 'Market price' },
+      { key: 'noRentalPrice', label: 'Rental price' },
       { key: 'noDeposit', label: 'Deposit' }, { key: 'noAdminFee', label: 'Admin fee' },
       { key: 'noEjariFee', label: 'Contract Registration fee' }, { key: 'noCommission', label: 'Commission' },
       { key: 'noBedrooms', label: 'Bedrooms' }, { key: 'noBathrooms', label: 'Bathrooms' },

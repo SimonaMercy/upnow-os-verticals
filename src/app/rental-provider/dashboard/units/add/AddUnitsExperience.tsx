@@ -333,7 +333,6 @@ export default function AddUnitsExperience({ backHref }: { backHref: string }) {
             unitSizeSqft:      r.unitSizeSqft    ? Number(r.unitSizeSqft)    : undefined,
             unitSizeSqm:       r.unitSizeSqm     ? Number(r.unitSizeSqm)     : undefined,
             rentalPrice:       r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
-            marketPrice:       r.rentalPrice     ? Number(r.rentalPrice)     : undefined,
             securityDeposit:   r.securityDeposit ? Number(r.securityDeposit) : undefined,
             adminFee:          r.adminFee        ? Number(r.adminFee)        : undefined,
             ejariFeeFils:      r.ejariFeeFils    ? Number(r.ejariFeeFils)    : undefined,

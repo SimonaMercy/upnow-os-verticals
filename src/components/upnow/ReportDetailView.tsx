@@ -206,7 +206,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
       { key: 'rentRollFils', label: 'Rent Roll', align: 'right', type: 'aed' },
       { key: 'activeContractedRentFils', label: 'Active leases', align: 'right', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market rent / yr', align: 'right', type: 'aed' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
@@ -218,7 +217,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'rentRollFils', label: 'Rent Roll', type: 'aed' },
       { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market rent / yr', type: 'aed' },
     ],
     // Click a property to list its units with live status + rent.
     drilldown: {
@@ -611,7 +609,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
       { key: 'listingStatus', label: 'Listing', type: 'stage' },
       { key: 'lastAnnualRentFils', label: 'Last annual rent', align: 'right', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market rent', align: 'right', type: 'aed' },
       { key: 'askingRentFils', label: 'Asking rent / yr', align: 'right', type: 'aed' },
     ],
     rowLink: { idKey: 'unitId', colKey: 'unitLabel', target: 'unit' },
@@ -621,7 +618,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'listed', label: 'Listed', type: 'number' },
       { key: 'unlisted', label: 'Unlisted', type: 'number' },
       { key: 'vacantLastRentFils', label: 'Last rent total / yr', type: 'aed' },
-      { key: 'vacantMarketFils', label: 'Market total / yr', type: 'aed' },
       { key: 'vacantAskingFils', label: 'Rent at stake / yr', type: 'aed' },
     ],
   },
@@ -663,18 +659,18 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
 
   'rent-vs-market': {
-    title: 'Rent vs Market',
-    description: 'Each occupied unit\'s current rent against its market benchmark — the gap is the rent you can recover when the lease renews. Sorted by biggest uplift first. "At market" is within ±5% of the benchmark.',
+    title: 'Rent vs Asking',
+    description: 'Each occupied unit\'s current contracted rent against the unit\'s asking price — the gap is the rent you can recover when the lease renews. Sorted by biggest uplift first. "At market" is within ±5% of the asking price.',
     endpoint: '/api/reports/rent-vs-market',
     buildingLeaseFilter: true,
-    dataNote: 'The market benchmark is each unit\'s market price as maintained on the Units page — update it there if a benchmark looks stale. Units without a benchmark are listed but excluded from the uplift total.',
+    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total.',
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'unitLabel', label: 'Unit' },
       { key: 'tenantName', label: 'Customer' },
       { key: 'unitType', label: 'Type', type: 'stage' },
       { key: 'currentRentFils', label: 'Current rent', align: 'right', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Asking', align: 'right', type: 'aed' },
       { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
       { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
       { key: 'position', label: 'Position', type: 'stage' },
@@ -683,10 +679,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     rowLink: { idKey: 'contractId', colKey: 'unitLabel', target: 'contract' },
     totals: [
       { key: 'units', label: 'Occupied units', type: 'number' },
-      { key: 'belowMarket', label: 'Below market', type: 'number' },
-      { key: 'aboveMarket', label: 'Above market', type: 'number' },
+      { key: 'belowMarket', label: 'Below asking', type: 'number' },
+      { key: 'aboveMarket', label: 'Above asking', type: 'number' },
       { key: 'currentRentFils', label: 'Current rent (all units)', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market (benchmarked units)', type: 'aed' },
+      { key: 'marketRentFils', label: 'Asking (priced units)', type: 'aed' },
       { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
     ],
   },

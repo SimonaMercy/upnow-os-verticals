@@ -31,7 +31,7 @@ interface RenewalPending { customer: string | null; property: string | null; uni
 interface KycIndividual { customer: string | null; units: string | null; noEid: boolean; noNationality: boolean; noDob: boolean; noGender: boolean; noPhone: boolean; noIdentityDoc: boolean; }
 interface KycCompany { customer: string | null; units: string | null; noTradeLicense: boolean; noEid: boolean; noPhone: boolean; noIdentityDoc: boolean; }
 interface DocGap { customer: string | null; unit: string | null; hasBank: boolean; expiredIds: string | null; }
-interface UnitMissing { unitId: number; propertyId: number; property: string | null; unit: string | null; type: string | null; noFloorPlan: boolean; noMarketPrice: boolean; noRentalPrice: boolean; noDeposit: boolean; noAdminFee: boolean; noEjariFee: boolean; noCommission: boolean; noBedrooms: boolean; noBathrooms: boolean; noSize: boolean; noFloor: boolean; noKitchen: boolean; noView: boolean; noFurnishing: boolean; noParking: boolean; noPremise: boolean; noDescription: boolean; noImages: boolean; }
+interface UnitMissing { unitId: number; propertyId: number; property: string | null; unit: string | null; type: string | null; noFloorPlan: boolean; noRentalPrice: boolean; noDeposit: boolean; noAdminFee: boolean; noEjariFee: boolean; noCommission: boolean; noBedrooms: boolean; noBathrooms: boolean; noSize: boolean; noFloor: boolean; noKitchen: boolean; noView: boolean; noFurnishing: boolean; noParking: boolean; noPremise: boolean; noDescription: boolean; noImages: boolean; }
 interface EmptyProperty { property: string | null; category: string | null; }
 interface DataGaps {
   generatedAt: string;
@@ -41,7 +41,7 @@ interface DataGaps {
   documentGaps: DocGap[];
   renewals: { total: number; completed: number; overduePending: number; upcomingPending: number; pending: RenewalPending[] };
   emptyProperties: EmptyProperty[];
-  unitsSummary: { total: number; noImages: number; noFloorPlan: number; noMarketPrice: number; noRentalPrice: number };
+  unitsSummary: { total: number; noImages: number; noFloorPlan: number; noRentalPrice: number };
   unitsMissing: UnitMissing[];
   kycSummary: Record<string, number>;
   kycIndividuals: KycIndividual[];
@@ -288,7 +288,7 @@ export function DataGapsView({
                     <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                       <TD>{u.property ?? '—'}</TD><TD>{u.unit ?? '—'}</TD><TD>{u.type ?? '—'}</TD>
                       <td className="px-4 py-2.5">
-                        <MissingChip label="Rental price" on={u.noRentalPrice} /><MissingChip label="Market price" on={u.noMarketPrice} />
+                        <MissingChip label="Rental price" on={u.noRentalPrice} />
                         <MissingChip label="Deposit" on={u.noDeposit} /><MissingChip label="Admin fee" on={u.noAdminFee} />
                         <MissingChip label="Contract Registration fee" on={u.noEjariFee} /><MissingChip label="Commission" on={u.noCommission} />
                         <MissingChip label="Bedrooms" on={u.noBedrooms} /><MissingChip label="Bathrooms" on={u.noBathrooms} />

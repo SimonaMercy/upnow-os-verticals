@@ -47,7 +47,6 @@ interface Unit {
   furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
-  marketPrice: number | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;
@@ -95,7 +94,6 @@ interface PriceHistory {
   unitId: number;
   unitNumber: string | null;
   currentRentalPrice: number | null;
-  currentMarketPrice: number | null;
   leaseCount: number;
   repriceCount: number;
   timeline: PriceEvent[];
@@ -312,8 +310,7 @@ export default function UnitDetailPage() {
         new Date(b.endDate || 0).getTime() - new Date(a.endDate || 0).getTime(),
     )[0];
 
-  // One rent per unit (annual rent); marketPrice mirrors it, so no separate
-  // benchmark/gap.
+  // One rent per unit (the asking / annual rent).
   const rent = unit.rentalPrice;
 
   // Parse the facilities JSON into amenities + leasing config (see buildFacilities).

@@ -47,7 +47,6 @@ export interface PublicUnit {
   premiseNumber: string | null;
   serviceTier: string | null;
   rentalPrice: string | number | null;
-  marketPrice: string | number | null;
   serviceCharges: string | number | null;
   securityDeposit: string | number | null;
   adminFee: string | number | null;
@@ -109,7 +108,7 @@ function fmt(n: string | number | null) {
 }
 function fmtAed(n: string | number | null) {
   if (n == null) return null;
-  // Unit prices (rental_price, market_price, security_deposit, admin_fee,
+  // Unit prices (rental_price, security_deposit, admin_fee,
   // service_charges) are stored in whole AED — NOT fils. Format as-is.
   const aed = Number(n);
   if (isNaN(aed)) return null;

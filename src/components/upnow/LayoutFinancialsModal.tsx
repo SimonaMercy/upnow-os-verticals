@@ -57,8 +57,6 @@ export interface Plan {
   sqftMin: number; sqftMax: number; sqmMin: number; sqmMax: number; avgSqft: number | null;
   priceFrom: number | null;            // asking-rent "from"
   rentFrom: number | null; rentTo: number | null;
-  marketFrom: number | null; marketTo: number | null;
-  marketGap: number | null;            // marketFrom − rentFrom (>0 = below market)
   aedPerSqft: number | null;
   // representative financial details for the layout (editable plan-wide)
   securityDeposit: number | null; adminFee: number | null; ejariFee: number | null;

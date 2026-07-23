@@ -26,7 +26,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   X, ArrowLeft, FileText, Eye, AlignLeft, Banknote, Layers, Building2, ScrollText,
-  Pencil, TrendingUp, ClipboardList,
+  Pencil, ClipboardList,
 } from 'lucide-react';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useSlideOver } from '@/lib/useSlideOver';
@@ -220,11 +220,6 @@ export function LayoutPreviewModal({
   // physical facts (annual rent ÷ size). Rendered with an explicit "AED" prefix.
   const aedPerSqft = plan?.aedPerSqft ?? null;
 
-  // Market comparison (plan-level).
-  const marketLo = plan?.marketFrom ?? null, marketHi = plan?.marketTo ?? null;
-  const gap = plan?.marketGap ?? null; // marketFrom − rentFrom (>0 ⇒ priced below market)
-  const hasMarket = marketLo != null || marketHi != null;
-
   const termsVer = plan?.termsVersion ?? null;
   const fpUrl = plan?.floorPlanUrl ?? null;
   const fpIsImage = fpUrl ? isImageUrl(fpUrl) : false;
@@ -352,7 +347,7 @@ export function LayoutPreviewModal({
 
               {/* PRICING & FEES */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>{sectionIcon(Banknote)}{sectionTitle('Pricing & fees')}</div>
-              <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: hasMarket || termsVer ? 24 : 28 }}>
+              <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: termsVer ? 24 : 28 }}>
                 {/* rent per unit + rent roll */}
                 <div style={{ display: 'grid', gridTemplateColumns: isTight ? '1fr' : '1.2fr 1fr', background: C.soft, borderBottom: fees.length > 0 ? `1px solid ${C.line2}` : 'none' }}>
                   <div style={{ padding: '16px 18px', borderRight: isTight ? 'none' : `1px solid ${C.line2}`, borderBottom: isTight ? `1px solid ${C.line2}` : 'none' }}>
@@ -380,21 +375,6 @@ export function LayoutPreviewModal({
               </div>
 
               {/* MARKET COMPARISON */}
-              {hasMarket && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 18px', border: `1px solid ${C.line}`, borderRadius: 14, marginBottom: termsVer ? 24 : 28, background: '#fff', flexWrap: 'wrap' }}>
-                  {sectionIcon(TrendingUp)}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2 }}>Market rent</div>
-                    <div style={{ fontSize: 11.5, color: C.mute2 }}>Benchmark for this layout</div>
-                  </div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {span(marketLo, marketHi)}</div>
-                  {gap != null && gap !== 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: gap > 0 ? C.amber : C.greenT, background: gap > 0 ? '#fdf3e3' : C.greenBg3, padding: '5px 10px', borderRadius: 8, flex: '0 0 auto' }}>
-                      {gap > 0 ? `AED ${aed(gap)} below market` : `AED ${aed(-gap)} above market`}
-                    </span>
-                  )}
-                </div>
-              )}
 
               {/* SPECIAL CONDITIONS / ADDENDUM */}
               {termsVer && (
