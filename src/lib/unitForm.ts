@@ -180,7 +180,11 @@ export function unitToFormInitial(u: UnitRecord): UnitFormData {
     furnishing:       u.furnishing ?? 'Unfurnished',
     amenities:        amenitiesFromUnit(u),
     rentalPrice:      u.rentalPrice != null ? String(u.rentalPrice) : '',
-    marketPrice:      u.marketPrice != null ? String(u.marketPrice) : '',
+    // Market Rent defaults to the annual rent on save, so a stored value equal to
+    // the rent is just that default — seed the field BLANK (its placeholder reads
+    // "Defaults to the annual rent") instead of repeating the rent as a second
+    // value in Unit Edit. A genuinely different market rent is still shown.
+    marketPrice:      u.marketPrice != null && Number(u.marketPrice) !== Number(u.rentalPrice) ? String(u.marketPrice) : '',
     securityDeposit:  u.securityDeposit != null ? String(u.securityDeposit) : '',
     adminFee:         u.adminFee != null ? String(u.adminFee) : '',
     ejariFeeFils:     u.ejariFeeFils != null ? String(u.ejariFeeFils) : '',
