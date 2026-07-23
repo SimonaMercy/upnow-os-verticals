@@ -191,8 +191,9 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   portfolio: {
     title: 'Portfolio',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and the rent roll. "Rent Roll" is the latest lease on every occupied unit (so it reconciles with occupancy, including units on lapsed leases pending renewal); "Active leases" counts only contracts still in active status.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and the rent roll. "Rent Roll" is the latest lease on every occupied unit (so it reconciles with occupancy, including units on lapsed leases pending renewal); "Active leases" counts only contracts still in active status. Pick a year above to scope the rent figures to leases that were on the books that year (the money columns follow the year; the unit counts stay a live snapshot, as availability isn\'t tracked historically). "All years" shows today.',
     endpoint: '/api/reports/occupancy',
+    controlKey: 'yearRange',
     buildingLeaseFilter: true,
     columns: [
       { key: 'buildingName', label: 'Property' },

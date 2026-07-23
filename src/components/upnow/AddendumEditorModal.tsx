@@ -8,7 +8,7 @@
  * Controlled — term edits flow to `onChange`.
  */
 import { useState, useEffect, type ReactNode } from 'react';
-import { X, Check, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import AddendumTermsEditor from './AddendumTermsEditor';
 import type { AddendumTerms } from '@/lib/addendumTerms';
 import { useBackClose } from '@/lib/useSlideOver';
@@ -59,18 +59,17 @@ export default function AddendumEditorModal({
 
   return (
     <div className="fixed inset-0 z-[70] bg-white flex flex-col">
-      <div className="px-5 py-3 border-b border-[#efece6] flex items-center justify-between shrink-0">
-        <div className="min-w-0">
+      <div className="px-5 py-3 border-b border-[#efece6] flex items-center gap-3 shrink-0">
+        {/* Back-arrow on the LEFT — matches the detail views' back button. */}
+        <button onClick={dismiss} aria-label="Back" className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#e7ebe6] text-[#5a635c] hover:bg-[#f4f3ef]"><ArrowLeft size={18} /></button>
+        <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-base text-[#1a1916] truncate">{title}</h3>
           <p className="text-xs text-[#9b9890] truncate">{subtitle || 'Write the terms on the left; the layout (with the signature block) previews on the right.'}</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={primary} disabled={primaryDisabled || busy}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: 'var(--primary,#2e9f82)' }}>
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {primaryLabel}
-          </button>
-          <button onClick={dismiss} className="text-[#9b9890] hover:text-[#1a1916] p-1.5 rounded-lg hover:bg-[#f4f3ef]" title="Close"><X size={18} /></button>
-        </div>
+        <button onClick={primary} disabled={primaryDisabled || busy}
+          className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: 'var(--primary,#2e9f82)' }}>
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {primaryLabel}
+        </button>
       </div>
 
       {hasOptions && (

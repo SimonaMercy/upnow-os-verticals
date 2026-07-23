@@ -647,7 +647,7 @@ export function UnitPreviewModal({
               <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 14, padding: '16px 18px', background: C.soft, borderBottom: `1px solid ${C.line2}`, flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>ANNUAL RENT</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>MARKET PRICE</div>
                     <div style={{ fontSize: 26, fontWeight: 800, color: C.greenD, letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>{rent != null ? `AED ${Number(rent).toLocaleString('en-AE')}` : '—'}</div>
                   </div>
                   {fees.length > 0 && <div style={{ fontSize: 11.5, color: C.mute3 }}>Excludes deposit &amp; one-off fees below</div>}

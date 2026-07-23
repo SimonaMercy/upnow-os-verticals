@@ -6,6 +6,7 @@ import { apiGet, apiPost, apiPatch } from '@/lib/api';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
+import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
 import AddendumTemplatePicker from '@/components/upnow/AddendumTemplatePicker';
 
 interface DefaultTemplate { id: number; name: string; fileUrl: string | null; source: 'subcategory' | 'category' }
@@ -33,6 +34,7 @@ export default function AddendumLayoutSection({
   const [terms, setTerms] = useState<AddendumTerms>(() => seedTerms ?? emptyAddendumTerms());
   const seededJson = JSON.stringify(seedTerms ?? emptyAddendumTerms());
   const [editorOpen, setEditorOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<'save' | 'default' | null>(null);
   const [saved, setSaved] = useState(false);
@@ -88,26 +90,6 @@ export default function AddendumLayoutSection({
   const dirty = hasTerms && JSON.stringify(terms) !== seededJson;
   const n = (terms.en?.filter(l => l.trim()).length ?? 0) + (terms.ar?.filter(l => l.trim()).length ?? 0);
 
-  // Open a print-style preview of the addendum in a NEW WINDOW (not an in-app modal).
-  const previewInNewWindow = () => {
-    const esc = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] ?? c));
-    const render = (arr?: string[]) => (arr ?? []).filter(l => l.trim()).map(l =>
-      /[A-Z]/.test(l) && l === l.toUpperCase()
-        ? `<h3 style="margin:14px 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#1a1916">${esc(l)}</h3>`
-        : `<p style="margin:4px 0;font-size:12px;line-height:1.55;color:#3d3b35">${esc(l)}</p>`).join('');
-    const title = terms.name?.trim() || 'Agreement Addendum';
-    const w = window.open('', '_blank', 'width=820,height=900');
-    if (!w) { setErr('Please allow pop-ups to preview the addendum.'); return; }
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title></head>
-      <body style="font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:32px auto;padding:0 24px">
-        <h1 style="font-size:18px;color:#1a1916;border-bottom:2px solid #b45309;padding-bottom:8px">${esc(title)}</h1>
-        ${render(terms.en)}
-        ${(terms.ar ?? []).some(l => l.trim()) ? `<hr style="margin:20px 0;border:none;border-top:1px solid #e8e6e0"><div dir="rtl" style="text-align:right">${render(terms.ar)}</div>` : ''}
-        <p style="margin-top:24px;font-size:10px;color:#9b9890">A tenant &amp; landlord signature block is added automatically on the contract.</p>
-      </body></html>`);
-    w.document.close();
-  };
-
   return (
     <div className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 space-y-3">
       <p className="text-[10px] font-bold uppercase tracking-widest text-[#b45309]">Agreement — Addendum</p>
@@ -142,8 +124,8 @@ export default function AddendumLayoutSection({
 
       <div className="rounded-lg border border-[#e8e6e0] bg-white px-3 py-2.5 space-y-2.5">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-[#1a1916] truncate">{terms.name?.trim() || 'Agreement Addendum'}</p>
-          <p className="text-[11px] text-[#9b9890]">{n ? `${n} term${n === 1 ? '' : 's'} written` : (hasExistingFile ? 'File addendum attached' : 'No terms yet')}</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[#9b9890]">Selected addendum</p>
+          <p className="text-[11px] text-[#9b9890] mt-0.5">{n ? `${n} term${n === 1 ? '' : 's'} written` : (hasExistingFile ? 'File addendum attached' : 'No terms yet')}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AddendumTemplatePicker
@@ -151,17 +133,20 @@ export default function AddendumLayoutSection({
             manager={manager ?? undefined}
             rpQ={rpQ}
             selectedName={terms.name?.trim() || undefined}
+            selectedTerms={terms}
           />
-          {n > 0 && (
-            <button type="button" onClick={previewInNewWindow}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
-              <Eye size={13} /> Preview
+          <div className="flex items-center gap-2 ml-auto">
+            {n > 0 && (
+              <button type="button" onClick={() => setPreviewOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
+                <Eye size={13} /> Preview
+              </button>
+            )}
+            <button type="button" onClick={() => { setEditorOpen(true); setSaved(false); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] cursor-pointer">
+              <Pencil size={13} /> {n ? 'Edit addendum' : 'Write new'}
             </button>
-          )}
-          <button type="button" onClick={() => { setEditorOpen(true); setSaved(false); }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#b45309] text-white text-xs font-semibold hover:bg-[#92400e] cursor-pointer">
-            <Pencil size={13} /> {n ? 'Edit addendum' : 'Write new'}
-          </button>
+          </div>
         </div>
       </div>
 
@@ -178,6 +163,7 @@ export default function AddendumLayoutSection({
       {err && <p className="text-[11px] text-red-600">{err}</p>}
 
       {editorOpen && <AddendumEditorModal value={terms} onChange={setTerms} onClose={() => setEditorOpen(false)} />}
+      {previewOpen && <AddendumPreviewModal terms={terms} title={terms.name?.trim() || 'Agreement Addendum'} onClose={() => setPreviewOpen(false)} />}
     </div>
   );
 }

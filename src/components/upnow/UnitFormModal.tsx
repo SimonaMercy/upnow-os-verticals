@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Loader2, Upload, Download, Sparkles, Layers, FileText } from 'lucide-react';
+import { X, ArrowLeft, Loader2, Upload, Download, Sparkles, Layers, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSlideOver } from '@/lib/useSlideOver';
 import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/lib/validateAddendum';
@@ -743,14 +743,14 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     <div className={cn(ds.fullscreen, 'slideover-panel', closing && 'closing')}>
       <div className={ds.app}>
         <header className={ds.header}>
+          {/* Back-arrow on the LEFT — matches the detail views' back button. */}
+          <button type="button" className={ds.backBtn} onClick={requestClose} aria-label="Back"><ArrowLeft size={18} /></button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className={ds.headTitle}>{title ?? (layoutBulk ? 'Edit layout' : 'Add Unit')}</div>
             <div className={ds.headSub}>{layoutBulk
               ? `Applies to all ${layoutUnitCount ?? ''} unit${layoutUnitCount === 1 ? '' : 's'} on this layout — unit number, premises no. and floor stay per-unit.`
               : (editingUnitId ? 'Update identity, pricing, terms and documents.' : 'Add a unit to this layout.')}</div>
           </div>
-          {/* Close on the RIGHT — aligned with the property modals. */}
-          <button type="button" className={ds.backBtn} onClick={requestClose} aria-label="Close"><X size={17} /></button>
         </header>
 
         <div ref={bodyRef} onScroll={onBodyScroll} className={ds.body}>
@@ -854,7 +854,7 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
 
           <div className={ds.grid2}>
             <div className={ds.field}>
-              <label className={ds.lbl}>Annual Rent (AED) <span className={ds.req}>*</span></label>
+              <label className={ds.lbl}>Market Price (AED) <span className={ds.req}>*</span></label>
               <input type="number" min="0" step="any" className={cn(ds.input, errors.rentalPrice && ds.inputErr)} placeholder="e.g. 85000"
                 value={form.rentalPrice} onChange={e => upd('rentalPrice', e.target.value)} />
               {errors.rentalPrice && <p className={ds.errText}>{errors.rentalPrice}</p>}

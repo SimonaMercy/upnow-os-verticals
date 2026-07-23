@@ -28,8 +28,9 @@ import { apiGet, apiPatch, apiDelete } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { UnitFormModal } from '@/components/upnow/UnitFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
-import { LayoutFinancialsModal, type Plan } from '@/components/upnow/LayoutFinancialsModal';
-import { saveUnit, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
+import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
+import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
 
 interface PropOpt { id: number; buildingName: string }
@@ -151,7 +152,14 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [viewer, setViewer] = useState<{ url: string; name: string } | null>(null);
 
   // plan-wide financial-details editor
-  const [finModal, setFinModal] = useState<Plan | null>(null);
+  // By-layout Edit opens the SAME full editor as the portfolio Unit Mix → Edit:
+  // UnitFormModal in layout-bulk mode. Ensure the layout's units are loaded so we
+  // have a representative unit to seed the form.
+  const [editLayout, setEditLayout] = useState<Plan | null>(null);
+  const openLayoutEdit = (p: Plan) => {
+    if (unitsByProperty[p.propertyId] == null && !loadingUnits.has(p.propertyId)) void loadUnitsForProperty(p.propertyId);
+    setEditLayout(p);
+  };
 
   const load = useCallback((pid?: number | null, b: string = 'all') => {
     setLoading(true);
@@ -187,6 +195,13 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
   const [unitModal, setUnitModal] = useState<{ plan: Plan; editingUnit?: UnitRecord } | null>(null);
   const [unitPreview, setUnitPreview] = useState<{ plan: Plan; unit: UnitRecord } | null>(null);
+  // Read-only layout detail popup — the same view shown from the portfolio's
+  // property → Unit Mix. Opened by clicking a layout card in the By-layout view.
+  const [layoutPreview, setLayoutPreview] = useState<Plan | null>(null);
+  const openLayoutPreview = (p: Plan) => {
+    if (unitsByProperty[p.propertyId] == null && !loadingUnits.has(p.propertyId)) void loadUnitsForProperty(p.propertyId);
+    setLayoutPreview(p);
+  };
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [busyUnit, setBusyUnit] = useState<number | null>(null);
 
@@ -490,7 +505,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         )}
       </div>
       {canEdit && (
-        <button onClick={() => setFinModal(p)} className="flex items-center gap-1.5 whitespace-nowrap shrink-0"
+        <button onClick={(e) => { e.stopPropagation(); openLayoutEdit(p); }} className="flex items-center gap-1.5 whitespace-nowrap shrink-0"
           style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 15px', borderRadius: 10 }}>
           <Pencil size={13} /> {p.rentFrom != null ? 'Edit' : 'Set price'}
         </button>
@@ -502,8 +517,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const gridCard = (p: Plan) => {
     const isUploading = uploadingPlan === planKey(p);
     return (
-      <div key={planKey(p)} className="flex flex-col overflow-hidden"
-        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
+      <div key={planKey(p)} onClick={() => openLayoutPreview(p)} title="View layout details" className="flex flex-col overflow-hidden"
+        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, boxShadow: '0 1px 2px rgba(20,40,30,.03)', cursor: 'pointer' }}>
         {/* Floor-plan drawing */}
         <div className="relative overflow-hidden" style={{ height: 128, background: THUMB_BG, borderBottom: '1px dashed #e0e6df' }}>
           <PlanThumb url={p.floorPlanUrl} alt={p.displayName} />
@@ -536,8 +551,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const rowCard = (p: Plan) => {
     const isUploading = uploadingPlan === planKey(p);
     return (
-      <div key={planKey(p)} className="flex items-center gap-4"
-        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
+      <div key={planKey(p)} onClick={() => openLayoutPreview(p)} title="View layout details" className="flex items-center gap-4"
+        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,40,30,.03)', cursor: 'pointer' }}>
         {/* Floor-plan thumbnail */}
         <div className="relative shrink-0 overflow-hidden" style={{ width: 84, height: 66, borderRadius: 11, background: THUMB_BG, border: '1px dashed #d6ddd6' }}>
           <PlanThumb url={p.floorPlanUrl} alt={p.displayName} />
@@ -921,10 +936,52 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       </div>
 
       {/* Plan-wide financial-details editor */}
-      {finModal && (
-        <LayoutFinancialsModal plan={finModal} manager={manager} rpQ={rpQ} feeRules={data?.feeRules ?? null}
-          onClose={() => setFinModal(null)}
-          onSaved={() => { setFinModal(null); reload(); }} />
+      {/* By-layout Edit — the full editor, identical to the portfolio Unit Mix → Edit. */}
+      {editLayout && (() => {
+        const plan = editLayout;
+        const rep = (unitsByProperty[plan.propertyId] ?? []).find(u => (u.planLabel ?? '') === (plan.planLabel ?? ''));
+        if (!rep) return null;
+        return (
+          <UnitFormModal
+            open
+            layoutBulk
+            layoutUnitCount={plan.unitCount}
+            title="Edit layout"
+            propertyCategory={plan.spaceCategory ?? ''}
+            propertyStandalone
+            propertyId={plan.propertyId}
+            planLabel={plan.planLabel}
+            manager={manager}
+            rpQ={rpQ}
+            feeRules={data?.feeRules ?? null}
+            existingFloorPlanUrl={plan.floorPlanUrl ?? null}
+            initial={unitToFormInitial(rep)}
+            seedAddendumTerms={plan.termsVersion?.addendumTerms ?? null}
+            hasAddendumFile={!!plan.termsVersion?.addendumUrl}
+            onAddendumApplied={reload}
+            onSave={async (data, floorPlan) => {
+              await saveLayoutDetails({ propertyId: plan.propertyId, planLabel: plan.planLabel ?? '', data, floorPlan, manager: manager ? { rp: manager.rp } : undefined });
+              await refreshProperty(plan.propertyId);
+            }}
+            onClose={() => setEditLayout(null)}
+          />
+        );
+      })()}
+
+      {/* Read-only layout detail popup — same view as the portfolio Unit Mix. */}
+      {layoutPreview && (
+        <LayoutPreviewModal
+          title={layoutPreview.displayName}
+          planName={layoutPreview.displayName}
+          unitType={layoutPreview.unitType ?? ''}
+          bedrooms={layoutPreview.bedrooms}
+          plan={layoutPreview}
+          units={(unitsByProperty[layoutPreview.propertyId] ?? []).filter(u => (u.planLabel ?? '') === (layoutPreview.planLabel ?? ''))}
+          propertyName={layoutPreview.buildingName}
+          canEdit={canEdit && !!layoutPreview.planLabel}
+          onEdit={() => { const p = layoutPreview; setLayoutPreview(null); if (p) openLayoutEdit(p); }}
+          onClose={() => setLayoutPreview(null)}
+        />
       )}
 
       {/* Full-screen floor-plan viewer */}

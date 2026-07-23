@@ -47,9 +47,9 @@ export interface LayoutUnitLite {
   bedrooms: number | null;
   unitSizeSqm: number | null;
   unitSizeSqft: number | null;
-  planLabel: string | null;
+  planLabel?: string | null;
   rentalPrice: number | null;
-  lastLeaseRent: number | null;   // latest lease annual_rent (net of discount); null = never leased
+  lastLeaseRent?: number | null;   // latest lease annual_rent (net of discount); null/absent = never leased
 }
 
 /* ---------- colour tokens (shared with the unit / property views) ---------- */
