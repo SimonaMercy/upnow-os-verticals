@@ -31,6 +31,8 @@ import {
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useSlideOver } from '@/lib/useSlideOver';
 import type { Plan } from '@/components/upnow/LayoutFinancialsModal';
+import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
+import { hasAddendumTerms } from '@/lib/addendumTerms';
 
 /* ---------- types ---------- */
 
@@ -47,6 +49,7 @@ export interface LayoutUnitLite {
   unitSizeSqft: number | null;
   planLabel: string | null;
   rentalPrice: number | null;
+  lastLeaseRent: number | null;   // latest lease annual_rent (net of discount); null = never leased
 }
 
 /* ---------- colour tokens (shared with the unit / property views) ---------- */
@@ -130,6 +133,7 @@ export function LayoutPreviewModal({
   // In-app document viewer — shared by the floor-plan hero and the addendum
   // (view-only, no download; PDFs via iframe, images inline). Null = closed.
   const [viewer, setViewer] = useState<{ url: string; title: string } | null>(null);
+  const [addendumPreview, setAddendumPreview] = useState(false);
 
   // Track viewport so the layout collapses like the sibling views.
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
@@ -145,28 +149,31 @@ export function LayoutPreviewModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (addendumPreview) return;   // the terms preview owns its own ESC / Back
       if (viewer) setViewer(null);
       else dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewer, dismiss]);
+  }, [viewer, addendumPreview, dismiss]);
 
   /* ---------- aggregates (from the units — always available) ---------- */
   const agg = useMemo(() => {
     let sqftLo: number | null = null, sqftHi: number | null = null;
     let sqmLo: number | null = null, sqmHi: number | null = null;
     let rentLo: number | null = null, rentHi: number | null = null;
-    let sum = 0, priced = 0, unpriced = 0, occupied = 0;
+    let sum = 0, annualSum = 0, priced = 0, unpriced = 0, occupied = 0;
     for (const u of units) {
       const sqft = numOrNull(u.unitSizeSqft), sqm = numOrNull(u.unitSizeSqm), rent = numOrNull(u.rentalPrice);
+      const lease = numOrNull(u.lastLeaseRent);
       sqftLo = minOf(sqftLo, sqft); sqftHi = maxOf(sqftHi, sqft);
       sqmLo = minOf(sqmLo, sqm); sqmHi = maxOf(sqmHi, sqm);
       if (rent != null && rent > 0) { sum += rent; priced += 1; rentLo = minOf(rentLo, rent); rentHi = maxOf(rentHi, rent); }
       else unpriced += 1;
+      if (lease != null && lease > 0) annualSum += lease;   // Σ latest-lease annual_rent (net of discount)
       if ((u.availability || '').toLowerCase() === 'occupied') occupied += 1;
     }
-    return { sqftLo, sqftHi, sqmLo, sqmHi, rentLo, rentHi, sum, priced, unpriced, occupied };
+    return { sqftLo, sqftHi, sqmLo, sqmHi, rentLo, rentHi, sum, annualSum, priced, unpriced, occupied };
   }, [units]);
 
   const count = units.length;
@@ -199,7 +206,8 @@ export function LayoutPreviewModal({
     pushLease('Min. lease', lt.minLeaseMonths != null ? `${lt.minLeaseMonths} month${lt.minLeaseMonths === 1 ? '' : 's'}` : null);
     pushLease('Notice period', lt.noticePeriodDays != null ? `${lt.noticePeriodDays} day${lt.noticePeriodDays === 1 ? '' : 's'}` : null);
     pushLease('Rent escalation', lt.rentEscalationPct != null ? `${lt.rentEscalationPct}% / yr` : null);
-    pushLease('Payments', lt.numberOfPayments != null ? `${lt.numberOfPayments} cheque${lt.numberOfPayments === 1 ? '' : 's'}` : null);
+    // Payments / number of cheques is a settings-level default, not a per-layout
+    // value — so it's not shown here.
   }
 
   // ── pricing & fees grid (plan-level; ejariFee is whole AED despite the fils name elsewhere) ──
@@ -218,9 +226,14 @@ export function LayoutPreviewModal({
 
   // Rent per sq.ft — a price benchmark, so it belongs with the money, not the
   // physical facts (annual rent ÷ size). Rendered with an explicit "AED" prefix.
-  const aedPerSqft = plan?.aedPerSqft ?? null;
 
   const termsVer = plan?.termsVersion ?? null;
+  // The addendum is viewable either as an uploaded file (addendumUrl) OR as
+  // in-app editor terms (addendumTerms jsonb) — open the doc viewer for the
+  // former, the terms preview for the latter.
+  const addendumFile = termsVer?.addendumUrl ?? null;
+  const addendumHasTerms = hasAddendumTerms(termsVer?.addendumTerms);
+  const addendumViewable = !!addendumFile || addendumHasTerms;
   const fpUrl = plan?.floorPlanUrl ?? null;
   const fpIsImage = fpUrl ? isImageUrl(fpUrl) : false;
 
@@ -298,22 +311,50 @@ export function LayoutPreviewModal({
                 {count === 0 ? (
                   <div style={{ padding: '14px 16px', fontSize: 13, color: C.mute3 }}>No units on this layout.</div>
                 ) : (
-                  <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-                    {units.map((u, i) => {
-                      const chip = availabilityChip(u.availability);
-                      const rent = numOrNull(u.rentalPrice);
-                      return (
-                        <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
-                          <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || titleCase(u.unitType)}</span>
-                          {rent != null && rent > 0
-                            ? <span style={{ fontSize: 12.5, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rent)}</span>
-                            : <span style={{ fontSize: 11, fontWeight: 600, color: C.amber }}>No price</span>}
-                          <span style={{ fontSize: 10.5, fontWeight: 700, color: chip.color, background: chip.bg, padding: '4px 9px', borderRadius: 7, flex: '0 0 auto' }}>{chip.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <>
+                    {/* header — labels the two money columns */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Unit</span>
+                      <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Market Price</span>
+                      <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Annual Rent</span>
+                      <span style={{ flex: '0 0 auto', width: 92 }} />
+                    </div>
+                    <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                      {units.map((u, i) => {
+                        const chip = availabilityChip(u.availability);
+                        const market = numOrNull(u.rentalPrice);
+                        const annual = numOrNull(u.lastLeaseRent);
+                        return (
+                          <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || titleCase(u.unitType)}</span>
+                            {/* Market Price — the unit's asking rent */}
+                            <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right' }}>
+                              {market != null && market > 0
+                                ? <span style={{ fontSize: 12.5, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(market)}</span>
+                                : <span style={{ fontSize: 11, fontWeight: 600, color: C.amber }}>No price</span>}
+                            </span>
+                            {/* Annual Rent — latest lease, net of discount; '—' if never leased */}
+                            <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right' }}>
+                              {annual != null && annual > 0
+                                ? <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(annual)}</span>
+                                : <span style={{ fontSize: 12.5, color: C.mute3 }}>—</span>}
+                            </span>
+                            <span style={{ flex: '0 0 auto', width: 92, textAlign: 'right' }}>
+                              <span style={{ fontSize: 10.5, fontWeight: 700, color: chip.color, background: chip.bg, padding: '4px 9px', borderRadius: 7 }}>{chip.label}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* TOTAL — sum of each money column across the layout's units */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: `2px solid ${C.line}`, background: C.greenBg2 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 800, color: C.ink, letterSpacing: '.02em' }}>TOTAL</span>
+                      <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 12.5, fontWeight: 800, color: C.ink, fontVariantNumeric: 'tabular-nums' }}>{agg.sum > 0 ? `AED ${aed(agg.sum)}` : '—'}</span>
+                      <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 12.5, fontWeight: 800, color: C.ink, fontVariantNumeric: 'tabular-nums' }}>{agg.annualSum > 0 ? `AED ${aed(agg.annualSum)}` : '—'}</span>
+                      <span style={{ flex: '0 0 auto', width: 92 }} />
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -351,13 +392,12 @@ export function LayoutPreviewModal({
                 {/* rent per unit + rent roll */}
                 <div style={{ display: 'grid', gridTemplateColumns: isTight ? '1fr' : '1.2fr 1fr', background: C.soft, borderBottom: fees.length > 0 ? `1px solid ${C.line2}` : 'none' }}>
                   <div style={{ padding: '16px 18px', borderRight: isTight ? 'none' : `1px solid ${C.line2}`, borderBottom: isTight ? `1px solid ${C.line2}` : 'none' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>RENT / UNIT · YEARLY</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>MARKET RENT / UNIT · YR</div>
                     <div style={{ fontSize: 24, fontWeight: 800, color: C.greenD, letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>{agg.rentLo != null ? `AED ${span(agg.rentLo, agg.rentHi)}` : '—'}</div>
-                    {aedPerSqft != null && <div style={{ fontSize: 11, color: C.mute3, marginTop: 3 }}>AED {aed(aedPerSqft)} / sq.ft / yr</div>}
                     {agg.unpriced > 0 && <div style={{ fontSize: 11, color: C.amber, fontWeight: 600, marginTop: 3 }}>{agg.unpriced} unit{agg.unpriced === 1 ? '' : 's'} not yet priced</div>}
                   </div>
                   <div style={{ padding: '16px 18px' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>RENT ROLL / YR</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>MARKET RENT ROLL / YR</div>
                     <div style={{ fontSize: 24, fontWeight: 800, color: agg.sum > 0 ? C.ink : C.mute3, letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>{agg.sum > 0 ? `AED ${aed(agg.sum)}` : '—'}</div>
                     <div style={{ fontSize: 11, color: C.mute3, marginTop: 3 }}>{agg.priced} priced unit{agg.priced === 1 ? '' : 's'} × rent</div>
                   </div>
@@ -381,14 +421,14 @@ export function LayoutPreviewModal({
                 <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>{sectionIcon(ScrollText)}{sectionTitle('Special conditions')}</div>
                   <div
-                    onClick={termsVer.addendumUrl ? () => setViewer({ url: termsVer.addendumUrl!, title: termsVer.addendumFileName || 'Layout addendum' }) : undefined}
-                    style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 18px', border: `1px solid ${termsVer.addendumUrl ? C.greenBd2 : C.line}`, background: termsVer.addendumUrl ? C.soft2 : '#fff', borderRadius: 14, marginBottom: 8, flexWrap: 'wrap', cursor: termsVer.addendumUrl ? 'pointer' : 'default' }}>
+                    onClick={addendumFile ? () => setViewer({ url: addendumFile, title: termsVer.addendumFileName || 'Layout addendum' }) : addendumHasTerms ? () => setAddendumPreview(true) : undefined}
+                    style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 18px', border: `1px solid ${addendumViewable ? C.greenBd2 : C.line}`, background: addendumViewable ? C.soft2 : '#fff', borderRadius: 14, marginBottom: 8, flexWrap: 'wrap', cursor: addendumViewable ? 'pointer' : 'default' }}>
                     <span style={{ width: 40, height: 40, flex: '0 0 40px', borderRadius: 10, background: C.greenBg2, color: C.greenT, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><FileText size={18} /></span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink2 }}>{termsVer.addendumFileName || 'Layout addendum'}</div>
                       <div style={{ fontSize: 11.5, color: C.mute2 }}>Version {termsVer.versionNo}{termsVer.versionsCount ? ` of ${termsVer.versionsCount}` : ''} · applies to every unit on this layout</div>
                     </div>
-                    {termsVer.addendumUrl ? (
+                    {addendumViewable ? (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, color: C.greenT, background: C.greenBg, border: `1px solid ${C.greenBd}`, padding: '8px 13px', borderRadius: 9 }}>
                         <Eye size={14} /> View
                       </span>
@@ -420,6 +460,15 @@ export function LayoutPreviewModal({
           )}
         </div>
       </div>
+
+      {/* ── ADDENDUM TERMS PREVIEW (in-app editor terms · view-only) ── */}
+      {addendumPreview && termsVer?.addendumTerms && (
+        <AddendumPreviewModal
+          terms={termsVer.addendumTerms}
+          title={termsVer.addendumFileName || 'Layout addendum'}
+          onClose={() => setAddendumPreview(false)}
+        />
+      )}
 
       {/* ── DOCUMENT VIEWER (floor plan / addendum · view-only, no download) ── */}
       {viewer && (

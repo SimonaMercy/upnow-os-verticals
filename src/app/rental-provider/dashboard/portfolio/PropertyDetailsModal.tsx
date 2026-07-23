@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X, ArrowLeft, MapPin, ExternalLink, FileText, Eye, Building2, AlignLeft,
   Image as ImageIcon, Check, Plus, Upload, Replace, Trash2,
-  Pencil, ChevronLeft, ChevronRight, ChevronDown, Loader2, Layers, Info, Download,
+  Pencil, ChevronLeft, ChevronRight, Loader2, Layers, Download,
 } from 'lucide-react';
 import { apiDelete } from '@/lib/api';
 import { downloadStoredDoc } from '@/lib/downloadDoc';
@@ -154,7 +154,7 @@ function ownershipChip(t: Property['leasingType']): { label: string; color: stri
 
 // ── Unit Mix helpers ──────────────────────────────────────
 // Shared column template for the mix table (Type · Layout · Sqft · Units · Rent/unit · Total · Edit).
-const MIX_COLS = 'minmax(100px,0.9fr) minmax(132px,1.4fr) 78px 52px minmax(110px,1fr) 82px';
+const MIX_COLS = 'minmax(96px,0.9fr) minmax(118px,1.3fr) 66px 46px minmax(104px,1fr) minmax(104px,1fr) 74px';
 const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
 // Backend numeric(…) columns (size, rent) come back as strings — coerce defensively.
 const numOrNull = (v: unknown): number | null => {
@@ -182,7 +182,8 @@ interface MixLayout {
   sqmLo: number | null; sqmHi: number | null;
   sqftLo: number | null; sqftHi: number | null;
   priceLo: number | null; priceHi: number | null;
-  sum: number;          // Σ last lease contract value (units.rental_price) over priced units
+  marketSum: number;    // Σ units.rental_price (asking / market price) over priced units
+  leaseSum: number;     // Σ latest-lease annual_rent (already net of discount); leased units only
   unpriced: number;
   hasPlan: boolean;     // a matching floor-plan exists (→ editable)
 }
@@ -195,7 +196,8 @@ interface MixGroup {
   sqmLo: number | null; sqmHi: number | null;
   sqftLo: number | null; sqftHi: number | null;
   priceLo: number | null; priceHi: number | null;
-  sum: number;
+  marketSum: number;
+  leaseSum: number;
   unpriced: number;
   layouts: MixLayout[];
 }
@@ -211,38 +213,42 @@ const maxOf = (a: number | null, b: number | null) => (a == null ? b : b == null
  * spans, price spans and rent-roll sums. `planLabels` (from the floor-plans
  * endpoint) marks which layouts have an editable plan.
  */
-function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRow[]; totalUnits: number; grandSum: number; unpriced: number } {
+function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRow[]; totalUnits: number; grandMarket: number; grandLease: number; unpriced: number } {
   const groups = new Map<string, MixGroup>();
   for (const u of units) {
     const gkey = `${u.unitType}::${u.bedrooms ?? ''}`;
     let g = groups.get(gkey);
     if (!g) {
-      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, layouts: [] };
+      g = { key: gkey, unitType: u.unitType, bedrooms: u.bedrooms ?? null, count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, marketSum: 0, leaseSum: 0, unpriced: 0, layouts: [] };
       groups.set(gkey, g);
     }
     const lp = u.planLabel ?? null;
     let l = g.layouts.find((x) => x.planLabel === lp);
     if (!l) {
-      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, sum: 0, unpriced: 0, hasPlan: lp != null && planLabels.has(lp) };
+      l = { planLabel: lp, label: lp || 'No layout', count: 0, sqmLo: null, sqmHi: null, sqftLo: null, sqftHi: null, priceLo: null, priceHi: null, marketSum: 0, leaseSum: 0, unpriced: 0, hasPlan: lp != null && planLabels.has(lp) };
       g.layouts.push(l);
     }
-    // Last lease value: the unit's most recent lease rent (active OR ended), so
-    // now-inactive units still count. Falls back to the asking rent only when the
-    // unit has never been leased.
-    const lease = u.lastLeaseRent ?? u.rentalPrice;
+    // Two money figures per unit:
+    //  • Market Price — the unit's asking rent (units.rental_price).
+    //  • Annual Rent  — the latest lease's annual_rent (active OR ended). It is
+    //    ALREADY net of any discount (annual_rent = listed_price − discount), so it
+    //    is summed as-is; a never-leased unit contributes nothing to this column.
+    const market = u.rentalPrice;
+    const leaseNet = u.lastLeaseRent;
     for (const bucket of [g, l]) {
       bucket.count += 1;
       bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
       bucket.sqmHi = maxOf(bucket.sqmHi, u.unitSizeSqm);
       bucket.sqftLo = minOf(bucket.sqftLo, u.unitSizeSqft);
       bucket.sqftHi = maxOf(bucket.sqftHi, u.unitSizeSqft);
-      if (lease != null && lease > 0) {
-        bucket.sum += lease;
-        bucket.priceLo = minOf(bucket.priceLo, lease);
-        bucket.priceHi = maxOf(bucket.priceHi, lease);
+      if (market != null && market > 0) {
+        bucket.marketSum += market;
+        bucket.priceLo = minOf(bucket.priceLo, market);
+        bucket.priceHi = maxOf(bucket.priceHi, market);
       } else {
         bucket.unpriced += 1;
       }
+      if (leaseNet != null && leaseNet > 0) bucket.leaseSum += leaseNet;
     }
   }
   const out = [...groups.values()];
@@ -251,9 +257,10 @@ function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRo
   // Flatten to one row per layout (no grouping), keeping type/bedroom order.
   const rows: MixRow[] = out.flatMap((g) => g.layouts.map((l) => ({ ...l, unitType: g.unitType, bedrooms: g.bedrooms })));
   const totalUnits = units.length;
-  const grandSum = out.reduce((s, g) => s + g.sum, 0);
+  const grandMarket = out.reduce((s, g) => s + g.marketSum, 0);
+  const grandLease = out.reduce((s, g) => s + g.leaseSum, 0);
   const unpriced = out.reduce((s, g) => s + g.unpriced, 0);
-  return { rows, totalUnits, grandSum, unpriced };
+  return { rows, totalUnits, grandMarket, grandLease, unpriced };
 }
 
 // Open a transient file picker and resolve with the chosen files.
@@ -307,9 +314,7 @@ export function PropertyDetailsModal({
   const [editLayout, setEditLayout] = useState<{ planLabel: string | null; unitCount: number } | null>(null);
   // Read-only per-layout (grouped) detail popup, opened from a Unit Mix row.
   const [previewLayout, setPreviewLayout] = useState<MixRow | null>(null);
-  const [showAllUnits, setShowAllUnits] = useState(false);
   // ANNUAL RENT info popover — anchored to the icon (fixed, escapes the stat strip's overflow clip).
-  const [rentSplitAt, setRentSplitAt] = useState<{ left: number; top: number } | null>(null);
 
   // RP vs manager scope for the pricing endpoints (mirrors the units workspace).
   // rp is a dedicated prop — it drives ONLY the pricing calls, never the units fetch.
@@ -435,18 +440,6 @@ export function PropertyDetailsModal({
   );
   const mix = useMemo(() => buildUnitMix(units, planLabelSet), [units, planLabelSet]);
 
-  // Annual-rent split for the ANNUAL RENT info popover — each unit's asking rent
-  // bucketed by occupancy (occupied vs everything else). Sums to the rent roll.
-  const rentSplit = useMemo(() => {
-    let occ = 0, vac = 0, occN = 0, vacN = 0;
-    for (const u of units) {
-      const r = numOrNull(u.rentalPrice) ?? 0;
-      if ((u.availability || '').toLowerCase() === 'occupied') { occ += r; occN += 1; }
-      else { vac += r; vacN += 1; }
-    }
-    return { occ, vac, occN, vacN, total: occ + vac };
-  }, [units]);
-
   // ── document slots ──────────────────────────────────────
   // The proof-of-right slot depends on the leasing model.
   const proofSlot: PropertyDocSlot = useMemo(() => {
@@ -570,14 +563,13 @@ export function PropertyDetailsModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (rentSplitAt) setRentSplitAt(null);
-      else if (lb !== null) setLb(null);
+      if (lb !== null) setLb(null);
       else if (reader !== null) setReader(null);
       else dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lb, reader, rentSplitAt, dismiss]);
+  }, [lb, reader, dismiss]);
 
   // ── summary numbers ─────────────────────────────────────
   const occFromUnits = units.filter((u) => u.availability === 'occupied').length;
@@ -601,7 +593,7 @@ export function PropertyDetailsModal({
     { label: 'UNITS', value: String(stats.units), color: C.ink },
     { label: 'OCCUPIED', value: String(stats.occupied), color: C.ink },
     { label: 'VACANT', value: String(vacant), color: C.ink },
-    { label: 'ANNUAL RENT', value: `AED ${Math.round(stats.rentTotal).toLocaleString('en-AE')}`, color: C.greenD },
+    { label: 'MARKET PRICE', value: `AED ${Math.round(stats.rentTotal).toLocaleString('en-AE')}`, color: C.greenD },
   ] : [];
 
   const hasMapLink = p.latitude != null && p.longitude != null;
@@ -711,29 +703,12 @@ export function PropertyDetailsModal({
               {/* STATS */}
               {statCells.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: isTight ? 'repeat(2,1fr)' : 'repeat(4,1fr)', border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', background: '#fff', marginBottom: 24 }}>
-                  {statCells.map((s, i) => {
-                    const showRentInfo = s.label === 'ANNUAL RENT' && !unitsLoading && units.length > 0;
-                    return (
+                  {statCells.map((s, i) => (
                     <div key={s.label} style={{ padding: '14px 18px', borderLeft: `1px solid ${i === 0 ? 'transparent' : C.line2}` }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>
-                        {s.label}
-                        {showRentInfo && (
-                          <button type="button" aria-label="Show occupied vs vacant rent split"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (rentSplitAt) { setRentSplitAt(null); return; }
-                              const r = e.currentTarget.getBoundingClientRect();
-                              setRentSplitAt({ left: Math.max(12, Math.min(r.left - 8, window.innerWidth - 268)), top: r.bottom + 8 });
-                            }}
-                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', background: 'transparent', color: rentSplitAt ? C.greenT : C.mute3, cursor: 'pointer', lineHeight: 0 }}>
-                            <Info size={12} />
-                          </button>
-                        )}
-                      </div>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>{s.label}</div>
                       <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-.02em', color: s.color, marginTop: 5, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
                     </div>
-                    );
-                  })}
+                  ))}
                 </div>
               )}
 
@@ -798,11 +773,11 @@ export function PropertyDetailsModal({
                   <div style={{ padding: 16, fontSize: 13, color: C.mute3, background: '#fff' }}>No units yet.</div>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
-                    <div style={{ minWidth: 720 }}>
+                    <div style={{ minWidth: 840 }}>
                       {/* header */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
-                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Sum of Last Lease Value', ''].map((h, i) => (
-                          <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4) ? 'right' : 'left' }}>{h}</div>
+                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Market Price', 'Annual Rent', ''].map((h, i) => (
+                          <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
                         ))}
                       </div>
 
@@ -818,10 +793,14 @@ export function PropertyDetailsModal({
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
                           <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
-                          {/* Sum of Last Lease Value — Σ units.rental_price (last activated lease's rent) for the layout */}
+                          {/* Market Price — Σ units.rental_price (asking) for the layout */}
                           <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: r.sum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.sum > 0 ? `AED ${aed(r.sum)}` : '—'}</span>
-                            {r.unpriced > 0 && r.sum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
+                            <span style={{ fontSize: 13, fontWeight: 700, color: r.marketSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.marketSum > 0 ? `AED ${aed(r.marketSum)}` : '—'}</span>
+                            {r.unpriced > 0 && r.marketSum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
+                          </div>
+                          {/* Annual Rent — Σ latest-lease annual_rent (already net of discount); leased units only */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: r.leaseSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.leaseSum > 0 ? `AED ${aed(r.leaseSum)}` : '—'}</span>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             {pricingEditable && r.planLabel && (
@@ -840,7 +819,8 @@ export function PropertyDetailsModal({
                         <div />
                         <div />
                         <div style={{ fontSize: 13, fontWeight: 800, color: C.ink, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{mix.totalUnits}</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandSum)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandMarket)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandLease)}</div>
                         <div />
                       </div>
                     </div>
@@ -852,36 +832,7 @@ export function PropertyDetailsModal({
               {!unitsLoading && units.length > 0 && (
                 <>
                   <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
-                    Tap a layout to see its grouped detail · annual rent roll at asking prices{mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
-                  </div>
-                  <div style={{ marginBottom: 28 }}>
-                    <button type="button" onClick={() => setShowAllUnits((v) => !v)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, color: C.body, background: '#fff', border: `1px solid ${C.line}`, padding: '8px 13px', borderRadius: 10, cursor: 'pointer' }}>
-                      <Building2 size={14} /> {showAllUnits ? 'Hide' : 'Show'} individual units ({units.length})
-                      <ChevronDown size={14} style={{ transform: showAllUnits ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }} />
-                    </button>
-                    {showAllUnits && (
-                      <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginTop: 10 }}>
-                        <div style={{ maxHeight: 286, overflowY: 'auto' }}>
-                          {units.map((u, i) => {
-                            const occ = u.availability === 'occupied';
-                            const maint = u.availability === 'maintenance';
-                            const pub = u.listingStatus === 'published';
-                            const color = occ || pub ? C.greenT : maint ? '#854d0e' : C.mute;
-                            const bg = occ || pub ? C.greenBg3 : maint ? '#fef3c7' : C.line3;
-                            const label = occ ? 'Occupied' : maint ? 'Maintenance' : pub ? 'Published' : 'Available';
-                            return (
-                              <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line4}`, background: '#fff' }}>
-                                <span style={{ fontSize: 13, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
-                                <span style={{ flex: 1, fontSize: 13, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || u.unitType.replace(/_/g, ' ')}</span>
-                                {u.rentalPrice != null && u.rentalPrice > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(u.rentalPrice)}</span>}
-                                <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '4px 10px', borderRadius: 7 }}>{label}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                    Tap a layout to see its grouped detail · Market Price = Σ asking rent · Annual Rent = Σ latest lease, net of discount (leased units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
                   </div>
                 </>
               )}
@@ -987,32 +938,6 @@ export function PropertyDetailsModal({
           </main>
         </div>
       </div>
-
-      {/* ── ANNUAL RENT split popover (occupied vs vacant) ── */}
-      {rentSplitAt && (
-        <>
-          <div onClick={() => setRentSplitAt(null)} style={{ position: 'fixed', inset: 0, zIndex: 64 }} />
-          <div style={{ position: 'fixed', left: rentSplitAt.left, top: rentSplitAt.top, zIndex: 65, width: 256, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: '0 12px 34px rgba(15,30,22,.20)', padding: 14 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4, marginBottom: 8 }}>ANNUAL RENT · BY OCCUPANCY</div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 0' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.body }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.green }} />Occupied <span style={{ color: C.mute3 }}>· {rentSplit.occN}</span>
-              </span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.occ)}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 0', borderTop: `1px solid ${C.line3}` }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.body }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.mute3 }} />Vacant <span style={{ color: C.mute3 }}>· {rentSplit.vacN}</span>
-              </span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.vac)}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 0 0', marginTop: 4, borderTop: `2px solid ${C.line}` }}>
-              <span style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, letterSpacing: '.03em' }}>TOTAL</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(rentSplit.total)}</span>
-            </div>
-          </div>
-        </>
-      )}
 
       {/* ── LIGHTBOX ── */}
       {lb !== null && photos.length > 0 && (
