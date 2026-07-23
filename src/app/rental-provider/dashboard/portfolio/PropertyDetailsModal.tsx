@@ -657,6 +657,10 @@ export function PropertyDetailsModal({
         >
           {/* HEADER */}
           <header style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 24px', borderBottom: `1px solid ${C.line2}`, flex: '0 0 auto' }}>
+            <button type="button" onClick={dismiss} aria-label="Back"
+              style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
+              <ArrowLeft size={18} />
+            </button>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700, letterSpacing: '-.02em', color: C.ink }}>{p.buildingName}</h1>
@@ -674,10 +678,6 @@ export function PropertyDetailsModal({
                 <Pencil size={14} /> Edit
               </button>
             )}
-            <button type="button" onClick={dismiss} aria-label="Back"
-              style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
-              <ArrowLeft size={18} />
-            </button>
           </header>
 
           {/* BODY */}

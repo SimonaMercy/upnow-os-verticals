@@ -45,13 +45,13 @@ export default function AddendumPreviewModal({ terms, title, onClose }: {
   return (
     <div className="fixed inset-0 z-[70] bg-[#52555a] flex flex-col">
       <div className="px-5 py-3 bg-white border-b border-[#efece6] flex items-center gap-3 shrink-0">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-base text-[#1a1916] truncate">{title || 'Addendum preview'}</h3>
-          <p className="text-xs text-[#9b9890]">How the addendum looks on the contract, with the signature block on each page.</p>
-        </div>
         <button onClick={dismiss} aria-label="Back" className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#e7ebe6] text-[#5a635c] hover:bg-[#f6f8f5]">
           <ArrowLeft size={18} />
         </button>
+        <div className="min-w-0">
+          <h3 className="font-semibold text-base text-[#1a1916] truncate">{title || 'Addendum preview'}</h3>
+          <p className="text-xs text-[#9b9890]">How the addendum looks on the contract, with the signature block on each page.</p>
+        </div>
       </div>
       <div className="flex-1 min-h-0">
         <AddendumTermsPreview terms={terms} height={h} />

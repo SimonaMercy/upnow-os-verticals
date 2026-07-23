@@ -254,6 +254,10 @@ export function LayoutPreviewModal({
 
           {/* HEADER */}
           <header style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 24px', borderBottom: `1px solid ${C.line2}`, flex: '0 0 auto' }}>
+            <button type="button" onClick={dismiss} aria-label="Back"
+              style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
+              <ArrowLeft size={18} />
+            </button>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: '-.02em', color: C.ink }}>{title}</h1>
@@ -272,10 +276,6 @@ export function LayoutPreviewModal({
                 <Pencil size={14} /> Edit layout
               </button>
             )}
-            <button type="button" onClick={dismiss} aria-label="Back"
-              style={{ width: 34, height: 34, flex: '0 0 34px', borderRadius: 10, border: `1px solid ${C.line}`, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}>
-              <ArrowLeft size={18} />
-            </button>
           </header>
 
           {/* BODY */}
