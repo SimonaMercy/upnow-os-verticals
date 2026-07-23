@@ -6,17 +6,41 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *  modules that have long imported it from there. */
 export const SLIDEOVER_MS = 380;
 
+// ── nested-overlay Back coordination ────────────────────────────────────────
+// Several overlays can be open at once (e.g. property details → layout details).
+// A single browser Back — or edge-swipe, or an in-app back-arrow — must close
+// only the TOP-MOST overlay so they peel off one at a time, back to the page
+// underneath. If every open overlay bound its OWN popstate listener they would
+// all fire on one Back and collapse together (skipping the layers between). So
+// we keep a module-level STACK of the open overlays' close handlers and ONE
+// popstate listener that fires just the top one.
+type OverlayHandle = { close: () => void };
+const overlayStack: OverlayHandle[] = [];
+let popstateBound = false;
+
+function onGlobalPopstate() {
+  // The browser already popped our sentinel entry; close only the top overlay.
+  overlayStack[overlayStack.length - 1]?.close();
+}
+
+function ensurePopstateListener() {
+  if (popstateBound || typeof window === 'undefined') return;
+  popstateBound = true;
+  window.addEventListener('popstate', onGlobalPopstate);
+}
+
 /**
  * Browser-Back-to-close for full-viewport overlays (modals, slide-overs,
  * takeovers). Because these overlays cover the whole screen they LOOK like a
  * page, so people instinctively press the browser Back button (or the edge-swipe
  * gesture) to leave them — which, without this, navigates away from the page
- * underneath instead. On activate we push a throwaway same-URL history entry;
- * pressing Back pops it (no real navigation), fires `popstate`, and we treat it
- * as a close. `dismiss()` (wired to every UI close path — X, backdrop, ESC,
- * Cancel, save-then-close) goes through `history.back()` too, so the pushed
- * entry is always consumed and the close is driven from the single popstate
- * path — the overlay never leaves a stray entry on the stack.
+ * underneath instead. On activate we push a throwaway same-URL history entry and
+ * register on the shared overlay stack; pressing Back pops the entry (no real
+ * navigation), fires `popstate`, and the single global listener closes just the
+ * top overlay. `dismiss()` (wired to every UI close path — X, backdrop, ESC,
+ * Cancel, back-arrow, save-then-close) goes through `history.back()` too, so the
+ * pushed entry is always consumed and closing is driven from one code path.
+ * Nested overlays therefore close innermost-first, one Back at a time.
  *
  * `active` marks whether the overlay is currently shown. Overlays mounted only
  * while open can leave it at the default `true`; overlays that stay mounted and
@@ -29,7 +53,7 @@ export const SLIDEOVER_MS = 380;
  * hook directly so they close instantly.
  */
 export function useBackClose(onClose: () => void, active: boolean = true) {
-  // Latest onClose, read at fire-time so the popstate listener never re-binds.
+  // Latest onClose, read at fire-time so the handler never goes stale.
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
@@ -39,17 +63,35 @@ export function useBackClose(onClose: () => void, active: boolean = true) {
 
   useEffect(() => {
     if (!active) return;
+    ensurePopstateListener();
     consumedRef.current = false;
     window.history.pushState({ __overlay: true }, '');
-    const onPop = () => {
-      if (consumedRef.current) return;
-      consumedRef.current = true;
-      onCloseRef.current();
+
+    // This overlay's slot on the shared stack. close() runs once, removes the
+    // slot, then fires onClose — invoked by Back (via the global listener) and
+    // by the in-app dismiss() below, so both go through the same single path.
+    const handle: OverlayHandle = {
+      close: () => {
+        if (consumedRef.current) return;
+        consumedRef.current = true;
+        const i = overlayStack.indexOf(handle);
+        if (i >= 0) overlayStack.splice(i, 1);
+        onCloseRef.current();
+      },
     };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    overlayStack.push(handle);
+
+    return () => {
+      // Deactivated / unmounted: drop our slot so a later Back never fires a
+      // stale handler. (The sentinel entry we pushed is harmless — a same-URL
+      // no-op — and is reclaimed the next time Back is pressed.)
+      const i = overlayStack.indexOf(handle);
+      if (i >= 0) overlayStack.splice(i, 1);
+    };
   }, [active]);
 
+  // In-app close affordance (X / backdrop / ESC / back-arrow / save): route
+  // through Back so the top overlay closes on exactly one code path.
   return useCallback(() => {
     if (consumedRef.current) return;
     window.history.back();
