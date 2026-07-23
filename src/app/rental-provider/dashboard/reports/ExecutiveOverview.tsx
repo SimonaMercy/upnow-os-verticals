@@ -30,7 +30,7 @@ interface ExecutiveSummary {
   kpis: {
     properties: number;
     units: number; occupied: number; vacant: number; occupancyRate: number;
-    rentRollFils: number; activeContractedRentFils: number;
+    rentRollFils: number;
     arrearsFils: number; arrearsCheques: number;
     upcoming90Fils: number;
     expiring90: number; expiring90RentFils: number;

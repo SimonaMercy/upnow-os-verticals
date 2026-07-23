@@ -458,7 +458,7 @@ export default function ManagerPropertiesPage() {
     { label: 'PROPERTIES', value: String(totalProperties), sub: rpFilter ? 'For this landlord' : 'Across your landlords', icon: <Building2 size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'TOTAL UNITS', value: String(totalUnits), sub: 'Across all properties', icon: <DoorClosed size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'OCCUPANCY', value: `${occRate}%`, sub: `${totalOccupied} occupied · ${totalVacant} vacant`, icon: <Gauge size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'ANNUAL RENT', value: fmtRentKpi(totalRent), sub: 'Gross across portfolio', icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
+    { label: 'MARKET PRICE', value: fmtRentKpi(totalRent), sub: 'Gross across portfolio', icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
   ];
 
   const filtersDirty = !!search || categoryFilter !== 'all' || ownershipFilter !== 'all' || sort !== 'default';

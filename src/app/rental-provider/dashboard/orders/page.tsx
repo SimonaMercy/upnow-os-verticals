@@ -32,7 +32,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Search, Plus, X, FileText, ChevronLeft, ChevronRight,
-  Bell, Download, Clock, Shield, Coins, Calendar, Pencil,
+  Bell, Download, Clock, Shield, Coins, Calendar, Pencil, Info,
 } from 'lucide-react';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
@@ -209,6 +209,81 @@ function statusLabel(c: Contract): string {
   return STATUS_LABELS[displayStatusOf(c)];
 }
 
+function unitLeaseKey(c: Contract): number | string {
+  return c.unit.id ?? `c${c.id}`;
+}
+
+function preferCurrentLease(prev: Contract, next: Contract): Contract {
+  const prevLive = displayStatusOf(prev) !== 'needs_activation';
+  const nextLive = displayStatusOf(next) !== 'needs_activation';
+  if (nextLive && !prevLive) return next;
+  if (nextLive === prevLive && (next.endDate ?? '') > (prev.endDate ?? '')) return next;
+  return prev;
+}
+
+function collapseCurrentLeaseCandidates(list: Contract[]): Contract[] {
+  const byUnit = new Map<number | string, Contract>();
+  for (const c of list) {
+    const key = unitLeaseKey(c);
+    const prev = byUnit.get(key);
+    if (!prev) { byUnit.set(key, c); continue; }
+    byUnit.set(key, preferCurrentLease(prev, c));
+  }
+  return [...byUnit.values()];
+}
+
+function isOrdersAnnualRentCandidate(c: Contract): boolean {
+  const ds = displayStatusOf(c);
+  return ds !== 'expired' && ds !== 'terminated' && ds !== 'declined' && ds !== 'superseded';
+}
+
+function sumAnnualRent(list: Contract[]): number {
+  return list.reduce((sum, c) => sum + (c.annualRent || 0), 0);
+}
+
+function leaseWord(n: number): string {
+  return `${n} lease${n === 1 ? '' : 's'}`;
+}
+
+function RentBreakdownTip({ breakdown }: { breakdown: RentBreakdown }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="rent-tip">
+      <button
+        type="button"
+        aria-label="Show annual rent breakdown"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        className="rent-tip-btn"
+      >
+        <Info size={12} />
+      </button>
+      {open && (
+        <span className="rent-tip-pop" role="dialog" aria-label="Annual rent breakdown">
+          <span className="rent-tip-row strong">
+            <span>Annual Rent</span>
+            <span>{leaseWord(breakdown.gross.count)} · AED {fmtAedAmt(breakdown.gross.amount)}</span>
+          </span>
+          <span className="rent-tip-row dim">
+            <span>− still in setup / unlocked / lapsed / unactivated pending</span>
+            <span>{leaseWord(breakdown.setup.count)} · AED {fmtAedAmt(breakdown.setup.amount)}</span>
+          </span>
+          <span className="rent-tip-row dim">
+            <span>− in Operations worklist / winding down / move-out</span>
+            <span>{leaseWord(breakdown.operations.count)} · AED {fmtAedAmt(breakdown.operations.amount)}</span>
+          </span>
+          <span className="rent-tip-sep" />
+          <span className="rent-tip-row strong final">
+            <span>= Orders &quot;Running rent / yr&quot;</span>
+            <span>{leaseWord(breakdown.running.count)} · AED {fmtAedAmt(breakdown.running.amount)}</span>
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Row component
 // ────────────────────────────────────────────────────────────────────────────
@@ -368,35 +443,35 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
   // headline "Total". A renewed unit keeps the old + new rows and prior cycles
   // stay as expired rows, so a raw count double/triple-counts; collapsing per
   // unit gives the real tenancy count (the fix for the inflated 169). ──
-  const currentLeases = useMemo(() => {
-    const byUnit = new Map<number | string, Contract>();
-    for (const c of yearScoped) {
-      if (!isInForce(c)) continue;
-      // A lease whose termination is accepted is winding down (move-out +
-      // settlement) — it belongs on Operations, not Leases. The backend already
-      // routes it into the Operations worklist (so opsIds excludes it below), but
-      // guard here too so it never shows as a current lease even if /operations
-      // fails to load and opsIds is empty.
-      if (displayStatusOf(c) === 'terminating') continue;
-      // Leases register = COMPLETED live leases only. A lease still in the
-      // Operations worklist (unlocked draft, or active-but-incomplete pipeline)
-      // is excluded — it shows here only once its setup is complete and it has
-      // dropped out of Operations. (opsIds = the live Operations worklist.)
-      if (c.lockedAt == null) continue;
-      if (opsIds.has(c.id)) continue;
-      const key = c.unit.id ?? `c${c.id}`;
-      const prev = byUnit.get(key);
-      if (!prev) { byUnit.set(key, c); continue; }
-      // Changeover: an outgoing active lease and an incoming running lease can
-      // both be in force on one unit. Prefer the signed-active one; among equals
-      // keep the later end date (the lease that actually runs longest).
-      const prevLive = displayStatusOf(prev) !== 'needs_activation';
-      const curLive = displayStatusOf(c) !== 'needs_activation';
-      if (curLive && !prevLive) { byUnit.set(key, c); continue; }
-      if (curLive === prevLive && (c.endDate ?? '') > (prev.endDate ?? '')) byUnit.set(key, c);
-    }
-    return [...byUnit.values()];
-  }, [yearScoped, opsIds]);
+  const grossLeaseCandidates = useMemo(
+    () => collapseCurrentLeaseCandidates(yearScoped.filter(c => isOrdersAnnualRentCandidate(c))),
+    [yearScoped],
+  );
+
+  const setupExcludedLeases = useMemo(
+    () => grossLeaseCandidates.filter(c => {
+      const ds = displayStatusOf(c);
+      return c.lockedAt == null || ds === 'needs_activation' || ds === 'pending';
+    }),
+    [grossLeaseCandidates],
+  );
+
+  const operationsExcludedLeases = useMemo(
+    () => grossLeaseCandidates.filter(c =>
+      c.lockedAt != null &&
+      displayStatusOf(c) !== 'needs_activation' &&
+      (displayStatusOf(c) === 'terminating' || opsIds.has(c.id))),
+    [grossLeaseCandidates, opsIds],
+  );
+
+  const currentLeases = useMemo(
+    () => grossLeaseCandidates.filter(c =>
+      c.lockedAt != null &&
+      displayStatusOf(c) !== 'needs_activation' &&
+      displayStatusOf(c) !== 'terminating' &&
+      !opsIds.has(c.id)),
+    [grossLeaseCandidates, opsIds],
+  );
 
   const expiringLeases = useMemo(() => currentLeases.filter(c => endsSoon(c, soonBy)), [currentLeases, soonBy]);
   const activeLeases   = useMemo(() => currentLeases.filter(c => !endsSoon(c, soonBy)), [currentLeases, soonBy]);
@@ -443,14 +518,20 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
 
   // Running rent = annual rent across the current leases (already one per unit).
   const runningRent = useMemo(() => currentLeases.reduce((s, c) => s + (c.annualRent || 0), 0), [currentLeases]);
+  const rentBreakdown = useMemo<RentBreakdown>(() => ({
+    gross: { count: grossLeaseCandidates.length, amount: sumAnnualRent(grossLeaseCandidates) },
+    setup: { count: setupExcludedLeases.length, amount: sumAnnualRent(setupExcludedLeases) },
+    operations: { count: operationsExcludedLeases.length, amount: sumAnnualRent(operationsExcludedLeases) },
+    running: { count: currentLeases.length, amount: runningRent },
+  }), [grossLeaseCandidates, setupExcludedLeases, operationsExcludedLeases, currentLeases, runningRent]);
 
   const hasFilters = filterAsset !== 'all' || search !== '';
 
-  const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode }[] = [
+  const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode; info?: React.ReactNode }[] = [
     { lbl: 'Current leases',          val: String(currentLeases.length),  ic: <FileText size={12} /> },
     { lbl: 'Active',                  val: String(activeLeases.length),   ic: <Shield size={12} /> },
     { lbl: `Expiring · ${EXPIRING_DAYS}d`, val: String(expiringLeases.length), ic: <Clock size={12} /> },
-    { lbl: 'Running rent / yr',       val: fmtAedAmt(runningRent), aed: true, accent: true, ic: <Coins size={12} /> },
+    { lbl: 'Running rent / yr',       val: fmtAedAmt(runningRent), aed: true, accent: true, ic: <Coins size={12} />, info: <RentBreakdownTip breakdown={rentBreakdown} /> },
   ];
 
   return (
@@ -488,7 +569,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
         <div className="kpis">
           {kpis.map((k, i) => (
             <div key={i} className={'kpi ' + (k.accent ? 'accent' : '')}>
-              <div className="lbl"><span className="ic">{k.ic}</span>{k.lbl}</div>
+              <div className="lbl"><span className="ic">{k.ic}</span>{k.lbl}{k.info}</div>
               <div className={'val ' + (k.aed ? 'aed' : '')}>
                 {k.aed && <span className="cur">AED</span>}{k.val}
               </div>
@@ -761,6 +842,33 @@ function GlobalStyle() {
         display: flex; align-items: center; gap: 6px; line-height: 1.2;
       }
       .orders-page .kpi .lbl .ic { color: var(--green-d); opacity: .85; flex-shrink: 0; }
+      .orders-page .rent-tip { position: relative; display: inline-flex; align-items: center; }
+      .orders-page .rent-tip-btn {
+        appearance: none; border: 0; background: transparent; padding: 0;
+        width: 14px; height: 14px; border-radius: 999px; cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: currentColor; opacity: .8;
+      }
+      .orders-page .rent-tip-btn:hover { opacity: 1; }
+      .orders-page .rent-tip-pop {
+        position: absolute; top: calc(100% + 8px); right: 0; z-index: 10;
+        width: min(360px, 82vw); border-radius: 14px; background: #fff;
+        border: 1px solid var(--line); box-shadow: 0 16px 40px rgba(26,25,22,.14);
+        padding: 12px 14px; color: var(--ink); text-transform: none; letter-spacing: normal;
+      }
+      .orders-page .rent-tip-row {
+        display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+        font-size: 12px; line-height: 1.45; padding: 3px 0;
+      }
+      .orders-page .rent-tip-row > span:last-child {
+        text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;
+      }
+      .orders-page .rent-tip-row.dim { color: var(--ink-3); }
+      .orders-page .rent-tip-row.strong { font-weight: 700; color: var(--ink); }
+      .orders-page .rent-tip-row.final { color: var(--green-d); }
+      .orders-page .rent-tip-sep {
+        display: block; border-top: 1px solid var(--line); margin: 8px 0 6px;
+      }
       .orders-page .kpi .val {
         font-size: 25px; font-weight: 700; letter-spacing: -.025em;
         color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums;

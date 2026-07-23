@@ -191,7 +191,7 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   portfolio: {
     title: 'Portfolio',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and the rent roll. "Rent Roll" is the latest lease on every occupied unit (so it reconciles with occupancy, including units on lapsed leases pending renewal); "Active leases" counts only contracts still in active status. Pick a year above to scope the rent figures to leases that were on the books that year (the money columns follow the year; the unit counts stay a live snapshot, as availability isn\'t tracked historically). "All years" shows today.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) across every unit — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on every unit, including currently vacant units where a prior term exists. Pick a year above to narrow Annual Rent to leases whose term overlapped that year; Market Rent and the unit counts stay a live snapshot. "All years" shows today.',
     endpoint: '/api/reports/occupancy',
     controlKey: 'yearRange',
     buildingLeaseFilter: true,
@@ -205,8 +205,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'maintenanceUnits', label: 'Maintenance', align: 'right', type: 'number' },
       { key: 'reservedUnits', label: 'Reserved', align: 'right', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', align: 'right', type: 'rate' },
-      { key: 'rentRollFils', label: 'Rent Roll', align: 'right', type: 'aed' },
-      { key: 'activeContractedRentFils', label: 'Active leases', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
+      { key: 'annualRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
@@ -216,8 +216,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'maintenance', label: 'Maintenance', type: 'number' },
       { key: 'reserved', label: 'Reserved', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
-      { key: 'rentRollFils', label: 'Rent Roll', type: 'aed' },
-      { key: 'activeContractedRentFils', label: 'On active leases', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market Rent', type: 'aed' },
+      { key: 'annualRentFils', label: 'Annual Rent', type: 'aed' },
     ],
     // Click a property to list its units with live status + rent.
     drilldown: {
@@ -228,7 +228,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'unitLabel', label: 'Unit' },
         { key: 'unitType', label: 'Type', type: 'stage' },
         { key: 'availability', label: 'Status', type: 'stage' },
-        { key: 'currentRentFils', label: 'Current rent', align: 'right', type: 'aed' },
+        { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
+        { key: 'annualRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
       ],
     },
   },
@@ -820,6 +821,7 @@ const STAGE_STYLE: Record<string, string> = {
   accepted:    'bg-[#dcfce7] text-[#166534]',
   signed:      'bg-[#dbeafe] text-[#1e40af]',
   active:      'bg-[#d8f2e8] text-[#1a7a5a]',
+  available:   'bg-[#dcfce7] text-[#166534]',
   rejected:    'bg-[#fee2e2] text-[#b91c1c]',
   renewed:     'bg-[#dcfce7] text-[#166534]',  // renewal completed — new term already running
   // contract-status lifecycle (leases-by-year register)
@@ -849,6 +851,12 @@ const STAGE_STYLE: Record<string, string> = {
   customer: 'bg-[#fef3c7] text-[#854d0e]',      // amber — waiting on the customer
   landlord: 'bg-[#d8f2e8] text-[#1a7a5a]',      // green — landlord counter-sign
 };
+
+function drillRowClass(item: Record<string, unknown>): string {
+  return item.availability === 'available'
+    ? 'border-t border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#dcfce7]'
+    : 'border-t border-[#f0ede8] hover:bg-[#fafaf8]';
+}
 
 function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
   if (value === null || value === undefined || value === '') {
@@ -2501,7 +2509,7 @@ export function ReportDetailView({
                   </thead>
                   <tbody>
                     {items.map((it, idx) => (
-                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                      <tr key={idx} className={drillRowClass(it)}>
                         {dd.columns.map(c => (
                           <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
                             <CellValue value={it[c.key]} type={c.type} />
