@@ -531,7 +531,6 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     { lbl: 'Current leases',          val: String(currentLeases.length),  ic: <FileText size={12} /> },
     { lbl: 'Active',                  val: String(activeLeases.length),   ic: <Shield size={12} /> },
     { lbl: `Expiring · ${EXPIRING_DAYS}d`, val: String(expiringLeases.length), ic: <Clock size={12} /> },
-    { lbl: 'Running rent / yr',       val: fmtAedAmt(runningRent), aed: true, accent: true, ic: <Coins size={12} />, info: <RentBreakdownTip breakdown={rentBreakdown} /> },
   ];
 
   return (

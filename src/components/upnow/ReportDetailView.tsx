@@ -76,6 +76,10 @@ interface ReportDef {
   /** When set, render an Active · Expired · All lease-status segmented control.
    *  The backend honours a `status=active|expired|all` query param (default all). */
   leaseStatusFilter?: boolean;
+  /** When set, render an All · Occupied · Vacant occupancy dropdown. The backend
+   *  honours an `occupancy=occupied|vacant|all` query param (default all).
+   *  Occupied narrows Annual Rent to passing/in-place rent; Vacant to hold-over. */
+  occupancyFilter?: boolean;
   /** Turn one column of a flat table into a deep link to the record the row
    *  represents — no drill-down needed. `idKey` is the row field holding the
    *  target id; the cell in `colKey` becomes the link. target 'unit' links are
@@ -191,10 +195,10 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   portfolio: {
     title: 'Portfolio',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) across every unit — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on every unit, including currently vacant units where a prior term exists. Pick a year above to narrow Annual Rent to leases whose term overlapped that year; Market Rent and the unit counts stay a live snapshot. "All years" shows today.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) across every unit — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on every unit, including currently vacant units where a prior term exists. Use the Occupancy filter to reshape the Annual Rent figure only (rows and unit counts stay whole): Occupied = passing/in-place rent on leased units, Vacant = hold-over value on empty units, All = the full contracted rent roll. Market Rent, Annual Rent and the unit counts are all a live snapshot of today.',
     endpoint: '/api/reports/occupancy',
-    controlKey: 'yearRange',
     buildingLeaseFilter: true,
+    occupancyFilter: true,
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'community', label: 'Community' },
@@ -601,7 +605,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'vacancy-analysis': {
     title: 'Vacant Units',
-    description: 'Vacant units to action — each available unit with the annual rent it last let for, its market benchmark and current asking rent (revenue at stake), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
+    description: 'Vacant units to action — each available unit with its Market Price (units.rental_price, the asking rent · revenue at stake) and the Annual Rent it last let for (latest lease, net of discount), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
     endpoint: '/api/reports/vacancy-analysis',
     buildingLeaseFilter: true,
     columns: [
@@ -610,8 +614,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'unitType', label: 'Type', type: 'stage' },
       { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
       { key: 'listingStatus', label: 'Listing', type: 'stage' },
-      { key: 'lastAnnualRentFils', label: 'Last annual rent', align: 'right', type: 'aed' },
-      { key: 'askingRentFils', label: 'Asking rent / yr', align: 'right', type: 'aed' },
+      { key: 'askingRentFils', label: 'Market Price', align: 'right', type: 'aed' },
+      { key: 'lastAnnualRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
     ],
     rowLink: { idKey: 'unitId', colKey: 'unitLabel', target: 'unit' },
     totals: [
@@ -619,8 +623,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'listed', label: 'Listed', type: 'number' },
       { key: 'unlisted', label: 'Unlisted', type: 'number' },
-      { key: 'vacantLastRentFils', label: 'Last rent total / yr', type: 'aed' },
-      { key: 'vacantAskingFils', label: 'Rent at stake / yr', type: 'aed' },
+      { key: 'vacantAskingFils', label: 'Market Price', type: 'aed' },
+      { key: 'vacantLastRentFils', label: 'Annual Rent', type: 'aed' },
     ],
   },
 
@@ -671,8 +675,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'unitLabel', label: 'Unit' },
       { key: 'tenantName', label: 'Customer' },
       { key: 'unitType', label: 'Type', type: 'stage' },
-      { key: 'currentRentFils', label: 'Current rent', align: 'right', type: 'aed' },
-      { key: 'marketRentFils', label: 'Asking', align: 'right', type: 'aed' },
+      { key: 'currentRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market Price', align: 'right', type: 'aed' },
       { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
       { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
       { key: 'position', label: 'Position', type: 'stage' },
@@ -963,6 +967,12 @@ export function ReportDetailView({
   const [leaseStatus, setLeaseStatus] = useState<'active' | 'expired' | 'all'>(
     () => (sp?.get('status') === 'active' ? 'active' : sp?.get('status') === 'expired' ? 'expired' : 'all'),
   );
+  // Occupancy segment (portfolio): All · Occupied · Vacant. Backend default is
+  // 'all', so only an explicit occupied/vacant needs sending. Occupied gives the
+  // passing/in-place rent; Vacant gives the hold-over value on empty units.
+  const [occupancy, setOccupancy] = useState<'all' | 'occupied' | 'vacant'>(
+    () => (sp?.get('occupancy') === 'occupied' ? 'occupied' : sp?.get('occupancy') === 'vacant' ? 'vacant' : 'all'),
+  );
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [drillFilter, setDrillFilter] = useState<string | null>(null);
   const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
@@ -1045,13 +1055,14 @@ export function ReportDetailView({
     // Unit type filter (Unit Mix).
     if (def.unitTypeFilter && unitTypeSel) url += (url.includes('?') ? '&' : '?') + 'unitType=' + encodeURIComponent(unitTypeSel);
     if (def.leaseStatusFilter && leaseStatus !== 'all') url += (url.includes('?') ? '&' : '?') + 'status=' + leaseStatus;
+    if (def.occupancyFilter && occupancy !== 'all') url += (url.includes('?') ? '&' : '?') + 'occupancy=' + occupancy;
     if (extraQuery) url += (url.includes('?') ? '&' : '?') + extraQuery;
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
 
   // Close the building filter menu on an outside click.
   useEffect(() => {
@@ -1683,6 +1694,16 @@ export function ReportDetailView({
                 <option value="all">All</option>
                 <option value="active">Active</option>
                 <option value="expired">Expired</option>
+              </select>
+            </div>
+          )}
+          {def.occupancyFilter && (
+            <div className={fGroup}>
+              <span className={fLabel}>Occupancy</span>
+              <select className={fSelect} aria-label="Occupancy" value={occupancy} onChange={e => setOccupancy(e.target.value as 'all' | 'occupied' | 'vacant')}>
+                <option value="all">All</option>
+                <option value="occupied">Occupied</option>
+                <option value="vacant">Vacant</option>
               </select>
             </div>
           )}
@@ -2404,7 +2425,7 @@ export function ReportDetailView({
                         const rlId = rl && c.key === rl.colKey ? row[rl.idKey] : null;
                         const rlHref = rlId == null ? null
                           : rl!.target === 'unit'
-                            ? (unitsBase ? `${unitsBase}/${rlId}` : null)
+                            ? (unitsBase ?? null)
                             : `${contractsBase}/${rlId}/v2`;
                         return (
                         <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
@@ -2413,7 +2434,7 @@ export function ReportDetailView({
                               href={rlHref}
                               onClick={e => e.stopPropagation()}
                               className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
-                              title={rl!.target === 'unit' ? 'Open unit' : 'Open contract'}>
+                              title={rl!.target === 'unit' ? 'Open in Units' : 'Open contract'}>
                               <CellValue value={row[c.key]} type={c.type} />
                               <ExternalLink size={12} className="print:hidden" />
                             </Link>

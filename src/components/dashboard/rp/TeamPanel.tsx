@@ -17,7 +17,7 @@ import { REPORT_TILES, GROUPS } from '@/components/upnow/reportCatalog';
  *  actually open (rpOnly reports 403 in the manager portal, so granting them
  *  is dead UI). Kept with their catalog group so the checklist can mirror the
  *  Reports page grouping. */
-const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available && !r.rpOnly)
+const AVAILABLE_REPORTS = REPORT_TILES.filter((r) => r.available && !r.rpOnly && !r.hidden)
   .map((r) => ({ slug: r.slug, title: r.title, group: r.group }));
 
 /** The checklist grouped the same way — and in the same order — as the Reports
