@@ -87,11 +87,33 @@ export function OperationsByStageReport({
   subtitleTeam,
   subtitleScoped,
   csvBase,
+  hideBack = false,
+  overallOnly = false,
+  hideHeading = false,
+  flush = false,
+  hideControls = false,
 }: {
   endpointBase?: string;
   extraQuery?: string;
   backHref?: string;
   onBack?: () => void;
+  /** Embedded mode (e.g. atop the Operations page): drop the "All Reports"
+   *  back link, since the report isn't a standalone route here. */
+  hideBack?: boolean;
+  /** Collapse the whole-account view to a SINGLE consolidated sheet — all
+   *  activity on the account (managers' work on the landlord's behalf
+   *  included), with no per-manager breakdown and no per-sheet label. Used by
+   *  the RP operations embed. Ignored when the payload is already server-scoped. */
+  overallOnly?: boolean;
+  /** Drop the title + subtitle (e.g. when embedded under another section that
+   *  already introduces it). The year/CSV/Print controls stay. */
+  hideHeading?: boolean;
+  /** Remove the outer padding so the report aligns flush with the host
+   *  section's own content edges (e.g. lines up with the pipeline tabs). */
+  flush?: boolean;
+  /** Hide the year selector + CSV + Print/PDF controls (e.g. when the host
+   *  section already provides a year filter). */
+  hideControls?: boolean;
   /** Base for the "Open" links in the cell drill-down. */
   contractsBase?: string;
   leadsBase?: string;
@@ -144,11 +166,17 @@ export function OperationsByStageReport({
     }
     const list: ManagerSheet[] = [];
     if (data.monthlyTotals.some(v => v > 0)) {
-      list.push({ userId: -1, name: 'Overall — whole account', monthly: data.monthly, monthlyTotals: data.monthlyTotals });
+      list.push({
+        userId: -1,
+        name: overallOnly ? 'Your account — all activity' : 'Overall — whole account',
+        monthly: data.monthly,
+        monthlyTotals: data.monthlyTotals,
+      });
     }
-    list.push(...data.perManager.filter(p => !p.isLandlord && p.monthlyTotals.some(v => v > 0)));
+    // overallOnly: just the one consolidated sheet, no per-manager breakdown.
+    if (!overallOnly) list.push(...data.perManager.filter(p => !p.isLandlord && p.monthlyTotals.some(v => v > 0)));
     return list;
-  }, [data]);
+  }, [data, overallOnly]);
 
   /* Drill-down: the records behind one clicked cell. Filter the dated stage
      actions to the clicked stage, month (Dubai calendar) and — for a person's
@@ -208,11 +236,12 @@ export function OperationsByStageReport({
   };
 
   return (
-    <div className="p-6 print:p-0 w-full">
-      {/* ── header ── */}
+    <div className={`w-full ${flush ? '' : 'p-6 print:p-0'}`}>
+      {/* ── header ── (skipped entirely when nothing in it is shown) */}
+      {!(hideBack && hideHeading && hideControls) && (
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          {onBack ? (
+          {hideBack ? null : onBack ? (
             <button onClick={onBack} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-sm print:hidden">
               <ArrowLeft size={14} /> All Reports
             </button>
@@ -221,13 +250,18 @@ export function OperationsByStageReport({
               <ArrowLeft size={14} /> All Reports
             </Link>
           )}
-          <h1 className="text-2xl font-bold text-[#1a1916] mt-1.5">{title}</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5 max-w-[80ch]">
-            {data?.scoped
-              ? (subtitleScoped ?? 'The records you progressed at each stage, month by month — your own activity and operation pipeline. Signatures marked “on file” are never counted.')
-              : (subtitleTeam ?? 'Records progressed at each stage, month by month — an overall sheet for your whole account, then one per manager. Signatures marked “on file” are never counted.')}
-          </p>
+          {!hideHeading && (
+            <>
+              <h1 className="text-2xl font-bold text-[#1a1916] mt-1.5">{title}</h1>
+              <p className="text-sm text-[#6b6860] mt-0.5 max-w-[80ch]">
+                {data?.scoped
+                  ? (subtitleScoped ?? 'The records you progressed at each stage, month by month — your own activity and operation pipeline. Signatures marked “on file” are never counted.')
+                  : (subtitleTeam ?? 'Records progressed at each stage, month by month — an overall sheet for your whole account, then one per manager. Signatures marked “on file” are never counted.')}
+              </p>
+            </>
+          )}
         </div>
+        {!hideControls && (
         <div className="flex items-center gap-2 print:hidden">
           {/* year selector */}
           <select
@@ -244,7 +278,9 @@ export function OperationsByStageReport({
             <Printer size={14} /> Print / PDF
           </button>
         </div>
+        )}
       </div>
+      )}
 
       {loading ? (
         <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>
@@ -258,8 +294,9 @@ export function OperationsByStageReport({
         <div className="mt-5 space-y-6">
           {sheets.map(sheet => (
             <section key={sheet.userId} className="print:break-inside-avoid">
-              {/* One sheet per manager. */}
-              <h2 className="text-sm font-bold text-[#1a1916] mb-2">{sheet.name}</h2>
+              {/* One sheet per manager. Label hidden in overallOnly (single
+                  consolidated sheet — the section above already introduces it). */}
+              {!overallOnly && <h2 className="text-sm font-bold text-[#1a1916] mb-2">{sheet.name}</h2>}
               {/* table-fixed keeps every stage column on one page — no scroll —
                   and the long headers wrap; styling matches the other report sheets. */}
               <div className="rounded-xl border border-[#e8e6e0] bg-white">

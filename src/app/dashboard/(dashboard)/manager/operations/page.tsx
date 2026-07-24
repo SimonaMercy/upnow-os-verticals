@@ -11,6 +11,7 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import OperationsPipelines from '@/components/upnow/OperationsPipelines';
+import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 export default function ManagerOperationsPage() {
@@ -32,6 +33,21 @@ export default function ManagerOperationsPage() {
   const rp = effectiveRp;
   return (
     <Suspense fallback={null}>
+      {/* Your own Leasing Funnel, scoped server-side to you, on top of the live
+          pipeline you work — so your stage-by-stage funnel updates as you
+          progress records below. */}
+      <OperationsByStageReport
+        key={`funnel-${rp}`}
+        endpointBase="/api/manager/reports"
+        reportPath="leasing-funnel"
+        title="Leasing Funnel by Manager"
+        csvBase="leasing-funnel"
+        subtitleScoped="The contracts you ran reaching each stage of the leasing journey — lead to settlement — month by month. Click any number for the records behind it. Signatures marked “on file” are never counted."
+        extraQuery={`rp=${rp}`}
+        contractsBase="/dashboard/manager/contracts"
+        leadsBase="/dashboard/manager/leads"
+        hideBack
+      />
       <OperationsPipelines
         key={rp}
         contractsPath={`/manager/contracts/operations?rp=${rp}`}

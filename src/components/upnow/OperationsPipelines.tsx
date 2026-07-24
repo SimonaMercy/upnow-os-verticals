@@ -20,13 +20,13 @@
  */
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
   Search, X, RefreshCw, Calendar, ClipboardList, CheckCircle2, ArrowRight,
   UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
-  BarChart3,
+  BarChart3, Info,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -65,6 +65,10 @@ interface Props {
   rpFilter?: number;
   /** Link to the manager-performance report (landlord-only) — omitted → no button. */
   performanceHref?: string;
+  /** Extra content rendered inside the page shell, right after the "Pipeline
+   *  tracker" heading and above the pipeline cards (e.g. the embedded Leasing
+   *  Funnel activity table on the operations page). */
+  afterHeading?: ReactNode;
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
@@ -91,10 +95,9 @@ const LEAD_STAGES: { key: string; title: string; match: string[] }[] = [
 ];
 const LEAD_MATCH = new Set(LEAD_STAGES.flatMap(s => s.match));
 
-// New Lease — KYC first (mirrors the lead flow), then the setup gates.
+// New Lease — the setup gates. (KYC + Payment plan are handled in the Lead flow,
+// so they're not tracked again as New Lease lanes.)
 const NEW_STAGES: StageDef[] = [
-  { key: 'kyc',          title: 'KYC',               keys: ['kyc'] },
-  { key: 'payment_plan', title: 'Payment plan',      keys: ['payment_plan'] },
   { key: 'pdc',          title: 'Cheques / PDC',     keys: ['pdc'] },
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
   { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
@@ -182,11 +185,16 @@ function contractStageKey(c: OpsContract, stages: StageDef[]): string {
   return stages[stages.length - 1].key;
 }
 
-// The handler(s) for a lane. For a multi-party lane (Signatures) we surface the
-// parties we're still WAITING ON: once a party signs, their name drops off; while
-// both are unsigned, both names show. Single-item lanes yield one person. Falls
-// back to the signed parties once the lane is complete (so the tooltip history
-// still shows who signed).
+// Stages co-signed by BOTH the manager and the customer — the manager conducts /
+// signs the inspection or settlement, and the customer counter-signs. Both names
+// show on these lanes (unlike the contract Signatures lane, where the manager is
+// never a signer).
+const CO_SIGNED_KEYS = new Set(['move_in', 'move_out', 'settlement']);
+
+// The handler(s) for a lane. For the Signatures lane we surface the parties we're
+// still WAITING ON: once a party signs, their name drops off; while both are
+// unsigned, both names show. For move-in/out + settlement we show BOTH the manager
+// and the customer (both sign). Single-item lanes otherwise yield one person.
 function laneHandlers(c: OpsContract, keys: string[]): StageHandler[] {
   const items = keys
     .map(k => c.checklist.find(i => i.key === k))
@@ -199,6 +207,12 @@ function laneHandlers(c: OpsContract, keys: string[]): StageHandler[] {
   for (const i of pick) {
     const h = i.handler!;
     if (!seen.has(h.name)) { seen.add(h.name); out.push(h); }
+  }
+  // Move-in/out + settlement are co-signed by the customer — add them alongside
+  // the manager who conducted the stage.
+  if (keys.some(k => CO_SIGNED_KEYS.has(k))) {
+    const cust = tenantDisplayName(c.tenant);
+    if (cust && !seen.has(cust)) { seen.add(cust); out.push({ name: cust, inferred: false }); }
   }
   return out;
 }
@@ -265,7 +279,7 @@ function leadToCard(l: OpsLead, href: string | null, nowMs: number): CardVM | nu
   };
 }
 
-export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, rpFilter, performanceHref }: Props) {
+export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, rpFilter, performanceHref, afterHeading }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -492,8 +506,13 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
         <div className="hero">
           <div className="left">
             <div className="eyebrow"><ClipboardList size={12} /> Operations</div>
-            <h1>Pipeline <span className="accent">tracker</span></h1>
-            <p>Every deal in progress, by pipeline. Pick a tab, see where each record sits, and <b>open</b> it to do the work on its detail page.</p>
+            <h1>
+              Pipeline <span className="accent">tracker</span>
+              <span className="info" tabIndex={0} role="note" aria-label="Every deal in progress, by pipeline. Pick a tab, see where each record sits, and open it to do the work on its detail page.">
+                <Info size={15} />
+                <span className="tip">Every deal in progress, by pipeline. Pick a tab, see where each record sits, and <b>open</b> it to do the work on its detail page.</span>
+              </span>
+            </h1>
           </div>
           <div className="hero-actions">
             <div className="year-global" title="Scope by year">
@@ -513,6 +532,8 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
             </button>
           </div>
         </div>
+
+        {afterHeading}
 
         {/* Pipeline selector cards — one per pipeline; click to switch. */}
         <div className="pcards">
@@ -620,6 +641,12 @@ export function OpsPipelineStyle() {
       .opsp-page .eyebrow{ font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--green-d); font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:7px; }
       .opsp-page .hero h1{ margin:0; font-size:23px; font-weight:700; letter-spacing:-.022em; line-height:1.1; }
       .opsp-page .hero h1 .accent{ color:var(--green-d); }
+      .opsp-page .hero h1 .info{ position:relative; display:inline-flex; align-items:center; margin-left:7px; vertical-align:middle; color:var(--mute); cursor:help; outline:none; }
+      .opsp-page .hero h1 .info:hover, .opsp-page .hero h1 .info:focus-visible{ color:var(--green-d); }
+      .opsp-page .hero h1 .info .tip{ position:absolute; top:calc(100% + 8px); left:0; width:300px; background:var(--ink); color:#fff; padding:9px 11px; border-radius:9px; font-size:12px; font-weight:450; line-height:1.45; letter-spacing:normal; opacity:0; visibility:hidden; transform:translateY(-3px); transition:opacity .15s, transform .15s; z-index:30; box-shadow:0 6px 20px rgba(0,0,0,.16); pointer-events:none; }
+      .opsp-page .hero h1 .info .tip b{ color:#fff; font-weight:700; }
+      .opsp-page .hero h1 .info .tip::before{ content:''; position:absolute; bottom:100%; left:12px; border:6px solid transparent; border-bottom-color:var(--ink); }
+      .opsp-page .hero h1 .info:hover .tip, .opsp-page .hero h1 .info:focus-visible .tip{ opacity:1; visibility:visible; transform:translateY(0); }
       .opsp-page .hero p{ margin:7px 0 0; font-size:12.5px; color:var(--ink-3); max-width:64ch; }
       .opsp-page .hero p b{ color:var(--ink-2); font-weight:700; }
       .opsp-page .hero-actions{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
