@@ -339,7 +339,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'rent-collection': {
     title: 'Cash Management',
-    description: 'The collection matrix — every unit down the side, the twelve months of the year across the top, with each unit\'s annual rent. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total, and year-to-date expected vs received. Pick the year above.',
+    description: 'The collection matrix — every unit down the side (each unit once, its current lease), the twelve months of the year across the top, with each unit\'s annual rent. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total, and year-to-date expected vs received. Deduped to the latest lease per unit, so the Annual Rent total reconciles with the Portfolio page. Pick the year above.',
     endpoint: '/api/reports/rent-collection',
     buildingLeaseFilter: true,
     dataNote: NEEDS_CHEQUE_DATA,
@@ -523,7 +523,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   'executive-cashflow': {
     title: 'Executive Cashflow',
     tagline: 'Your rent cashflow, month by month — expected vs received, what’s pending or bounced, and Net Income.',
-    description: 'For each month of the selected year: the rent Expected (every cheque due, cancelled ones excluded), how much was Received (cleared), what is still Pending, what Bounced, the Penalty income collected, and Net Income (received rent + penalties). Anchored on the cheque date; the totals up top are the year-to-date figures. Pick the year above.',
+    description: 'For each month of the selected year: the rent Expected (every cheque due, cancelled ones excluded), how much was Received (cleared), what is still Pending, what Bounced, the Penalty income collected, and Net Income (received rent + penalties). Anchored on the cheque date. Expected / Received up top are full-year (all 12 months, incl. post-dated cheques); YTD Expected / YTD Received are collection to date and reconcile with Cash Management. Latest lease per unit. Pick the year above.',
     endpoint: '/api/reports/executive-cashflow',
     dataNote: NEEDS_CHEQUE_DATA + ' Penalty income is penalty / late-fee cheques cleared in the month (bounced-cheque, replacement, deferral and the late/early lifecycle penalties) — admin, Contract Registration and commission fees are in the Fee & VAT report. Net Income = received rent + penalties.',
     controlKey: 'year',
@@ -541,8 +541,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'bouncedCount', label: 'Bounced #', align: 'right', type: 'number' },
     ],
     totals: [
-      { key: 'expectedFils', label: 'Expected', type: 'aed', keep: true },
-      { key: 'receivedFils', label: 'Received', type: 'aed', keep: true },
+      { key: 'expectedFils', label: 'Expected (full year)', type: 'aed', keep: true },
+      { key: 'receivedFils', label: 'Received (full year)', type: 'aed', keep: true },
+      { key: 'ytdExpectedFils', label: 'YTD expected', type: 'aed', keep: true },
+      { key: 'ytdReceivedFils', label: 'YTD received', type: 'aed', keep: true },
       { key: 'pendingFils', label: 'Pending', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'penaltyFils', label: 'Penalty', type: 'aed' },
@@ -766,7 +768,7 @@ const FEE_DETAIL_COLUMNS: Column[] = [
 // only" vs "all" scope toggle (backend ?scope=all includes ended tenants).
 // Inventory / occupancy reports aren't listed — they have no ended-tenant noise.
 const TENANT_SCOPED = new Set<ReportSlug>([
-  'security-deposits', 'executive-cashflow', 'rent-collection',
+  'security-deposits', 'executive-cashflow',
   'leasing-activity', 'fee-taxation',
 ]);
 
