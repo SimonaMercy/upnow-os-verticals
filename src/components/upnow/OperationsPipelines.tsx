@@ -31,7 +31,7 @@ import {
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
-import type { OpsContract } from '@/components/upnow/OperationsBoard';
+import type { OpsContract, StageHandler } from '@/components/upnow/OperationsBoard';
 
 /* ── Lead shape (subset of GET /leads) ─────────────────────────────────────── */
 interface OpsLead {
@@ -48,6 +48,8 @@ interface OpsLead {
     property?: { id?: number | null; buildingName?: string | null; rentalProviderId?: number | null } | null;
   } | null;
   paymentPlan?: { rentFils?: number | null } | null;
+  /** Manager handling the lead (assigned, else responsible manager, else RP). */
+  handler?: StageHandler | null;
 }
 
 interface Props {
@@ -133,6 +135,11 @@ interface CardVM {
   stageKey: string;
   building: string | null;
   ageDays: number | null;
+  /** Handler(s) for the card's CURRENT stage. Usually one person; the Signatures
+   *  stage lists every party still awaiting signature (customer and/or landlord). */
+  handler: StageHandler[];
+  /** Per-stage handler breakdown (stages present on this contract) for the tooltip. */
+  handlerBreakdown: { stage: string; name: string; inferred: boolean; done: boolean }[];
 }
 
 // Days since last activity (updatedAt, falling back to createdAt) — powers the
@@ -175,7 +182,44 @@ function contractStageKey(c: OpsContract, stages: StageDef[]): string {
   return stages[stages.length - 1].key;
 }
 
+// The handler(s) for a lane. For a multi-party lane (Signatures) we surface the
+// parties we're still WAITING ON: once a party signs, their name drops off; while
+// both are unsigned, both names show. Single-item lanes yield one person. Falls
+// back to the signed parties once the lane is complete (so the tooltip history
+// still shows who signed).
+function laneHandlers(c: OpsContract, keys: string[]): StageHandler[] {
+  const items = keys
+    .map(k => c.checklist.find(i => i.key === k))
+    .filter((i): i is NonNullable<typeof i> => !!i && !!i.handler);
+  if (!items.length) return [];
+  const pending = items.filter(i => !i.done);
+  const pick = pending.length ? pending : items;
+  const seen = new Set<string>();
+  const out: StageHandler[] = [];
+  for (const i of pick) {
+    const h = i.handler!;
+    if (!seen.has(h.name)) { seen.add(h.name); out.push(h); }
+  }
+  return out;
+}
+
 function contractToCard(c: OpsContract, stages: StageDef[], href: string, nowMs: number): CardVM {
+  const stageKey = contractStageKey(c, stages);
+  const curKeys = stages.find(s => s.key === stageKey)?.keys ?? [];
+  // Current-stage handler(s): the pending signers on the Signatures stage, else the
+  // stage's exact actor / responsible manager; final fallback to the card handler.
+  let handler = laneHandlers(c, curKeys);
+  if (!handler.length && c.handler) handler = [c.handler];
+  // Per-stage breakdown (only lanes that exist on this contract) for the tooltip.
+  const handlerBreakdown = stages
+    .filter(s => s.keys.length)
+    .map(s => {
+      const hs = laneHandlers(c, s.keys);
+      if (!hs.length) return null;
+      const done = s.keys.every(k => { const it = c.checklist.find(i => i.key === k); return !it || it.done; });
+      return { stage: s.title, name: hs.map(h => h.name).join(', '), inferred: hs.some(h => h.inferred), done };
+    })
+    .filter((x): x is { stage: string; name: string; inferred: boolean; done: boolean } => x != null);
   return {
     key: `c-${c.id}`,
     name: tenantDisplayName(c.tenant) ?? '—',
@@ -186,9 +230,11 @@ function contractToCard(c: OpsContract, stages: StageDef[], href: string, nowMs:
     done: c.doneCount,
     total: c.totalCount,
     href,
-    stageKey: contractStageKey(c, stages),
+    stageKey,
     building: c.property.buildingName ?? null,
     ageDays: daysSince(c.updatedAt ?? c.createdAt, nowMs),
+    handler,
+    handlerBreakdown,
   };
 }
 
@@ -214,6 +260,8 @@ function leadToCard(l: OpsLead, href: string | null, nowMs: number): CardVM | nu
     stageKey,
     building: l.unit?.property?.buildingName ?? null,
     ageDays: daysSince(l.updatedAt ?? l.createdAt, nowMs),
+    handler: l.handler ? [l.handler] : [],
+    handlerBreakdown: [],
   };
 }
 
@@ -366,13 +414,27 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     c.rentAed != null ? `AED ${fmtAed(c.rentAed)}/yr` : null,
     c.term,
     `Stage: ${stageTitleOf(c.stageKey)}`,
-  ].filter(Boolean).join('\n');
+    ...(c.handlerBreakdown.length
+      ? ['', 'Handlers:', ...c.handlerBreakdown.map(h =>
+          `  ${h.done ? '✓' : '•'} ${h.stage}: ${h.name}${h.inferred ? ' (responsible)' : ''}`)]
+      : []),
+  ].filter(x => x != null).join('\n');
 
   // Shared vertical card (kanban lanes + grid). showStage adds a stage badge
   // (kanban implies stage by lane, so it hides it).
   const vcard = (c: CardVM, showStage: boolean) => (
     <article key={c.key} className={'card' + (c.key === focusKey ? ' focused' : '')}
       ref={c.key === focusKey ? (focusElRef as React.RefObject<HTMLElement>) : undefined} title={cardTitle(c)}>
+      {c.handler.length > 0 && (
+        <div className="c-handler-top" title={`${stageTitleOf(c.stageKey)}: ${c.handler.map(h => h.name).join(', ')}`}>
+          {c.handler.map((h, i) => (
+            <span className="hperson" key={i}>
+              <span className="hav">{initials(h.name)}</span>
+              <span className="hname">{h.name}</span>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="c-top">
         <span className="av">{initials(c.name)}</span>
         <div className="c-id">
@@ -405,6 +467,11 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
         <div className="c-ref">{c.ref ?? 'Lead'}</div>
       </div>
       <div className="r-sub">{c.sub}</div>
+      {c.handler.length > 0
+        ? <span className="r-handler" title={`${stageTitleOf(c.stageKey)}: ${c.handler.map(h => h.name).join(', ')}`}>
+            <span className="hav">{initials(c.handler[0].name)}</span>{c.handler.map(h => h.name).join(', ')}
+          </span>
+        : <span className="r-handler empty">—</span>}
       <span className="c-stage">{stageTitleOf(c.stageKey)}</span>
       {c.ageDays != null && (
         <span className={'age ' + ageTone(c.ageDays)} title={`${c.ageDays} day${c.ageDays === 1 ? '' : 's'} since last activity`}>{c.ageDays}d</span>
@@ -623,6 +690,17 @@ export function OpsPipelineStyle() {
       .opsp-page .c-name{ font-size:11px; font-weight:700; color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .opsp-page .c-ref{ font-family:'DM Mono',ui-monospace,monospace; font-size:9.5px; color:var(--mute); }
       .opsp-page .c-unit{ font-size:10px; color:var(--mute); margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      /* current-stage handler — highlighted banner pinned to the top of the card.
+         Right margin clears the absolute age badge so the name never sits under it. */
+      .opsp-page .c-handler-top{ display:flex; flex-direction:column; align-items:stretch; gap:4px; margin:0 30px 9px 0; padding:5px 9px; border-radius:8px;
+        background:var(--green-t); border:1px solid #cfe7dc; min-width:0; }
+      .opsp-page .c-handler-top .hperson{ display:flex; align-items:center; gap:6px; min-width:0; }
+      .opsp-page .c-handler-top .hav{ width:17px; height:17px; flex:0 0 17px; border-radius:5px; background:var(--green-d); color:#fff; display:grid; place-items:center; font-size:8px; font-weight:700; }
+      .opsp-page .c-handler-top .hname{ font-size:11.5px; font-weight:800; color:var(--green-d); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      /* handler cell (list row) — highlighted value */
+      .opsp-page .rrow .r-handler{ width:170px; flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:800; color:var(--green-d); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .opsp-page .rrow .r-handler .hav{ width:19px; height:19px; flex:0 0 19px; border-radius:5px; background:var(--green-d); color:#fff; display:grid; place-items:center; font-size:8.5px; font-weight:700; }
+      .opsp-page .rrow .r-handler.empty{ color:var(--mute); font-weight:500; }
       .opsp-page .c-foot{ display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:8px; flex-wrap:wrap; }
       .opsp-page .c-foot .rent{ font-size:11px; font-weight:700; color:var(--green-d); font-variant-numeric:tabular-nums; }
       .opsp-page .c-foot .term{ font-size:9.5px; color:var(--mute); font-variant-numeric:tabular-nums; }
@@ -665,6 +743,7 @@ export function OpsPipelineStyle() {
         .opsp-page .rrow{ flex-wrap:wrap; gap:8px 12px; }
         .opsp-page .rrow .r-id{ width:auto; flex:1 1 auto; }
         .opsp-page .rrow .r-sub{ flex:1 1 100%; order:5; }
+        .opsp-page .rrow .r-handler{ width:auto; order:6; }
         .opsp-page .rrow .r-rent{ width:auto; margin-left:auto; }
         .opsp-page .rrow .open{ order:7; margin-left:auto; }
       }

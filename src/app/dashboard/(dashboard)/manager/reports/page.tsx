@@ -26,6 +26,7 @@ import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
+import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
 import { MissingDataView, MISSING_REPORTS } from '@/components/upnow/MissingDataView';
 
@@ -139,6 +140,18 @@ export default function ManagerReportsPage() {
         onBack={() => navigate(null)}
         contractsBase="/dashboard/manager/contracts"
         leadsBase="/dashboard/manager/leads"
+      />
+    );
+  }
+  // Lease Revenue by Year renders its own two-section component (not a standard
+  // table), scoped to this managed landlord's book via rp=N.
+  if (openSlug === 'lease-revenue-by-year') {
+    return (
+      <LeaseRevenueByYearReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        contractsBase="/dashboard/manager/contracts"
       />
     );
   }

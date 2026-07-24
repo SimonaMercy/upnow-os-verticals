@@ -68,7 +68,8 @@ interface Property {
   unitCount?: number;
   listedCount?: number;
   occupiedCount?: number;
-  rentTotal?: number;
+  rentTotal?: number;        // Σ units.rental_price — Market Price (asking, all units)
+  annualRentTotal?: number;  // Σ latest lease annual_rent — contracted Annual Rent (leased units)
   coverPhotoUrl?: string | null;
 }
 
@@ -125,9 +126,10 @@ interface CardVM {
   hasVacancy: boolean;
   vacancyLabel: string;
   occText: string;
-  rentText: string;
+  rentText: string;      // Market Price (asking) headline
   rentUnit: string;
   rentColor: string;
+  annualText: string | null;  // contracted Annual Rent — null when nothing is leased
 }
 
 function toCardVM(p: Property): CardVM {
@@ -138,6 +140,7 @@ function toCardVM(p: Property): CardVM {
   const typeLabel = categoryLabel(p.spaceCategory);
   const ts = typeStyle(typeLabel);
   const rent = p.rentTotal ?? 0;
+  const annual = p.annualRentTotal ?? 0;
   const hasPin = p.latitude != null && p.longitude != null;
   return {
     name: p.buildingName,
@@ -153,6 +156,7 @@ function toCardVM(p: Property): CardVM {
     rentText: rent ? fmtAed(rent) : 'No rent set',
     rentUnit: rent ? ' /yr' : '',
     rentColor: rent ? '#1a6b4d' : '#aab2ab',
+    annualText: annual ? fmtAed(annual) : null,
   };
 }
 
@@ -226,11 +230,15 @@ function PropertyCard({
         </div>
       </div>
 
-      {/* Tail — rent + occupancy + actions (wraps below on mobile) */}
+      {/* Tail — market price / annual rent + occupancy + actions (wraps on mobile) */}
       <div className={s.dxRowTail}>
         <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
           <div style={{ fontSize: 16, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
             {vm.rentText}<span style={{ fontSize: 11.5, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
+          </div>
+          <div style={{ fontSize: 11.5, color: '#8a938c', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+            {vm.annualText ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>{vm.annualText}</span></> : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
           </div>
           <div style={{ fontSize: 11.5, color: '#9aa39c', marginTop: 2 }}>{vm.occText}</div>
         </div>
@@ -279,10 +287,14 @@ function PropertyGridCard({
         {/* Footer: rent + occupancy + actions */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 13, paddingTop: 12, borderTop: '1px solid #f1f3f0' }}>
           <div>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums' }}>
               {vm.rentText}<span style={{ fontSize: 11, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
             </div>
-            <div style={{ fontSize: 11, color: '#9aa39c' }}>{vm.occText}</div>
+            <div style={{ fontSize: 11, color: '#8a938c', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+              {vm.annualText ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>{vm.annualText}</span></> : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
+            </div>
+            <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 1 }}>{vm.occText}</div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
             <button type="button" title="Edit property" aria-label="Edit property"
@@ -491,13 +503,17 @@ export default function PortfolioPage() {
   const totalVacant     = Math.max(0, totalUnits - totalOccupied);
   const occRate         = totalUnits ? Math.round((totalOccupied / totalUnits) * 100) : 0;
   const totalRent       = properties.reduce((sum, p) => sum + (p.rentTotal ?? 0), 0);
+  const totalAnnualRent = properties.reduce((sum, p) => sum + (p.annualRentTotal ?? 0), 0);
 
-  // Four-up KPI strip (Properties · Total units · Occupancy · Annual rent).
+  // Four-up KPI strip (Properties · Total units · Occupancy · Market price / Annual rent).
+  // The money tile pairs Market Price (Σ asking rent, all units) with the contracted
+  // Annual Rent (Σ latest lease, leased units) so the portfolio's asking-vs-earning
+  // gap is visible at a glance.
   const kpis: Array<{ label: string; value: string; sub: string; icon: ReactNode; iconBg: string; iconColor: string; color: string }> = [
     { label: 'PROPERTIES', value: String(totalProperties), sub: 'Buildings under management', icon: <Building2 size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'TOTAL UNITS', value: String(totalUnits), sub: 'Across all properties', icon: <DoorClosed size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'OCCUPANCY', value: `${occRate}%`, sub: `${totalOccupied} occupied · ${totalVacant} vacant`, icon: <Gauge size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'MARKET PRICE', value: fmtRentKpi(totalRent), sub: 'Gross across portfolio', icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
+    { label: 'MARKET PRICE / ANNUAL RENT', value: fmtRentKpi(totalRent), sub: `Annual rent ${totalAnnualRent ? fmtRentKpi(totalAnnualRent) : '—'} · asking vs contracted`, icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
   ];
 
   const filtersDirty = !!search || categoryFilter !== 'all' || ownershipFilter !== 'all' || sort !== 'default';

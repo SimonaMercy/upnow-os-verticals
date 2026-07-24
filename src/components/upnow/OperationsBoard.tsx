@@ -33,7 +33,10 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
 import OperationsViewToggle from '@/components/upnow/OperationsViewToggle';
 
-interface ChecklistItem { key: string; label: string; done: boolean; action: string | null }
+/** Who is handling a stage. inferred=true → not an exact recorded actor but the
+ *  contract's responsible manager (stage carries only a timestamp, no actor). */
+export interface StageHandler { name: string; inferred: boolean }
+interface ChecklistItem { key: string; label: string; done: boolean; action: string | null; handler?: StageHandler | null }
 export interface OpsContract {
   id: number;
   ref: string;
@@ -57,6 +60,9 @@ export interface OpsContract {
   checklist: ChecklistItem[];
   doneCount: number;
   totalCount: number;
+  /** Person responsible for the contract right now (fallback for the card's
+   *  current-stage handler when that stage has no exact recorded actor). */
+  handler?: StageHandler | null;
 }
 
 interface Props {

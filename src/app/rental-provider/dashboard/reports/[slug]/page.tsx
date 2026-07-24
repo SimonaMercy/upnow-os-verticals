@@ -9,6 +9,7 @@ import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { PaymentGroupingReport } from '@/components/upnow/PaymentGroupingReport';
 import { ManagerOperationsReport } from '@/components/upnow/ManagerOperationsReport';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
+import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 
 export default function ReportDetailPage() {
@@ -24,6 +25,9 @@ export default function ReportDetailPage() {
   }
   if (params.slug === 'operations-by-stage') {
     return <OperationsByStageReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
+  }
+  if (params.slug === 'lease-revenue-by-year') {
+    return <LeaseRevenueByYearReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
   }
   // Leasing Funnel reuses the same per-manager month-sheet + drill-down, with a
   // different report slug + labels.

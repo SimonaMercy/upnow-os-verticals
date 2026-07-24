@@ -195,7 +195,7 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   portfolio: {
     title: 'Portfolio',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) across every unit — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on every unit, including currently vacant units where a prior term exists. Use the Occupancy filter to reshape the Annual Rent figure only (rows and unit counts stay whole): Occupied = passing/in-place rent on leased units, Vacant = hold-over value on empty units, All = the full contracted rent roll. Market Rent, Annual Rent and the unit counts are all a live snapshot of today.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) across every unit — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on every unit, including currently vacant units where a prior term exists. Use the Occupancy filter to reshape both the Market Rent and Annual Rent figures the same way (rows and unit counts stay whole): Occupied = leased units only, Vacant = empty units only, All = every unit. The unit counts are always a live snapshot of today.',
     endpoint: '/api/reports/occupancy',
     buildingLeaseFilter: true,
     occupancyFilter: true,
@@ -277,24 +277,19 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'leases-by-year': {
     title: 'Leases - Monthly',
-    description: 'The year’s leases grouped by the month each one COMMENCED — every lease that started during the selected year (leases carried over from an earlier year are not included). Each row is a month; expand it to see the leases that began that month. All twelve months are listed, so a month with no new leases reads 0. The tiles show how many leases commenced and the annual rent they represent, how many of them have already ended, and how many are still active now. Pick the year above.',
+    description: 'Each unit’s CURRENT (latest) lease, grouped by the month it COMMENCED within the selected year. A renewed unit is counted once — under its current lease’s start month — so the totals reconcile with the Lease Revenue report and the Portfolio page’s Annual Rent (they never double-count a unit that has renewed). Each row is a month; expand it to see the leases that began that month. Only months with a commencement are shown. The tiles show how many units’ current leases commenced and the annual rent they represent. Pick the year above.',
     endpoint: '/api/reports/leases-by-year',
     buildingLeaseFilter: true,
-    leaseStatusFilter: true,
     layout: 'grouped',
     controlKey: 'year',
     columns: [
       { key: 'monthLabel', label: 'Commenced' },
       { key: 'leases', label: 'Leases', align: 'right', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-      { key: 'ended', label: 'Ended in year', align: 'right', type: 'number' },
-      { key: 'active', label: 'Active now', align: 'right', type: 'number' },
     ],
     totals: [
-      { key: 'leases', label: 'Leases commenced', type: 'number', keep: true },
+      { key: 'leases', label: 'Leases', type: 'number', keep: true },
       { key: 'annualRentFils', label: 'Annual rent', type: 'aed', keep: true },
-      { key: 'endedThisYear', label: 'Ended', type: 'number', keep: true },
-      { key: 'active', label: 'Currently active', type: 'number' },
     ],
     drilldown: {
       childKey: 'items',
@@ -471,7 +466,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'new-leases-matrix': {
     title: 'Lease Summary - Yearly',
-    description: 'A property × month grid of leases that COMMENCED (started) each month of the selected year — the matrix companion to Contract Registration Activity. Each cell counts the new leases that began that month for the property; the trailing columns give the property’s total new leases and the annual rent they represent. Anchored on the lease start date (real leases only — pending drafts excluded). Pick the year above.',
+    description: 'A property × month grid of each unit’s CURRENT (latest) lease, placed in the month it COMMENCED within the selected year. A renewed unit is counted once — under its current lease’s start month — so the totals reconcile with the Lease Revenue report and the Portfolio page’s Annual Rent (no double-counting a unit that has renewed). Each cell counts the units whose current lease began that month for the property; the trailing columns give the property’s total and the annual rent it represents. Pick the year above.',
     endpoint: '/api/reports/new-leases-matrix',
     buildingLeaseFilter: true,
     layout: 'countMatrix',
@@ -669,7 +664,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     description: 'Each occupied unit\'s current contracted rent against the unit\'s asking price — the gap is the rent you can recover when the lease renews. Sorted by biggest uplift first. "At market" is within ±5% of the asking price.',
     endpoint: '/api/reports/rent-vs-market',
     buildingLeaseFilter: true,
-    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total.',
+    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The Market Price total below sums the asking price across ALL units (occupied and vacant), matching the Portfolio page — the table rows above list occupied units only.',
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'unitLabel', label: 'Unit' },
@@ -942,7 +937,7 @@ export function ReportDetailView({
   const slug = slugProp as ReportSlug;
   const def = REPORTS[slug];
 
-  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; unitTypes?: string[]; items?: Record<string, unknown>[] } | null>(null);
+  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; unitTypes?: string[]; items?: Record<string, unknown>[]; availableYears?: number[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -965,8 +960,8 @@ export function ReportDetailView({
   const [unitTypeSel, setUnitTypeSel] = useState<string>(() => sp?.get('unitType') ?? '');
   // Lease-status segment (leases-by-year): Active · Expired · All. Backend
   // default is 'all', so only an explicit active/expired needs sending.
-  const [leaseStatus, setLeaseStatus] = useState<'active' | 'expired' | 'all'>(
-    () => (sp?.get('status') === 'active' ? 'active' : sp?.get('status') === 'expired' ? 'expired' : 'all'),
+  const [leaseStatus, setLeaseStatus] = useState<'active' | 'expired' | 'terminated' | 'all'>(
+    () => (sp?.get('status') === 'active' ? 'active' : sp?.get('status') === 'expired' ? 'expired' : sp?.get('status') === 'terminated' ? 'terminated' : 'all'),
   );
   // Occupancy segment (portfolio): All · Occupied · Vacant. Backend default is
   // 'all', so only an explicit occupied/vacant needs sending. Occupied gives the
@@ -1076,6 +1071,17 @@ export function ReportDetailView({
   }, [buildingMenuOpen]);
 
   const buildingOptions = data?.buildings ?? [];
+  // A report may declare which years actually have data (availableYears); when it
+  // does, the year picker shows only those (empty years never appear). Reports
+  // that don't declare it keep their full static range (below, per picker).
+  const dataYears = data?.availableYears && data.availableYears.length ? data.availableYears : null;
+  // If the selected year has no data (e.g. a stored 2024 on a data-scoped report),
+  // snap to the latest year that does, so the view isn't confusingly empty.
+  useEffect(() => {
+    if (def.controlKey === 'year' && dataYears && !dataYears.includes(year)) {
+      setYear(dataYears[dataYears.length - 1]);
+    }
+  }, [dataYears, def.controlKey, year]);
   // Simple-bar cascade: when exactly one lease type is chosen, the Property
   // dropdown lists only buildings of that leasing model.
   const leaseFilteredBuildingOptions = selectedLeaseTypes.length === 1
@@ -1601,7 +1607,7 @@ export function ReportDetailView({
             <div className={fGroup}>
               <span className={fLabel}>Year</span>
               <select className={fSelect} value={year} onChange={e => setYear(Number(e.target.value))} aria-label="Year">
-                {Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i).map(y => <option key={y} value={y}>{y}</option>)}
+                {(dataYears ? [...dataYears].reverse() : Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i)).map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           )}
@@ -1691,10 +1697,11 @@ export function ReportDetailView({
           {def.leaseStatusFilter && (
             <div className={fGroup}>
               <span className={fLabel}>Leases</span>
-              <select className={fSelect} aria-label="Lease status" value={leaseStatus} onChange={e => setLeaseStatus(e.target.value as 'active' | 'expired' | 'all')}>
+              <select className={fSelect} aria-label="Lease status" value={leaseStatus} onChange={e => setLeaseStatus(e.target.value as 'active' | 'expired' | 'terminated' | 'all')}>
                 <option value="all">All</option>
                 <option value="active">Active</option>
                 <option value="expired">Expired</option>
+                <option value="terminated">Terminated</option>
               </select>
             </div>
           )}
@@ -1912,7 +1919,7 @@ export function ReportDetailView({
       {!simpleFilterBar && def.controlKey === 'year' && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>Year:</span>
-          {Array.from({ length: CURRENT_YEAR - 2021 }, (_, i) => 2023 + i).map(y => (
+          {(dataYears ?? Array.from({ length: CURRENT_YEAR - 2021 }, (_, i) => 2023 + i)).map(y => (
             <button key={y} onClick={() => setYear(y)}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${year === y ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
               {y}
