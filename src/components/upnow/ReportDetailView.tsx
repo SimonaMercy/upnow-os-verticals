@@ -687,8 +687,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'units', label: 'Occupied units', type: 'number' },
       { key: 'belowMarket', label: 'Below asking', type: 'number' },
       { key: 'aboveMarket', label: 'Above asking', type: 'number' },
-      { key: 'currentRentFils', label: 'Current rent (all units)', type: 'aed' },
-      { key: 'marketRentFils', label: 'Asking (priced units)', type: 'aed' },
+      { key: 'currentRentFils', label: 'Annual Rent', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market Price', type: 'aed' },
       { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
     ],
   },
@@ -844,9 +844,9 @@ const STAGE_STYLE: Record<string, string> = {
   published: 'bg-[#dcfce7] text-[#166534]',  // green — live/listed
   expired:   'bg-[#fee2e2] text-[#b91c1c]',  // red — lapsed (rejected already above)
   // rent-vs-market position (gap to benchmark)
-  below_market: 'bg-[#d8f2e8] text-[#1a7a5a]',  // rent under market → recoverable uplift
+  below_market: 'bg-[#fee2e2] text-[#b91c1c]',  // rent under market → red
   at_market:    'bg-[#f4f3ef] text-[#6b6860]',  // within ±5% → neutral
-  above_market: 'bg-[#fee2e2] text-[#b91c1c]',  // rent over market → downside on renewal
+  above_market: 'bg-[#d8f2e8] text-[#1a7a5a]',  // rent over market → green
   no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market price set
   // operations-pipeline signature states — on_file deliberately NOT signed
   signed_state: 'bg-[#dbeafe] text-[#1e40af]',
@@ -872,10 +872,11 @@ function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
   if (type === 'rate') return <span>{Number(value).toFixed(1)}%</span>;
   if (type === 'delta') {
     const v = Number(value);
+    // gapFils = market − current: positive = below market (red, down), negative = above market (green, up)
     if (v === 0) return <span className="text-[#6b6860] inline-flex items-center gap-1"><Minus size={11} /> {fmtAed(0)}</span>;
     return v > 0
-      ? <span className="text-[#1a7a5a] inline-flex items-center gap-1"><TrendingUp size={11} /> {fmtAed(v)}</span>
-      : <span className="text-red-600 inline-flex items-center gap-1"><TrendingDown size={11} /> {fmtAed(v)}</span>;
+      ? <span className="text-red-600 inline-flex items-center gap-1"><TrendingDown size={11} /> {fmtAed(Math.abs(v))}</span>
+      : <span className="text-[#1a7a5a] inline-flex items-center gap-1"><TrendingUp size={11} /> {fmtAed(Math.abs(v))}</span>;
   }
   if (type === 'bucket') {
     const cls = BUCKET_STYLE[String(value)] ?? 'bg-[#f4f3ef] text-[#6b6860]';
