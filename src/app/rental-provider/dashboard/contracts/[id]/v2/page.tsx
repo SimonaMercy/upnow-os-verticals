@@ -280,7 +280,13 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     // has reviewed + accepted the customer's re-uploaded docs.
     case 'documents': return !st.renewalDocsRequired || st.renewalDocsAccepted;
     // Renewal Cheques/PDC step — done once the RP confirms the cheques collected.
-    case 'cheques': return st.pdcConfirmed;
+    // Confirm-PDC is a PRE-signature action (it releases the contract for signing),
+    // so a lease that has already been signed or activated is inherently past this
+    // stage — treat cheques as done to avoid offering a moot "Mark as Collected"
+    // button that the backend (status must be 'issued') would reject with a 400.
+    case 'cheques': return st.pdcConfirmed
+      || (st.tenantSigned && st.landlordSigned)
+      || st.status === 'active' || st.status === 'expired' || st.status === 'terminated';
     case 'sign':    return st.tenantSigned && st.landlordSigned;
     case 'ejari':   return st.ejariStatus === 'registered';
     case 'utility': return st.utilityDoc;
