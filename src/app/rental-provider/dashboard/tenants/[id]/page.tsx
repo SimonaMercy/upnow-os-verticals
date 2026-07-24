@@ -21,6 +21,7 @@ import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadMod
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
@@ -32,7 +33,7 @@ type Lease = {
   // first lease on a renewal; depositSourceId = which contract actually holds it.
   depositHeld: number; depositSourceId: number | null;
   isCurrent: boolean;
-  unit: { id: number | null; number: string | null; name: string | null };
+  unit: { id: number | null; number: string | null; name: string | null; type: string | null };
   property: { id: number | null; buildingName: string | null };
 };
 type Doc = {
@@ -269,6 +270,12 @@ export default function CustomerDetailPage() {
   // is derived from those keys (no DB column) and can be bumped up to backfill.
   // The override is clamped to never hide an occupant that already has docs.
   const occupantDocs = data.documents.filter(d => (d.ownerType ?? 'customer') === 'customer' && isOccupantDoc(d));
+  // Additional occupants are a residential-only concept — a commercial tenancy is
+  // held by a business, not a household. Show the section only when the customer
+  // holds at least one residential unit (unknown/missing type ⇒ treated as
+  // residential, so nothing that showed before disappears unexpectedly).
+  const occupantsApply = data.leases.length === 0
+    || data.leases.some(l => isResidentialUnitType(l.unit.type));
   const derivedOccupants = deriveOccupantCount(data.documents.map(d => d.documentKey)); // ≥1, primary = occupant 1
   const totalOccupants = Math.max(occupantOverride ?? derivedOccupants, derivedOccupants, 1);
   const occupantGroups: { idx: number; reqs: DocReq[] }[] = (() => {
@@ -871,7 +878,9 @@ export default function CustomerDetailPage() {
       {/* Additional occupants — other people living in the unit alongside the
           primary customer. Their identity docs hang off the customer record
           (occupant_N_* keys); the count is derived from the uploaded docs and can
-          be bumped up here so an admin can backfill each occupant's documents. */}
+          be bumped up here so an admin can backfill each occupant's documents.
+          Residential only — hidden when every unit the customer holds is commercial. */}
+      {occupantsApply && (
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
         <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-5 py-4 border-b border-[#eeece6]">
           <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><Users size={15} /></span>
@@ -959,6 +968,7 @@ export default function CustomerDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Supporting documents (optional) — Employment / Salary Certificate, Bank
           Statement / Pay Slip, Marriage Certificate. None are required; this card

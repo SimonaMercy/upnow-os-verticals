@@ -26,6 +26,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { comparePaymentSchedule } from '@/lib/paymentPlan';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, usePathname } from 'next/navigation';
@@ -1301,6 +1302,10 @@ function InterestedPopup({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  // Occupants are residential-only. Commercial / industrial / mixed-use
+  // commercial unit types are leased to a business, so we neither ask for nor
+  // send occupant counts (no number-of-occupants, children or pets).
+  const residential = isResidentialUnitType(viewing.unit?.unitType ?? null);
   const [occupants, setOccupants] = useState<number>(defaultOccupants);
   const [paymentsCount, setPaymentsCount] = useState<number>(defaultPayments);
   const [moveIn, setMoveIn] = useState<string>(defaultStart);
@@ -1364,7 +1369,7 @@ function InterestedPopup({
           contractStartDate: moveIn,
           paymentsCount,
           paymentMethod: 'postdated_cheque',
-          occupantsAdults: occupants,
+          occupantsAdults: residential ? occupants : 1,
         }),
       });
       const body = await res.json().catch(() => ({} as { message?: string }));
@@ -1391,7 +1396,8 @@ function InterestedPopup({
       </>
     }>
       <div style={{ display: 'grid', gap: 16 }}>
-        {/* Occupants */}
+        {/* Occupants — residential only */}
+        {residential && (
         <div>
           <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Number of occupants</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1410,6 +1416,7 @@ function InterestedPopup({
             </p>
           )}
         </div>
+        )}
 
         {/* Move-in date */}
         <div>

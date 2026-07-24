@@ -922,6 +922,11 @@ function BookModal({ unit, property, onClose }: { unit: PublicUnit; property: Pu
 function InquireModal({ unit, property, preferredStartDays = [], allowedInstallments = [], onClose }: { unit: PublicUnit; property: PublicProperty; preferredStartDays?: number[]; allowedInstallments?: number[]; onClose: () => void }) {
   const { refresh: refreshAuth } = useAuth();
 
+  // Occupants (adults / children / pets) are a residential-only concept. For
+  // commercial, industrial and mixed-use commercial unit types there are no
+  // occupants — the tenant is a business — so the whole block is hidden.
+  const residential = isResidentialUnitType(unit.unitType);
+
   // Form state
   const [moveIn,       setMoveIn]       = useState(() => nextAllowedDate(preferredStartDays));
   const [adults,       setAdults]       = useState('1');
@@ -970,9 +975,11 @@ function InquireModal({ unit, property, preferredStartDays = [], allowedInstallm
         unitId:           unit.id,
         contractStartDate: moveIn,                 // desired move-in
         paymentsCount:     Number(installments),   // rent instalments
-        occupantsAdults:   Number(adults) || 1,
-        occupantsChildren: Number(children) || 0,
-        occupantsPets:     Number(pets) || 0,
+        // Occupants only apply to residential lettings; commercial tenants are
+        // businesses, so we don't collect or send adults/children/pets there.
+        occupantsAdults:   residential ? (Number(adults) || 1) : 1,
+        occupantsChildren: residential ? (Number(children) || 0) : 0,
+        occupantsPets:     residential ? (Number(pets) || 0) : 0,
         occupantsDetails:  msg || undefined,
       };
       const res = await fetch('/api/leads/book-now', {
@@ -1296,15 +1303,19 @@ function InquireModal({ unit, property, preferredStartDays = [], allowedInstallm
         <MiniCalendar value={moveIn} onChange={setMoveIn} allowedDays={preferredStartDays} compact />
       </div>
 
-      <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Occupants <span className="text-red-500">*</span></label>
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        {[['Adults','1',adults,setAdults],['Children','0',children,setChildren],['Pets','0',pets,setPets]].map(([label, min, val, setter]) => (
-          <div key={label as string}>
-            <p className="text-[11px] text-[#9b9890] mb-1">{label as string}</p>
-            <input type="number" min={min as string} value={val as string} onChange={e => (setter as (v:string)=>void)(e.target.value)} className={inputCls} />
+      {residential && (
+        <>
+          <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Occupants <span className="text-red-500">*</span></label>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {[['Adults','1',adults,setAdults],['Children','0',children,setChildren],['Pets','0',pets,setPets]].map(([label, min, val, setter]) => (
+              <div key={label as string}>
+                <p className="text-[11px] text-[#9b9890] mb-1">{label as string}</p>
+                <input type="number" min={min as string} value={val as string} onChange={e => (setter as (v:string)=>void)(e.target.value)} className={inputCls} />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
 
       <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">Payment installments</label>
       <div className="grid grid-cols-4 gap-2 mb-4">
