@@ -52,6 +52,7 @@ const s = StyleSheet.create({
   th: { flexDirection: 'row', backgroundColor: '#faf9f6', paddingVertical: 2.5, paddingHorizontal: 5 },
   thc: { fontSize: 6.5, color: '#6b6860', fontFamily: 'Helvetica-Bold', textTransform: 'uppercase' },
   tr: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 5, borderTopWidth: 0.5, borderTopColor: '#f0ede8' },
+  subtotalTr: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 5, borderTopWidth: 1, borderTopColor: '#e8e6e0', backgroundColor: '#faf9f6', fontFamily: 'Helvetica-Bold', color: '#4a4842' },
   band: { backgroundColor: '#f4f2ee', paddingVertical: 2.5, paddingHorizontal: 5 },
   bandTxt: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#4a4842', textTransform: 'uppercase' },
   // paddingRight on every column keeps adjacent cells from touching (esp. the
@@ -171,15 +172,14 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
     { label: 'Community Fees', kw: ['community', 'service'] },
     { label: 'Telecommunications', kw: ['telecom', 'du', 'etisalat', 'internet'] },
   ];
+  // Show every standard utility row — including the zero ones.
   const utilRows = utilBuckets
-    .map(b => ({ label: b.label, amount: r2(utilities.filter(l => b.kw.some(k => (l.label || '').toLowerCase().includes(k))).reduce((a, l) => a + (l.net ?? l.amount), 0)) }))
-    .filter(r => Math.abs(r.amount) > 0.005);
+    .map(b => ({ label: b.label, amount: r2(utilities.filter(l => b.kw.some(k => (l.label || '').toLowerCase().includes(k))).reduce((a, l) => a + (l.net ?? l.amount), 0)) }));
   const utilitiesTotal = sumNet(utilities, ['utility']);
 
-  const restorationRows = restoration.length
-    ? restoration.map(l => ({ label: l.label.replace(/\s*\(move-out inspection\)\s*/i, ''), amount: l.net ?? l.amount }))
-    : [{ label: 'Repairs & Maintenance', amount: 0 }, { label: 'Cleaning', amount: 0 }];
+  // A single summed "Restoration" line.
   const restorationTotal = sumNet(restoration, ['restoration']);
+  const restorationRows = [{ label: 'Restoration', amount: restorationTotal }];
   const hasInspection = restoration.some(l => l.inspectionContractId != null);
 
   const additionalRows = [
@@ -248,7 +248,7 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
           {data.paymentHistory.map((band, bi) => (
             <View key={bi} wrap={false}>
               <View style={s.band}>
-                <Text style={s.bandTxt}>{band.contractNo ? `${band.band ?? 'YEAR'}  ·  ${band.contractNo}  ·  ${fmtDate(band.startDate)} to ${fmtDate(band.endDate)}` : band.label}</Text>
+                <Text style={s.bandTxt}>{band.contractNo ? `${band.contractNo}  ·  ${fmtDate(band.startDate)} to ${fmtDate(band.endDate)}` : band.label}</Text>
               </View>
               {band.rows.map((r, ri) => (
                 <View key={ri} style={s.tr}>
@@ -261,6 +261,16 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
                   <Text style={[s.cPen, { color: RED }]}>{r.penalty ? money(r.penalty) : ''}</Text>
                 </View>
               ))}
+              {/* Per-contract subtotal — sum of the amounts listed under this lease. */}
+              <View style={s.subtotalTr}>
+                <Text style={s.cDesc}>{`Subtotal${band.contractNo ? `  ·  ${band.contractNo}` : ''}`}</Text>
+                <Text style={s.cDate} />
+                <Text style={[s.cAmt, { fontFamily: 'Helvetica-Bold' }]}>{money(band.rows.reduce((a, r) => a + (r.amount || 0), 0))}</Text>
+                <Text style={s.cMethod} />
+                <Text style={s.cRef} />
+                <Text style={s.cStatus} />
+                <Text style={s.cPen} />
+              </View>
             </View>
           ))}
         </View>
