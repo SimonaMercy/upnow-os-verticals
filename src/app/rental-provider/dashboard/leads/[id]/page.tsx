@@ -15,6 +15,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, use } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Eye, UserPlus, FolderOpen, Wallet, Receipt, BadgeCheck,
@@ -624,6 +625,18 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const phone  = lead.leadPhone ?? lead.convertedTenant?.user?.phone ?? null;
   const unitLabel = lead.unit?.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit?.unitName ?? '—');
   const building  = lead.unit?.property?.buildingName ?? null;
+
+  // Deep-links to the related entities (Property → portfolio popup, Unit → unit
+  // page, Customer → tenant page, Lead → this lead). Only rendered as links in
+  // the RP view — the manager mirror has no standalone unit/property pages, so
+  // those stay plain there (mirrors the contract page's chain-link gating).
+  const propertyId = lead.unit?.property?.id ?? null;
+  const unitId     = lead.unit?.id ?? null;
+  const customerId = lead.convertedTenant?.id ?? null;
+  const propertyHref = !manager && propertyId ? `/rental-provider/dashboard/portfolio?property=${propertyId}` : null;
+  const unitHref     = !manager && unitId     ? `/rental-provider/dashboard/units/${unitId}` : null;
+  const customerHref = !manager && customerId ? `/rental-provider/dashboard/tenants/${customerId}` : null;
+  const leadHref     = !manager ? `/rental-provider/dashboard/leads/${lead.id}` : null;
   const node = stageNode(lead.stage);
   const effNode = selNode ?? node;              // journey step currently on screen
   const viewingCurrent = effNode === node;      // true → full interactive card; false → read-only preview
@@ -707,11 +720,19 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               </h1>
               <div className="hsub">
                 <Building2 size={13} />
-                {building && <span>{building}</span>}
+                {building && (
+                  propertyHref
+                    ? <Link href={propertyHref} className="chain-link" title="Open property details">{building}</Link>
+                    : <span>{building}</span>
+                )}
                 {building && <ChevronRight size={12} />}
-                <span>{unitLabel}</span>
+                {unitHref
+                  ? <Link href={unitHref} className="chain-link" title="Open unit details">{unitLabel}</Link>
+                  : <span>{unitLabel}</span>}
                 <ChevronRight size={12} />
-                <span>Lead-{lead.id}</span>
+                {leadHref
+                  ? <Link href={leadHref} className="chain-link" title="Open lead">Lead-{lead.id}</Link>
+                  : <span>Lead-{lead.id}</span>}
                 {lead.source && <> · {lead.source}</>}
               </div>
             </div>
@@ -721,7 +742,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
         {/* Info bar */}
         <div className="infobar">
-          <div className="pitem"><span className="pk">Customer</span><span className="pv">{displayName}</span></div>
+          <div className="pitem"><span className="pk">Customer</span>
+            {customerHref
+              ? <Link href={customerHref} className="chain-link" style={{ fontSize: 13 }} title="Open customer details">{displayName}</Link>
+              : <span className="pv">{displayName}</span>}
+          </div>
           {phone && <div className="pitem"><span className="pk">Phone</span><span className="pv">{phone}</span></div>}
           <span className="isep" />
           {annualRentAed != null && <div className="pitem"><span className="pk">Annual rent</span><span className="pv">{aedWhole(annualRentAed)}</span></div>}
