@@ -1276,7 +1276,7 @@ export function PropertyFields({
             <FieldLabel label="Country" required />
             <select className={SELECT} value={value.countryId ?? ''} onChange={e => handleCountryChange(e.target.value)}>
               <option value="">Select Country</option>
-              {countries.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+              {countries.filter(c => c.code === 'AE').map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
             </select>
           </div>
           <div>

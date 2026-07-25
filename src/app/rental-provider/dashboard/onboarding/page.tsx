@@ -263,13 +263,13 @@ export default function RentalProviderOnboardingPage() {
   function checklistForKind(): Array<{ key: string; displayName: string; required: boolean; description: string }> {
     const COMPANY_BASE = [
       { key: "trade_license",   displayName: "Trade License",                       required: true,  description: "Valid UAE trade licence. Must be current — expired licences cannot be accepted." },
-      { key: "emirates_id",     displayName: "Emirates ID",                         required: false, description: "Emirates ID (both sides) of a UAE national or resident representative. Optional." },
+      { key: "emirates_id",     displayName: "Emirates ID",                         required: true,  description: "Emirates ID (both sides) of the authorised signatory / representative." },
       { key: "passport",        displayName: "Passport",                            required: false, description: "Bio-data page of a valid passport. Optional." },
       { key: "visa",            displayName: "UAE Visa",                            required: false, description: "UAE residency or entry visa. Optional." },
     ];
     if (kind.id === "individual") return [
       { key: "emirates_id", displayName: "Emirates ID",          required: true,  description: "Clear scan of your Emirates ID (both sides). Required for UAE nationals and residents." },
-      { key: "passport",    displayName: "Passport",             required: false, description: "Bio-data page of your valid passport. Required for non-UAE nationals." },
+      { key: "passport",    displayName: "Passport",             required: true,  description: "Bio-data page of your valid passport." },
       { key: "visa",        displayName: "UAE Residency Visa",   required: false, description: "Residency visa page. Required for expatriate residents." },
     ];
     if (kind.id === "brokerage") return [

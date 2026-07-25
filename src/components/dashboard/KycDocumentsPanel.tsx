@@ -134,13 +134,13 @@ type DocReq = Pick<KycChecklistItem, "key" | "displayName" | "category" | "requi
 const RP_COMPANY_BASE: DocReq[] = [
   { key: "trade_license",   displayName: "Trade License",                       category: "license",    required: true,  description: "Valid UAE trade license. Must be current — expired licences cannot be accepted." },
   { key: "emirates_id",     displayName: "Emirates ID of Authorised Signatory", category: "identity",   required: true,  description: "Emirates ID (both sides) of the person authorised to sign on behalf of the company." },
-  { key: "passport",        displayName: "Passport",                            category: "identity",   required: true, description: "Bio-data page of the authorised signatory's valid passport." },
+  { key: "passport",        displayName: "Passport",                            category: "identity",   required: false, description: "Bio-data page of the authorised signatory's valid passport. Optional." },
   { key: "visa",            displayName: "UAE Visa",                            category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
 ];
 
 const RP_INDIVIDUAL: DocReq[] = [
   { key: "emirates_id", displayName: "Emirates ID",        category: "identity", required: true,  description: "Clear scan of your Emirates ID (both sides). Required for UAE nationals and residents." },
-  { key: "passport",    displayName: "Passport",           category: "identity", required: true, description: "Bio-data page of your valid passport." },
+  { key: "passport",    displayName: "Passport",           category: "identity", required: true,  description: "Bio-data page of your valid passport." },
   { key: "visa",        displayName: "UAE Residency Visa", category: "identity", required: false, description: "Residency visa page. Required for expatriate residents." },
 ];
 
@@ -157,7 +157,7 @@ const RP_BROKERAGE: DocReq[] = [
 const RP_AGENTS: DocReq[] = [
   { key: "trade_license",              displayName: "Trade License",                          category: "license",    required: true,  description: "Valid UAE trade license. Must be current — expired licences cannot be accepted." },
   { key: "emirates_id",                displayName: "Emirates ID of Authorised Signatory",    category: "identity",   required: true,  description: "Emirates ID (both sides) of the person authorised to sign on behalf of the company." },
-  { key: "passport",                   displayName: "Passport",                               category: "identity",   required: true, description: "Bio-data page of the authorised signatory's valid passport." },
+  { key: "passport",                   displayName: "Passport",                               category: "identity",   required: false, description: "Bio-data page of the authorised signatory's valid passport. Optional." },
   { key: "visa",                       displayName: "UAE Visa",                               category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
   { key: "broker_registration",        displayName: "Agent Registration Certificate", category: "license",    required: true,  description: "Real-estate agent registration certificate issued by the relevant emirate regulator (BRN card or equivalent)." },
   { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Firm", category: "compliance", required: true,  description: "Signed agreement authorising you to operate as an agent under the named parent brokerage firm." },
