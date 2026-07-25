@@ -109,7 +109,11 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
   const tenantName = ten.companyName || ten.name || '';
   put('date', fmtDate(data.createdAt) || fmtDate(new Date().toISOString()));
   put('owner_name', landlordName); put('lessor_name', landlordName);
-  put('lessor_id', lord.emiratesId); put('lessor_license', lord.licenseNumber); put('lessor_license_authority', lord.licenseAuthority);
+  // A company lessor is identified by its trade License No. + Licensing Authority,
+  // not an Emirates ID — leave the EID box blank when the landlord is a company.
+  // Keyed off entityType (individual RPs may also carry a company/brand name).
+  if (lord.entityType !== 'company') put('lessor_id', lord.emiratesId);
+  put('lessor_license', lord.licenseNumber); put('lessor_license_authority', lord.licenseAuthority);
   // Lessor's phone: when the RP acts under a Power of Attorney, the POA holder's
   // phone is the lessor's contact on the official Ejari; otherwise the landlord's own.
   const lessorPhone = lord.hasPoa && lord.poaPersonPhone ? lord.poaPersonPhone : lord.phone;

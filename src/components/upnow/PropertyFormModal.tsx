@@ -6,7 +6,7 @@ import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { PROPERTY_DOC_SLOTS, HEAD_LEASE_KEY, MGMT_AGREEMENT_KEY, LEASE_PROOF_KEYS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
-import { DocPreviewModal } from './DocPreviewModal';
+import { openDocViewer } from '@/lib/docViewer';
 import { PropertyPhotos } from './PropertyPhotos';
 import { useSlideOver } from '@/lib/useSlideOver';
 
@@ -826,7 +826,13 @@ export function PropertyFields({
   const [autoFilled, setAutoFilled] = useState(false);
   const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
   // In-app document preview (matches the KYC / contract "View" pattern).
-  const [viewerDoc, setViewerDoc] = useState<{ url: string; mime?: string | null; name: string } | null>(null);
+  // "View" routes through the shared in-portal viewer (pdf.js → <canvas>), the
+  // same path units and every other surface use. Unlike a native <iframe> PDF
+  // preview, pdf.js decodes the bytes itself, so it renders even in Chrome/Edge
+  // set to "download PDFs" (where an iframe would show blank). Handles both a
+  // queued File (blob: URL) and an already-uploaded doc (http URL).
+  const handleView = (doc: { url: string; mime?: string | null; name: string }) =>
+    openDocViewer({ fileUrl: doc.url, mimeType: doc.mime ?? null, caption: doc.name });
 
   // Location data — full chain Country → Emirate → City → Community → Sub-Community
   const [countries,         setCountries]         = useState<Country[]>([]);
@@ -1205,7 +1211,7 @@ export function PropertyFields({
                 onAdd={files => { const f = files?.[0] ?? null; if (f) setTitleDeed(f); }}
                 onRemoveQueued={() => setTitleDeed(null)}
                 onRemoveExisting={onRemoveExisting}
-                onView={setViewerDoc}
+                onView={handleView}
               />
             ) : value.leasingType === 'sub' ? (
               <PropertyDocCard
@@ -1216,7 +1222,7 @@ export function PropertyFields({
                 onAdd={files => addSlotFiles(HEAD_LEASE_KEY, files, false)}
                 onRemoveQueued={i => removeSlotFile(HEAD_LEASE_KEY, i)}
                 onRemoveExisting={onRemoveExisting}
-                onView={setViewerDoc}
+                onView={handleView}
               />
             ) : (
               <PropertyDocCard
@@ -1227,7 +1233,7 @@ export function PropertyFields({
                 onAdd={files => addSlotFiles(MGMT_AGREEMENT_KEY, files, false)}
                 onRemoveQueued={i => removeSlotFile(MGMT_AGREEMENT_KEY, i)}
                 onRemoveExisting={onRemoveExisting}
-                onView={setViewerDoc}
+                onView={handleView}
               />
             )}
           </div>
@@ -1464,7 +1470,7 @@ export function PropertyFields({
                 onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
                 onRemoveQueued={i => removeSlotFile(slot.key, i)}
                 onRemoveExisting={onRemoveExisting}
-                onView={setViewerDoc}
+                onView={handleView}
               />
             ))}
           </div>
@@ -1481,7 +1487,7 @@ export function PropertyFields({
               onAdd={addDrawings}
               onRemoveQueued={i => setDrawings(prev => prev.filter((_, j) => j !== i))}
               onRemoveExisting={onRemoveExisting}
-              onView={setViewerDoc}
+              onView={handleView}
             />
             {PROPERTY_DOC_SLOTS.filter(s => s.multiple).map(slot => (
               <PropertyDocCard
@@ -1492,21 +1498,15 @@ export function PropertyFields({
                 onAdd={files => addSlotFiles(slot.key, files, slot.multiple)}
                 onRemoveQueued={i => removeSlotFile(slot.key, i)}
                 onRemoveExisting={onRemoveExisting}
-                onView={setViewerDoc}
+                onView={handleView}
               />
             ))}
           </div>
         </div>
       </>)}
 
-      {/* In-app document preview ("View") */}
-      {viewerDoc && (
-        <DocPreviewModal
-          title={viewerDoc.name}
-          docs={[{ id: 1, fileUrl: viewerDoc.url, mimeType: viewerDoc.mime ?? null, caption: viewerDoc.name }]}
-          onClose={() => setViewerDoc(null)}
-        />
-      )}
+      {/* "View" opens the shared in-portal viewer (see handleView) — no local
+          preview modal needed. */}
     </>
   );
 }

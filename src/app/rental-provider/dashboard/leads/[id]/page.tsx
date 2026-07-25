@@ -77,6 +77,14 @@ type TenantDoc = {
   fileUrl: string; mimeType: string | null; status: string;
   notes?: string | null;
 };
+/** One entry in the lead's running notes log (newest first). */
+type LeadNote = {
+  id: number;
+  body: string;
+  authorName: string | null;
+  authorRole: 'rental_provider' | 'manager' | 'system' | null;
+  createdAt: string;
+};
 type DocState = 'approved' | 'pending' | 'rejected' | 'docmiss';
 function docState(status: string | undefined, onFile: boolean): DocState {
   if (!onFile) return 'docmiss';
@@ -337,6 +345,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [selNode, setSelNode] = useState<number | null>(null);
   const [reopenOpen, setReopenOpen] = useState(false);   // reopen-with-note modal
   const [reopenNote, setReopenNote] = useState('');
+  const [rescheduleFor, setRescheduleFor] = useState<number | null>(null);   // reschedule-on-behalf modal (viewing id)
+
+  // Lead notes log — the RP/manager running journal for this lead (mirrors the
+  // tenancy contract Notes log). Loaded independently of the main lead fetch.
+  const [notes, setNotes] = useState<LeadNote[]>([]);
 
   // RP settings needed by the plan editor (fee prefill, preferred days, allowed
   // instalment counts) — same sources as the list page's page-level fetches.
@@ -350,6 +363,27 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const fetchCheques = useCallback(async () => {
     const res = await fetch(leadUrl(`/api/leads/${leadId}/cheques`, manager), { credentials: 'include', cache: 'no-store' });
     if (res.ok) setCheques(await res.json());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId, rpParam]);
+
+  // Lead notes log — loaded independently so the journal renders even if the
+  // main lead fetch hiccups; refreshed after every action (e.g. mark visited,
+  // whose outcome is mirrored into the log server-side).
+  const loadNotes = useCallback(async () => {
+    const res = await fetch(leadUrl(`/api/leads/${leadId}/notes`, manager), { credentials: 'include', cache: 'no-store' });
+    if (res.ok) { const rows = await res.json(); setNotes(Array.isArray(rows) ? rows : []); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId, rpParam]);
+
+  const addNote = useCallback(async (body: string) => {
+    const res = await fetch(leadUrl(`/api/leads/${leadId}/notes`, manager), {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? 'Failed to save note');
+    const created = await res.json() as LeadNote;
+    setNotes(prev => [created, ...prev]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, rpParam]);
 
@@ -389,6 +423,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   // effect-driven fetch pattern used throughout this dashboard.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchLead(true); }, [fetchLead]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void loadNotes(); }, [loadNotes]);
 
   // RP settings (same endpoints the list page uses at page level).
   useEffect(() => {
@@ -416,6 +452,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         return;
       }
       await fetchLead();
+      await loadNotes();   // pick up any note the action mirrored (e.g. mark-visited outcome)
     } catch {
       setActionError('Action failed.');
     } finally {
@@ -428,6 +465,13 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       method: 'PATCH', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'completed', ...(outcome ? { outcome } : {}) }),
+    }));
+
+  const rescheduleViewing = (viewingId: number, scheduledAt: string) => runAction(() =>
+    fetch(leadUrl(`/api/leads/viewings/${viewingId}/reschedule`, manager), {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scheduledAt }),
     }));
 
   const approveDocuments = () => runAction(() =>
@@ -624,6 +668,16 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         </button>
       ) : (
         <>
+          {/* Reschedule on the customer's behalf — first/most prominent header
+              action while the viewing is still upcoming (scheduled / confirmed). */}
+          {(() => {
+            const rv = pendingViewing ?? latestViewing;
+            return rv && (rv.status === 'scheduled' || rv.status === 'confirmed') ? (
+              <button className="btn btn-jade btn-sm" disabled={busy} onClick={() => setRescheduleFor(rv.id)}>
+                <Calendar size={14} /> Reschedule
+              </button>
+            ) : null;
+          })()}
           {email && <a className="btn btn-ghost btn-sm" href={`mailto:${email}`}><MessageSquare size={14} /> Message</a>}
           {!email && phone && <a className="btn btn-ghost btn-sm" href={`tel:${phone}`}><MessageSquare size={14} /> Message</a>}
           {/* Lead-reject is REASONLESS — the list page rejects via
@@ -734,6 +788,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             <StepPreview node={effNode} current={node} onBack={() => setSelNode(null)} />
           )}
         </div>
+
+        {/* Notes log — an internal running journal for the RP/manager team, the
+            same way a tenancy has one. The customer never sees it. */}
+        <LeadNotesSection notes={notes} onAdd={addNote} />
       </div>
 
       {/* Reopen-with-note modal — the note is carried to the customer (e.g. a
@@ -754,7 +812,126 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
       )}
+
+      {/* Reschedule-on-behalf modal — RP/manager picks a new slot for the customer. */}
+      {rescheduleFor !== null && (
+        <RpRescheduleModal
+          busy={busy}
+          currentScheduledAt={(pendingViewing ?? latestViewing)?.scheduledAt}
+          onCancel={() => setRescheduleFor(null)}
+          onConfirm={(scheduledAt) => { rescheduleViewing(rescheduleFor, scheduledAt); setRescheduleFor(null); }}
+        />
+      )}
       <GlobalStyle />
+    </div>
+  );
+}
+
+/* ─── RpRescheduleModal: RP/manager picks a new date + time slot to reschedule
+ *  a viewing on the customer's behalf. Same slots as the customer's own picker.
+ *  The backend writes a system note recording who moved it + notifies everyone. */
+function RpRescheduleModal({ busy, currentScheduledAt, onCancel, onConfirm }: { busy: boolean; currentScheduledAt?: string; onCancel: () => void; onConfirm: (scheduledAt: string) => void }) {
+  const SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+  const today = new Date().toISOString().slice(0, 10);
+  // Current slot (date + time) — block rescheduling to the SAME slot (no-op).
+  const cur = currentScheduledAt ? new Date(currentScheduledAt) : null;
+  const curDate = cur ? cur.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE }) : '';
+  const curTime = cur ? cur.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: APP_TIME_ZONE }) : '';
+  const curLabel = cur ? cur.toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: APP_TIME_ZONE }) : '';
+  // Default to the viewing's CURRENT date (fallback today) so the greyed-out
+  // current slot is visible right away — the customer's existing booking.
+  const [date, setDate] = useState((curDate && curDate >= today) ? curDate : today);
+  const [time, setTime] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const confirm = () => {
+    if (!date || !time) { setErr('Pick both a date and a time.'); return; }
+    if (date === curDate && time === curTime) { setErr('That’s already the scheduled time — pick a different slot.'); return; }
+    setErr(null);
+    onConfirm(`${date}T${time}:00`);
+  };
+  return (
+    <div className="qmodal-scrim" onClick={onCancel}>
+      <div className="qmodal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="subhead"><Calendar size={13} /> Reschedule viewing</div>
+        <p className="note" style={{ margin: '0 0 10px' }}>Pick a new slot for the customer. They&rsquo;ll be notified, and this is logged on the lead.</p>
+        {curLabel && <p className="note" style={{ margin: '0 0 10px', fontWeight: 600 }}>Currently: {curLabel}</p>}
+        <label className="flabel" style={{ display: 'block', marginBottom: 6 }}>New date</label>
+        <input type="date" className="qinput" value={date} min={today} onChange={e => setDate(e.target.value)} />
+        <label className="flabel" style={{ display: 'block', margin: '12px 0 6px' }}>Time slot</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+          {SLOTS.map(s => {
+            const isCurrent = date === curDate && s === curTime;   // slot the customer already holds
+            return (
+              <button key={s} type="button" disabled={isCurrent} onClick={() => setTime(s)}
+                title={isCurrent ? 'Current viewing time' : undefined}
+                className={`btn btn-sm ${time === s ? 'btn-jade' : 'btn-ghost'}`}
+                style={isCurrent ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}>
+                {s}{isCurrent ? ' ·now' : ''}
+              </button>
+            );
+          })}
+        </div>
+        {err && <p className="note" style={{ color: 'var(--danger, #c0392b)', margin: '10px 0 0' }}>{err}</p>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <button className="btn btn-jade btn-sm" disabled={busy} onClick={confirm}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <><Calendar size={14} /> Confirm new time</>}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── LeadNotesSection: the RP/manager running journal for a lead. Append-only,
+ *  newest first, mirrors the tenancy contract Notes log. Never shown to the
+ *  customer. The "mark visited" outcome is mirrored in here server-side. ─────── */
+function LeadNotesSection({ notes, onAdd }: { notes: LeadNote[]; onAdd: (body: string) => Promise<void> }) {
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    const t = draft.trim();
+    if (!t) return;
+    setBusy(true); setErr(null);
+    try { await onAdd(t); setDraft(''); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save note'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="notes-sec">
+      <div className="subhead"><MessageSquare size={13} /> Notes</div>
+      <p className="note" style={{ margin: '0 0 12px' }}>
+        An internal log for your team — record what’s going on with this lead so the next person to handle it is up to speed. Not visible to the customer.
+      </p>
+      <div className="note-add">
+        <textarea className="qinput" rows={2} value={draft} placeholder="Add a note about this lead…"
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); } }} />
+        {err && <p className="note" style={{ color: 'var(--brick, #b91c1c)', margin: '6px 0 0' }}>{err}</p>}
+        <div style={{ display: 'flex', marginTop: 8 }}>
+          <button className="btn btn-jade btn-sm" disabled={busy || !draft.trim()} onClick={() => void submit()}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <><Check size={14} /> Add note</>}
+          </button>
+        </div>
+      </div>
+      {notes.length === 0 ? (
+        <p className="note" style={{ marginTop: 14 }}>No notes yet. Add the first one above.</p>
+      ) : (
+        <div className="note-list">
+          {notes.map(n => (
+            <div key={n.id} className="note-item">
+              <div className="note-meta">
+                <strong>{n.authorRole === 'system' ? 'System' : (n.authorName ?? 'Staff')}</strong>
+                {n.authorRole === 'manager' && <span className="pill neutral" style={{ fontSize: 10 }}>Manager</span>}
+                {n.authorRole === 'system' && <span className="pill neutral" style={{ fontSize: 10 }}>System</span>}
+                <span className="note-when">{fmtDateTime(n.createdAt)}</span>
+              </div>
+              <div className="note-body">{n.body}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -959,19 +1136,36 @@ type StageBodyProps = {
   onSetPlanItemMethod: (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string }) => Promise<void>;
   onOpenLease: () => void;
 };
-/* ─── CostSummary: the FULL cost breakdown the customer sees (from lead.costPreview),
- *  mirroring the customer spaces v2 payment summary (rent incl VAT · deposit · admin ·
- *  ejari · commission · custom fees · total payable). Shown at the viewing stage
- *  before a firm plan exists. ──────────────────────────────────────────────────── */
+/* ─── CostSummary: the FULL cost breakdown the customer sees (from lead.costPreview).
+ *  Rendered as the SAME flat "Cost summary" the customer sees on spaces/v2 (rent incl
+ *  VAT · deposit · admin · Contract Registration · commission · custom fees · total
+ *  payable) — one consistent layout across both sides. Shown at the viewing stage
+ *  before a firm plan exists, so the cheque schedule is deliberately omitted. ────── */
 function CostSummary({ cp }: { cp: NonNullable<ApiLead['costPreview']> }) {
-  // Centralised four-group segregation — same SegregatedPlanView as the contract
-  // Payment Summary, the receipts, and the customer proposal, so RP and customer
-  // see one consistent layout.
-  const seg = buildSegregatedPlan(segRowsFromAggregatePlan(cp));
+  const rows: Array<{ label: string; fils: number }> = [
+    { label: `Annual rent${cp.rentVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.rentFils + cp.rentVatFils },
+    { label: 'Security deposit', fils: cp.securityDepositFils },
+    { label: `Admin fee${cp.adminFeeVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.adminFeeFils + cp.adminFeeVatFils },
+    { label: `Contract Registration Fee${cp.ejariVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.ejariFils + cp.ejariVatFils },
+    { label: `Commission${cp.commissionVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.commissionFils + cp.commissionVatFils },
+    ...(cp.customFees ?? []).map(f => ({ label: `${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`, fils: f.netFils + f.vatFils })),
+  ].filter(r => r.fils > 0);
   return (
     <div>
-      <div className="subhead"><Wallet size={13} /> Payment summary · shared with customer</div>
-      <SegregatedPlanView plan={seg} />
+      <div className="subhead"><Wallet size={13} /> Cost summary · shared with customer</div>
+      <table className="ptable">
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}><td>{r.label}</td><td className="amt">{aed(r.fils)}</td></tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr><td>Total payable</td><td className="amt tot">{aed(cp.totalFils)}</td></tr>
+        </tfoot>
+      </table>
+      <p className="note" style={{ margin: '8px 0 0' }}>
+        The customer picks a payment frequency (annual, semi-annual, quarterly, etc.) when they tap <b>I&rsquo;m Interested</b> — the full cheque schedule appears before they confirm.
+      </p>
     </div>
   );
 }
@@ -1089,6 +1283,12 @@ function StageBody(props: StageBodyProps) {
                   {v.desiredMoveIn && <span>Desired move-in <b>{fmtDateOnly(v.desiredMoveIn.slice(0, 10))}</b></span>}
                   <span>Status <span className={`cstat ${v.status === 'confirmed' ? 'cleared' : 'pending'}`}>{v.status === 'confirmed' ? 'Confirmed' : 'Scheduled'}</span></span>
                 </div>
+                {v.notes && (
+                  <div className="vnote">
+                    <div className="vnote-label">Note from customer</div>
+                    <div className="vnote-body">{v.notes}</div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2101,6 +2301,9 @@ function GlobalStyle() {
       .quest-page .vcard .vloc svg { margin-top: 2px; flex-shrink: 0; color: var(--mute); }
       .quest-page .vcard .vmeta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 10px; font-size: 12px; color: var(--mute); align-items: center; }
       .quest-page .vcard .vmeta b { color: var(--ink); font-weight: 700; }
+      .quest-page .vcard .vnote { margin-top: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid #f5d98a; border-left: 4px solid #e0a92a; background: #fff9e8; }
+      .quest-page .vcard .vnote .vnote-label { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #a06d05; margin-bottom: 5px; }
+      .quest-page .vcard .vnote .vnote-body { font-size: 14px; font-weight: 600; line-height: 1.5; color: var(--ink); white-space: pre-wrap; }
 
       .quest-page .ptable { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid var(--mist-strong); border-radius: 12px; overflow: hidden; }
       .quest-page .ptable th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); font-weight: 800; padding: 8px 10px; border-bottom: 1px solid var(--mist-strong); background: var(--surface); }
@@ -2109,6 +2312,14 @@ function GlobalStyle() {
       .quest-page .ptable .amt { font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
       .quest-page .ptable tfoot td { border-top: 2px solid #bfe3d5; background: var(--jade-tint); font-weight: 800; }
       .quest-page .ptable tfoot .tot { color: var(--jade-deep); }
+      .quest-page .notes-sec { margin-top: 16px; background: var(--paper, #fff); border: 1px solid var(--mist-strong); border-radius: 16px; padding: 18px 20px; }
+      .quest-page .notes-sec .note-add { }
+      .quest-page .notes-sec .note-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+      .quest-page .notes-sec .note-item { background: var(--surface); border: 1px solid var(--mist-strong); border-radius: 12px; padding: 10px 13px; }
+      .quest-page .notes-sec .note-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; color: var(--mute); }
+      .quest-page .notes-sec .note-meta strong { color: var(--ink-2); font-weight: 700; }
+      .quest-page .notes-sec .note-when { margin-left: auto; }
+      .quest-page .notes-sec .note-body { font-size: 13.5px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; }
 
       /* Grouped payment plan (cleaner cheque schedule) */
       .quest-page .plan2 { border: 1px solid var(--mist-strong); border-radius: 12px; overflow: hidden; background: #fff; }

@@ -1247,13 +1247,22 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
       </div>
 
       {/* Actions */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <PrimaryBtn onClick={() => setModal('interested')}>
-          <CheckCircle2 size={16} /> I&rsquo;m Interested
-        </PrimaryBtn>
-        <SecondaryBtn onClick={() => setModal('reschedule')}>Reschedule</SecondaryBtn>
-        <SecondaryBtn onClick={() => setModal('not_interested')}>Not interested</SecondaryBtn>
-      </div>
+      {/* Reschedule is only offered while the viewing is still upcoming
+          (scheduled / confirmed). Once the RP marks it completed/no-show or it's
+          cancelled, the slot can't be moved — hide the button so the customer
+          isn't shown an action the backend will reject. */}
+      {(() => {
+        const canReschedule = v.status === 'scheduled' || v.status === 'confirmed';
+        return (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <PrimaryBtn onClick={() => setModal('interested')}>
+              <CheckCircle2 size={16} /> I&rsquo;m Interested
+            </PrimaryBtn>
+            {canReschedule && <SecondaryBtn onClick={() => setModal('reschedule')}>Reschedule</SecondaryBtn>}
+            <SecondaryBtn onClick={() => setModal('not_interested')}>Not interested</SecondaryBtn>
+          </div>
+        );
+      })()}
 
       {modal === 'interested' && <InterestedPopup
         viewing={v}
@@ -1556,14 +1565,24 @@ function InterestedPopup({
 }
 
 function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: ApiViewing; onClose: () => void; onSuccess: () => void }) {
-  const [date, setDate] = useState('');
+  const SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+  const today = new Date().toISOString().slice(0, 10);
+  // Current slot (date + time in app timezone) — used to block rescheduling to
+  // the SAME slot the customer already holds (that's a no-op).
+  const cur = viewing?.scheduledAt ? new Date(viewing.scheduledAt) : null;
+  const curDate = cur ? cur.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE }) : '';
+  const curTime = cur ? cur.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: APP_TIME_ZONE }) : '';
+  const curLabel = cur ? cur.toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: APP_TIME_ZONE }) : '';
+  // Default to the viewing's CURRENT date (fallback today) so the greyed-out
+  // current slot is visible. The time is left unselected — the current slot is
+  // shown disabled, not pre-picked, so they choose a fresh time.
+  const [date, setDate] = useState((curDate && curDate >= today) ? curDate : today);
   const [time, setTime] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const SLOTS = ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-  const today = new Date().toISOString().slice(0, 10);
   async function submit() {
     if (!date || !time) { setErr('Pick both a date and a time.'); return; }
+    if (date === curDate && time === curTime) { setErr('That’s already your current viewing time — pick a different slot.'); return; }
     setBusy(true); setErr(null);
     try {
       const scheduledAt = `${date}T${time}:00`;
@@ -1580,6 +1599,7 @@ function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: ApiViewing;
       </>
     }>
       <div style={{ display: 'grid', gap: 16 }}>
+        {curLabel && <div style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 600 }}>Currently: {curLabel}</div>}
         <div>
           <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>New date</label>
           <input type="date" value={date} min={today} onChange={e => setDate(e.target.value)}
@@ -1588,12 +1608,16 @@ function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: ApiViewing;
         <div>
           <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Time slot</label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-            {SLOTS.map(s => (
-              <button key={s} type="button" onClick={() => setTime(s)}
-                style={{ padding: '10px 8px', borderRadius: 10, border: `1.5px solid ${time === s ? 'var(--jade)' : 'var(--mist-strong)'}`, background: time === s ? 'var(--jade-soft)' : 'var(--paper)', color: time === s ? 'var(--jade-deep)' : 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                {s}
-              </button>
-            ))}
+            {SLOTS.map(s => {
+              const isCurrent = date === curDate && s === curTime;   // the slot they already hold
+              return (
+                <button key={s} type="button" disabled={isCurrent} onClick={() => setTime(s)}
+                  title={isCurrent ? 'Your current viewing time' : undefined}
+                  style={{ padding: '10px 8px', borderRadius: 10, border: `1.5px solid ${time === s ? 'var(--jade)' : 'var(--mist-strong)'}`, background: isCurrent ? 'var(--mist)' : time === s ? 'var(--jade-soft)' : 'var(--paper)', color: isCurrent ? 'var(--mute)' : time === s ? 'var(--jade-deep)' : 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: isCurrent ? 'not-allowed' : 'pointer', opacity: isCurrent ? 0.55 : 1, fontFamily: 'inherit' }}>
+                  {s}{isCurrent ? ' ·now' : ''}
+                </button>
+              );
+            })}
           </div>
         </div>
         {err && <ErrorBox msg={err} />}

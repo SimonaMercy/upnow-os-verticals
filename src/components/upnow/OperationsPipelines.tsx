@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
-  Search, X, RefreshCw, Calendar, ClipboardList, CheckCircle2, ArrowRight,
+  Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight,
   UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
   BarChart3, Info,
 } from 'lucide-react';
@@ -292,7 +292,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   });
   const [search, setSearch] = useState('');
   const [filterAsset, setFilterAsset] = useState('all');
-  const [filterYear, setFilterYear] = useState('all');
+  // Scope is fixed to the current calendar year (no picker) — the board always
+  // shows this year's deals.
+  const filterYear = String(new Date().getFullYear());
   const [view, setView] = useState<'kanban' | 'list' | 'grid'>(() => {
     const v = sp.get('view'); return v === 'list' || v === 'grid' || v === 'kanban' ? v : 'kanban';
   });
@@ -319,20 +321,12 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLoading(true); load().finally(() => setLoading(false)); }, [load]);
 
-  // Property + year option lists (drawn from both sources).
+  // Property option list (drawn from both sources).
   const assets = useMemo(() => {
     const s = new Set<string>();
     for (const c of contracts) if (c.property.buildingName) s.add(c.property.buildingName);
     for (const l of leads) if (l.unit?.property?.buildingName) s.add(l.unit.property.buildingName);
     return [...s].sort();
-  }, [contracts, leads]);
-
-  const years = useMemo(() => {
-    const s = new Set<string>();
-    const y = (d: string | null | undefined) => (d && /^\d{4}/.test(d) ? d.slice(0, 4) : null);
-    for (const c of contracts) { const a = y(c.startDate); if (a) s.add(a); const b = y(c.endDate); if (b) s.add(b); }
-    for (const l of leads) { const a = y(l.createdAt); if (a) s.add(a); }
-    return [...s].sort((a, b) => b.localeCompare(a));
   }, [contracts, leads]);
 
   const matchSearch = (hay: (string | null | undefined)[]) => {
@@ -341,7 +335,6 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     return hay.filter((x): x is string => Boolean(x)).join(' ').toLowerCase().includes(q);
   };
   const contractInYear = (c: OpsContract) => {
-    if (filterYear === 'all') return true;
     const jan1 = `${filterYear}-01-01`, dec31 = `${filterYear}-12-31`;
     const st = (c.startDate ?? '').slice(0, 10), en = (c.endDate ?? '').slice(0, 10);
     if (!st || st > dec31) return (c.createdAt ?? '').slice(0, 4) === filterYear;
@@ -357,7 +350,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
       && matchSearch([c.ref, tenantDisplayName(c.tenant), c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]);
     const passL = (l: OpsLead) =>
       (filterAsset === 'all' || l.unit?.property?.buildingName === filterAsset)
-      && (filterYear === 'all' || (l.createdAt ?? '').slice(0, 4) === filterYear)
+      && (l.createdAt ?? '').slice(0, 4) === filterYear
       && matchSearch([l.customerName, l.convertedTenant?.user?.name, l.leadEmail, l.unit?.unitNumber, l.unit?.property?.buildingName]);
 
     const leadCards = leads.filter(l => LEAD_MATCH.has(l.stage) && passL(l))
@@ -498,7 +491,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     </div>
   );
 
-  const hasFilters = filterAsset !== 'all' || filterYear !== 'all' || search !== '';
+  const hasFilters = filterAsset !== 'all' || search !== '';
 
   return (
     <div className="opsp-page">
@@ -515,13 +508,6 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
             </h1>
           </div>
           <div className="hero-actions">
-            <div className="year-global" title="Scope by year">
-              <Calendar size={14} />
-              <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter by year">
-                <option value="all">All years</option>
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
             {performanceHref && (
               <Link href={performanceHref} className="btn btn-ghost" title="How the team is performing, stage by stage">
                 <BarChart3 size={14} /> Manager performance
@@ -568,7 +554,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
             </select>
           </div>
           {hasFilters && (
-            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setFilterYear('all'); setSearch(''); }}>
+            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setSearch(''); }}>
               <X size={12} /> Reset
             </button>
           )}
@@ -653,9 +639,6 @@ export function OpsPipelineStyle() {
       .opsp-page .btn{ display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:9px; font-weight:600; font-size:12px; border:1px solid transparent; cursor:pointer; white-space:nowrap; }
       .opsp-page .btn-ghost{ background:#fff; color:var(--ink-2); border-color:var(--line); }
       .opsp-page .btn-ghost:hover{ border-color:var(--ink-3); color:var(--ink); }
-      .opsp-page .year-global{ display:inline-flex; align-items:center; gap:5px; padding:0 4px 0 10px; height:33px; border-radius:9px; background:#fff; border:1px solid var(--line); color:var(--ink-2); }
-      .opsp-page .year-global svg{ color:var(--green-d); }
-      .opsp-page .year-global .sel{ border:0; background:transparent; height:31px; padding:0 6px 0 4px; font-weight:600; color:var(--ink); cursor:pointer; }
       .opsp-page .reset{ background:transparent; border:0; color:var(--green-d); font-weight:600; font-size:12.5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:7px; }
       .opsp-page .reset:hover{ background:var(--green-t2); }
 

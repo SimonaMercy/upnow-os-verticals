@@ -29,6 +29,7 @@ export function toEjari(c: any, signatures: any[]): EjariContractData {
       bankAccountName: c.landlord?.bankAccountName ?? null,
       email: c.landlord?.email ?? null,
       phone: c.landlord?.phone ?? null,
+      entityType: c.landlord?.entityType ?? null,
       companyName: c.landlord?.companyName ?? null,
       emiratesId: c.landlord?.emiratesId ?? null,
       licenseNumber: c.landlord?.licenseNumber ?? null,

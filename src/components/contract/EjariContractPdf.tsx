@@ -51,7 +51,7 @@ const AR = 'NotoAr';
 const isArabic = (s?: string | null) =>
   /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(s || '');
 
-export interface EjariParty { name: string | null; email: string | null; phone: string | null; companyName?: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null }
+export interface EjariParty { name: string | null; email: string | null; phone: string | null; entityType?: string | null; companyName?: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null }
 export interface EjariContractData {
   ref: string;
   startDate: string; endDate: string; createdAt: string;
@@ -284,6 +284,11 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   const listed = data.listedRent != null ? Number(data.listedRent) : rent;
   const discount = data.discountAmount != null ? Number(data.discountAmount) : Math.max(0, listed - rent);
   const landlordName = data.landlord.companyName || data.landlord.name || '';
+  // A company lessor is identified by its trade License No. + Licensing Authority
+  // (shown below), not an Emirates ID — so the individual-only EID row is omitted.
+  // Keyed off entityType, NOT companyName: individual RPs may also carry a
+  // company/brand name, so companyName is not a reliable "is a company" signal.
+  const landlordIsCompany = data.landlord.entityType === 'company';
   // Lessor's phone: when the RP acts under a Power of Attorney, the POA holder's
   // phone is the lessor's contact on the contract; otherwise the landlord's own.
   const lessorPhone = data.landlord.hasPoa && data.landlord.poaPersonPhone
@@ -323,7 +328,9 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
         <Section en="Owner / Lessor Information" ar="معلومات المالك / المؤجر">
           <Field label="Owner's Name" ar="اسم المالك" value={landlordName} />
           <Field label="Lessor's Name" ar="اسم المؤجر" value={landlordName} />
-          <Field label="Lessor's Emirates ID" ar="الهوية الإماراتية للمؤجر" value={data.landlord.emiratesId} />
+          {!landlordIsCompany && (
+            <Field label="Lessor's Emirates ID" ar="الهوية الإماراتية للمؤجر" value={data.landlord.emiratesId} />
+          )}
           <View style={{ flexDirection: 'row' }}>
             <Field label="License No." ar="رقم الرخصة" value={data.landlord.licenseNumber} half />
             <Field label="Licensing Authority" ar="سلطة الترخيص" value={data.landlord.licenseAuthority} half />
