@@ -1162,7 +1162,7 @@ export default function AddListingPage() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {/* Choose from a saved template… */}
-                <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} />
+                <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} selectedName={addendumTerms.name?.trim() || undefined} selectedTerms={addendumTerms} />
                 {hasAddendumTerms(addendumTerms) && (
                   <button type="button" disabled={addendumPreviewBusy}
                     onClick={async () => {

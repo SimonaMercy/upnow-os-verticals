@@ -781,7 +781,7 @@ export default function AddUnitsExperience({ backHref }: { backHref: string }) {
                             })()}
                           </div>
                         </div>
-                        <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} />
+                        <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} selectedName={addendumTerms.name?.trim() || undefined} selectedTerms={addendumTerms} />
                         {hasAddendumTerms(addendumTerms) && (
                           <button type="button" className={s.addendPreview} disabled={addendumPreviewBusy}
                             onClick={async () => {
