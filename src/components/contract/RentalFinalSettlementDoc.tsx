@@ -211,7 +211,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
         <div className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wider">Landlord / Rental Provider</div>
         <div className="text-[17px] font-bold text-[#1f6b4f] uppercase tracking-wide leading-tight">{c.landlordName || '—'}</div>
         <div className="mt-2 text-center">
-          <h1 className="text-[26px] font-extrabold text-[#1a1916] leading-none">RENTAL FINAL SETTLEMENT</h1>
+          <h1 className="text-[26px] font-extrabold text-[#1a1916] leading-none">FINAL STATEMENT</h1>
           <p className="text-[12px] italic text-[#9b9890] mt-1">Statement of Account &amp; Deposit Reconciliation</p>
         </div>
       </div>
