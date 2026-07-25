@@ -514,7 +514,6 @@ const EMIRATES_LIST = ['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','F
 type PenaltyRuleKey =
   | 'bouncedChequePenalty'
   | 'chequeHoldPenalty'
-  | 'chequeDeferralPenalty'
   | 'lateRenewalPenalty'
   | 'earlyTerminationPenalty'
   | 'lateMoveoutPenalty'
@@ -542,7 +541,6 @@ type PenaltyRuleCfg = {
 const PENALTY_RULES: PenaltyRuleCfg[] = [
   { key: 'bouncedChequePenalty', title: 'Bounced Cheque Penalty', description: 'Charge for each bounced rent cheque. Auto-added as an editable deduction at move-out settlement.', pctLabel: '% of cheque' },
   { key: 'chequeHoldPenalty', title: 'Cheque Hold / Replacement', description: 'Charge when a rent cheque is held or replaced. Auto-fills the "Cheque replacement" fee on a contract; also an editable deduction at move-out settlement.' },
-  { key: 'chequeDeferralPenalty', title: 'Cheque Deferral', description: 'Charge to defer a cheque’s due date. Auto-fills the "Cheque deferral" fee when the RP adds it on a contract.' },
   { key: 'lateRenewalPenalty', title: 'Late Renewal', description: 'Charge when the tenant renews after the renewal window.' },
   { key: 'earlyTerminationPenalty', title: 'Early Termination', description: 'Charge when the tenant ends the lease early — typically a number of months of annual rent. Auto-added as an editable deduction at settlement.', modes: ['months', 'pct', 'aed'] },
   { key: 'lateMoveoutPenalty', title: 'Late Move-out', description: 'Charge when the tenant overstays past the lease end date — typically pro-rated per day of delay. Auto-added as an editable deduction at settlement.', modes: ['daily', 'aed', 'pct'] },
