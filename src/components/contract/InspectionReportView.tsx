@@ -23,6 +23,7 @@ import {
   computeInspectionTotals, quantityOf, canonicalKey,
 } from '@/lib/inspectionCatalog';
 import { displayInspectionPhotoUrl } from '@/lib/inspectionPhotos';
+import { openDocViewer } from '@/lib/docViewer';
 import s from './InspectionReportView.module.css';
 
 type Phase = 'move_in' | 'move_out';
@@ -160,13 +161,16 @@ export function InspectionReportView({
         ]} />
       </div>
 
-      {/* Tiles */}
-      <div className={`${s.tiles} ${showMoney ? '' : s.three}`}>
-        <div className={`${s.tile} ${s.cat}`}><span className={`${s.tIc} ${s.ico}`}><Layers /></span><div className={s.body}><span className={s.l}>Total Categories</span><span className={s.num}>{totals.categories}</span></div></div>
-        <div className={`${s.tile} ${s.items}`}><span className={`${s.tIc} ${s.ico}`}><ClipboardCheck /></span><div className={s.body}><span className={s.l}>Total Items</span><span className={s.num}>{totals.items}</span></div></div>
-        <div className={`${s.tile} ${s.replace}`}><span className={`${s.tIc} ${s.ico}`}><Wrench /></span><div className={s.body}><span className={s.l}><span className={s.warn}><AlertTriangle /></span>{isMoveIn ? 'Items Flagged' : 'Items to be Replaced'}</span><span className={s.num}>{isMoveIn ? totals.defective : totals.itemsToReplace}</span></div></div>
-        {showMoney && <div className={`${s.tile} ${s.cost}`}><span className={`${s.tIc} ${s.ico}`}><Banknote /></span><div className={s.body}><span className={s.l}><span className={s.warn}><AlertTriangle /></span>Estimated Total Cost (AED)</span><span className={`${s.num} ${s.tabnum}`}>{AED(totals.estCostAed)}</span></div></div>}
-      </div>
+      {/* Tiles — hidden on move-in (Total Categories / Total Items / Items Flagged
+          removed per request); move-out keeps its replacement + cost summary. */}
+      {!isMoveIn && (
+        <div className={`${s.tiles} ${showMoney ? '' : s.three}`}>
+          <div className={`${s.tile} ${s.cat}`}><span className={`${s.tIc} ${s.ico}`}><Layers /></span><div className={s.body}><span className={s.l}>Total Categories</span><span className={s.num}>{totals.categories}</span></div></div>
+          <div className={`${s.tile} ${s.items}`}><span className={`${s.tIc} ${s.ico}`}><ClipboardCheck /></span><div className={s.body}><span className={s.l}>Total Items</span><span className={s.num}>{totals.items}</span></div></div>
+          <div className={`${s.tile} ${s.replace}`}><span className={`${s.tIc} ${s.ico}`}><Wrench /></span><div className={s.body}><span className={s.l}><span className={s.warn}><AlertTriangle /></span>{isMoveIn ? 'Items Flagged' : 'Items to be Replaced'}</span><span className={s.num}>{isMoveIn ? totals.defective : totals.itemsToReplace}</span></div></div>
+          {showMoney && <div className={`${s.tile} ${s.cost}`}><span className={`${s.tIc} ${s.ico}`}><Banknote /></span><div className={s.body}><span className={s.l}><span className={s.warn}><AlertTriangle /></span>Estimated Total Cost (AED)</span><span className={`${s.num} ${s.tabnum}`}>{AED(totals.estCostAed)}</span></div></div>}
+        </div>
+      )}
 
       {/* Component table */}
       <div className={s.secH}>
@@ -387,9 +391,14 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
       {photos.map((p) => (
-        <span key={p.id} style={{ position: 'relative', width: 40, height: 40, borderRadius: 6, overflow: 'hidden', border: '1px solid #e8e6e0', background: '#f4f3ef', flexShrink: 0 }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={displayInspectionPhotoUrl(p.url)} alt={p.caption || 'attachment'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <span key={p.id} style={{ position: 'relative', width: 56, height: 56, borderRadius: 6, overflow: 'hidden', border: '1px solid #e8e6e0', background: '#f4f3ef', flexShrink: 0 }}>
+          {/* Click the thumbnail to open the full photo in the in-portal viewer. */}
+          <button type="button" onClick={() => openDocViewer({ fileUrl: displayInspectionPhotoUrl(p.url), caption: p.caption || 'Inspection photo' })}
+            title="Click to view full photo" aria-label="View full photo"
+            style={{ display: 'block', width: '100%', height: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in', lineHeight: 0 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={displayInspectionPhotoUrl(p.url)} alt={p.caption || 'attachment'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </button>
           {editable && onRemove && (
             <button type="button" aria-label="Remove photo" onClick={() => onRemove(p.id)}
               style={{ position: 'absolute', top: 1, right: 1, width: 16, height: 16, borderRadius: 999, background: 'rgba(0,0,0,.6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', padding: 0 }}>

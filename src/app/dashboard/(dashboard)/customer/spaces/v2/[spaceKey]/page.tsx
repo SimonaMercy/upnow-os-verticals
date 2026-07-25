@@ -280,7 +280,7 @@ type StateKey =
   | 'docs_under_review'
   | 'payment_review'
   | 'awaiting_rp_confirm'
-  | 'signature' | 'ejari' | 'utility'
+  | 'signature' | 'ejari' | 'utility' | 'utility_review'
   | 'move_in' | 'active'
   | 'termination_request_received' | 'termination_request_sent'
   | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques'
@@ -313,6 +313,7 @@ const STATE_DEFS: Record<StateKey, StateDef> = {
   signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'Review and sign your tenancy contract.',          body: 'Open the final contract, then add your signature below.',                                                                                                                                         timing: 'Takes ~2 min' },
   ejari:                         { label: 'Contract Registration in progress', sub: 'Step 5 of 8',                 mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is registering your Contract Registration Certificate.', body: 'The certificate will appear here for download the moment it’s uploaded.',                                                                                                                       timing: '2-5 business days' },
   utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
+  utility_review:                { label: 'Utility under review',          sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'waiting',   headline: 'Your utility submission is under review.',         body: 'Your rental provider is checking your account number and proof of payment. You’ll move on to the inspection once it’s approved.',                                                               timing: 'Usually within 1 business day' },
   move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Walk through every room and meter reading, then counter-sign so the record is official.',                                                                                                       timing: 'Takes ~3 min' },
   active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: 'Manage payments, raise issues, or start a renewal request from here any time.',                                                                                                                 timing: null },
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
@@ -535,7 +536,11 @@ function deriveStateKey(r: Resolved): StateKey {
 
     if (c.status === 'active') return 'active';
 
-    const hasUtility = c.utilityStatus === 'submitted' || c.utilityStatus === 'verified';
+    // The utility step only clears once the RP has VERIFIED the submission.
+    // A bare `submitted` holds the customer on a review-waiting screen rather
+    // than advancing to move-in.
+    const utilityVerified = c.utilityStatus === 'verified';
+    const utilitySubmitted = c.utilityStatus === 'submitted';
     const inspectionSubmitted = !!c.moveInInspection?.submitted;
     const inspectionSignedByTenant = !!c.moveInInspection?.signedByTenant;
 
@@ -543,7 +548,8 @@ function deriveStateKey(r: Resolved): StateKey {
     // for the landlord to submit AND awaiting the customer's counter-sign.
     // The MoveInAction component decides which sub-UI to render based on
     // `inspectionSubmitted` + `inspectionSignedByTenant`.
-    if (c.ejariStatus === 'registered' && hasUtility) return 'move_in';
+    if (c.ejariStatus === 'registered' && utilityVerified) return 'move_in';
+    if (c.ejariStatus === 'registered' && utilitySubmitted) return 'utility_review';
     if (c.ejariStatus === 'registered') return 'utility';
     if (c.status === 'issued' && c.tenantSignedAt) return 'ejari';
     if (c.status === 'issued' && !c.tenantSignedAt) return 'signature';
@@ -932,6 +938,77 @@ function WaitingBadge() {
   );
 }
 
+/* ─── Ongoing-setup downloads: payment receipts + Contract Registration cert ──
+   Surfaced across the ongoing setup steps (signature → registration → utility →
+   move-in) so the customer can grab their receipts the moment the RP confirms
+   payment, and their Contract Registration certificate the moment it's attached
+   — without waiting for the tenancy to go active. Renders nothing until at
+   least one is available. */
+function ejariCertDoc(resolved: Resolved): TenantDoc | undefined {
+  return (resolved.myDocs ?? []).find(d => d.documentKey.startsWith('ejari') && !!d.fileUrl);
+}
+function receiptsReadyFor(contract: Resolved['contract'] | Resolved['renewalContract'] | null | undefined): boolean {
+  if (!contract) return false;
+  return !!contract.pdcConfirmed || (contract.payments ?? []).some(p => (p.chequeStatus ?? '').toLowerCase() === 'cleared');
+}
+function DownloadCard({ href, icon, title, sub }: { href: string; icon: React.ReactNode; title: string; sub: string }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 18px', borderRadius: 14, background: 'var(--paper)', border: '1.5px solid var(--jade)', textDecoration: 'none', color: 'var(--ink)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        <span style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--jade)', color: 'var(--paper)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>{icon}</span>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{title}</p>
+          <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0' }}>{sub}</p>
+        </div>
+      </div>
+      <ExternalLink size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
+    </a>
+  );
+}
+/** States where the downloads panel is surfaced. Deliberately excludes the
+ *  active / end states — the active view already lists these documents in full,
+ *  so showing them again here would duplicate. Self-hides anyway until a
+ *  receipt or certificate actually exists. */
+const DOWNLOAD_STATES = new Set<StateKey>([
+  'awaiting_rp_confirm', 'signature', 'ejari', 'utility', 'utility_review', 'move_in',
+  'renewal_cheques', 'renewal_progress', 'renewal_ejari',
+]);
+/**
+ * Standalone section (rendered BELOW the current-step card, never inside it) so
+ * the customer can grab their payment receipts the moment the RP confirms
+ * payment, and their Contract Registration certificate the moment it's attached
+ * — kept visually separate from the active step to avoid any confusion about
+ * what they still need to do. Renders nothing until at least one is available.
+ */
+function SetupDownloads({ resolved, stateKey }: { resolved: Resolved; stateKey: StateKey }) {
+  // Prefer the renewal contract while a renewal is in-flight (its receipts are
+  // the ones the customer is settling); falls back to the primary contract for
+  // a brand-new lease, where renewalContract is null.
+  const contract = resolved.renewalContract ?? resolved.contract;
+  const ejariDoc = ejariCertDoc(resolved);
+  const showReceipts = !!contract && receiptsReadyFor(contract);
+  if (!DOWNLOAD_STATES.has(stateKey) || (!showReceipts && !ejariDoc)) return null;
+  return (
+    <div style={{ background: 'var(--paper)', borderRadius: 18, border: '1px solid var(--mist-strong)', padding: '22px 24px', display: 'grid', gap: 12, boxShadow: '0 18px 44px -34px rgba(26,23,20,0.18)' }}>
+      <div>
+        <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.015em' }}>Available to download</p>
+        <p style={{ fontSize: 12, color: 'var(--mute)', margin: '3px 0 0' }}>Ready now — you don&apos;t need to wait for the next step.</p>
+      </div>
+      {showReceipts && contract && (
+        <DownloadCard href={`/dashboard/customer/contracts/${contract.id}/print/receipt`}
+          icon={<FileText size={18} />} title="View &amp; download receipts"
+          sub="Your payments are confirmed — preview and download all your receipts." />
+      )}
+      {ejariDoc?.fileUrl && (
+        <DownloadCard href={ejariDoc.fileUrl}
+          icon={<Stamp size={18} />} title="Download Contract Registration Certificate"
+          sub="Your certificate is ready — open or save a copy for your records." />
+      )}
+    </div>
+  );
+}
+
 /* ─── Modal primitive ──────────────────────────────────────────────── */
 function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
@@ -1062,10 +1139,10 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'payment_review':                return <PaymentPlanAction resolved={resolved} onRefresh={onRefresh} />;
     case 'awaiting_rp_confirm':           return <ChequesReviewWaitAction resolved={resolved} />;
     case 'signature':                     return <SignatureAction resolved={resolved} onRefresh={onRefresh} />;
-    // PHASE 6 → add Ejari certificate download once RP uploads
     case 'ejari':                         return <WaitingBadge />;
     // PHASE 6 → prefill premise number into the utility form
     case 'utility':                       return <UtilityAction resolved={resolved} onRefresh={onRefresh} />;
+    case 'utility_review':                return <UtilityReviewWaitAction resolved={resolved} />;
     // PHASE 6 → MoveInAction handles both halves (awaiting submit + counter-sign);
     //          dispute / reject flow lands here too.
     case 'move_in':                       return <MoveInAction resolved={resolved} />;
@@ -3256,6 +3333,34 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   );
 }
 
+/* ─── UTILITY — under review (customer submitted, RP hasn't verified yet) ── */
+function UtilityReviewWaitAction({ resolved }: { resolved: Resolved }) {
+  const acc = resolved.contract?.utilityAccountNumber;
+  const proof = (resolved.myDocs ?? []).find(d => d.documentKey === 'utility_proof_of_payment' && !!d.fileUrl);
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <Clock size={18} style={{ color: 'var(--jade-deep)', flexShrink: 0, marginTop: 2 }} />
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 4px' }}>Utility submitted — awaiting approval</p>
+          <p style={{ fontSize: 13, color: 'var(--jade-deep)', margin: 0, lineHeight: 1.5 }}>
+            {acc
+              ? <>Account <strong>{acc}</strong> and your proof of payment are with your rental provider for review. We&apos;ll move you to the move-in inspection the moment it&apos;s approved.</>
+              : <>Your submission is with your rental provider for review. We&apos;ll move you to the move-in inspection the moment it&apos;s approved.</>}
+          </p>
+        </div>
+      </div>
+      {proof?.fileUrl && (
+        <button type="button" onClick={() => openDocViewer({ fileUrl: proof.fileUrl, caption: 'Utility proof of payment' })}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', background: '#f4efe8', border: '1px solid var(--mist)', borderRadius: 12, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+          <FileText size={16} color="var(--jade-deep)" />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>View the proof you uploaded</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ─── UTILITY ──────────────────────────────────────────────────────── */
 function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const c = resolved.contract;
@@ -3271,7 +3376,9 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
   const [proofJustUploaded, setProofJustUploaded] = useState<{ name: string; fileUrl: string } | null>(null);
   // Existing proof on file from a previous attempt (if any).
   const existingProof = resolved.myDocs.find(d => d.documentKey === 'utility_proof_of_payment');
-  const proofUploaded = !!proofJustUploaded || !!existingProof;
+  // A rejected proof does NOT count as uploaded — the customer must replace it
+  // with a fresh file before they can submit again.
+  const proofUploaded = !!proofJustUploaded || (!!existingProof && existingProof.status !== 'rejected');
   const proofDisplayName = proofJustUploaded?.name ?? existingProof?.displayName ?? 'Utility proof on file';
 
   if (!c) return <ErrorBox msg="Contract not found." />;
@@ -3305,8 +3412,21 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
     } catch (e) { setErr(e instanceof Error ? e.message : 'Upload failed'); } finally { setProofBusy(false); }
   }
 
+  const wasRejected = existingProof?.status === 'rejected' && !proofJustUploaded;
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {wasRejected && (
+        <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 12, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <AlertCircle size={16} style={{ color: 'var(--brick)', flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--brick)', margin: '0 0 2px' }}>Your rental provider needs a new utility proof</p>
+            <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+              {existingProof?.notes?.trim() || 'Please re-upload a clearer utility proof of payment.'} Replace the file below and submit again.
+            </p>
+          </div>
+        </div>
+      )}
       <div>
         <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>DEWA / utility account number</label>
         <input type="text" value={acc} onChange={e => setAcc(e.target.value)} placeholder="e.g. 12345678"
@@ -3637,11 +3757,6 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
       .finally(() => setLoading(false));
   }, [viewing]);
 
-  // Receipts unlock once the RP has reviewed/cleared the payments (PDC confirmed,
-  // or any cheque cleared). ONE control that previews AND downloads the bundle.
-  const contract = resolved.contract;
-  const receiptsReady = !!contract && (!!contract.pdcConfirmed || (contract.payments ?? []).some(p => (p.chequeStatus ?? '').toLowerCase() === 'cleared'));
-
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div style={{ background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
@@ -3653,20 +3768,6 @@ function ChequesReviewWaitAction({ resolved }: { resolved: Resolved }) {
           </p>
         </div>
       </div>
-
-      {receiptsReady && contract && (
-        <a href={`/dashboard/customer/contracts/${contract.id}/print/receipt`} target="_blank" rel="noopener noreferrer"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 18px', borderRadius: 14, background: 'var(--paper)', border: '1.5px solid var(--jade)', textDecoration: 'none', color: 'var(--ink)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <span style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--jade)', color: 'var(--paper)', display: 'grid', placeItems: 'center', flexShrink: 0 }}><FileText size={18} /></span>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>View &amp; download receipts</p>
-              <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0' }}>Your payments are confirmed — preview and download all your receipts.</p>
-            </div>
-          </div>
-          <ExternalLink size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
-        </a>
-      )}
 
       {loading ? (
         <div style={{ display: 'flex', gap: 8, color: 'var(--mute)', fontSize: 13, alignItems: 'center' }}>
@@ -5148,7 +5249,10 @@ export default function CustomerSpaceV2Page() {
       <div style={{ maxWidth: 1240, margin: '0 auto', padding: '28px 24px 60px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
           <QuestMap steps={steps} currentIndex={currentIndex} mode={def.mode} />
-          <QuestActionCard stateKey={stateKey} resolved={resolved} onRefresh={fetchAll} />
+          <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
+            <QuestActionCard stateKey={stateKey} resolved={resolved} onRefresh={fetchAll} />
+            <SetupDownloads resolved={resolved} stateKey={stateKey} />
+          </div>
         </div>
       </div>
     </div>
@@ -5185,7 +5289,10 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
       <DualSection eyebrow="01 · Renewal" title={renewalDef.label} sub={rc?.endDate ? `Through ${renewalEndStr}` : 'In progress'} tone="brick">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
           <QuestMap steps={renewalSteps} currentIndex={renewalCurrentIdx} mode={renewalDef.mode} />
-          <QuestActionCard stateKey={renewalStateKey} resolved={resolved} onRefresh={onRefresh} />
+          <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
+            <QuestActionCard stateKey={renewalStateKey} resolved={resolved} onRefresh={onRefresh} />
+            <SetupDownloads resolved={resolved} stateKey={renewalStateKey} />
+          </div>
         </div>
       </DualSection>
 

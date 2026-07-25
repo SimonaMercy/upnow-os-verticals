@@ -401,7 +401,9 @@ function deriveState(contract: ContractDetail, signatures: { role: string; metho
     tenantSigned: signatures.some(s => s.role === 'tenant'),
     landlordSigned: signatures.some(s => s.role === 'landlord'),
     sigsOnFile: signatures.length > 0 && signatures.every(s => s.method === 'on_file'),
-    utilityDoc: contract.utilityStatus === 'submitted' || contract.utilityStatus === 'verified',
+    // "Done" only once the RP has verified it. While the customer's submission is
+    // merely `submitted`, the step stays open so the RP sees the review/approve UI.
+    utilityDoc: contract.utilityStatus === 'verified',
     moveIn: {
       rpSubmitted: !!insp?.rpSubmittedAt,
       tenantSig: !!insp?.tenantSig,
@@ -582,9 +584,9 @@ function Completed({ title, sub, onUndo, undoLabel, viewUrl, viewLabel, onView }
   );
 }
 
-/** RP review of the customer-uploaded utility proof: view the bill + confirm. */
-function UtilityReview({ proof, accountNumber, onConfirm, onUpload, lock }: {
-  proof: ContractDoc; accountNumber?: string | null; onConfirm: () => void; onUpload: () => void; lock?: boolean;
+/** RP review of the customer-uploaded utility proof: view the bill + confirm or reject. */
+function UtilityReview({ proof, accountNumber, onConfirm, onReject, onUpload, lock }: {
+  proof: ContractDoc; accountNumber?: string | null; onConfirm: () => void; onReject: () => void; onUpload: () => void; lock?: boolean;
 }) {
   return (
     <>
@@ -596,9 +598,14 @@ function UtilityReview({ proof, accountNumber, onConfirm, onUpload, lock }: {
         <button type="button" onClick={() => openDocViewer({ fileUrl: proof.fileUrl, caption: proof.displayName ?? 'Utility proof' })} className="mini-btn view cursor-pointer" style={{ marginLeft: 'auto' }}><ExternalLink size={12} /> View bill</button>
       </div>
       {!lock && (
-        <button className="btn btn-jade btn-sm" style={{ justifySelf: 'start', marginTop: 6 }} onClick={onConfirm}>
-          <Check size={13} /> Confirm utility account
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+          <button className="btn btn-jade btn-sm" onClick={onConfirm}>
+            <Check size={13} /> Confirm utility account
+          </button>
+          <button className="mini-btn no cursor-pointer" onClick={onReject}>
+            <X size={13} /> Reject
+          </button>
+        </div>
       )}
       {!lock && <button className="ca" style={{ justifySelf: 'start', marginTop: 4, padding: 0 }} onClick={onUpload}>Upload a different proof</button>}
     </>
@@ -711,6 +718,9 @@ interface StepHandlers {
   /** Bypass digital signing — record both signatures as on file (paper/imported). */
   onMarkSignedOnFile: () => Promise<void>;
   onVerifyUtility: () => Promise<void>;
+  /** Reject the customer's utility submission — opens the reason modal, which
+   *  sends it back to the customer's utility step for a fresh upload. */
+  onRejectUtility: () => void;
   /** Confirm the post-dated cheques were collected → PATCH /contracts/:id/confirm-pdc.
    *  Unlocks the Signatures step on a renewal (Cheques/PDC → Signatures). */
   onConfirmPdc: () => Promise<void>;
@@ -1252,18 +1262,24 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
 
   if (key === 'utility') {
     const done = isDone('utility', st);
-    // Move-in utility activation proof: the customer uploads
-    // "utility_proof_of_payment"; the RP's upload here is keyed
-    // "utility_registration" (legacy uploads used "utility_<ts>"). Clearance /
-    // final-bill are move-out docs and must NOT count as the move-in activation,
-    // so we match registration specifically.
-    const proof = (h.contract.documents || []).find(d =>
+    // Move-in utility activation proof. The RP now writes the SAME shared doc the
+    // customer reads (`utility_proof_of_payment`), so prefer that — it guarantees
+    // both sides show the same file. Fall back to the newest legacy RP-uploaded
+    // copy ("utility_registration_*" / "utility_<ts>") for older contracts.
+    // Clearance / final-bill are move-out docs and must NOT count here.
+    const utilDocs = (h.contract.documents || []).filter(d =>
       d.documentKey === 'utility_proof_of_payment' ||
       d.documentKey === 'utility' ||
       /^utility_\d/.test(d.documentKey) ||
       /^utility_registration(_|$)/.test(d.documentKey));
+    const proof = utilDocs.find(d => d.documentKey === 'utility_proof_of_payment')
+      ?? utilDocs.reduce<ContractDoc | undefined>((best, d) => (!best || (d.id ?? 0) > (best.id ?? 0) ? d : best), undefined);
     const acc = h.contract.utilityAccountNumber;
     const accSub = acc ? `Utility account ${acc}` : 'Utility activation proof on file';
+    // A customer submission awaiting RP review only while status is `submitted`.
+    // After a reject the status drops back to `not_submitted` (awaiting the
+    // customer's fresh upload), so we don't re-open the review over a stale proof.
+    const awaitingReview = h.contract.utilityStatus === 'submitted' && !!proof;
     return done
       ? {
           tone: 'celebrate', icon: 'bolt', sub: 'Stop 4 · complete', label: 'Utility',
@@ -1274,13 +1290,13 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
         }
       : {
           tone: 'action', icon: 'bolt', sub: stopOf(4), label: 'Utility',
-          headline: proof ? `${TEN} uploaded the utility proof.` : 'Attach the utility activation.',
-          body: proof
-            ? 'Review the proof the customer uploaded, then confirm the utility account to advance.'
+          headline: awaitingReview ? `${TEN} uploaded the utility proof.` : 'Attach the utility activation.',
+          body: awaitingReview
+            ? 'Review the proof the customer uploaded, then confirm the utility account to advance — or reject it to send it back for a new upload.'
             : `Add the utility proof, let ${TEN} upload it, or mark it on file for imported leases.`,
-          timing: proof ? null : 'Takes ~1 min',
-          node: proof
-            ? <UtilityReview proof={proof} accountNumber={acc} onConfirm={() => h.onVerifyUtility()} onUpload={h.onUploadUtility} lock={lock} />
+          timing: awaitingReview ? null : 'Takes ~1 min',
+          node: awaitingReview
+            ? <UtilityReview proof={proof} accountNumber={acc} onConfirm={() => h.onVerifyUtility()} onReject={() => h.onRejectUtility()} onUpload={h.onUploadUtility} lock={lock} />
             : <UploadAction fileLabel="Utility-activation.pdf" onUpload={h.onUploadUtility} onMark={() => h.onMarkUtility()} />,
         };
   }
@@ -4470,6 +4486,60 @@ function DirectTerminateModal({
 // Clean void of a NOT-YET-ACTIVE (pending / issued) lease — the tenant never
 // started, so there is no move-out / settlement wind-down. Distinct from
 // DirectTerminateModal (which ends a live tenancy). Posts to /contracts/:id/cancel.
+function RejectUtilityModal({
+  contract, onClose, onSubmitted,
+}: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/utility/reject`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reason.trim() ? { reason: reason.trim() } : {}),
+      });
+      if (!res.ok) throw new Error(`Reject failed: ${res.status}`);
+      onSubmitted();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Reject failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mscrim" onClick={onClose}>
+      <div className="modal sm" onClick={e => e.stopPropagation()}>
+        <div className="mh">
+          <span className="mt">
+            <span className="mti" style={{ background: 'var(--brick)' }}><AlertCircle size={17} /></span>
+            Reject utility submission
+          </span>
+          <button className="x" onClick={onClose}><X size={17} /></button>
+        </div>
+        <div className="mb">
+          <p className="note" style={{ marginBottom: 14 }}>
+            This sends the utility step back to the customer to upload a fresh proof of payment. They&rsquo;ll see your reason below.
+          </p>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Reason (the customer will see this)</label>
+            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. The proof is blurry / the account number doesn't match / wrong document." />
+          </div>
+          {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+        </div>
+        <div className="mf">
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Keep reviewing</button>
+          <button className="btn btn-brick btn-sm" disabled={busy} onClick={submit}>
+            {busy ? 'Rejecting…' : 'Reject & send back'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CancelLeaseModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
@@ -4978,7 +5048,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
-  const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | 'cancel-lease' | null>(null);
+  const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | 'cancel-lease' | 'reject-utility' | null>(null);
 
   // Deep-link from the Leases (record) view: ?action=renew / ?action=terminate
   // jumps here into the full Operations view and opens that action directly, so
@@ -5299,12 +5369,23 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     } catch { alert('Unexpected error. Please try again.'); }
   };
   // Upload a file to GCS/local via presigned URL, then record the document row.
-  async function uploadContractDoc(file: File, displayName: string, keyPrefix: string) {
+  async function uploadContractDoc(
+    file: File,
+    displayName: string,
+    keyPrefix: string,
+    opts?: { ownerType?: 'tenancy_contract' | 'customer'; ownerId?: number; category?: string; fixedKey?: boolean },
+  ) {
     if (!contract) return;
-    const docKey = `${keyPrefix}_${Date.now()}`;
+    // `fixedKey` keeps the documentKey stable so the backend UPSERTs the same
+    // row (one live doc per owner+key) — used when replacing a doc the customer
+    // also reads (e.g. their utility proof), instead of stacking timestamped copies.
+    const docKey = opts?.fixedKey ? keyPrefix : `${keyPrefix}_${Date.now()}`;
+    const ownerType = opts?.ownerType ?? 'tenancy_contract';
+    const ownerId = opts?.ownerId ?? contract.id;
+    const category = opts?.category ?? 'property';
     const urlRes = await fetch('/api/documents/upload-url', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
+      body: JSON.stringify({ ownerType, ownerId, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
     });
     if (!urlRes.ok) throw new Error('Failed to get upload URL');
     // fileKey MUST be persisted as s3Key — the bucket is private and the
@@ -5315,7 +5396,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     if (!putRes.ok) throw new Error('File upload failed');
     const docRes = await fetch('/api/documents', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, category: 'property', documentKey: docKey, displayName, fileUrl, mimeType: file.type || 'application/octet-stream', s3Key: fileKey, isVisibleToTenant: true }),
+      body: JSON.stringify({ ownerType, ownerId, category, documentKey: docKey, displayName, fileUrl, mimeType: file.type || 'application/octet-stream', s3Key: fileKey, isVisibleToTenant: true }),
     });
     if (!docRes.ok) throw new Error('Failed to record document');
   }
@@ -5352,7 +5433,17 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onUtilityFilePicked = async (file: File) => {
     setUtilityUploading(true);
     try {
-      await uploadContractDoc(file, 'Utility Registration', 'utility_registration');
+      // Write the SAME document the customer reads (their utility_proof_of_payment)
+      // so an RP-uploaded replacement is reflected on both sides, not stored under
+      // a separate contract-owned key the customer never sees. Falls back to a
+      // contract-owned doc only if the tenant profile id is somehow missing.
+      const tenantProfileId = contract.tenant.id;
+      if (tenantProfileId != null) {
+        await uploadContractDoc(file, 'Utility Proof of Payment', 'utility_proof_of_payment',
+          { ownerType: 'customer', ownerId: tenantProfileId, category: 'payment', fixedKey: true });
+      } else {
+        await uploadContractDoc(file, 'Utility Registration', 'utility_registration');
+      }
       void reload();
     } catch (e) { alert(e instanceof Error ? e.message : 'Utility upload failed'); }
     finally { setUtilityUploading(false); if (utilityInputRef.current) utilityInputRef.current.value = ''; }
@@ -5454,6 +5545,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch (e) { alert(e instanceof Error ? e.message : 'Could not confirm utility'); }
   };
+  const onRejectUtility = () => setModal('reject-utility');
 
   // KYC approve / reject — use the dedicated verify/reject endpoints. A PATCH
   // with a `status` field is rejected by the API's whitelist validation (it's
@@ -5720,7 +5812,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onConfirmPdc, onUploadCheques, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,
@@ -6409,6 +6501,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); loadNotes(); }} />}
       {modal === 'cancel-lease' && perms.agreements && <CancelLeaseModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
       {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+      {modal === 'reject-utility' && perms.agreements && <RejectUtilityModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
       {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
       <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" style={{ display: 'none' }}

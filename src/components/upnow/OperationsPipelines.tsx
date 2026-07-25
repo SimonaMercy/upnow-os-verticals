@@ -83,7 +83,7 @@ const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
 /* ── Stage definitions per pipeline (fixed lanes, in order) ────────────────────
  * `keys` = the operations checklist keys that belong to that lane; a contract
  * card lands in the FIRST lane that still has an incomplete item. A lane with no
- * keys ('ready') is the terminal "everything done" lane. */
+ * keys is a terminal "everything done" lane. */
 interface StageDef { key: string; title: string; keys: string[] }
 
 // Lead lanes match RAW lead stages (interested-onward, pre-contract).
@@ -96,24 +96,30 @@ const LEAD_STAGES: { key: string; title: string; match: string[] }[] = [
 const LEAD_MATCH = new Set(LEAD_STAGES.flatMap(s => s.match));
 
 // New Lease — the setup gates. (KYC + Payment plan are handled in the Lead flow,
-// so they're not tracked again as New Lease lanes.)
+// so they're not tracked again as New Lease lanes.) No terminal "Ready to
+// activate" lane: once every gate is done the lease awaits activation on the
+// contract page, so it drops off this board (see allGatesDone below).
 const NEW_STAGES: StageDef[] = [
   { key: 'pdc',          title: 'Cheques / PDC',     keys: ['pdc'] },
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
   { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
   { key: 'utility',      title: 'Utility',           keys: ['utility'] },
   { key: 'move_in',      title: 'Move-in',           keys: ['move_in'] },
-  { key: 'ready',        title: 'Ready to activate', keys: [] },
 ];
 
-// Renewal — same spine, no Utility / Move-in (same tenant, no re-handover).
+// Renewal — starts with the offer stages (Draft → Notice Sent, driven by the
+// parent's renewalStatus) before the operational spine. No Utility / Move-in
+// (same tenant, no re-handover).
 const RENEWAL_STAGES: StageDef[] = [
+  { key: 'draft',        title: 'Draft',             keys: ['renewal_draft'] },
+  { key: 'notice_sent',  title: 'Notice Sent',       keys: ['renewal_notice'] },
   { key: 'kyc',          title: 'KYC',               keys: ['kyc'] },
   { key: 'payment_plan', title: 'Payment plan',      keys: ['payment_plan'] },
   { key: 'pdc',          title: 'Cheques / PDC',     keys: ['pdc'] },
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
   { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
-  { key: 'ready',        title: 'Ready to activate', keys: [] },
+  // No 'Ready to activate' lane: renewals have no manual activation step, and a
+  // fully-complete renewal has already dropped off the worklist.
 ];
 
 // Terminated — Requested (pending acceptance) then the wind-down work.
