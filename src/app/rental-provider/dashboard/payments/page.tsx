@@ -6,46 +6,65 @@ import Link from 'next/link';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
 
 /** Portfolio-wide Payments ledger (SCRUM-577 / 579). Lists every payment row across
- *  the RP's contracts, grouped into top-level CATEGORIES — Rental Income,
- *  Security Deposit, Government Fees (VAT / Ejari), Management Fee (Admin / Commission)
- *  and Others — with a per-category subtotal and a per-type breakdown inside the
- *  multi-type categories (Government Fees / Management Fee). The category
- *  breakdown doubles as the top-level filter (click a summary card). Security-deposit
- *  rows keep their held/returned status, settlement and detail drawer; others are
- *  read-only. */
+ *  the RP's contracts, grouped into top-level CATEGORIES that mirror the Payment
+ *  Grouping report one-to-one — Rental Income (rent + rental VAT), Security Deposit,
+ *  Management Fee (admin, commission + Settings → Rules penalties), Third Party
+ *  (Contract Registration, Fees VAT and pass-throughs the RP collects on behalf of
+ *  others) and Other — with a per-category subtotal and a per-type breakdown inside
+ *  the multi-type categories. The category breakdown doubles as the top-level filter
+ *  (click a summary card). Security-deposit rows keep their held/returned status,
+ *  settlement and detail drawer; others are read-only. */
 
 // ─── Categories (top level) ───────────────────────────────────────────────
-type CategoryKey = 'rental_income' | 'security_deposit' | 'govt_fee' | 'management_fee' | 'others';
+type CategoryKey = 'rental_income' | 'security_deposit' | 'management_fee' | 'third_party' | 'others';
 
-const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'govt_fee', 'management_fee', 'others'];
+const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'management_fee', 'third_party', 'others'];
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   rental_income:    'Rental Income',
   security_deposit: 'Security Deposit',
-  govt_fee:         'Government Fees',
   management_fee:   'Management Fee',
-  others:           'Others',
+  third_party:      'Third Party',
+  others:           'Other',
 };
 const CATEGORY_SUB: Record<CategoryKey, string> = {
-  rental_income:    'rent collected',
+  rental_income:    'rent + rental VAT',
   security_deposit: 'deposits',
-  govt_fee:         'VAT · Contract Registration DLD',
-  management_fee:   'Contract Registration · admin · commission',
-  others:           'maintenance · service · other',
+  management_fee:   'admin · commission · penalties',
+  third_party:      'Contract Registration · Fees VAT · pass-throughs',
+  others:           'uncategorised',
 };
-// The DLD Ejari registration is the ONLY government portion of the RP's Ejari
-// charge (a fixed AED 172.5, capped at the amount charged); the remainder is the
-// RP's Ejari handling and stays in Management Fee. VAT is 100% government.
-const GOVT_EJARI_FEE = 172.5;
-// Fully-government payment types (VAT). Ejari is SPLIT across Government Fees
-// (the AED 172.5 DLD registration) and Management Fee (the remainder), handled
-// in buildCategoryRows below — so it isn't routed by categoryOf.
-const GOVT_TYPES = ['vat'];
-// Provider's own fee types (Ejari's management remainder is added in the split).
-const MANAGEMENT_TYPES = ['admin_fee', 'commission'];
+
+// A `vat` payment is "Fees VAT" (the combined VAT cheque on admin/commission fees)
+// when its description says so — a pass-through that sits under Third Party. Every
+// other `vat` cheque is Rental VAT and belongs with Rental Income. Identical to the
+// Payment Grouping report's split, so the two surfaces reconcile one-to-one.
+const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
+  (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
+
+// The sub-item a payment row belongs to. VAT splits into rental vs fees; every
+// other row keeps its raw payment type. Contract Registration (Ejari) is a SINGLE
+// item — NOT split into DLD + service — matching the report.
+function itemKeyOf(r: { paymentType: string; description?: string | null }): string {
+  if (r.paymentType === 'vat') return isFeesVat(r) ? 'vat_fees' : 'vat_rental';
+  return r.paymentType;
+}
+
+// Rental Income — rent collected plus the rental-VAT cheque.
+const RENTAL_TYPES = ['rental_income', 'vat_rental'];
+// Management Fee — RP-charged fees + every Settings → Rules penalty / charge.
+const MANAGEMENT_TYPES = [
+  'admin_fee', 'commission',
+  'bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee',
+  'late_renewal_fee', 'early_termination_fee', 'late_moveout_fee',
+  'unauthorized_sharing_fee', 'access_card_fee', 'contract_name_change_fee', 'unit_transfer_fee',
+];
+// Third Party — pass-through fees the RP collects on behalf of others.
+const THIRD_PARTY_TYPES = ['ejari_fee', 'vat_fees', 'maintenance_fee', 'service_charge', 'refund'];
 // Per-category display order for the type sub-groups.
 const TYPE_ORDER: Partial<Record<CategoryKey, string[]>> = {
-  govt_fee:       ['vat', 'ejari_fee'],
-  management_fee: ['ejari_fee', 'admin_fee', 'commission'],
+  rental_income:  RENTAL_TYPES,
+  management_fee: MANAGEMENT_TYPES,
+  third_party:    THIRD_PARTY_TYPES,
 };
 
 // Ownership segregation by the property's leasing model (properties.leasing_type),
@@ -53,28 +72,50 @@ const TYPE_ORDER: Partial<Record<CategoryKey, string[]>> = {
 // management = Property Management. Resolved per row via its building name.
 const OWNERSHIP_LABEL: Record<string, string> = { direct: 'Own Property', sub: 'Sub-lease', management: 'Property Management' };
 
-function categoryOf(t: string): CategoryKey {
-  if (t === 'rental_income') return 'rental_income';
-  if (t === 'security_deposit') return 'security_deposit';
-  if (GOVT_TYPES.includes(t)) return 'govt_fee';
-  if (MANAGEMENT_TYPES.includes(t)) return 'management_fee';
+// Route a sub-item key (from itemKeyOf) to its top-level category. Unmapped types
+// fall through to Other, so nothing is ever silently dropped.
+function categoryOf(itemKey: string): CategoryKey {
+  if (itemKey === 'security_deposit') return 'security_deposit';
+  if (RENTAL_TYPES.includes(itemKey)) return 'rental_income';
+  if (MANAGEMENT_TYPES.includes(itemKey)) return 'management_fee';
+  if (THIRD_PARTY_TYPES.includes(itemKey)) return 'third_party';
   return 'others';
 }
 
-// Per-type labels (used for the sub-rows inside Management Fee / Others).
+// Per-type labels (used for the sub-rows inside multi-type categories). Mirrors the
+// Payment Grouping report's item labels.
 const TYPE_LABELS: Record<string, string> = {
-  rental_income:    'Rental Income',
-  security_deposit: 'Security Deposit',
-  vat:              'VAT',
-  ejari_fee:        'Contract Registration',
-  admin_fee:        'Admin',
-  commission:       'Commission',
-  maintenance_fee:  'Maintenance',
-  service_charge:   'Service Charge',
-  refund:           'Refund',
-  other:            'Other',
+  rental_income:            'Rental Income',
+  vat_rental:               'Rental VAT',
+  vat_fees:                 'Fees VAT',
+  security_deposit:         'Security Deposit',
+  admin_fee:                'Admin',
+  commission:               'Commission',
+  bounced_cheque_fee:       'Bounced cheque',
+  cheque_replacement_fee:   'Cheque hold / replacement',
+  cheque_deferral_fee:      'Cheque deferral',
+  late_renewal_fee:         'Late renewal',
+  early_termination_fee:    'Early termination',
+  late_moveout_fee:         'Late move-out',
+  unauthorized_sharing_fee: 'Sharing without notice / NOC',
+  access_card_fee:          'Access card / remote replacement',
+  contract_name_change_fee: 'Contract name change',
+  unit_transfer_fee:        'Unit transfer',
+  ejari_fee:                'Contract Registration',
+  maintenance_fee:          'Maintenance',
+  service_charge:           'Service Charge',
+  refund:                   'Refund',
+  other:                    'Other',
 };
 const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+// The Contract-Registration (ejari) fee was historically recorded under several
+// free-text descriptions ("Ejari fee", "Ejari Fee", "Contract Registration Fee"…).
+// Show the single canonical name so the ledger reads consistently (the government
+// "Ejari" name is kept only in the printed contract). Every other row keeps its own
+// description, which carries real per-payment detail (instalment no., period, notes).
+const rowDescription = (d: { paymentType: string; description: string | null }): string =>
+  d.paymentType === 'ejari_fee' ? TYPE_LABELS.ejari_fee : (d.description ?? '—');
 
 // Status vocabulary spans both the deposit (held/returned/…) and payment
 // (pending/cleared/…) sets — the ledger renders rows from both.
@@ -131,6 +172,8 @@ interface PaymentRow {
   settledOn: string | null;
   settledViaSettlementId: number | null;
   proofs?: DepositProof[];
+  // Derived sub-item key for grouping (rental vs fees VAT, etc.); set in catRowsMap.
+  itemKey?: string;
 }
 
 interface DepositProof {
@@ -141,8 +184,8 @@ interface DepositProof {
 }
 
 function fmtAed(v: number) {
-  // Whole amounts stay clean (AED 20,000); fractional amounts keep 2 dp so the
-  // government/management Ejari split (172.50 / 77.50) isn't rounded away.
+  // Whole amounts stay clean (AED 20,000); fractional amounts keep 2 dp so VAT
+  // and other fractional cheques aren't rounded away.
   const fractional = Math.round(v) !== v;
   return new Intl.NumberFormat('en-AE', {
     style: 'currency', currency: 'AED',
@@ -273,21 +316,15 @@ export default function PaymentsPage() {
     return true;
   }), [yearScoped, filterStatus, filterBuilding, filterOwnership, buildingLeasing, search]);
 
-  // Split every payment into its category bucket. Ejari is DIVIDED: AED 172.5
-  // (capped at the amount) goes to Government Fees as the DLD registration, the
-  // remainder to Management Fee as the RP's Ejari handling — so each side's
-  // financial statement is exact. Every other type maps to a single category.
+  // Split every payment into its category bucket. Each row is tagged with its
+  // sub-item key (rental vs fees VAT; Contract Registration stays a single item)
+  // and routed by categoryOf — mirroring the Payment Grouping report exactly, so
+  // the two surfaces reconcile one-to-one.
   const catRowsMap = useMemo(() => {
-    const m: Record<CategoryKey, PaymentRow[]> = { rental_income: [], security_deposit: [], govt_fee: [], management_fee: [], others: [] };
+    const m: Record<CategoryKey, PaymentRow[]> = { rental_income: [], security_deposit: [], management_fee: [], third_party: [], others: [] };
     for (const r of scoped) {
-      if (r.paymentType === 'ejari_fee') {
-        const gov  = Math.min(GOVT_EJARI_FEE, r.amount);
-        const rest = Math.max(0, r.amount - GOVT_EJARI_FEE);
-        if (gov > 0)  m.govt_fee.push({ ...r, id: `${r.id}:g`, amount: gov,  vatAmount: 0, description: 'Contract Registration · DLD registration' });
-        if (rest > 0) m.management_fee.push({ ...r, id: `${r.id}:m`, amount: rest, vatAmount: 0, description: 'Contract Registration · service (handling)' });
-      } else {
-        m[categoryOf(r.paymentType)].push(r);
-      }
+      const itemKey = itemKeyOf(r);
+      m[categoryOf(itemKey)].push({ ...r, itemKey });
     }
     return m;
   }, [scoped]);
@@ -295,7 +332,7 @@ export default function PaymentsPage() {
   // Per-category totals (over the full scoped set, so the cards always show every
   // category's amount regardless of which one is currently selected).
   const catTotals = useMemo(() => {
-    const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, govt_fee: 0, management_fee: 0, others: 0 };
+    const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, third_party: 0, others: 0 };
     for (const cat of CATEGORY_ORDER) t[cat] = catRowsMap[cat].reduce((s, r) => s + r.amount, 0);
     return t;
   }, [catRowsMap]);
@@ -331,8 +368,8 @@ export default function PaymentsPage() {
   const cards: { key: CategoryKey; label: string; value: number; sub: string }[] = [
     { key: 'rental_income',    label: CATEGORY_LABELS.rental_income,       value: catTotals.rental_income, sub: CATEGORY_SUB.rental_income },
     { key: 'security_deposit', label: CATEGORY_LABELS.security_deposit,    value: catTotals.security_deposit, sub: `held ${fmtAed(depositsHeld)}` },
-    { key: 'govt_fee',         label: CATEGORY_LABELS.govt_fee,            value: catTotals.govt_fee,      sub: CATEGORY_SUB.govt_fee },
     { key: 'management_fee',   label: CATEGORY_LABELS.management_fee,      value: catTotals.management_fee, sub: CATEGORY_SUB.management_fee },
+    { key: 'third_party',      label: CATEGORY_LABELS.third_party,         value: catTotals.third_party,   sub: CATEGORY_SUB.third_party },
     { key: 'others',           label: CATEGORY_LABELS.others,              value: catTotals.others,        sub: CATEGORY_SUB.others },
   ];
 
@@ -482,9 +519,9 @@ export default function PaymentsPage() {
   );
 }
 
-/** One category block: a subtotal header, then — for multi-type categories
- *  (Management Fee, Others) — a per-type sub-header + its rows; single-type
- *  categories list their rows directly. Only security-deposit rows are clickable. */
+/** One category block: a subtotal header, then — when the category holds more than
+ *  one sub-item — a per-item sub-header + its rows; single-item categories list
+ *  their rows directly. Only security-deposit rows are clickable. */
 function CategoryBlock({
   category, rows, subtotal, vat, onRowClick,
 }: {
@@ -494,12 +531,17 @@ function CategoryBlock({
   vat: number;
   onRowClick: (id: string) => void;
 }) {
-  const multiType = category === 'management_fee' || category === 'govt_fee' || category === 'others';
-  // Distinct types present in this category, in a stable order.
-  const typeOrder = TYPE_ORDER[category] ?? [...new Set(rows.map(r => r.paymentType))];
+  const keyOf = (r: PaymentRow) => r.itemKey ?? r.paymentType;
+  // Distinct sub-items present in this category, in a stable order (any not in the
+  // configured order are appended so nothing is dropped).
+  const configured = TYPE_ORDER[category] ?? [];
+  const present = [...new Set(rows.map(keyOf))];
+  const typeOrder = [...configured.filter(t => present.includes(t)), ...present.filter(t => !configured.includes(t))];
   const byType = typeOrder
-    .map(t => ({ type: t, rows: rows.filter(r => r.paymentType === t) }))
+    .map(t => ({ type: t, rows: rows.filter(r => keyOf(r) === t) }))
     .filter(g => g.rows.length > 0);
+  // Show per-item sub-headers only when the category spans more than one item.
+  const multiType = byType.length > 1;
 
   return (
     <>
@@ -548,7 +590,7 @@ function CategoryBlock({
                   <td className="px-4 py-3.5 text-[#6b6860]">{d.building}</td>
                   <td className="px-4 py-3.5">{d.unit}</td>
                   <td className="px-4 py-3.5">{d.tenant}</td>
-                  <td className="px-4 py-3.5 text-[#6b6860] max-w-[220px] truncate" title={d.description ?? ''}>{d.description ?? '—'}</td>
+                  <td className="px-4 py-3.5 text-[#6b6860] max-w-[220px] truncate" title={rowDescription(d)}>{rowDescription(d)}</td>
                   <td className="px-4 py-3.5 font-semibold">{fmtAed(d.amount)}</td>
                   <td className="px-4 py-3.5 text-[#6b6860]">{d.vatAmount != null && d.vatAmount > 0 ? fmtAed(d.vatAmount) : '—'}</td>
                   <td className="px-4 py-3.5">

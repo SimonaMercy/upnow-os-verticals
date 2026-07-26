@@ -226,6 +226,7 @@ export default function DepositDetailModal({ deposit, loadDetail, onClose, links
               <DetailCol label="Customer" value={deposit.tenant} />
               {detail?.chequeNumber && <DetailCol label="Cheque no." value={detail.chequeNumber} />}
               {detail?.paymentMethod && <DetailCol label="Method" value={String(detail.paymentMethod).replace(/_/g, ' ')} />}
+              {detail?.dueDate && <DetailCol label="Cheque date" value={detail.dueDate} />}
               {deposit.recordedDate && <DetailCol label="Recorded" value={deposit.recordedDate} />}
             </div>
             <div className="flex flex-col items-end justify-center shrink-0 pl-2">

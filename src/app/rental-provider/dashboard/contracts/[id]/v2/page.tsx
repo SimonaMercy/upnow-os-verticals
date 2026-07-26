@@ -2303,6 +2303,7 @@ function DetailsDrawer({
   const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0) + otherActiveGross;
   const feeLabel = (t: string | null) =>
     t === 'admin_fee' ? 'Admin fee' : t === 'ejari_fee' ? 'Contract Registration fee' : t === 'commission' ? 'Commission'
+      : t === 'other' ? 'Other'
       : (t && RULE_FEE_LABELS[t]) ? RULE_FEE_LABELS[t]
       : (t ?? 'Fee');
   // ── Fees editor (admin-filled: admin / ejari / commission + cheque charges).
@@ -2343,6 +2344,9 @@ function DetailsDrawer({
     { value: 'ejari_fee', label: 'Contract Registration fee' },
     { value: 'commission', label: 'Commission' },
     ...RULE_FEE_DEFS.map(d => ({ value: d.pt, label: d.label })),
+    // Catch-all pass-through charge (service fee, per-unit tax, etc.) — lands under
+    // Third Party; the RP names it via the Description field.
+    { value: 'other', label: 'Other' },
   ];
   /** Auto-filled amount (form string) for a fee type from Settings → Rules, or ''. */
   const feeAutoAmount = (t: string): string => {
@@ -6331,10 +6335,14 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 />
               </div>
             )}
-            {/* Settlement signing link — once the settlement has been SENT, the
-                 customer can review + sign it via a no-login magic link (the
-                 backend serves it only after send). Mirrors the move-out link. */}
-            {selStep.key === 'settlement' && contract.tenant.id && derived.settlementStatus === 'sent' && perms.settleDeposits && (
+            {/* Customer settlement signing link — a persistent section on the
+                 settlement step, laid out exactly like the move-out signing link
+                 above: generate a secure no-login link, then copy / open / share it
+                 (and see it here). Generating the link promotes a still-draft
+                 settlement to "sent" on the backend so the customer can actually
+                 review + sign it. Hidden only once fully paid/closed. */}
+            {selStep.key === 'settlement' && contract.tenant.id && perms.settleDeposits
+              && derived.settlementStatus != null && derived.settlementStatus !== 'paid' && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
                   Customer settlement signing link

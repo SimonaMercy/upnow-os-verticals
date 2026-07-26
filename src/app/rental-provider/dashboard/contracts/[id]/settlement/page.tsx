@@ -176,9 +176,6 @@ export default function SettlementPage() {
   const isManagerView = (pathname ?? '').startsWith('/dashboard/manager');
   const [landlordId, setLandlordId] = useState<number | null>(null);
   const [tenantId, setTenantId] = useState<number | null>(null);
-  // Landlord signing identity: the display name + any POA holder on file, so the
-  // §9 signature block matches the contract-signing surfaces.
-  const [landlordSigner, setLandlordSigner] = useState<{ name: string; poaHolder: string | null }>({ name: 'Landlord', poaHolder: null });
 
   const [meta, setMeta] = useState<ContractMeta | null>(null);
   const [view, setView] = useState<'worksheet' | 'statement'>('worksheet');
@@ -273,9 +270,6 @@ export default function SettlementPage() {
         setLandlordId(c.landlord?.id ?? null);
         setTenantId(c.tenant?.id ?? null);
         setIsDirect(c.termination?.method === 'direct');
-        const lname = c.landlord?.companyName || c.landlord?.name || 'Landlord';
-        const poa = c.landlord?.hasPoa && c.landlord?.poaPersonName?.trim() ? c.landlord.poaPersonName.trim() : null;
-        setLandlordSigner({ name: lname, poaHolder: poa });
       }
       if (sRes.ok) {
         const s = await sRes.json() as ApiSettlement;
@@ -395,17 +389,29 @@ export default function SettlementPage() {
     finally { setSaving(false); }
   }
 
-  // RP/landlord signs the §9 settlement statement. Persists rpSignature via the
-  // same PATCH as save() (the backend stamps rpSignatoryName from the acting
-  // party). Reloads so the signed state + statement pick it up.
+  // RP/manager signs the §9 settlement statement (the backend stamps
+  // rpSignatoryName from the acting party). Signing order is NOT enforced: in
+  // draft we persist the current figures + signature together (as when preparing);
+  // once sent/agreed the figures are locked, so we add ONLY the signature — the
+  // RP/manager may sign AFTER the customer. Reloads so the signed state + statement
+  // pick it up.
   async function signSettlement(p: SignaturePayload) {
     if (!contractId) return;
-    const de = discountError();
-    if (de) throw new Error(de);
-    const res = await fetch(`/api/contracts/${contractId}/settlement`, {
-      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ depositHeld: depositNum, notes: notes.trim() || null, moveoutDateOverride: moveOut || null, lines: linesPayload(), rpSignature: p.signatureImage }),
-    });
+    let res: Response;
+    if (status === 'draft') {
+      const de = discountError();
+      if (de) throw new Error(de);
+      res = await fetch(`/api/contracts/${contractId}/settlement`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depositHeld: depositNum, notes: notes.trim() || null, moveoutDateOverride: moveOut || null, lines: linesPayload(), rpSignature: p.signatureImage }),
+      });
+    } else {
+      // Signature-only path — allowed after the settlement has been sent.
+      res = await fetch(`/api/contracts/${contractId}/settlement/sign`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rpSignature: p.signatureImage }),
+      });
+    }
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? 'Failed to sign'); }
     apply(await res.json() as ApiSettlement);
   }
@@ -871,20 +877,17 @@ export default function SettlementPage() {
           className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] resize-none disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
       </div>
 
-      {/* Landlord signature on the settlement statement (required before sending) */}
-      {!locked && canSettle && (
+      {/* Settlement signature — a final settlement is signed BY the person operating
+          it (the acting manager or the logged-in RP owner), NOT the landlord/POA.
+          Available until the settlement is paid, so the RP/manager can sign AFTER
+          the customer (signing order is not enforced). */}
+      {status !== 'paid' && canSettle && (
         sig.rp ? (
           <div className="bg-[#f0faf6] border border-[#c5e8df] rounded-2xl p-4 flex items-center gap-3">
             <BadgeCheck size={18} className="text-[#2e9f82] shrink-0" />
             <div className="min-w-0">
-              <p className="text-sm font-bold text-[#1a1916]">Signed as Landlord</p>
-              <p className="text-xs text-[#6b6860]">
-                {isManagerView
-                  ? `${authUser?.name || 'Authorised Manager'} — on behalf of ${landlordSigner.name}`
-                  : landlordSigner.poaHolder
-                    ? `${landlordSigner.poaHolder} — on behalf of ${landlordSigner.name}`
-                    : landlordSigner.name}
-              </p>
+              <p className="text-sm font-bold text-[#1a1916]">Signed</p>
+              <p className="text-xs text-[#6b6860]">{authUser?.name || 'Authorised signatory'}</p>
             </div>
           </div>
         ) : (
@@ -892,11 +895,11 @@ export default function SettlementPage() {
             <h3 className="text-sm font-bold text-[#1a1916] mb-1">Sign the settlement statement</h3>
             <p className="text-xs text-[#6b6860] mb-3">Add your signature to the final settlement before sending it to the customer.</p>
             <SignatureBlock
-              signerRole="Landlord"
-              signerName={isManagerView ? (authUser?.name || 'Authorised Manager') : (landlordSigner.poaHolder ?? landlordSigner.name)}
-              onBehalfOf={isManagerView ? landlordSigner.name : (landlordSigner.poaHolder ? landlordSigner.name : null)}
-              defaultName={isManagerView ? (authUser?.name || '') : (landlordSigner.poaHolder ?? landlordSigner.name)}
-              termsText="I have reviewed this final settlement statement and agree to it as the landlord."
+              signerRole="Rental Provider / Property Manager"
+              signerName={authUser?.name || ''}
+              onBehalfOf={null}
+              defaultName={authUser?.name || ''}
+              termsText="I have reviewed and approve this final settlement statement."
               submitLabel="Sign settlement"
               alreadySigned={false}
               onSign={signSettlement}
@@ -916,8 +919,7 @@ export default function SettlementPage() {
               className="mr-auto flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
               {saving && acting === null ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save draft
             </button>
-            <button onClick={() => void sendToCustomer()} disabled={saving || acting !== null || !sig.rp}
-              title={!sig.rp ? 'Sign the settlement statement first' : undefined}
+            <button onClick={() => void sendToCustomer()} disabled={saving || acting !== null}
               className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
               {acting === 'send' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send to customer
             </button>
