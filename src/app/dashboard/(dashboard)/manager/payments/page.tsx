@@ -9,11 +9,10 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { Search, X, Wallet, Loader2, RefreshCw, Lock, Calendar, ExternalLink } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 
 // ─── Categories (top level) ───────────────────────────────────────────────
 type CategoryKey = 'rental_income' | 'security_deposit' | 'management_fee' | 'others';
@@ -152,13 +151,10 @@ function allYears(rows: PaymentRow[]): number[] {
 }
 
 export default function ManagerPaymentsPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
-  const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageDeposits)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canManageDeposits', effectiveRp);
+  // Scoped to the landlord chosen in the LandlordSwitcher (?rp=). Under "All
+  // landlords" with several to choose from, prompt for one rather than showing
+  // an arbitrary landlord's payments.
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageDeposits');
 
   const [rows, setRows]       = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,6 +191,10 @@ export default function ManagerPaymentsPage() {
     () => (filterYear === 'all' ? rows : rows.filter(d => yearMatch(d, Number(filterYear)))),
     [rows, filterYear],
   );
+
+  if (!permsLoading && needsLandlord) {
+    return <SelectLandlordNotice resource="Payments" />;
+  }
 
   // Per-landlord permission gate.
   if (!permsLoading && !allowed) {

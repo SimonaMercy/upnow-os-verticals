@@ -19,10 +19,9 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { Search, X, DollarSign, Loader2, RefreshCw, Lock } from 'lucide-react';
 import { apiGet } from '@/lib/api';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 
 type RecvStatus = 'scheduled' | 'due' | 'overdue' | 'received';
 
@@ -76,15 +75,10 @@ function fmtDate(iso: string | null) {
 }
 
 export default function ManagerReceivablesPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
-  const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
-  // Effective landlord = the one chosen in the LandlordSwitcher, else the first
-  // managed landlord that delegated collections access.
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageCollections)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canManageCollections', effectiveRp);
+  // Scoped to the landlord chosen in the LandlordSwitcher (?rp=). Under "All
+  // landlords" with several to choose from, we prompt for one rather than
+  // showing an arbitrary landlord's receivables.
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageCollections');
 
   const [items, setItems]       = useState<Receivable[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -116,6 +110,10 @@ export default function ManagerReceivablesPage() {
     ys.add(String(new Date().getFullYear()));
     return [...ys].sort().reverse();
   }, [items]);
+
+  if (!permsLoading && needsLandlord) {
+    return <SelectLandlordNotice resource="Receivables" />;
+  }
 
   // Per-landlord permission gate — mirrors the lock the nav enforces.
   if (!permsLoading && !allowed) {

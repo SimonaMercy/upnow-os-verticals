@@ -10,21 +10,20 @@
  * Previously this was a hand-maintained file-upload-only copy that had drifted a
  * generation behind — now it shares the RP component so the two stay in sync.
  */
-import { useSearchParams } from 'next/navigation';
 import { Lock } from 'lucide-react';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 import { TemplatesWorkspace } from '@/app/rental-provider/dashboard/templates/page';
 
 export default function ManagerTemplatesPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
-  const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageTemplates)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canManageTemplates', effectiveRp);
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageTemplates');
 
-  if (!permsLoading && !allowed) {
+  if (permsLoading) {
+    return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
+  }
+  if (needsLandlord) {
+    return <SelectLandlordNotice resource="Addendum templates" />;
+  }
+  if (!allowed) {
     return (
       <div className="p-6">
         <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
@@ -39,8 +38,5 @@ export default function ManagerTemplatesPage() {
       </div>
     );
   }
-  if (permsLoading || effectiveRp == null) {
-    return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
-  }
-  return <TemplatesWorkspace manager={{ rp: effectiveRp }} />;
+  return <TemplatesWorkspace manager={{ rp: effectiveRp! }} />;
 }

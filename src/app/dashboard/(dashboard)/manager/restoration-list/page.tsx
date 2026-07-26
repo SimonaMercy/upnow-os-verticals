@@ -7,21 +7,20 @@
  * writes hit the landlord-scoped /manager/inspection-price-book endpoints,
  * enforced server-side.
  */
-import { useSearchParams } from 'next/navigation';
 import { Lock } from 'lucide-react';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 import { RestorationListWorkspace } from '@/app/rental-provider/dashboard/restoration-list/page';
 
 export default function ManagerRestorationListPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
-  const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageInspections)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canManageInspections', effectiveRp);
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageInspections');
 
-  if (!permsLoading && !allowed) {
+  if (permsLoading) {
+    return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
+  }
+  if (needsLandlord) {
+    return <SelectLandlordNotice resource="Restoration List prices" />;
+  }
+  if (!allowed) {
     return (
       <div className="p-6">
         <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
@@ -36,8 +35,5 @@ export default function ManagerRestorationListPage() {
       </div>
     );
   }
-  if (permsLoading || effectiveRp == null) {
-    return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
-  }
-  return <RestorationListWorkspace manager={{ rp: effectiveRp }} />;
+  return <RestorationListWorkspace manager={{ rp: effectiveRp! }} />;
 }

@@ -14,12 +14,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { Search, X, Loader2, RefreshCw, Lock, Calendar, CalendarX } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { type EndedCustomerRow, type EndedCustomerDetail } from '@/components/upnow/EndedLeaseDetailModal';
 import SettlementStatementModal from '@/components/contract/SettlementStatementModal';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 
 const OUTCOME_LABELS: Record<string, string> = { expired: 'Expired', terminated: 'Terminated' };
 const OUTCOME_STYLE: Record<string, string> = {
@@ -54,13 +53,10 @@ function collectYears(rows: EndedCustomerRow[]): number[] {
 }
 
 export default function ManagerEndedLeasesPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
-  const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canManageAgreements)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canManageAgreements', effectiveRp);
+  // Scoped to the landlord chosen in the LandlordSwitcher (?rp=). Under "All
+  // landlords" with several to choose from, prompt for one rather than showing
+  // an arbitrary landlord's ended leases.
+  const { effectiveRp, allowed, permsLoading, needsLandlord, canForRp } = useManagerLandlordScope('canManageAgreements');
 
   const [rows, setRows] = useState<EndedCustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +110,10 @@ export default function ManagerEndedLeasesPage() {
     () => (filterYear === 'all' ? rows : rows.filter(r => yearMatch(r, Number(filterYear)))),
     [rows, filterYear],
   );
+
+  if (!permsLoading && needsLandlord) {
+    return <SelectLandlordNotice resource="Ended leases" />;
+  }
 
   // Per-landlord permission gate — mirrors the lock the nav enforces.
   if (!permsLoading && !allowed) {
