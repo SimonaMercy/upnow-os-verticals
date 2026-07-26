@@ -19,6 +19,7 @@ import {
 } from '@/lib/inspectionCatalog';
 import { uploadInspectionItemPhoto, type InspectionPhotoRef } from '@/lib/inspectionPhotos';
 import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 
 type Phase = 'move_in' | 'move_out';
 const AED = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -66,11 +67,6 @@ export default function CategoryInspectionPage() {
   const [priceBook, setPriceBook] = useState<InspectionPriceBookEntry[] | null>(null);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const [compPickerSection, setCompPickerSection] = useState<string | null>(null);
-  // Portal inspector counter-sign (the RP side, drawn on site once the customer has
-  // signed) — mirrors the legacy workspace's counter-sign step.
-  const [counterSig, setCounterSig] = useState<string | null>(null);
-  const [countering, setCountering] = useState(false);
-  const [counterError, setCounterError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const docRef = useRef<InspectionDoc | null>(null);
@@ -383,23 +379,17 @@ export default function CategoryInspectionPage() {
 
   // Portal inspector counter-sign (RP side) — available once the customer has
   // signed and before the inspection is approved.
-  async function handleCounterSign() {
-    if (!contractId || !counterSig) { setCounterError('Please draw your signature first.'); return; }
-    setCountering(true); setCounterError(null);
-    try {
-      const res = await fetch(`${apiBase}/inspection/counter-sign`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: phase, signatureImage: counterSig, signatoryName: doc?.inspectorName?.trim() || meta?.tenantName || 'Inspection Manager' }),
-      });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        setCounterError((b as { message?: string }).message ?? 'Counter-sign failed.');
-        return;
-      }
-      setDoc((d) => (d ? { ...d, rpCounterSig: counterSig, rpCounterSignedAt: new Date().toISOString() } : d));
-    } catch { setCounterError('Counter-sign failed.'); }
-    finally { setCountering(false); }
+  async function handleCounterSign(p: SignaturePayload) {
+    const res = await fetch(`${apiBase}/inspection/counter-sign`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: phase, signatureImage: p.signatureImage, signatoryName: p.signatoryName || doc?.inspectorName?.trim() || meta?.tenantName || 'Inspection Manager', consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? 'Counter-sign failed.');
+    }
+    setDoc((d) => (d ? { ...d, rpCounterSig: p.signatureImage, rpCounterSignedAt: new Date().toISOString() } : d));
   }
 
   // On-demand PDF of the v2 report (categories, conditions, costs, signatures).
@@ -554,16 +544,16 @@ export default function CategoryInspectionPage() {
           ) : !tenantSigned ? (
             <p className="text-sm text-[#9b9890]">Submitted — waiting for the customer to sign from their link. You counter-sign once they do.</p>
           ) : (
-            <>
-              <p className="text-xs text-[#6b6860] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the condition recorded above, then sign to complete the inspection.</p>
-              <SignaturePad value={counterSig} onChange={setCounterSig} />
-              {counterError && <p className="text-xs text-red-600 mt-1">{counterError}</p>}
-              <button type="button" onClick={handleCounterSign} disabled={!counterSig || countering}
-                className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-4 py-2.5 disabled:opacity-60">
-                {countering ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                {countering ? 'Signing…' : 'Counter-sign inspection'}
-              </button>
-            </>
+            <SignatureBlock
+              signerRole="Inspector"
+              signerName={doc?.inspectorName?.trim() || meta?.tenantName || 'Inspection Manager'}
+              onBehalfOf="the rental provider"
+              defaultName={doc?.inspectorName?.trim() || ''}
+              termsText={`I confirm the condition recorded in this ${phase === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
+              submitLabel="Counter-sign inspection"
+              alreadySigned={false}
+              onSign={handleCounterSign}
+            />
           )}
         </div>
       )}
@@ -627,37 +617,6 @@ function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel }: {
 /** Draw-to-sign pad (portal inspector counter-signature). Emits a PNG data-URL on
  *  each stroke so the parent can enable the Counter-sign button; sizes its backing
  *  store to the rendered box (× DPR) so strokes stay crisp and un-stretched. */
-function SignaturePad({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const fit = () => {
-      const r = c.getBoundingClientRect();
-      if (!r.width || !r.height) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 3);
-      c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
-      c.getContext('2d')!.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    fit();
-    window.addEventListener('resize', fit);
-    return () => window.removeEventListener('resize', fit);
-  }, []);
-  const pos = (e: React.PointerEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  const down = (e: React.PointerEvent) => { drawing.current = true; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
-  const move = (e: React.PointerEvent) => { if (!drawing.current) return; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.lineTo(x, y); ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke(); };
-  const up = () => { if (drawing.current) { drawing.current = false; onChange(canvasRef.current!.toDataURL('image/png')); } };
-  const clear = () => { const c = canvasRef.current!; const ctx = c.getContext('2d')!; ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.restore(); onChange(null); };
-  return (
-    <div>
-      <canvas ref={canvasRef} className="w-full h-40 sm:h-[150px] border border-[#d8d6d0] rounded-lg bg-[#fafaf8] touch-none cursor-crosshair"
-        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} />
-      <button type="button" onClick={clear} className="text-[11px] text-[#6b6860] mt-1">{value ? 'Clear' : 'Draw your signature above'}</button>
-    </div>
-  );
-}
-
 /* ─── Restoration-list pickers ─────────────────────────────────────────────
  * The move-out inspection starts from the move-in report (or blank). These two
  * modals let the RP/manager add categories & sub-category/components one by one

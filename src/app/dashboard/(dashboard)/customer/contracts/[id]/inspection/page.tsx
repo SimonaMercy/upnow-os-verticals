@@ -5,11 +5,12 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, RotateCcw, FileSignature, Printer } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, Printer } from 'lucide-react';
 import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import type { InspectionDoc, InspectionCategory } from '@/lib/inspectionCatalog';
 
 function BackLink({ contractId }: { contractId: string | undefined }) {
@@ -46,54 +47,6 @@ interface InspMeta {
 }
 
 /** Inline signature canvas. */
-function SigPad({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  useEffect(() => {
-    const cvs = canvasRef.current; if (!cvs) return;
-    const ratio = window.devicePixelRatio || 1;
-    const rect = cvs.getBoundingClientRect();
-    cvs.width = rect.width * ratio; cvs.height = rect.height * ratio;
-    const ctx = cvs.getContext('2d'); if (!ctx) return;
-    ctx.scale(ratio, ratio); ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#1a1916';
-  }, []);
-  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  };
-  function start(e: React.PointerEvent<HTMLCanvasElement>) {
-    e.preventDefault(); drawing.current = true;
-    const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return;
-    const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y);
-  }
-  function move(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!drawing.current) return;
-    const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return;
-    const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
-  }
-  function end() {
-    if (!drawing.current) return;
-    drawing.current = false;
-    onChange(canvasRef.current?.toDataURL('image/png') ?? null);
-  }
-  function clear() {
-    const cvs = canvasRef.current; const ctx = cvs?.getContext('2d');
-    if (!cvs || !ctx) return;
-    ctx.clearRect(0, 0, cvs.width, cvs.height); onChange(null);
-  }
-  return (
-    <div className="w-full space-y-2">
-      <canvas ref={canvasRef}
-        className="w-full h-32 rounded-xl border-2 border-dashed border-[#d8d6d0] bg-[#fafaf8] touch-none cursor-crosshair"
-        onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerLeave={end} />
-      <div className="flex items-center justify-between">
-        {value ? <span className="text-[10px] text-[#16a34a]">✓ Signature captured</span> : <span className="text-[10px] text-[#9b9890]">Draw your signature above</span>}
-        <button type="button" onClick={clear} className="flex items-center gap-1 text-xs text-[#6b6860] hover:text-[#1a1916]"><RotateCcw size={11} /> Clear</button>
-      </div>
-    </div>
-  );
-}
-
 export default function TenantInspectionPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -104,9 +57,6 @@ export default function TenantInspectionPage() {
   const [meta, setMeta] = useState<InspMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [sigImg, setSigImg] = useState<string | null>(null);
-  const [signing, setSigning] = useState(false);
-  const [signError, setSignError] = useState<string | null>(null);
   const [signed, setSigned] = useState(false);
 
   const load = useCallback(async () => {
@@ -150,24 +100,17 @@ export default function TenantInspectionPage() {
   }, [contractId, inspType]);
   useEffect(() => { void load(); }, [load]);
 
-  async function handleSign() {
-    if (!sigImg) { setSignError('Please draw your signature first.'); return; }
-    setSigning(true); setSignError(null);
-    try {
-      const res = await fetch(`/api/contracts/tenant/${contractId}/inspection/sign?type=${inspType}`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatureImage: sigImg }),
-      });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        setSignError((b as { message?: string }).message ?? 'Failed to submit signature');
-        return;
-      }
-      setSigned(true);
-    } catch {
-      setSignError('Unexpected error submitting signature');
-    } finally { setSigning(false); }
+  async function handleSign(p: SignaturePayload) {
+    const res = await fetch(`/api/contracts/tenant/${contractId}/inspection/sign?type=${inspType}`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? 'Failed to submit signature');
+    }
+    setSigned(true);
   }
 
   if (loading) {
@@ -214,22 +157,23 @@ export default function TenantInspectionPage() {
         editable={false}
         generalNotes={data.generalNotes}
         signatures={{ tenantSig: data.tenantSig, tenantSignedAt: data.tenantSignedAt, rpSig: data.rpCounterSig, rpSignedAt: data.rpCounterSignedAt }}
-        signSlot={!signed ? <SigPad value={sigImg} onChange={setSigImg} /> : undefined}
+        signSlot={!signed ? (
+          <SignatureBlock
+            signerRole="Customer"
+            signerName={meta?.tenantName ?? ''}
+            defaultName={meta?.tenantName ?? ''}
+            termsText={`I confirm the condition recorded in this ${inspType === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate and agree to it.`}
+            submitLabel="Agree & Sign Inspection"
+            alreadySigned={false}
+            onSign={handleSign}
+          />
+        ) : undefined}
       />
 
-      {signed ? (
+      {signed && (
         <div className="no-print mt-5 flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
           <CheckCircle2 size={16} className="text-[#2e9f82]" />
           <p className="text-sm font-medium text-[#1a7a5a]">{data.rpCounterSig ? 'Both parties have signed.' : 'You have signed — awaiting the rental provider counter-signature.'}</p>
-        </div>
-      ) : (
-        <div className="no-print mt-5 max-w-md ml-auto">
-          {signError && <p className="text-xs text-red-600 mb-2">{signError}</p>}
-          <button type="button" onClick={handleSign} disabled={!sigImg || signing}
-            className="w-full flex items-center justify-center gap-1.5 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 cursor-pointer"
-            style={{ background: '#2e9f82' }}>
-            {signing ? <><Loader2 size={14} className="animate-spin" /> Submitting…</> : <><FileSignature size={14} /> Agree &amp; Sign Inspection</>}
-          </button>
         </div>
       )}
 

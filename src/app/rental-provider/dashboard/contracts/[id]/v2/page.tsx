@@ -48,16 +48,17 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
-import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -194,7 +195,7 @@ interface ContractDetail {
     method?: 'mutual' | 'direct' | 'cancelled' | null;
   } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
-  landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null };
+  landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null; hasPoa?: boolean; poaPersonName?: string | null };
   property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
   unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
   documents: ContractDoc[];
@@ -4012,67 +4013,9 @@ function DetailsDrawer({
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// SignaturePad + Modals (full feature parity with v1)
+// Modals + signing (shared SignatureBlock)
 // ────────────────────────────────────────────────────────────────────────────
 
-function SignaturePad({ onChange }: { onChange: (d: string | null) => void }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const [drawing, setDrawing] = useState(false);
-  const [has, setHas] = useState(false);
-  const pos = (e: React.MouseEvent | React.TouchEvent) => {
-    const c = ref.current!;
-    const r = c.getBoundingClientRect();
-    const sx = c.width / r.width;
-    const sy = c.height / r.height;
-    if ('touches' in e) {
-      const t = e.touches[0];
-      return { x: (t.clientX - r.left) * sx, y: (t.clientY - r.top) * sy };
-    }
-    return { x: ((e as React.MouseEvent).clientX - r.left) * sx, y: ((e as React.MouseEvent).clientY - r.top) * sy };
-  };
-  const start = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const ctx = ref.current!.getContext('2d')!;
-    const p = pos(e);
-    ctx.beginPath(); ctx.moveTo(p.x, p.y); setDrawing(true);
-  };
-  const move = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!drawing) return;
-    e.preventDefault();
-    const ctx = ref.current!.getContext('2d')!;
-    const p = pos(e);
-    ctx.lineTo(p.x, p.y); ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.stroke();
-  };
-  const end = () => {
-    if (drawing) { setDrawing(false); setHas(true); onChange(ref.current!.toDataURL()); }
-  };
-  const clear = () => {
-    const c = ref.current!;
-    c.getContext('2d')!.clearRect(0, 0, c.width, c.height);
-    setHas(false);
-    onChange(null);
-  };
-  return (
-    <div>
-      <div className="sigpad">
-        <canvas
-          ref={ref} width={600} height={170}
-          onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
-          onTouchStart={start} onTouchMove={move} onTouchEnd={end}
-        />
-        {!has && <div className="ph">Draw your signature here</div>}
-      </div>
-      {has && (
-        <button className="note" style={{ marginTop: 8, background: 'none', border: 0, cursor: 'pointer', textDecoration: 'underline' }} onClick={clear}>
-          Clear signature
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** Inline landlord-signature field shown on the page (no modal) so the landlord
- *  can countersign directly. Same role/endpoint as SignModal. */
 /** Collapsible DocuSign-style signing audit trail: per-signature evidence
  *  (channel, IP, device, consent, terms hash) + the envelope event history,
  *  with a one-click "Certificate (PDF)" download. Fetches lazily on expand. */
@@ -4161,44 +4104,29 @@ function SignatureAuditTrail({ contractId }: { contractId: number }) {
   );
 }
 
-function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; onSigned: () => void }) {
-  const [sig, setSig] = useState<string | null>(null);
-  const [name, setName] = useState(contract.landlord.companyName || contract.landlord.name || '');
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
-  const [consent, setConsent] = useState(false);
+/** Maps a SignatureBlock payload to the /contracts/:id/sign landlord API call. */
+async function submitLandlordSignature(contractId: number, fallbackName: string, p: SignaturePayload) {
+  const res = await fetch(`/api/contracts/${contractId}/sign`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      role: 'landlord',
+      signatoryName: p.signatoryName || fallbackName || 'Landlord',
+      method: 'online',
+      signatureImage: p.signatureImage,
+      consent: p.consent,
+      clientMeta: p.clientMeta,
+      geo: p.geo,
+    }),
+  });
+  if (!res.ok) throw new Error(`Sign failed: ${res.status}`);
+}
 
-  const submit = async () => {
-    setBusy(true); setErr(null);
-    try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown>; geo?: { lat: number; lng: number; accuracy?: number } | null } = {
-        role: 'landlord',
-        signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
-        method: 'online',
-        consent,
-        clientMeta: collectClientMeta(),
-        geo: await collectGeo(),
-      };
-      if (mode === 'canvas') body.signatureImage = sig!;
-      else                   body.typedName     = name.trim();
-      const res = await fetch(`/api/contracts/${contract.id}/sign`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`Sign failed: ${res.status}`);
-      setDone(true);          // hold the success state until the parent reload swaps this out
-      onSigned();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Sign failed');
-      setBusy(false);
-    }
-  };
-  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && consent && !busy;
-
+function InlineLandlordSign({ contract, signerName, onBehalfOf, onSigned }: {
+  contract: ContractDetail; signerName: string; onBehalfOf?: string | null; onSigned: () => void;
+}) {
+  const fallbackName = contract.landlord.companyName || contract.landlord.name || 'Landlord';
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--jade-edge, #bfe3d6)', borderRadius: 'var(--r-lg)', padding: 16, marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -4208,24 +4136,16 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
           <div className="note">Add your landlord signature below to countersign — no extra steps.</div>
         </div>
       </div>
-      <div className="signas">
-        <span className="sa-ic"><BadgeCheck size={20} /></span>
-        <div>
-          <div className="sa-l">Signing as Landlord</div>
-          <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
-        </div>
-      </div>
-      <SignaturePad onChange={setSig} />
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
-        <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 2 }} />
-        <span className="note">{ESIGN_CONSENT_TEXT}</span>
-      </label>
-      {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-        <button className="btn btn-jade" disabled={!canSubmit || done} onClick={submit}>
-          <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : 'Sign as Landlord'}
-        </button>
-      </div>
+      <SignatureBlock
+        signerRole="Landlord"
+        signerName={signerName}
+        onBehalfOf={onBehalfOf}
+        defaultName={signerName}
+        termsText="I have reviewed this contract and agree to execute it as the landlord."
+        submitLabel="Sign as Landlord"
+        alreadySigned={false}
+        onSign={async (p) => { await submitLandlordSignature(contract.id, fallbackName, p); onSigned(); }}
+      />
     </div>
   );
 }
@@ -4233,33 +4153,22 @@ function InlineLandlordSign({ contract, onSigned }: { contract: ContractDetail; 
 /** Inline RP counter-signature for the move-in / move-out inspection — shown on
  *  the step card once the customer has signed, so the landlord doesn't have to
  *  open the inspection workspace just to countersign. Move-in auto-activates. */
-function InlineInspectionCounterSign({ contractId, type, onSigned }: {
-  contractId: number; type: 'move_in' | 'move_out'; onSigned: () => void;
+function InlineInspectionCounterSign({ contractId, type, signerName, onBehalfOf, onSigned }: {
+  contractId: number; type: 'move_in' | 'move_out'; signerName: string; onBehalfOf?: string | null; onSigned: () => void;
 }) {
-  const [sig, setSig] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true); setErr(null);
-    try {
-      const res = await fetch(`/api/contracts/${contractId}/inspection/sign?type=${type}`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatureImage: sig }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => null);
-        throw new Error(d?.message ?? `Sign failed: ${res.status}`);
-      }
-      setDone(true);          // hold the success state until the parent reload swaps this out
-      onSigned();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Sign failed');
-      setBusy(false);
+  const moveLabel = type === 'move_out' ? 'move-out' : 'move-in';
+  const signInspection = async (p: SignaturePayload) => {
+    const res = await fetch(`/api/contracts/${contractId}/inspection/sign?type=${type}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => null);
+      throw new Error(d?.message ?? `Sign failed: ${res.status}`);
     }
+    onSigned();
   };
 
   return (
@@ -4275,57 +4184,24 @@ function InlineInspectionCounterSign({ contractId, type, onSigned }: {
           </div>
         </div>
       </div>
-      <SignaturePad onChange={setSig} />
-      {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-        <button className="btn btn-jade" disabled={!sig || busy || done} onClick={submit}>
-          <Pencil size={14} /> {done ? 'Signed ✓' : busy ? 'Signing…' : 'Counter-sign inspection'}
-        </button>
-      </div>
+      <SignatureBlock
+        signerRole="Landlord"
+        signerName={signerName}
+        onBehalfOf={onBehalfOf}
+        defaultName={signerName}
+        termsText={`I confirm the condition recorded in this ${moveLabel} inspection is accurate.`}
+        submitLabel="Counter-sign inspection"
+        alreadySigned={false}
+        onSign={signInspection}
+      />
     </div>
   );
 }
 
 function SignModal({
-  contract, onClose, onSigned,
-}: { contract: ContractDetail; onClose: () => void; onSigned: () => void }) {
-  const [sig, setSig] = useState<string | null>(null);
-  const [name, setName] = useState(contract.landlord.companyName || contract.landlord.name || '');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [mode, setMode] = useState<'canvas' | 'typed'>('canvas');
-  const [consent, setConsent] = useState(false);
-
-  const submit = async () => {
-    setBusy(true); setErr(null);
-    try {
-      const body: { role: 'landlord'; signatoryName: string; method: 'online'; signatureImage?: string; typedName?: string; consent: boolean; clientMeta: Record<string, unknown>; geo?: { lat: number; lng: number; accuracy?: number } | null } = {
-        role: 'landlord',
-        signatoryName: name.trim() || (contract.landlord.companyName || 'Landlord'),
-        method: 'online',
-        consent,
-        clientMeta: collectClientMeta(),
-        geo: await collectGeo(),
-      };
-      if (mode === 'canvas') body.signatureImage = sig!;
-      else                   body.typedName     = name.trim();
-      const res = await fetch(`/api/contracts/${contract.id}/sign`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`Sign failed: ${res.status}`);
-      onSigned();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Sign failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const canSubmit = (mode === 'canvas' ? !!sig : name.trim().length > 0) && consent && !busy;
-
+  contract, signerName, onBehalfOf, onClose, onSigned,
+}: { contract: ContractDetail; signerName: string; onBehalfOf?: string | null; onClose: () => void; onSigned: () => void }) {
+  const fallbackName = contract.landlord.companyName || contract.landlord.name || 'Landlord';
   return (
     <div className="mscrim" onClick={onClose}>
       <div className="modal sm" onClick={e => e.stopPropagation()}>
@@ -4337,25 +4213,16 @@ function SignModal({
           <button className="x" onClick={onClose}><X size={17} /></button>
         </div>
         <div className="mb">
-          <div className="signas">
-            <span className="sa-ic"><BadgeCheck size={20} /></span>
-            <div>
-              <div className="sa-l">Signing as Landlord</div>
-              <div className="sa-n">{contract.landlord.companyName || contract.landlord.name || '—'}</div>
-            </div>
-          </div>
-          <SignaturePad onChange={setSig} />
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, cursor: 'pointer' }}>
-            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 2 }} />
-            <span className="note">{ESIGN_CONSENT_TEXT}</span>
-          </label>
-          {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
-        </div>
-        <div className="mf">
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-          <button className="btn btn-jade btn-sm" disabled={!canSubmit} onClick={submit}>
-            <Pencil size={14} /> Sign as Landlord
-          </button>
+          <SignatureBlock
+            signerRole="Landlord"
+            signerName={signerName}
+            onBehalfOf={onBehalfOf}
+            defaultName={signerName}
+            termsText="I have reviewed this contract and agree to execute it as the landlord."
+            submitLabel="Sign as Landlord"
+            alreadySigned={false}
+            onSign={async (p) => { await submitLandlordSignature(contract.id, fallbackName, p); onClose(); onSigned(); }}
+          />
         </div>
       </div>
     </div>
@@ -5035,6 +4902,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // Manager permission gate for the Edit affordance — RP owners always see it,
   // managers only when they hold canManageAgreements for this contract's landlord.
   const { canForRp: managerCanForRp } = useManagerPermissions();
+  const { user: authUser } = useAuth();
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
   const [paymentRefs, setPaymentRefs] = useState<PaymentRefs>(EMPTY_PAYMENT_REFS);
@@ -5804,6 +5672,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     collections:   mgrCan('canManageCollections') || mgrCan('canRecordPayments') || mgrCan('canClearCheques'),
   };
 
+  // Landlord-signature identity for the signing block. Three cases, all stamped
+  // to match by the backend:
+  //  1. A manager signing → their own name "on behalf of {landlord}" (POA act).
+  //  2. Else, if the landlord (RP) has a Power of Attorney holder on file → the
+  //     POA holder's name "on behalf of {landlord}". This is why an owner-path
+  //     signature is attributed to the attorney, not the landlord directly.
+  //  3. Otherwise the landlord signs directly, with no on-behalf-of line.
+  const landlordName = contract.landlord.companyName || contract.landlord.name || 'Landlord';
+  const poaHolder = contract.landlord.hasPoa && contract.landlord.poaPersonName?.trim() ? contract.landlord.poaPersonName.trim() : null;
+  const landlordSignerName = isManagerView ? (authUser?.name || 'Authorised Manager') : (poaHolder ?? landlordName);
+  const landlordOnBehalfOf = isManagerView ? landlordName : (poaHolder ? landlordName : null);
+
   // Step content + jump-to-step handler
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of 6`;
   const handlers: StepHandlers = {
@@ -6362,7 +6242,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                  countersign here. */}
             {selStep.key === 'sign' && canLandlordSign && perms.signLandlord && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
-                <InlineLandlordSign contract={contract} onSigned={() => void reload()} />
+                <InlineLandlordSign contract={contract} signerName={landlordSignerName} onBehalfOf={landlordOnBehalfOf} onSigned={() => void reload()} />
               </div>
             )}
             {/* Move-in: second link for the on-site inspection manager — they
@@ -6387,7 +6267,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                  the move-in inspection, so it can be completed right here. */}
             {selStep.key === 'movein' && derived.moveIn.rpSubmitted && derived.moveIn.tenantSig && !derived.moveIn.rpCounterSig && perms.inspections && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
-                <InlineInspectionCounterSign contractId={contract.id} type="move_in" onSigned={() => void reload()} />
+                <InlineInspectionCounterSign contractId={contract.id} type="move_in" signerName={landlordSignerName} onBehalfOf={landlordOnBehalfOf} onSigned={() => void reload()} />
               </div>
             )}
             {/* Move-out signing link — available during wind-down even though the
@@ -6496,7 +6376,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         )}
       </div>
 
-      {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
+      {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} signerName={landlordSignerName} onBehalfOf={landlordOnBehalfOf} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
       {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); loadNotes(); }} />}
       {modal === 'cancel-lease' && perms.agreements && <CancelLeaseModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}

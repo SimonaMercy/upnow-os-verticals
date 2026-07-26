@@ -6,13 +6,14 @@
  * RP/customer print pages) for the tenant to read, then a separate signing
  * section. No login.
  */
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
-import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { collectClientMeta, collectGeo } from '@/lib/signEvidence';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
@@ -353,83 +354,38 @@ function Card({ title, icon: Icon, children }: { title: string; icon: React.Comp
 function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector = false }: {
   token: string; contractId: number; kind: 'contract' | 'move_in' | 'move_out'; defaultName: string; onSigned: () => void; asInspector?: boolean;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const dirty = useRef(false);
-  const [name, setName] = useState(defaultName);
-  const [agreed, setAgreed] = useState(kind !== 'contract');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const isContract = kind === 'contract';
+  const moveLabel = kind === 'move_out' ? 'move-out' : 'move-in';
+  const termsText = isContract
+    ? 'I have read the contract above and agree to its terms.'
+    : `I confirm the condition recorded in this ${moveLabel} inspection is accurate.`;
+  const submitLabel = isContract ? 'Sign contract'
+    : asInspector ? (kind === 'move_out' ? 'Counter-sign move-out' : 'Counter-sign move-in')
+    : (kind === 'move_out' ? 'Sign move-out' : 'Sign move-in');
 
-  // Size the signature pad's backing store to its rendered CSS box (× DPR) so
-  // strokes aren't stretched and stay crisp — the pad is taller on mobile, so a
-  // fixed 520×150 buffer would squash the signature. Re-fits on resize/rotate.
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const fit = () => {
-      const r = c.getBoundingClientRect();
-      if (!r.width || !r.height) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 3);
-      c.width = Math.round(r.width * dpr);
-      c.height = Math.round(r.height * dpr);
-      c.getContext('2d')!.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS-pixel units
-      dirty.current = false; // resizing the buffer clears it
-    };
-    fit();
-    window.addEventListener('resize', fit);
-    return () => window.removeEventListener('resize', fit);
-  }, []);
-
-  // Pointer → CSS-pixel coords (the context is DPR-scaled, so no extra ratio).
-  const pos = (e: React.PointerEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  const down = (e: React.PointerEvent) => { drawing.current = true; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
-  const move = (e: React.PointerEvent) => { if (!drawing.current) return; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.lineTo(x, y); ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke(); dirty.current = true; };
-  const up = () => { drawing.current = false; };
-  const clear = () => { const c = canvasRef.current!; const ctx = c.getContext('2d')!; ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.restore(); dirty.current = false; };
-
-  async function submit() {
-    if (kind === 'contract' && !agreed) { setErr('Please confirm you have read the contract above.'); return; }
-    if (!dirty.current) { setErr('Please draw your signature.'); return; }
-    if (!name.trim()) { setErr('Please enter your name.'); return; }
-    setBusy(true); setErr(null);
-    try {
-      const signatureImage = canvasRef.current!.toDataURL('image/png');
-      const url = kind === 'contract' ? `/contracts/${contractId}/sign`
-        : asInspector ? `/contracts/${contractId}/inspection/counter-sign`
-        : `/contracts/${contractId}/inspection/sign`;
-      const body = kind === 'contract'
-        ? { signatureImage, signatoryName: name.trim(), consent: agreed, clientMeta: collectClientMeta(), geo: await collectGeo() }
-        : asInspector
-          ? { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage, signatoryName: name.trim() }
-          : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage };
-      const res = await fetch(API(token, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
-      onSigned();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  }
+  const onSign = async (p: SignaturePayload) => {
+    const url = isContract ? `/contracts/${contractId}/sign`
+      : asInspector ? `/contracts/${contractId}/inspection/counter-sign`
+      : `/contracts/${contractId}/inspection/sign`;
+    const body = isContract
+      ? { signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }
+      : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo };
+    const res = await fetch(API(token, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
+    onSigned();
+  };
 
   return (
-    <div className="space-y-3">
-      {kind === 'contract' && (
-        <label className="flex items-start gap-2 text-xs text-[#1a1916] cursor-pointer">
-          <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5" />
-          <span>I have read the contract above and agree to its terms. {ESIGN_CONSENT_TEXT}</span>
-        </label>
-      )}
-      <input className="w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg" placeholder={asInspector ? 'Your full name (inspection manager)' : 'Full name'} value={name} onChange={e => setName(e.target.value)} />
-      <div>
-        <p className="text-xs text-[#6b6860] mb-1">Draw your signature</p>
-        {/* Taller pad on mobile (easier finger signing); unchanged 150px on web (sm+). */}
-        <canvas ref={canvasRef} className="w-full h-52 sm:h-[150px] border border-[#d8d6d0] rounded-lg bg-[#fafaf8] touch-none cursor-crosshair"
-          onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} />
-        <button onClick={clear} className="text-[11px] text-[#6b6860] mt-1">Clear</button>
-      </div>
-      {err && <p className="text-xs text-[#b91c1c]">{err}</p>}
-      <button onClick={submit} disabled={busy} className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60 bg-[#2e9f82] inline-flex items-center gap-1.5">
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} {kind === 'contract' ? 'Sign contract' : asInspector ? (kind === 'move_out' ? 'Counter-sign move-out' : 'Counter-sign move-in') : kind === 'move_out' ? 'Sign move-out' : 'Sign move-in'}
-      </button>
-    </div>
+    <SignatureBlock
+      signerRole={asInspector ? 'Inspector' : 'Customer'}
+      signerName={defaultName}
+      onBehalfOf={asInspector ? 'the rental provider' : null}
+      defaultName={defaultName}
+      termsText={termsText}
+      submitLabel={submitLabel}
+      alreadySigned={false}
+      onSign={onSign}
+    />
   );
 }
 
@@ -440,6 +396,10 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
   token: string; id: number; d: Detail; ejari: EjariContractData; addendums: EjariAddendum[]; onSigned: () => void;
 }) {
   const landlordName = d.contract.landlord?.companyName || d.contract.landlord?.name || 'Landlord';
+  // When the landlord has a Power of Attorney holder on file, the lessor
+  // signature is legally the POA holder's — show them "on behalf of" the
+  // landlord (matches the authenticated surfaces + the backend stamp).
+  const poaHolder = d.contract.landlord?.hasPoa && d.contract.landlord?.poaPersonName?.trim() ? d.contract.landlord.poaPersonName.trim() : null;
   // Stamp the landlord's identity + the moment opened into every preview, once.
   const [watermark] = useState(() =>
     `${landlordName} — Confidential · ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
@@ -489,8 +449,9 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
       receipt={receipt}
       watermark={watermark}
       portalToken={token}
-      signerName={landlordName}
-      signerDefaultName={d.contract.landlord?.name || d.contract.landlord?.companyName || ''}
+      signerName={poaHolder ?? landlordName}
+      signerOnBehalfOf={poaHolder ? landlordName : undefined}
+      signerDefaultName={poaHolder ?? d.contract.landlord?.name ?? d.contract.landlord?.companyName ?? ''}
       landlordSigned={!!d.landlordSigned}
       onSign={sign}
     />

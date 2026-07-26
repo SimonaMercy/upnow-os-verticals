@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -530,96 +531,6 @@ function AreaBlock({
 
 // ─── Signature pad ────────────────────────────────────────────────────────────
 
-function SignaturePad({
-  label, value, onChange,
-}: {
-  label: string;
-  value: string | null;
-  onChange: (dataUrl: string | null) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasDrawn, setHasDrawn] = useState(!!value);
-
-  const getPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if ('touches' in e) {
-      const t = e.touches[0];
-      return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
-    }
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-  }, []);
-
-  const startDrawing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const { x, y } = getPos(e);
-    ctx.beginPath(); ctx.moveTo(x, y);
-    setIsDrawing(true);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const { x, y } = getPos(e);
-    ctx.lineTo(x, y);
-    ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.stroke();
-  }, [isDrawing, getPos]);
-
-  const stopDrawing = useCallback(() => {
-    if (!isDrawing) return;
-    setIsDrawing(false); setHasDrawn(true);
-    const canvas = canvasRef.current;
-    if (canvas) onChange(canvas.toDataURL('image/png'));
-  }, [isDrawing, onChange]);
-
-  const clear = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (ctx && canvas) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      setHasDrawn(false);
-      onChange(null);
-    }
-  }, [onChange]);
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-semibold text-[#6b6860] uppercase tracking-wide">{label}</p>
-      <div className="relative border-2 border-dashed border-[#e8e6e0] rounded-xl bg-white overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          width={560} height={140}
-          className="w-full cursor-crosshair touch-none"
-          style={{ height: 140 }}
-          onMouseDown={startDrawing} onMouseMove={draw}
-          onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
-        />
-        {!hasDrawn && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-[#c0bdb8] text-sm">Draw signature here</span>
-          </div>
-        )}
-      </div>
-      {hasDrawn && (
-        <button type="button" onClick={clear} className="flex items-center gap-1.5 text-xs text-[#9b9890] hover:text-[#ef4444] transition-colors">
-          <RotateCcw size={12} /> Clear
-        </button>
-      )}
-    </div>
-  );
-}
-
 // ─── Photos section ───────────────────────────────────────────────────────────
 
 function PhotosSection({
@@ -872,9 +783,6 @@ function InspectionWorkspace() {
   const [saving, setSaving]           = useState(false);
   const [saved, setSaved]             = useState(false);
   const [error, setError]             = useState<string | null>(null);
-  const [counterSig, setCounterSig]   = useState<string | null>(null);
-  const [countering, setCountering]   = useState(false);
-  const [counterError, setCounterError] = useState<string | null>(null);
   const [counterDone, setCounterDone] = useState(false);
   const [reopening, setReopening]     = useState(false);
   // Draft autosave — persists progress (photos/conditions/notes) as the inspector
@@ -1110,55 +1018,46 @@ function InspectionWorkspace() {
     } catch { /* best-effort download */ }
   }
 
-  async function handleCounterSign() {
-    if (!counterSig) { setCounterError('Please draw your signature first.'); return; }
-    if (!contractId) return;
-    setCountering(true); setCounterError(null);
-    try {
-      const res = await fetch(portalToken
-        ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/counter-sign`
-        : `/api/contracts/${contractId}/inspection/sign?type=${inspType}`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(portalToken
-          // Inspector links record who physically counter-signed.
-          ? { type: inspType, signatureImage: counterSig, signatoryName: data.inspectorName?.trim() || 'Inspection Manager' }
-          : { signatureImage: counterSig }),
-      });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        setCounterError((b as { message?: string }).message ?? 'Failed to submit signature');
-        return;
-      }
-      setCounterDone(true);
-      setData(d => ({ ...d, rpCounterSig: counterSig, rpCounterSignedAt: new Date().toISOString() }));
-      // Snapshot the completed inspection as a stored PDF so the contract documents
-      // binder shows a real document (RP/manager authed path only — the upload flow
-      // needs a session; best-effort, never block signing).
-      if (!portalToken && meta) {
-        try {
-          const nowIso = new Date().toISOString();
-          const [{ storeContractPdf }, mod] = await Promise.all([
-            import('@/lib/storeContractPdf'),
-            import('@/components/contract/InspectionReportPdf'),
-          ]);
-          await storeContractPdf({
-            contractId: Number(contractId),
-            documentKey: inspType === 'move_out' ? 'move_out_report' : 'move_in_report',
-            category: 'inspection',
-            displayName: inspType === 'move_out' ? 'Move-out Inspection Checklist' : 'Move-in Inspection Checklist',
-            element: createElement(mod.default, { data: buildInspectionPdfData({
-              inspectionDate: data.inspectionDate ?? nowIso,
-              rpCounterSig: counterSig, rpCounterSignedAt: nowIso,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            }) as any }),
-          });
-        } catch { /* PDF snapshot is best-effort */ }
-      }
-    } catch {
-      setCounterError('Unexpected error submitting signature');
-    } finally {
-      setCountering(false);
+  async function handleCounterSign(p: SignaturePayload) {
+    if (!contractId) throw new Error('Missing contract');
+    const res = await fetch(portalToken
+      ? `/api/portal/${portalToken}/contracts/${contractId}/inspection/counter-sign`
+      : `/api/contracts/${contractId}/inspection/sign?type=${inspType}`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(portalToken
+        // Inspector links record who physically counter-signed.
+        ? { type: inspType, signatureImage: p.signatureImage, signatoryName: p.signatoryName || data.inspectorName?.trim() || 'Inspection Manager', consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }
+        : { signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? 'Failed to submit signature');
+    }
+    setCounterDone(true);
+    setData(d => ({ ...d, rpCounterSig: p.signatureImage, rpCounterSignedAt: new Date().toISOString() }));
+    // Snapshot the completed inspection as a stored PDF so the contract documents
+    // binder shows a real document (RP/manager authed path only — the upload flow
+    // needs a session; best-effort, never block signing).
+    if (!portalToken && meta) {
+      try {
+        const nowIso = new Date().toISOString();
+        const [{ storeContractPdf }, mod] = await Promise.all([
+          import('@/lib/storeContractPdf'),
+          import('@/components/contract/InspectionReportPdf'),
+        ]);
+        await storeContractPdf({
+          contractId: Number(contractId),
+          documentKey: inspType === 'move_out' ? 'move_out_report' : 'move_in_report',
+          category: 'inspection',
+          displayName: inspType === 'move_out' ? 'Move-out Inspection Checklist' : 'Move-in Inspection Checklist',
+          element: createElement(mod.default, { data: buildInspectionPdfData({
+            inspectionDate: data.inspectionDate ?? nowIso,
+            rpCounterSig: p.signatureImage, rpCounterSignedAt: nowIso,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          }) as any }),
+        });
+      } catch { /* PDF snapshot is best-effort */ }
     }
   }
 
@@ -1479,14 +1378,16 @@ function InspectionWorkspace() {
               )}
             </div>
           ) : tenantSigned && !fullySigned ? (
-            <div className="space-y-3">
-              <SignaturePad label="" value={counterSig} onChange={setCounterSig} />
-              {counterError && <p className="text-xs text-red-600">{counterError}</p>}
-              <button type="button" onClick={handleCounterSign} disabled={!counterSig || countering}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-50 transition-colors print:hidden">
-                {countering ? <><Loader2 size={14} className="animate-spin" /> Signing…</> : <><FileSignature size={14} /> Sign & Activate Tenancy</>}
-              </button>
-            </div>
+            <SignatureBlock
+              signerRole="Inspector"
+              signerName={data.inspectorName?.trim() || 'Inspection Manager'}
+              onBehalfOf="the rental provider"
+              defaultName={data.inspectorName?.trim() || ''}
+              termsText={`I confirm the condition recorded in this ${inspType === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
+              submitLabel="Sign & Activate Tenancy"
+              alreadySigned={false}
+              onSign={handleCounterSign}
+            />
           ) : (
             <div className="rounded-xl border border-dashed border-[#d8d6d0] bg-[#fafaf8] px-3 py-8 text-center">
               <p className="text-[11px] text-[#9b9890]">Awaiting customer signature first.</p>

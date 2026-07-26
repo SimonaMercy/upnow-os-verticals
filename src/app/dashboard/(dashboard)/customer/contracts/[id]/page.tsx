@@ -14,19 +14,19 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, FileText, CheckCircle, Loader2, AlertCircle, X,
-  User, Building2, Calendar, DollarSign, RotateCcw, FileSignature,
+  User, Building2, Calendar, DollarSign, FileSignature,
   BadgeCheck, Eye, Download, CreditCard, ClipboardList,
   ChevronRight,
 } from 'lucide-react';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { openDocViewer } from '@/lib/docViewer';
 import { useBackClose } from '@/lib/useSlideOver';
-import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -196,81 +196,6 @@ function StepRow({ num, label, state, last, children }: {
 
 // ─── Signature Pad ──────────────────────────────────────────────────────────
 
-function SignaturePad({ onSignatureChange }: { onSignatureChange: (dataUrl: string | null) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasDrawn, setHasDrawn] = useState(false);
-
-  const getPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if ('touches' in e) {
-      const t = e.touches[0];
-      return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY };
-    }
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-  }, []);
-
-  const startDrawing = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const { x, y } = getPos(e);
-    ctx.beginPath(); ctx.moveTo(x, y);
-    setIsDrawing(true);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const { x, y } = getPos(e);
-    ctx.lineTo(x, y);
-    ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.stroke();
-  }, [isDrawing, getPos]);
-
-  const stopDrawing = useCallback(() => {
-    if (!isDrawing) return;
-    setIsDrawing(false); setHasDrawn(true);
-    const canvas = canvasRef.current;
-    if (canvas) onSignatureChange(canvas.toDataURL('image/png'));
-  }, [isDrawing, onSignatureChange]);
-
-  const clear = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (ctx && canvas) { ctx.clearRect(0, 0, canvas.width, canvas.height); setHasDrawn(false); onSignatureChange(null); }
-  }, [onSignatureChange]);
-
-  return (
-    <div className="space-y-2">
-      <div className="relative border-2 border-dashed border-[#e8e6e0] rounded-xl bg-white overflow-hidden">
-        <canvas ref={canvasRef} width={560} height={140}
-          className="w-full cursor-crosshair touch-none" style={{ height: '140px' }}
-          onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
-        />
-        {!hasDrawn && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-[#c0bdb8] text-sm">Draw your signature here</span>
-          </div>
-        )}
-      </div>
-      {hasDrawn && (
-        <button onClick={clear} type="button" className="flex items-center gap-1.5 text-xs text-[#9b9890] hover:text-[#1a1916] transition">
-          <RotateCcw size={12} /> Clear signature
-        </button>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function TenantContractDetailPage() {
@@ -291,11 +216,6 @@ export default function TenantContractDetailPage() {
 
   // Sign modal
   const [showSignModal, setShowSignModal] = useState(false);
-  const [signatoryName, setSignatoryName] = useState('');
-  const [signatureImage, setSignatureImage] = useState<string | null>(null);
-  const [signConsent, setSignConsent] = useState(false);
-  const [signing, setSigning] = useState(false);
-  const [signError, setSignError] = useState<string | null>(null);
   const [signSuccess, setSignSuccess] = useState(false);
 
   // Payment preferences (editable while pending)
@@ -376,34 +296,25 @@ export default function TenantContractDetailPage() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  async function submitSignature() {
+  async function submitSignature(p: SignaturePayload) {
     if (!contract) return;
-    if (!signatoryName.trim()) { setSignError('Please enter your full legal name.'); return; }
-    if (!signatureImage)       { setSignError('Please draw your signature.'); return; }
-    setSigning(true); setSignError(null);
-    try {
-      const res = await fetch(`/api/contracts/tenant/${contract.id}/sign`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatoryName: signatoryName.trim(), signatureImage, consent: signConsent, clientMeta: collectClientMeta(), geo: await collectGeo() }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { message?: string };
-        throw new Error(body.message ?? `Error ${res.status}`);
-      }
-      const [updated, newSigs] = await Promise.all([
-        fetch(`/api/contracts/tenant/${contract.id}`, { credentials: 'include' }).then(r => r.json() as Promise<ContractDetail>),
-        fetch(`/api/contracts/${contract.id}/signatures`, { credentials: 'include' }).then(r => r.ok ? r.json() as Promise<Signature[]> : [] as Signature[]),
-      ]);
-      setContract(updated);
-      setSigs(Array.isArray(newSigs) ? newSigs : []);
-      setSignSuccess(true);
-      setShowSignModal(false);
-    } catch (e: unknown) {
-      setSignError(e instanceof Error ? e.message : 'Failed to save signature');
-    } finally {
-      setSigning(false);
+    const res = await fetch(`/api/contracts/tenant/${contract.id}/sign`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatoryName: p.signatoryName, signatureImage: p.signatureImage, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { message?: string };
+      throw new Error(body.message ?? `Error ${res.status}`);
     }
+    const [updated, newSigs] = await Promise.all([
+      fetch(`/api/contracts/tenant/${contract.id}`, { credentials: 'include' }).then(r => r.json() as Promise<ContractDetail>),
+      fetch(`/api/contracts/${contract.id}/signatures`, { credentials: 'include' }).then(r => r.ok ? r.json() as Promise<Signature[]> : [] as Signature[]),
+    ]);
+    setContract(updated);
+    setSigs(Array.isArray(newSigs) ? newSigs : []);
+    setSignSuccess(true);
+    setShowSignModal(false);
   }
 
   async function savePreferences() {
@@ -1162,42 +1073,16 @@ export default function TenantContractDetailPage() {
               </div>
               <button onClick={() => setShowSignModal(false)} className="text-white/70 hover:text-white text-xs">✕</button>
             </div>
-            <div className="px-5 py-5 space-y-4">
-              <div className="bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3 text-xs text-[#1a7a5a]">
-                By signing, you confirm you have read and agree to all terms of tenancy contract{' '}
-                <strong>{contract.ref}</strong> for{' '}
-                <strong>{contract.unit.number ? `Unit ${contract.unit.number}, ` : ''}{contract.property.buildingName}</strong>.
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#1a1916] block mb-1.5">Your full legal name</label>
-                <input type="text" value={signatoryName} onChange={e => setSignatoryName(e.target.value)}
-                  placeholder="As it appears on your Emirates ID"
-                  className="w-full text-sm px-3 py-2.5 border border-[#e8e6e0] rounded-xl bg-[#f7f6f2] focus:outline-none focus:border-[#2e9f82] placeholder:text-[#c0bdb8]" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#1a1916] block mb-1.5">Draw your signature</label>
-                <SignaturePad onSignatureChange={setSignatureImage} />
-              </div>
-              <label className="flex items-start gap-2 text-xs text-[#1a1916] cursor-pointer">
-                <input type="checkbox" checked={signConsent} onChange={e => setSignConsent(e.target.checked)} className="mt-0.5" />
-                <span>{ESIGN_CONSENT_TEXT}</span>
-              </label>
-              {signError && (
-                <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                  <AlertCircle size={13} /> {signError}
-                </div>
-              )}
-              <div className="flex gap-3 pt-1">
-                <button onClick={() => setShowSignModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-[#e8e6e0] text-sm text-[#6b6860] hover:border-[#c5c2bc] transition-colors">
-                  Cancel
-                </button>
-                <button onClick={submitSignature} disabled={signing || !signatoryName.trim() || !signatureImage || !signConsent}
-                  className="flex-1 py-2.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                  {signing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                  {signing ? 'Signing…' : 'Submit Signature'}
-                </button>
-              </div>
+            <div className="px-5 py-5">
+              <SignatureBlock
+                signerRole="Customer"
+                signerName={contract.tenant.companyName ?? contract.tenant.name}
+                defaultName={contract.tenant.companyName ?? contract.tenant.name ?? ''}
+                termsText={`I have read and agree to all terms of tenancy contract ${contract.ref} for ${contract.unit.number ? `Unit ${contract.unit.number}, ` : ''}${contract.property.buildingName}.`}
+                submitLabel="Sign contract"
+                alreadySigned={false}
+                onSign={submitSignature}
+              />
             </div>
           </div>
         </div>

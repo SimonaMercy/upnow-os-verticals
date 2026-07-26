@@ -97,7 +97,7 @@ function getSteps(user: AppUser, rpProfile: RpSpProfile | null): Step[] {
   if (user.role === "customer") {
     base.push({
       label: "Complete your profile",
-      done: !!(user.firstName && user.lastName),
+      done: !!user.firstName,
       href: "/dashboard/customer/profile",
     });
   }

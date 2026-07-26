@@ -181,6 +181,13 @@ const unitLabel = (u?: { number?: string | null; unitNumber?: string | null; nam
   return num ? `Unit ${num}` : (nm ?? '—');
 };
 
+// True when every gate in `stages` is complete (a lane with no keys never blocks).
+// A New Lease in this state has nothing left on the board — it awaits activation
+// on the contract page — so it's filtered off the pipeline.
+function allGatesDone(c: OpsContract, stages: StageDef[]): boolean {
+  return stages.every(s => !s.keys.length || !c.checklist.some(i => s.keys.includes(i.key) && !i.done));
+}
+
 // The lane a contract card sits in = its first incomplete gate (only counting
 // checklist items that actually exist on that contract).
 function contractStageKey(c: OpsContract, stages: StageDef[]): string {
@@ -365,7 +372,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
 
     // Setup = neither winding down nor termination-requested (those belong to Terminated).
     const setup = contracts.filter(c => !c.windDown && !c.terminationRequested && passC(c));
-    const newCards = setup.filter(c => c.contractType !== 'renewal').map(c => contractToCard(c, NEW_STAGES, contractHref(c.id), nowMs));
+    const newCards = setup
+      .filter(c => c.contractType !== 'renewal' && !allGatesDone(c, NEW_STAGES))
+      .map(c => contractToCard(c, NEW_STAGES, contractHref(c.id), nowMs));
     const renewalCards = setup.filter(c => c.contractType === 'renewal').map(c => contractToCard(c, RENEWAL_STAGES, contractHref(c.id), nowMs));
     const termCards = contracts.filter(c => (c.windDown || c.terminationRequested) && passC(c)).map(c => contractToCard(c, TERM_STAGES, contractHref(c.id), nowMs));
 

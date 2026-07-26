@@ -70,7 +70,7 @@ const schema = z.object({
   fullName: z.string().min(2, "Name must be at least 2 characters"),
   dateOfBirth: z.string().optional(),
   nationality: z.string().optional(),
-  gender: z.enum(["male", "female", "prefer_not_to_say"]).optional().or(z.literal("")),
+  gender: z.enum(["male", "female"]).optional().or(z.literal("")),
   entityType: z.enum(["individual", "company"]),
   companyName: z.string().optional(),
   companyType: z.enum(["landlord", "brokerage", "agents"]).optional(),
@@ -204,7 +204,7 @@ export default function RentalProviderProfilePage() {
           fullName: user?.name ?? "",
           dateOfBirth: profile.dateOfBirth ?? "",
           nationality: profile.nationality ?? "",
-          gender: (profile.gender as "male" | "female" | "prefer_not_to_say") ?? undefined,
+          gender: (profile.gender === "male" || profile.gender === "female") ? profile.gender : undefined,
           entityType: et,
           companyName: profile.companyName ?? "",
           companyType: profile.companyType ?? undefined,
@@ -368,7 +368,6 @@ export default function RentalProviderProfilePage() {
                   <option value="">Select…</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
-                  <option value="prefer_not_to_say">Prefer not to say</option>
                 </select>
               </div>
             </div>

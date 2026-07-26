@@ -254,6 +254,9 @@ export interface ContractDocsBinderProps {
   headerRight?: React.ReactNode;
   signerName: string;
   signerDefaultName: string;
+  /** When the signer acts under POA, the represented landlord — shows an
+   *  "on behalf of {B}" line on the sign bar. */
+  signerOnBehalfOf?: string | null;
   landlordSigned: boolean;
   /** Whether the current actor may sign as landlord — needs signing rights AND
    *  power of attorney for a delegated manager. Defaults to true so the no-login
@@ -271,7 +274,7 @@ type Slot =
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
-  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, signatureCertificate, headerRight, signerName, signerDefaultName, landlordSigned, canLandlordSign = true, onSign } = props;
+  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, signatureCertificate, headerRight, signerName, signerDefaultName, signerOnBehalfOf, landlordSigned, canLandlordSign = true, onSign } = props;
   const planRefNo = paymentRefs?.planRefNo ?? null;
   // Enrich the receipt contract so per-payment receipts print their real gapless
   // number and the plan number (see PaymentReceiptPdf).
@@ -512,6 +515,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         <ContractSignBar
           signerRole="Landlord"
           signerName={signerName}
+          onBehalfOf={signerOnBehalfOf}
           defaultName={signerDefaultName}
           alreadySigned={landlordSigned}
           onSign={onSign}

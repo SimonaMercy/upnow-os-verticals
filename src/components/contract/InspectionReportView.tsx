@@ -11,12 +11,13 @@
  *   - phase: move_in has no amounts and no Move-Out-Date box; move_out adds the auto-calc Cost.
  */
 
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Home, Calendar, ClipboardCheck, User, Users, Layers, Wrench, Banknote, AlertTriangle,
   Plus, FileText, DoorClosed, Shirt, AppWindow, Grid3x3, Zap, Utensils,
   Bath, Trees, Wind, KeyRound, Sparkles, Paintbrush, Package, Camera, X, Loader2,
+  ZoomIn, ImageOff,
 } from 'lucide-react';
 import {
   InspectionDoc, InspectionItem, Condition,
@@ -391,21 +392,7 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
       {photos.map((p) => (
-        <span key={p.id} style={{ position: 'relative', width: 56, height: 56, borderRadius: 6, overflow: 'hidden', border: '1px solid #e8e6e0', background: '#f4f3ef', flexShrink: 0 }}>
-          {/* Click the thumbnail to open the full photo in the in-portal viewer. */}
-          <button type="button" onClick={() => openDocViewer({ fileUrl: displayInspectionPhotoUrl(p.url), caption: p.caption || 'Inspection photo' })}
-            title="Click to view full photo" aria-label="View full photo"
-            style={{ display: 'block', width: '100%', height: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in', lineHeight: 0 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={displayInspectionPhotoUrl(p.url)} alt={p.caption || 'attachment'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          </button>
-          {editable && onRemove && (
-            <button type="button" aria-label="Remove photo" onClick={() => onRemove(p.id)}
-              style={{ position: 'absolute', top: 1, right: 1, width: 16, height: 16, borderRadius: 999, background: 'rgba(0,0,0,.6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', padding: 0 }}>
-              <X size={10} />
-            </button>
-          )}
-        </span>
+        <PhotoThumb key={p.id} photo={p} removable={editable && !!onRemove} onRemove={onRemove ? () => onRemove(p.id) : undefined} />
       ))}
       {editable && onAdd && (
         <>
@@ -420,6 +407,51 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
         </>
       )}
     </div>
+  );
+}
+
+/** One inspection-photo thumbnail. Always a button that opens the full photo in
+ *  the in-portal viewer (bigger preview). When the image fails to load — e.g. a
+ *  private-bucket URL that couldn't be re-signed — it degrades to a labelled,
+ *  still-clickable placeholder instead of a broken-image glyph. */
+function PhotoThumb({ photo, removable, onRemove }: {
+  photo: { id: string; url: string; caption?: string };
+  removable: boolean;
+  onRemove?: () => void;
+}) {
+  const [broken, setBroken] = useState(false);
+  const src = displayInspectionPhotoUrl(photo.url);
+  const caption = photo.caption || 'Inspection photo';
+  return (
+    <span style={{ position: 'relative', width: 76, height: 76, borderRadius: 8, overflow: 'hidden', border: '1px solid #e8e6e0', background: '#f4f3ef', flexShrink: 0 }}>
+      {/* Click the thumbnail to open the full photo in the in-portal viewer. */}
+      <button type="button" onClick={() => openDocViewer({ fileUrl: src, caption })}
+        title="Click to view full photo" aria-label={`View full photo — ${caption}`}
+        style={{ display: 'block', width: '100%', height: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in', lineHeight: 0 }}>
+        {broken ? (
+          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, width: '100%', height: '100%', color: '#9a978f', fontSize: 9, fontWeight: 600, textAlign: 'center', padding: 4 }}>
+            <ImageOff size={18} />
+            <span style={{ lineHeight: 1.1 }}>View photo</span>
+          </span>
+        ) : (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={caption} onError={() => setBroken(true)}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            {/* Zoom affordance so it reads as clickable. */}
+            <span style={{ position: 'absolute', bottom: 3, right: 3, width: 18, height: 18, borderRadius: 999, background: 'rgba(0,0,0,.55)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+              <ZoomIn size={11} />
+            </span>
+          </>
+        )}
+      </button>
+      {removable && onRemove && (
+        <button type="button" aria-label="Remove photo" onClick={onRemove}
+          style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 999, background: 'rgba(0,0,0,.6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', padding: 0 }}>
+          <X size={11} />
+        </button>
+      )}
+    </span>
   );
 }
 

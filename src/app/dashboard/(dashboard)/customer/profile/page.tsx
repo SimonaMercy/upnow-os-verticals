@@ -54,7 +54,7 @@ export default function CustomerProfilePage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName]   = useState('');
   const [phone, setPhone]         = useState('');
-  const [gender, setGender]       = useState<'' | 'male' | 'female' | 'other'>('');
+  const [gender, setGender]       = useState<'' | 'male' | 'female'>('');
   const [nationality, setNationality] = useState('');
   const [emiratesId, setEmiratesId]   = useState('');
 
@@ -104,7 +104,7 @@ export default function CustomerProfilePage() {
       if (user.lastName   && !lastName)    setLastName(user.lastName);
       if (user.nationality && !nationality) setNationality(user.nationality);
       if (user.emiratesIdNumber && !emiratesId) setEmiratesId(user.emiratesIdNumber);
-      if (user.gender && !gender) setGender(user.gender as 'male' | 'female' | 'other');
+      if (user.gender && !gender && (user.gender === 'male' || user.gender === 'female')) setGender(user.gender);
       setTimeout(() => setOcrExtracted(false), 5000);
     }
     prevOcrUserRef.current = user;
@@ -135,7 +135,7 @@ export default function CustomerProfilePage() {
     setFirstName(snap.firstName);
     setLastName(snap.lastName);
     setPhone(snap.phone);
-    setGender((snap.gender as 'male' | 'female' | 'other') || '');
+    setGender((snap.gender === 'male' || snap.gender === 'female') ? snap.gender : '');
     setNationality(snap.nationality);
     setEmiratesId(snap.emiratesId);
     setOriginal(snap);
@@ -166,7 +166,7 @@ export default function CustomerProfilePage() {
     setFirstName(original.firstName);
     setLastName(original.lastName);
     setPhone(original.phone);
-    setGender((original.gender as 'male' | 'female' | 'other') || '');
+    setGender((original.gender === 'male' || original.gender === 'female') ? original.gender : '');
     setNationality(original.nationality);
     setEmiratesId(original.emiratesId);
   }
@@ -234,8 +234,8 @@ export default function CustomerProfilePage() {
 
   async function onSubmit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!firstName.trim() || !lastName.trim()) {
-      setError('First name and last name are required.');
+    if (!firstName.trim()) {
+      setError('First name is required.');
       return;
     }
     setError(null);
@@ -245,7 +245,7 @@ export default function CustomerProfilePage() {
       // OTP-verified update flow. Email same — handled by EmailField.
       await apiPatch('/auth/me', {
         firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        lastName: lastName.trim() || null,
         emiratesIdNumber: emiratesId.trim() || null,
         gender: gender || null,
         nationality: nationality.trim() || null,
@@ -290,7 +290,7 @@ export default function CustomerProfilePage() {
 
   // Profile completion checklist
   const completionItems = [
-    { key: 'name',        label: 'Add your full name',     done: !!firstName.trim() && !!lastName.trim(), actionTarget: 'firstName' },
+    { key: 'name',        label: 'Add your name',          done: !!firstName.trim(),                      actionTarget: 'firstName' },
     { key: 'phone',       label: 'Add a phone number',     done: !!phone.trim(),                          actionTarget: 'phone'     },
     { key: 'gender',      label: 'Tell us your gender',    done: !!gender,                                actionTarget: 'gender'    },
     { key: 'nationality', label: 'Add your nationality',   done: !!nationality.trim(),                    actionTarget: 'nationality' },
@@ -472,7 +472,7 @@ export default function CustomerProfilePage() {
                       </div>
                     </div>
                     <div className={s.field}>
-                      <label className={s.fieldLabel}>Last name <span className={s.req}>*</span></label>
+                      <label className={s.fieldLabel}>Last name</label>
                       <div className={s.input}>
                         <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Al Mansouri" />
                       </div>
@@ -493,7 +493,7 @@ export default function CustomerProfilePage() {
                         Gender <span className={s.opt}>(optional)</span>
                       </label>
                       <div className={s.seg} ref={fieldRefs.gender} tabIndex={-1}>
-                        {(['male','female','other'] as const).map((opt) => (
+                        {(['male','female'] as const).map((opt) => (
                           <button
                             key={opt}
                             type="button"
