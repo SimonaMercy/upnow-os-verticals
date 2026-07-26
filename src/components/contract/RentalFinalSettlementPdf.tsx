@@ -203,7 +203,7 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
         {/* Header */}
         <Text style={s.landlordLabel}>Landlord / Rental Provider</Text>
         <Text style={s.landlord}>{c.landlordName || '—'}</Text>
-        <Text style={s.title}>FINAL STATEMENT</Text>
+        <Text style={s.title}>FINAL SETTLEMENT</Text>
         <Text style={s.subtitle}>Statement of Account &amp; Deposit Reconciliation</Text>
         <View style={s.headRule} />
 
