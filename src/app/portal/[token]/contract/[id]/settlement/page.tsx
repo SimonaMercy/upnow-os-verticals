@@ -10,12 +10,13 @@
  * sent it (the backend returns null while it's still a draft).
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { createElement, useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
+import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
 import { collectClientMeta } from '@/lib/signEvidence';
-import RentalFinalSettlementDoc, { type RFSData, type RFSPayRow, type RFSBand } from '@/components/contract/RentalFinalSettlementDoc';
+import { type RFSData, type RFSPayRow, type RFSBand } from '@/components/contract/RentalFinalSettlementDoc';
 
 interface PortalSettlement {
   status: 'draft' | 'sent' | 'agreed' | 'paid';
@@ -57,8 +58,35 @@ export default function PortalSettlementPage() {
   const id = params?.id;
   const [raw, setRaw] = useState<PortalSettlement | null>(null);
   const [data, setData] = useState<RFSData | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Render the settlement as a real A4 vector PDF on a watermarked <canvas> — the
+  // SAME secure, fixed-page presentation the tenancy-contract signing page uses
+  // (<SecureDocCanvas>), NOT a responsive HTML doc. We build the PDF client-side
+  // from the exact RFSData the screen already has (<RentalFinalSettlementPdf>, the
+  // same component stored on mark-paid, so on-screen and archived copies match).
+  useEffect(() => {
+    if (!data) { setPdfUrl(null); return; }
+    let url: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [{ pdf }, mod] = await Promise.all([
+          import('@react-pdf/renderer'),
+          import('@/components/contract/RentalFinalSettlementPdf'),
+        ]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const blob = await pdf(createElement(mod.default, { data }) as any).toBlob();
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setPdfUrl(url);
+      } catch { if (!cancelled) setError('Could not render the settlement document.'); }
+    })();
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  }, [data]);
+
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -124,7 +152,13 @@ export default function PortalSettlementPage() {
               </p>
             )}
 
-            <RentalFinalSettlementDoc data={data} />
+            {pdfUrl ? (
+              <SecureDocCanvas fileUrl={pdfUrl} isImage={false} caption="Final settlement statement" watermark="" />
+            ) : (
+              <div style={{ display: 'grid', placeItems: 'center', padding: '60px 0', color: '#6b6860' }}>
+                <Loader2 className="animate-spin" size={22} /> <span style={{ marginTop: 8, fontSize: 12 }}>Preparing your settlement document…</span>
+              </div>
+            )}
 
             <div style={{ marginTop: 20 }}>
               <ContractSignBar
