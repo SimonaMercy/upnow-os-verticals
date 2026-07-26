@@ -3,6 +3,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Building2, FileText, Eye, Users, AlertTriangle, ChevronRight,
   RefreshCw, LogIn, LogOut, XCircle, Wrench, Clock,
@@ -38,10 +39,12 @@ function permLabel(key: string) {
 }
 
 /**
- * Manager home — ALWAYS the manager's own dashboard (cross-landlord overview +
- * action center + landlords list). Selecting a landlord in the switcher scopes
- * the other manager pages via ?rp=; the home stays the manager dashboard and
- * never swaps into the RP/landlord dashboard.
+ * Manager home — always the manager's own dashboard layout (headline stats +
+ * action center + landlords list); it never swaps into the RP/landlord
+ * dashboard component. Selecting a landlord in the switcher (?rp=) scopes the
+ * headline stats and Action Center to that landlord, matching every other
+ * manager page; "All landlords" (no ?rp=) shows the cross-landlord aggregate.
+ * The "Your Landlords" list always covers every managed landlord.
  */
 export default function ManagerOverview() {
   return <ManagerMultiOverview />;
@@ -50,6 +53,7 @@ export default function ManagerOverview() {
 function ManagerMultiOverview() {
   const { user }                            = useAuth();
   const { rps, loading: permsLoading, can } = useManagerPermissions();
+  const searchParams                        = useSearchParams();
   const [stats, setStats]                   = useState<OverviewStats | null>(null);
   const [statsLoading, setStatsLoading]     = useState(true);
   const [action, setAction]                 = useState<ActionCenter | null>(null);
@@ -57,20 +61,28 @@ function ManagerMultiOverview() {
   const [days, setDays]                     = useState(90);
   const name = user?.name ?? user?.firstName ?? 'Manager';
 
+  // LandlordSwitcher scope: ?rp=<id> narrows the headline stats + Action Center
+  // to that landlord; absent = All landlords (cross-landlord aggregate).
+  const rpParam    = searchParams.get('rp');
+  const scopedRp   = rpParam ? Number(rpParam) : null;
+  const scopedName = scopedRp ? rps.find(r => r.rentalProviderId === scopedRp)?.rpName ?? null : null;
+  const rpQuery    = scopedRp ? `?rp=${scopedRp}` : '';
+
   useEffect(() => {
-    apiGet<OverviewStats>('/manager/overview')
+    setStatsLoading(true);
+    apiGet<OverviewStats>(`/manager/overview${rpQuery}`)
       .then(setStats)
       .catch(() => {})
       .finally(() => setStatsLoading(false));
-  }, []);
+  }, [rpQuery]);
 
   const loadAction = useCallback(() => {
     setActionLoading(true);
-    apiGet<ActionCenter>(`/manager/action-center?days=${days}`)
+    apiGet<ActionCenter>(`/manager/action-center?days=${days}${scopedRp ? `&rp=${scopedRp}` : ''}`)
       .then(setAction)
       .catch(() => {})
       .finally(() => setActionLoading(false));
-  }, [days]);
+  }, [days, scopedRp]);
   useEffect(() => { loadAction(); }, [loadAction]);
 
   const loading = statsLoading || permsLoading;
@@ -78,7 +90,13 @@ function ManagerMultiOverview() {
   return (
     <DashboardPage
       title={`Welcome back, ${name}`}
-      subtitle={loading ? 'Loading your dashboard…' : `Managing properties for ${rps.length} landlord${rps.length !== 1 ? 's' : ''}`}
+      subtitle={
+        loading
+          ? 'Loading your dashboard…'
+          : scopedRp
+            ? `Acting for ${scopedName ?? 'this landlord'}`
+            : `Managing properties for ${rps.length} landlord${rps.length !== 1 ? 's' : ''}`
+      }
     >
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

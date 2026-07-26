@@ -19,7 +19,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Search, X, BarChart2, Lock, CalendarRange, LineChart } from 'lucide-react';
-import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow/reportsYear';
 import DataExports from '@/app/rental-provider/dashboard/reports/DataExports';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
@@ -31,18 +31,13 @@ import { DataGapsView } from '@/components/upnow/DataGapsView';
 import { MissingDataView, MISSING_REPORTS } from '@/components/upnow/MissingDataView';
 
 export default function ManagerReportsPage() {
-  const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
+  // Scoped to the landlord chosen in the LandlordSwitcher (?rp=). Under "All
+  // landlords" with several to choose from, prompt for one rather than showing
+  // an arbitrary landlord's reports.
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canViewReports');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const selectedRp = searchParams.get('rp');
   const slugParam = searchParams.get('slug');
-
-  // Effective landlord = the one chosen in the LandlordSwitcher, else the first
-  // managed landlord that delegated reports access.
-  const effectiveRp = selectedRp
-    ? Number(selectedRp)
-    : (rps.find(r => r.permissions.canViewReports)?.rentalProviderId ?? rps[0]?.rentalProviderId ?? null);
-  const allowed = effectiveRp != null && canForRp('canViewReports', effectiveRp);
 
   const year = useReportsYear();
   const [search, setSearch] = useState('');
@@ -61,6 +56,10 @@ export default function ManagerReportsPage() {
     if (slug) qs.set('slug', slug);
     router.replace(`/dashboard/manager/reports?${qs.toString()}`);
   };
+
+  if (!permsLoading && needsLandlord) {
+    return <SelectLandlordNotice resource="Reports" />;
+  }
 
   // Per-landlord permission gate — mirrors the lock the nav enforces.
   if (!permsLoading && !allowed) {
