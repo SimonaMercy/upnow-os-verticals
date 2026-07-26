@@ -174,14 +174,14 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
   const utilOther = Math.round((sumNet(utilities, ['utility']) - matchedUtil) * 100) / 100;
   if (utilOther > 0.005) utilRows.push({ label: 'Other utilities', amount: utilOther });
   const utilitiesTotal = sumNet(utilities, ['utility']);
-  // Only show utility rows that carry a value (zero rows are hidden in the preview).
-  const utilRowsShown = utilRows.filter(r => Math.abs(r.amount) > 0.005);
+  // Show every standard utility row — including the zero ones — so the statement
+  // always accounts for each service category explicitly.
+  const utilRowsShown = utilRows;
 
-  // §4 — restoration lines verbatim (repairs / cleaning / keys …).
-  const restorationRows = restoration.length
-    ? restoration.map(l => ({ label: l.label.replace(/\s*\(move-out inspection\)\s*/i, ''), amount: l.net ?? l.amount }))
-    : [{ label: 'Repairs & Maintenance', amount: 0 }, { label: 'Cleaning', amount: 0 }, { label: 'Missing Keys / Remotes', amount: 0 }];
+  // §4 — a single summed "Restoration" line (the individual repair/cleaning/keys
+  // items roll up into one figure).
   const restorationTotal = sumNet(restoration, ['restoration']);
+  const restorationRows = [{ label: 'Restoration', amount: restorationTotal }];
   const restorationInspId = restoration.find(l => l.inspectionContractId != null)?.inspectionContractId;
 
   // §5 — the standard additional-charge rows, each summed from its category.
@@ -211,7 +211,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
         <div className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wider">Landlord / Rental Provider</div>
         <div className="text-[17px] font-bold text-[#1f6b4f] uppercase tracking-wide leading-tight">{c.landlordName || '—'}</div>
         <div className="mt-2 text-center">
-          <h1 className="text-[26px] font-extrabold text-[#1a1916] leading-none">RENTAL FINAL SETTLEMENT</h1>
+          <h1 className="text-[26px] font-extrabold text-[#1a1916] leading-none">FINAL STATEMENT</h1>
           <p className="text-[12px] italic text-[#9b9890] mt-1">Statement of Account &amp; Deposit Reconciliation</p>
         </div>
       </div>
@@ -265,8 +265,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
                     <tr className="bg-[#f4f2ee]">
                       <td colSpan={7} className="px-3 py-1 text-[11px] font-bold text-[#4a4842] uppercase tracking-wide">
                         {band.contractNo && band.contractId != null
-                          ? <>{band.band ?? 'YEAR'}{'  ·  '}
-                              {contractHref
+                          ? <>{contractHref
                                 ? <a href={contractHref(band.contractId)} target="_blank" rel="noreferrer" className="text-[#1f6b4f] hover:underline normal-case">{band.contractNo}</a>
                                 : <span className="text-[#1f6b4f]">{band.contractNo}</span>}
                               {band.startDate ? `  ·  ${fmtDate(band.startDate)} → ${fmtDate(band.endDate)}` : ''}</>
@@ -284,6 +283,15 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
                         <td className="px-3 py-1.5 text-right tabular-nums text-[#b91c1c]">{r.penalty ? money(r.penalty) : ''}</td>
                       </tr>
                     ))}
+                    {/* Per-contract subtotal — sum of the amounts listed under this lease. */}
+                    <tr className="border-t border-[#e8e6e0] bg-[#faf9f6]">
+                      <td className="px-3 py-1 text-[11px] font-semibold text-[#4a4842]">Subtotal{band.contractNo ? ` · ${band.contractNo}` : ''}</td>
+                      <td className="px-2 py-1" />
+                      <td className="px-2 py-1 text-right tabular-nums font-bold text-[#1a1916]">
+                        {money(band.rows.reduce((a, r) => a + (r.amount || 0), 0))}
+                      </td>
+                      <td className="px-2 py-1" colSpan={4} />
+                    </tr>
                   </Fragment>
                 ))}
               </tbody>

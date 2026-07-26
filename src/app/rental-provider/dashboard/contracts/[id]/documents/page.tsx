@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useAuth } from '@/contexts/AuthContext';
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import { ContractDocsBinder, LandlordLinkButton, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
@@ -28,7 +29,7 @@ interface Contract {
   originLeadId?: number | null; offerPlan?: OfferPlan | null;
   termination?: { response?: string | null } | null;
   documents?: BinderDoc[];
-  landlord?: { id?: number | null; name?: string | null; companyName?: string | null } | null;
+  landlord?: { id?: number | null; name?: string | null; companyName?: string | null; hasPoa?: boolean; poaPersonName?: string | null } | null;
   tenant?: { id?: number | null } | null;
   payments?: PlanPayment[];
   fees?: PlanPayment[];
@@ -47,6 +48,7 @@ export default function ContractDocumentsPage() {
   const pathname = usePathname();
   const isManagerView = pathname?.startsWith('/dashboard/manager') ?? false;
   const { canForRp } = useManagerPermissions();
+  const { user: authUser } = useAuth();
   const [c, setC] = useState<Contract | null>(null);
   const [sigs, setSigs] = useState<Sig[]>([]);
   const [cert, setCert] = useState<SignatureCertificateData | null>(null);
@@ -79,6 +81,15 @@ export default function ContractDocumentsPage() {
   const canLandlordSign = !isManagerView
     || (landlordId != null && canForRp('canSignDocuments', landlordId) && canForRp('canActAsPoa', landlordId));
 
+  // A manager signing the landlord's signature does so under POA — show their own
+  // name with an "on behalf of {landlord}" line (the backend stamps the same).
+  const landlordName = c.landlord?.companyName || c.landlord?.name || 'Landlord';
+  // POA holder on file → the landlord signature is legally theirs, "on behalf of"
+  // the landlord (matches the backend stamp + the v2 signing surface).
+  const poaHolder = c.landlord?.hasPoa && c.landlord?.poaPersonName?.trim() ? c.landlord.poaPersonName.trim() : null;
+  const signerName = isManagerView ? (authUser?.name || 'Authorised Manager') : (poaHolder ?? landlordName);
+  const signerOnBehalfOf = isManagerView ? landlordName : (poaHolder ? landlordName : undefined);
+
   const ejari = toEjari(c, sigs);
   const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
     const res = await fetch(`/api/contracts/${c.id}/sign`, {
@@ -106,8 +117,9 @@ export default function ContractDocumentsPage() {
       watermark={watermark}
       signatureCertificate={cert}
       headerRight={c.tenant?.id && canLandlordSign ? <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} /> : undefined}
-      signerName={c.landlord?.companyName || c.landlord?.name || 'Landlord'}
-      signerDefaultName={c.landlord?.name || c.landlord?.companyName || ''}
+      signerName={signerName}
+      signerOnBehalfOf={signerOnBehalfOf}
+      signerDefaultName={isManagerView ? (authUser?.name || '') : (poaHolder ?? c.landlord?.name ?? c.landlord?.companyName ?? '')}
       landlordSigned={sigs.some(s => s.role === 'landlord')}
       canLandlordSign={canLandlordSign}
       onSign={sign}

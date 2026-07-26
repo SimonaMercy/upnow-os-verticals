@@ -44,7 +44,7 @@ import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
 import { buildSegregatedPlan, segRowsFromCustomerPlan } from '@/lib/segregatedPlan';
 import { openDocViewer } from '@/lib/docViewer';
-import { collectClientMeta, collectGeo, ESIGN_CONSENT_TEXT } from '@/lib/signEvidence';
+import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
@@ -285,7 +285,7 @@ type StateKey =
   | 'termination_request_received' | 'termination_request_sent'
   | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques'
   | 'renewal_progress' | 'renewal_ejari' | 'renewal_active'
-  | 'rejected' | 'terminated' | 'renewal_rejected'
+  | 'rejected' | 'withdrawn' | 'terminated' | 'renewal_rejected'
   | 'superseded' | 'terminating';
 
 type Mode = 'new' | 'renewal' | 'rejected';
@@ -333,6 +333,7 @@ const STATE_DEFS: Record<StateKey, StateDef> = {
   renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
   rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
+  withdrawn:                     { label: 'You declined this unit',        sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'You declined this offer.',                               body: "No problem — this unit is off your list. Whenever you're ready, we'll help you find a place that fits.",                                                                                       timing: null },
   terminated:                    { label: 'Tenancy terminated',            sub: 'Contract closed',                 mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your tenancy has ended.',                                body: 'Final settlements processed; security deposit return pending move-out inspection.',                                                                                                             timing: null },
   renewal_rejected:              { label: 'Renewal declined',              sub: 'Renewal closed',                  mode: 'renewal',  currentIndex: -1, tone: 'declined', headline: 'You declined this renewal offer.',                       body: 'New terms can still be proposed, or your tenancy will end as scheduled.',                                                                                                                       timing: null },
   // Phase 6c — a stale draft that the RP archived because the unit was
@@ -559,8 +560,14 @@ function deriveStateKey(r: Resolved): StateKey {
   }
 
   // ── 4. Dead-end states (no contract yet).
+  // Attribute the decline to the right party. A customer who tapped
+  // "Not interested" is the ONLY actor that sets viewing.outcome =
+  // 'not_interested' (leads.service markNotInterested), so it must be
+  // checked BEFORE the generic stage==='rejected' branch — that same
+  // customer action also flips lead.stage to 'rejected', which would
+  // otherwise mislabel their own decline as a provider decline.
+  if (viewing?.outcome === 'not_interested') return 'withdrawn';
   if (stage === 'rejected') return 'rejected';
-  if (viewing?.outcome === 'not_interested') return 'rejected';
   if (viewing?.status === 'no_show' || viewing?.status === 'cancelled') return 'rejected';
 
   // ── 4b. Additional-docs gate. If the RP requested extra documents that aren't
@@ -1028,69 +1035,6 @@ function Modal({ title, onClose, children, footer }: { title: string; onClose: (
 }
 
 /* ─── Signature canvas ────────────────────────────────────────────── */
-function SignatureCanvas({ onChange }: { onChange: (dataUrl: string | null) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [drawing, setDrawing] = useState(false);
-  const [hasDrawn, setHasDrawn] = useState(false);
-
-  const pos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const c = canvasRef.current; if (!c) return { x: 0, y: 0 };
-    const r = c.getBoundingClientRect();
-    const sx = c.width / r.width, sy = c.height / r.height;
-    if ('touches' in e) {
-      const t = e.touches[0];
-      return { x: (t.clientX - r.left) * sx, y: (t.clientY - r.top) * sy };
-    }
-    return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
-  }, []);
-
-  const start = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const p = pos(e);
-    const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return;
-    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#1a1916';
-    setDrawing(true);
-  };
-  const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!drawing) return;
-    e.preventDefault();
-    const p = pos(e);
-    const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return;
-    ctx.lineTo(p.x, p.y); ctx.stroke();
-    if (!hasDrawn) setHasDrawn(true);
-  };
-  const end = () => {
-    if (!drawing) return;
-    setDrawing(false);
-    const c = canvasRef.current; if (c && hasDrawn) onChange(c.toDataURL('image/png'));
-  };
-  const clear = () => {
-    const c = canvasRef.current, ctx = c?.getContext('2d');
-    if (c && ctx) { ctx.clearRect(0, 0, c.width, c.height); setHasDrawn(false); onChange(null); }
-  };
-
-  return (
-    <div>
-      <div style={{ position: 'relative', border: '1.5px dashed var(--mist-strong)', borderRadius: 12, background: 'var(--surface)' }}>
-        <canvas ref={canvasRef} width={560} height={180} style={{ width: '100%', height: 180, cursor: 'crosshair', display: 'block', touchAction: 'none' }}
-          onMouseDown={start} onMouseMove={draw} onMouseUp={end} onMouseLeave={end}
-          onTouchStart={start} onTouchMove={draw} onTouchEnd={end} />
-        {!hasDrawn && (
-          <p style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: 'var(--mute)', fontSize: 13, pointerEvents: 'none', margin: 0 }}>
-            Draw your signature here
-          </p>
-        )}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-        <button type="button" onClick={clear} disabled={!hasDrawn}
-          style={{ background: 'none', border: 'none', color: 'var(--mute)', fontSize: 12, cursor: hasDrawn ? 'pointer' : 'not-allowed', fontFamily: 'inherit', textDecoration: 'underline' }}>
-          Clear signature
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /* ─── Action card shell ────────────────────────────────────────────── */
 function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey; resolved: Resolved; onRefresh: () => void }) {
   const def = STATE_DEFS[stateKey];
@@ -1156,6 +1100,7 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'renewal_ejari':                 return <WaitingBadge />;
     case 'renewal_active':                return <ActiveAction resolved={resolved} onRefresh={onRefresh} />;
     case 'rejected':                      return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
+    case 'withdrawn':                     return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
     case 'terminated':                    return <EndStateAction primaryLabel="Find a new place" primaryHref="/listings" />;
     case 'renewal_rejected':              return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
     case 'superseded':                    return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
@@ -2266,7 +2211,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   // Identity details (name + Emirates ID number) must be present before the
   // customer can submit. Auto-filled by OCR when the Emirates ID is readable;
   // otherwise the customer types them into the Personal Details fallback form.
-  const personalDetailsComplete = !!(user?.firstName?.trim() && user?.lastName?.trim() && user?.emiratesIdNumber?.trim());
+  const personalDetailsComplete = !!(user?.firstName?.trim() && user?.emiratesIdNumber?.trim());
   const eidUploaded = uploadedKeys.has('emirates_id') || uploadedKeys.has('emirates_id_front');
 
   return (
@@ -3246,11 +3191,6 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved; onRefresh: () => void; renewal?: boolean }) {
   const { user } = useAuth();
   const c = renewal ? resolved.renewalContract : resolved.contract;
-  const [sig, setSig] = useState<string | null>(null);
-  const [name, setName] = useState(personName(user));
-  const [consent, setConsent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   if (!c) return <ErrorBox msg="Contract not found." />;
 
   // The customer has signed but the landlord hasn't countersigned yet — show a
@@ -3263,16 +3203,10 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
     );
   }
 
-  async function sign() {
-    if (!sig) { setErr('Please draw your signature.'); return; }
-    if (!name.trim()) { setErr('Please enter your full name.'); return; }
-    if (!consent) { setErr('Please confirm the electronic-signature agreement.'); return; }
-    setBusy(true); setErr(null);
-    try {
-      const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: name.trim(), signatureImage: sig, consent, clientMeta: collectClientMeta(), geo: await collectGeo() }) });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
-      onRefresh();
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to sign'); } finally { setBusy(false); }
+  async function onSign(p: SignaturePayload) {
+    const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: p.signatoryName, signatureImage: p.signatureImage, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }) });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
+    onRefresh();
   }
 
   return (
@@ -3305,30 +3239,17 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
         <ExternalLink size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
       </a>
 
-      {/* Name */}
-      <div>
-        <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Full name (as on Emirates ID)</label>
-        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Your full legal name"
-          style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 14, fontFamily: 'inherit' }} />
-      </div>
-
-      {/* Signature */}
-      <div>
-        <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Signature</label>
-        <SignatureCanvas onChange={setSig} />
-      </div>
-
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: 'var(--ink-2)', cursor: 'pointer', lineHeight: 1.5 }}>
-        <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 2 }} />
-        <span>{ESIGN_CONSENT_TEXT}</span>
-      </label>
-
-      {err && <ErrorBox msg={err} />}
-
-      <PrimaryBtn onClick={sign} disabled={busy || !sig}>
-        {busy ? <Loader2 size={16} className="animate-spin" /> : <Pen size={16} />}
-        {busy ? 'Signing…' : renewal ? 'Sign renewal' : 'Sign contract'}
-      </PrimaryBtn>
+      <SignatureBlock
+        signerRole="Customer"
+        signerName={personName(user)}
+        defaultName={personName(user)}
+        termsText={renewal
+          ? 'I have reviewed and agree to the terms of this renewal.'
+          : 'I have reviewed and agree to all terms of this tenancy contract.'}
+        submitLabel={renewal ? 'Sign renewal' : 'Sign contract'}
+        alreadySigned={false}
+        onSign={onSign}
+      />
     </div>
   );
 }
@@ -3500,13 +3421,11 @@ function condTone(c?: string): { bg: string; fg: string } {
 }
 
 function MoveInAction({ resolved }: { resolved: Resolved }) {
+  const { user } = useAuth();
   const c = resolved.contract;
   const [insp, setInsp] = useState<MoveInInspectionData | null>(null);
   const [loadingInsp, setLoadingInsp] = useState(true);
   const [inspErr, setInspErr] = useState<string | null>(null);
-  const [sigDataUrl, setSigDataUrl] = useState<string | null>(null);
-  const [signBusy, setSignBusy] = useState(false);
-  const [signErr, setSignErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!c?.id) return;
@@ -3522,24 +3441,16 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
     return () => controller.abort();
   }, [c?.id]);
 
-  async function signInspection() {
+  async function signInspection(p: SignaturePayload) {
     if (!c?.id) return;
-    if (!sigDataUrl) { setSignErr('Please draw your signature.'); return; }
-    setSignBusy(true); setSignErr(null);
-    try {
-      const res = await fetch(`/api/contracts/tenant/${c.id}/inspection/sign?type=move_in`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatureImage: sigDataUrl }),
-      });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
-      // Re-fetch so the now-saved signature appears + the journey advances
-      const refreshed = await apiGet<MoveInInspectionData>(`/contracts/tenant/${c.id}/inspection?type=move_in`);
-      setInsp(refreshed);
-    } catch (e) {
-      setSignErr(e instanceof Error ? e.message : 'Failed to sign');
-    } finally {
-      setSignBusy(false);
-    }
+    const res = await fetch(`/api/contracts/tenant/${c.id}/inspection/sign?type=move_in`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
+    // Re-fetch so the now-saved signature appears + the journey advances
+    const refreshed = await apiGet<MoveInInspectionData>(`/contracts/tenant/${c.id}/inspection?type=move_in`);
+    setInsp(refreshed);
   }
 
   if (!c) return <ErrorBox msg="Contract not found." />;
@@ -3720,19 +3631,20 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
             </div>
           </div>
         ) : (
-          /* Not signed yet — show the canvas + Sign button so customer can sign without leaving this page */
+          /* Not signed yet — the shared signing block, so customer can sign without leaving this page */
           <div style={{ display: 'grid', gap: 10 }}>
-            <SignatureCanvas onChange={setSigDataUrl} />
-            {signErr && <ErrorBox msg={signErr} />}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <PrimaryBtn onClick={signInspection} disabled={signBusy || !sigDataUrl}>
-                {signBusy ? <Loader2 size={16} className="animate-spin" /> : <Pen size={16} />}
-                {signBusy ? 'Signing…' : 'Counter-sign inspection'}
-              </PrimaryBtn>
-              <SecondaryBtn href={inspectionUrl}>
-                Sign in full view <ExternalLink size={14} />
-              </SecondaryBtn>
-            </div>
+            <SignatureBlock
+              signerRole="Customer"
+              signerName={personName(user)}
+              defaultName={personName(user)}
+              termsText="I confirm the condition recorded in this move-in inspection is accurate and agree to it."
+              submitLabel="Counter-sign inspection"
+              alreadySigned={false}
+              onSign={signInspection}
+            />
+            <SecondaryBtn href={inspectionUrl}>
+              Sign in full view <ExternalLink size={14} />
+            </SecondaryBtn>
           </div>
         )}
       </div>

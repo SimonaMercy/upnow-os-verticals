@@ -133,7 +133,6 @@ export default function PortalSettlementPage() {
                 signerName={data.contract.tenantName ?? null}
                 defaultName={data.contract.tenantName ?? ''}
                 alreadySigned={signed}
-                requireConfirm
                 confirmText="I have reviewed the final settlement statement above and agree to it as the customer."
                 submitLabel="Agree & sign"
                 onSign={agree}
