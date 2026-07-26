@@ -57,6 +57,12 @@ export interface Plan {
   sqftMin: number; sqftMax: number; sqmMin: number; sqmMax: number; avgSqft: number | null;
   priceFrom: number | null;            // asking-rent "from"
   rentFrom: number | null; rentTo: number | null;
+  // Asking-rent total across the layout's units (sum of every unit's price).
+  rentSum?: number | null;
+  // Contracted Annual Rent range + total (latest lease per leased unit on the
+  // plan) — pairs with rentFrom/rentTo (asking) the way portfolio pairs Market
+  // Price with Annual Rent. All null when nothing on the plan has ever leased.
+  annualRentFrom?: number | null; annualRentTo?: number | null; annualRentSum?: number | null; leasedCount?: number;
   aedPerSqft: number | null;
   // representative financial details for the layout (editable plan-wide)
   securityDeposit: number | null; adminFee: number | null; ejariFee: number | null;

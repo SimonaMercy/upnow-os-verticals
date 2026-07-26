@@ -495,14 +495,26 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const priceBlock = (p: Plan) => (
     <div className="flex items-end justify-between gap-3">
       <div>
-        {p.rentFrom != null ? (
+        {/* Plan-wide TOTALS across the layout's units — not a per-unit range.
+            Market Price = Σ every unit's asking rent; Annual Rent = Σ each
+            leased unit's latest-lease annual rent. */}
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>
+          MARKET PRICE{p.unitCount > 1 ? ` · ${p.unitCount} UNITS` : ''}
+        </div>
+        {p.rentSum != null && p.rentSum > 0 ? (
           <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
-            AED {aed(p.rentFrom)}{p.rentTo != null && p.rentTo !== p.rentFrom ? ` – ${aed(p.rentTo)}` : ''}
+            AED {aed(p.rentSum)}
             <span style={{ fontSize: 12, fontWeight: 600, color: MUTE2 }}> /yr</span>
           </div>
         ) : (
           <div style={{ fontSize: 14, fontWeight: 700, color: '#b91c1c' }}>No price set</div>
         )}
+        {/* Contracted Annual Rent — sum of each leased unit's latest lease. */}
+        <div style={{ fontSize: 11.5, color: MUTE, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+          {p.annualRentSum != null
+            ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>AED {aed(p.annualRentSum)}</span></>
+            : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
+        </div>
       </div>
       {canEdit && (
         <button onClick={(e) => { e.stopPropagation(); openLayoutEdit(p); }} className="flex items-center gap-1.5 whitespace-nowrap shrink-0"
@@ -593,7 +605,11 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const leaseRange = start && end ? `${start} → ${end}` : start ? `from ${start}` : end ? `until ${end}` : '';
     const size = u.unitSizeSqft ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
       : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
-    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, busy: busyUnit === u.id };
+    // Annual Rent counts only while occupied — a vacated unit's ended lease must
+    // not inflate the figure (matches the portfolio KPI + Unit Mix). Vacant units
+    // show "No lease yet".
+    const annual = u.availability === 'occupied' ? (u.lastLeaseRent ?? null) : null;
+    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, annual, busy: busyUnit === u.id };
   };
 
   // Listing / edit / delete actions — shared by the unit row and card. (The row
@@ -647,7 +663,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // One unit row — used in the per-unit row view (`showBuilding` adds the
   // building name, since rows can span properties).
   const unitRow = (p: Plan, u: UnitRecord, showBuilding = false) => {
-    const { tenant, leaseRange, pill, size, price, busy } = unitMeta(u);
+    const { tenant, leaseRange, pill, size, price, annual, busy } = unitMeta(u);
     return (
       <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
         className="flex items-center gap-4 cursor-pointer transition-colors hover:border-[#cfe7da]"
@@ -669,11 +685,18 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11.5, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
         </div>
-        {/* Price */}
+        {/* Market Price (asking) + contracted Annual Rent (latest lease) —
+            mirrors the portfolio's per-property pairing. */}
         <div className="text-right shrink-0">
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
           {price != null
             ? <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>AED {aed(Number(price))} <span style={{ fontSize: 12, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
             : <div style={{ fontSize: 14, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
+          <div style={{ fontSize: 11.5, color: MUTE, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+            {annual != null
+              ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>AED {aed(Number(annual))}</span></>
+              : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
           {unitActions(p, u, busy)}
@@ -684,7 +707,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
   // One unit as a card — used in the per-unit grid view.
   const unitCard = (p: Plan, u: UnitRecord, showBuilding = false) => {
-    const { tenant, leaseRange, pill, size, price, busy } = unitMeta(u);
+    const { tenant, leaseRange, pill, size, price, annual, busy } = unitMeta(u);
     return (
       <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
         className="flex flex-col overflow-hidden cursor-pointer"
@@ -705,9 +728,18 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
           <div className="mt-auto flex items-end justify-between gap-2" style={{ paddingTop: 13, marginTop: 14, borderTop: '1px solid #f1f3f0' }}>
-            {price != null
-              ? <div style={{ fontSize: 17, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums' }}>AED {aed(Number(price))} <span style={{ fontSize: 11, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
-              : <div style={{ fontSize: 13, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
+            {/* Market Price (asking) + contracted Annual Rent (latest lease). */}
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
+              {price != null
+                ? <div style={{ fontSize: 17, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums' }}>AED {aed(Number(price))} <span style={{ fontSize: 11, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
+                : <div style={{ fontSize: 13, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
+              <div style={{ fontSize: 11, color: MUTE, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                {annual != null
+                  ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>AED {aed(Number(annual))}</span></>
+                  : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
+              </div>
+            </div>
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>{unitActions(p, u, busy)}</div>
           </div>
         </div>

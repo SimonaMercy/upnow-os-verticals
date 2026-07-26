@@ -195,7 +195,7 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   portfolio: {
     title: 'Portfolio',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) across every unit — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on every unit, including currently vacant units where a prior term exists. Use the Occupancy filter to reshape both the Market Rent and Annual Rent figures the same way (rows and unit counts stay whole): Occupied = leased units only, Vacant = empty units only, All = every unit. The unit counts are always a live snapshot of today.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on the unit. The Occupancy filter scopes BOTH the rent figures and the units listed: Occupied (the default) = leased units only; Vacant = empty units and the hold-over rent they last let for; All = every unit summed together. Per-property occupied/vacant/total counts always show the live composition regardless of the filter.',
     endpoint: '/api/reports/occupancy',
     buildingLeaseFilter: true,
     occupancyFilter: true,
@@ -965,11 +965,11 @@ export function ReportDetailView({
   const [leaseStatus, setLeaseStatus] = useState<'active' | 'expired' | 'terminated' | 'all'>(
     () => (sp?.get('status') === 'active' ? 'active' : sp?.get('status') === 'expired' ? 'expired' : sp?.get('status') === 'terminated' ? 'terminated' : 'all'),
   );
-  // Occupancy segment (portfolio): All · Occupied · Vacant. Backend default is
-  // 'all', so only an explicit occupied/vacant needs sending. Occupied gives the
-  // passing/in-place rent; Vacant gives the hold-over value on empty units.
+  // Occupancy segment (portfolio): Occupied · Vacant · All. Defaults to Occupied
+  // (occupied units' in-place rent + records only); Vacant = empty units' hold-over;
+  // All = every unit summed together. The param is always sent so 'all' is explicit.
   const [occupancy, setOccupancy] = useState<'all' | 'occupied' | 'vacant'>(
-    () => (sp?.get('occupancy') === 'occupied' ? 'occupied' : sp?.get('occupancy') === 'vacant' ? 'vacant' : 'all'),
+    () => (sp?.get('occupancy') === 'all' ? 'all' : sp?.get('occupancy') === 'vacant' ? 'vacant' : 'occupied'),
   );
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [drillFilter, setDrillFilter] = useState<string | null>(null);
@@ -1053,7 +1053,7 @@ export function ReportDetailView({
     // Unit type filter (Unit Mix).
     if (def.unitTypeFilter && unitTypeSel) url += (url.includes('?') ? '&' : '?') + 'unitType=' + encodeURIComponent(unitTypeSel);
     if (def.leaseStatusFilter && leaseStatus !== 'all') url += (url.includes('?') ? '&' : '?') + 'status=' + leaseStatus;
-    if (def.occupancyFilter && occupancy !== 'all') url += (url.includes('?') ? '&' : '?') + 'occupancy=' + occupancy;
+    if (def.occupancyFilter) url += (url.includes('?') ? '&' : '?') + 'occupancy=' + occupancy;
     if (extraQuery) url += (url.includes('?') ? '&' : '?') + extraQuery;
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
@@ -1711,9 +1711,9 @@ export function ReportDetailView({
             <div className={fGroup}>
               <span className={fLabel}>Occupancy</span>
               <select className={fSelect} aria-label="Occupancy" value={occupancy} onChange={e => setOccupancy(e.target.value as 'all' | 'occupied' | 'vacant')}>
-                <option value="all">All</option>
                 <option value="occupied">Occupied</option>
                 <option value="vacant">Vacant</option>
+                <option value="all">All</option>
               </select>
             </div>
           )}

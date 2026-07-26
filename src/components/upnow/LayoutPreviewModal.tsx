@@ -170,8 +170,13 @@ export function LayoutPreviewModal({
       sqmLo = minOf(sqmLo, sqm); sqmHi = maxOf(sqmHi, sqm);
       if (rent != null && rent > 0) { sum += rent; priced += 1; rentLo = minOf(rentLo, rent); rentHi = maxOf(rentHi, rent); }
       else unpriced += 1;
-      if (lease != null && lease > 0) annualSum += lease;   // Σ latest-lease annual_rent (net of discount)
-      if ((u.availability || '').toLowerCase() === 'occupied') occupied += 1;
+      const isOccupied = (u.availability || '').toLowerCase() === 'occupied';
+      // Σ latest-lease annual_rent (net of discount), OCCUPIED units only: a vacant
+      // unit's last lease survives the lease ending, so counting it would overstate
+      // current contracted income — exclude it, matching the portfolio KPI + Unit
+      // Mix table. Vacant / never-leased units contribute nothing.
+      if (lease != null && lease > 0 && isOccupied) annualSum += lease;
+      if (isOccupied) occupied += 1;
     }
     return { sqftLo, sqftHi, sqmLo, sqmHi, rentLo, rentHi, sum, annualSum, priced, unpriced, occupied };
   }, [units]);
@@ -323,7 +328,9 @@ export function LayoutPreviewModal({
                       {units.map((u, i) => {
                         const chip = availabilityChip(u.availability);
                         const market = numOrNull(u.rentalPrice);
-                        const annual = numOrNull(u.lastLeaseRent);
+                        // Annual Rent counts only while occupied, so the column
+                        // reconciles with the occupied-only TOTAL (vacant → '—').
+                        const annual = (u.availability || '').toLowerCase() === 'occupied' ? numOrNull(u.lastLeaseRent) : null;
                         return (
                           <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
                             <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
@@ -334,7 +341,7 @@ export function LayoutPreviewModal({
                                 ? <span style={{ fontSize: 12.5, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(market)}</span>
                                 : <span style={{ fontSize: 11, fontWeight: 600, color: C.amber }}>No price</span>}
                             </span>
-                            {/* Annual Rent — latest lease, net of discount; '—' if never leased */}
+                            {/* Annual Rent — latest lease, net of discount; '—' when vacant or never leased */}
                             <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right' }}>
                               {annual != null && annual > 0
                                 ? <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>AED {aed(annual)}</span>

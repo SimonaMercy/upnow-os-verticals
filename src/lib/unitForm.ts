@@ -29,6 +29,9 @@ export interface UnitRecord {
   furnishing: string | null;
   facilities: string | null;
   rentalPrice: number | null;
+  // Contracted Annual Rent — annual_rent of the unit's latest lease (portfolio
+  // canonical rule); null when never leased. Read-only, set server-side.
+  lastLeaseRent?: number | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;
