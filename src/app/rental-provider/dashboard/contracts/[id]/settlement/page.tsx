@@ -887,7 +887,10 @@ export default function SettlementPage() {
             <BadgeCheck size={18} className="text-[#2e9f82] shrink-0" />
             <div className="min-w-0">
               <p className="text-sm font-bold text-[#1a1916]">Signed</p>
-              <p className="text-xs text-[#6b6860]">{authUser?.name || 'Authorised signatory'}</p>
+              {/* Show who ACTUALLY signed (the stored §9 signatory — the acting
+                  manager or RP owner captured at sign time), never the current
+                  viewer. Opening as the landlord must not relabel the signer. */}
+              <p className="text-xs text-[#6b6860]">{statement?.contract?.rpSignatoryName || 'Authorised signatory'}</p>
             </div>
           </div>
         ) : (
