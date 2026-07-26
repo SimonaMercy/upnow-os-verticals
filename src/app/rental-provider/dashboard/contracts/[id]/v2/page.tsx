@@ -687,8 +687,12 @@ interface ActorPerms {
   renewals: boolean;
   /** Terminate / request termination + addenda → canManageAgreements. */
   agreements: boolean;
-  /** Sign the LANDLORD signature — needs signing rights AND power of attorney. */
+  /** Sign the LANDLORD signature inline (a manager signing on the landlord's
+   *  behalf) — needs signing rights AND power of attorney. */
   signLandlord: boolean;
+  /** Send the no-login landlord signing link — invites the owner to sign
+   *  themselves, so only needs agreement management (NOT signing / POA). */
+  sendLandlordLink: boolean;
   /** Sign tenant / witness / manager signatures → canSignDocuments. */
   signDocuments: boolean;
   /** Counter-sign a move-in / move-out inspection → canManageInspections (NOT
@@ -1796,9 +1800,6 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             </div>
           </div>
         )}
-        <button className="btn btn-jade btn-lg btn-block" onClick={() => h.onActivate()}>
-          <BadgeCheck size={15} /> Activate tenancy now
-        </button>
       </>
     ),
   };
@@ -5660,6 +5661,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     // "Sign as Landlord" needs POA in addition to signing rights (a manager may
     // only sign the landlord's signature with power of attorney).
     signLandlord:  mgrCan('canSignDocuments') && mgrCan('canActAsPoa'),
+    // Sending the owner their signing link only invites them to sign themselves,
+    // so it needs agreement management — not signing rights or POA. A manager who
+    // can't sign can still send the owner the link.
+    sendLandlordLink: mgrCan('canManageAgreements'),
     signDocuments: mgrCan('canSignDocuments'),
     // Inspection counter-sign = inspection-management, not contract signing.
     inspections:   mgrCan('canManageInspections'),
@@ -6223,7 +6228,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                  link above. Opens the same no-login page (every document in full
                  preview + a sticky sign menu) so the landlord / authorised
                  signatory can review and sign as the lessor from any device. */}
-            {selStep.key === 'sign' && contract.tenant.id && !readOnlyWorkflow && perms.signLandlord && (
+            {selStep.key === 'sign' && contract.tenant.id && !readOnlyWorkflow && perms.sendLandlordLink && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
                   Rental provider contract signing link
