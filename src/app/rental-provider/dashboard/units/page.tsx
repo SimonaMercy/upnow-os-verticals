@@ -17,7 +17,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
@@ -33,7 +33,7 @@ import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
 
-interface PropOpt { id: number; buildingName: string }
+interface PropOpt { id: number; buildingName: string; leasingType?: 'direct' | 'sub' | 'management' | null }
 interface Resp {
   properties: PropOpt[];
   selectedPropertyId: number | null;
@@ -125,6 +125,13 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const canEdit    = !manager || canForRp('canEditProperties', manager.rp);
   const canPublish = !manager || canForRp('canPublishListings', manager.rp);
   const [data, setData] = useState<Resp | null>(null);
+  // propertyId → leasing model, so the unit editor can offer the sub-lease-only
+  // charge (`properties` covers every property with plans, so it maps every row).
+  const leasingByProperty = useMemo(() => {
+    const m = new Map<number, 'direct' | 'sub' | 'management' | null>();
+    for (const p of data?.properties ?? []) m.set(p.id, p.leasingType ?? null);
+    return m;
+  }, [data]);
   const [propertyId, setPropertyId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState('all');
   // Plan/layout selector — 'all' or a planKey (propertyId::planLabel). Lets the
@@ -980,6 +987,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
             layoutUnitCount={plan.unitCount}
             title="Edit layout"
             propertyCategory={plan.spaceCategory ?? ''}
+            leasingType={leasingByProperty.get(plan.propertyId) ?? null}
             propertyStandalone
             propertyId={plan.propertyId}
             planLabel={plan.planLabel}
@@ -1010,6 +1018,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           plan={layoutPreview}
           units={(unitsByProperty[layoutPreview.propertyId] ?? []).filter(u => (u.planLabel ?? '') === (layoutPreview.planLabel ?? ''))}
           propertyName={layoutPreview.buildingName}
+          leasingType={leasingByProperty.get(layoutPreview.propertyId) ?? null}
           canEdit={canEdit && !!layoutPreview.planLabel}
           onEdit={() => { const p = layoutPreview; setLayoutPreview(null); if (p) openLayoutEdit(p); }}
           onClose={() => setLayoutPreview(null)}
@@ -1044,6 +1053,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         <UnitFormModal
           open
           propertyCategory={unitModal.plan.spaceCategory ?? ''}
+          leasingType={leasingByProperty.get(unitModal.plan.propertyId) ?? null}
           title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
           initial={unitModal.editingUnit ? unitToFormInitial(unitModal.editingUnit) : undefined}
           existingFloorPlanUrl={unitModal.editingUnit?.floorPlanUrl ?? null}
@@ -1068,6 +1078,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         <UnitPreviewModal
           propertyId={unitPreview.plan.propertyId}
           propertyName={unitPreview.plan.buildingName}
+          leasingType={leasingByProperty.get(unitPreview.plan.propertyId) ?? null}
           fetchBase={manager ? '/manager/properties' : undefined}
           fetchQuery={manager ? rpQ : undefined}
           unit={unitPreview.unit}

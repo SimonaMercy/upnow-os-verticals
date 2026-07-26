@@ -27,8 +27,8 @@ export const STAGE_LABELS: Record<LeadStage, string> = {
   documents_collection: 'Docs Collection',
   payment_plan_shared:  'Plan Shared',
   interested:           'Interested',
-  cheques_submitted:    'Payment Advice Ready',
-  cheques_collected:    'Payment Advice Collected',
+  cheques_submitted:    'Payment Confirmation Ready',
+  cheques_collected:    'Payment Confirmation Collected',
   contract_issued:      'Contract Issued',
   rejected:             'Rejected',
   converted:            'Converted',
@@ -219,7 +219,7 @@ export function getUrgency(lead: ApiLead): Urgency | null {
     case 'interested':
       return idle >= 3 ? { level: idle >= 7 ? 'red' : 'amber', label: `No next step ${idle}d` } : null;
     case 'cheques_submitted':
-      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Payment advice ready ${idle}d — collect` } : null;
+      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Payment confirmation ready ${idle}d — collect` } : null;
     default:
       return null;
   }

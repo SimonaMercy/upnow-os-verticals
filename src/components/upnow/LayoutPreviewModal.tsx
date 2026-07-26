@@ -104,6 +104,7 @@ export function LayoutPreviewModal({
   plan,
   units,
   propertyName,
+  leasingType,
   canEdit = false,
   onEdit,
   onClose,
@@ -119,6 +120,9 @@ export function LayoutPreviewModal({
   /** Units on this layout — the source of truth for counts, rent roll and occupancy. */
   units: LayoutUnitLite[];
   propertyName?: string | null;
+  /** Parent property's leasing model — when `'sub'`, the Pricing & fees grid
+   *  shows the auto-calculated sub-lease charge (20% of Market Price + 5% VAT). */
+  leasingType?: 'direct' | 'sub' | 'management' | null;
   /** When true, the header/footer expose the "Edit layout" action. */
   canEdit?: boolean;
   /** Opens the layout bulk editor. */
@@ -224,6 +228,19 @@ export function LayoutPreviewModal({
     pushFee('Contract Registration Fee', plan.ejariFee);
     pushFee('Commission', plan.commission);
     pushFee('Service Charges', plan.serviceCharges);
+  }
+  // Sub-lease charge — shown only for sub-lease properties, auto-calculated from
+  // each unit's Market Price (20% + 5% VAT on that 20%). Uses the layout's price
+  // range so a mixed-price layout still reads correctly; skipped when unpriced.
+  const subFees: Array<{ label: string; value: string }> = [];
+  if (leasingType === 'sub' && agg.rentLo != null && agg.rentHi != null) {
+    const lo = agg.rentLo, hi = agg.rentHi;
+    const fmtRange = (rate: number) => {
+      const a = Math.round(lo * rate), b = Math.round(hi * rate);
+      return a === b ? `AED ${aed(a)}` : `AED ${aed(a)} – ${aed(b)}`;
+    };
+    subFees.push({ label: '20% on sub-lease', value: fmtRange(0.20) });
+    subFees.push({ label: '5% VAT on sub-lease', value: fmtRange(0.20 * 0.05) });
   }
   const feeCols = isTight ? 1 : (isNarrow ? 2 : 3);
   // Leasing terms render as a full-width cell grid (one row on wide screens).
@@ -417,6 +434,19 @@ export function LayoutPreviewModal({
                         <div style={{ fontSize: 15, fontWeight: 700, color: C.ink2, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{f.value}</div>
                       </div>
                     ))}
+                  </div>
+                )}
+                {subFees.length > 0 && (
+                  <div style={{ borderTop: `1px solid ${C.line3}`, background: '#fbf6ea', padding: '13px 18px' }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', color: '#8a7a4e', textTransform: 'uppercase', marginBottom: 9 }}>Sub-lease charge · auto-calculated from Market Price · per unit</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: isTight ? '1fr' : 'repeat(2,1fr)', gap: '10px 18px' }}>
+                      {subFees.map((f, i) => (
+                        <div key={`${f.label}-${i}`}>
+                          <div style={{ fontSize: 11.5, color: C.mute2 }}>{f.label}</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: C.ink2, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{f.value}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

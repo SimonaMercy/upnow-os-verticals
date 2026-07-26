@@ -304,7 +304,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // RIGHT column order.
   const seq: Slot[] = [
     { kind: 'plan' },
-    { kind: 'doc', key: 'payment_advice', label: 'Payment Advice' },
+    { kind: 'doc', key: 'payment_advice', label: 'Payment Confirmation' },
     ...(showReceipts ? [{ kind: 'receipts' } as Slot] : []),
     { kind: 'agreement' },
     { kind: 'doc', key: 'ejari_certificate', label: 'Contract Registration Certificate' },

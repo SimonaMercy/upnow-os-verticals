@@ -31,6 +31,7 @@ import {
   ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { isSubleaseChargeRow } from '@/lib/unitForm';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useSlideOver } from '@/lib/useSlideOver';
 
@@ -232,6 +233,7 @@ export function UnitPreviewModal({
   fetchBase = '/properties',
   fetchQuery = '',
   propertyName,
+  leasingType,
   unit,
   contract,
   contracts,
@@ -243,6 +245,9 @@ export function UnitPreviewModal({
   fetchBase?: string;
   fetchQuery?: string;
   propertyName?: string | null;
+  /** Parent property's leasing model — `'sub'` shows the auto-calculated
+   *  sub-lease charge (20% of Market Price + 5% VAT), matching the layout view. */
+  leasingType?: 'direct' | 'sub' | 'management' | null;
   unit: Unit;
   /** Current / latest contract — drives the renewal history when `contracts` is absent. */
   contract?: UnitContract | null;
@@ -388,7 +393,19 @@ export function UnitPreviewModal({
   pushFee('Contract Registration Fee', aed(unit.ejariFeeFils));
   pushFee('Commission', aed(unit.commission));
   pushFee('Service Charges', aed(unit.serviceCharges));
-  additionalPayments.forEach((p) => pushFee(p.vat > 0 ? `${p.label} (incl. VAT)` : p.label, aed(p.amount + p.vat)));
+  // The sub-lease charge is shown in its own auto-calculated block below, so keep
+  // its persisted rows out of the generic fee grid to avoid showing it twice.
+  additionalPayments
+    .filter((p) => !isSubleaseChargeRow(p.label))
+    .forEach((p) => pushFee(p.vat > 0 ? `${p.label} (incl. VAT)` : p.label, aed(p.amount + p.vat)));
+  // Sub-lease charge — auto-calculated from Market Price (20% + 5% VAT on that
+  // 20%), only for sub-lease properties. Matches the layout Details view.
+  const subFees: Array<{ label: string; value: string }> = [];
+  if (leasingType === 'sub' && rent != null && Number(rent) > 0) {
+    const net = Math.round(Number(rent) * 0.20);
+    subFees.push({ label: '20% on sub-lease', value: aed(net) ?? '—' });
+    subFees.push({ label: '5% VAT on sub-lease', value: aed(Math.round(net * 0.05)) ?? '—' });
+  }
   const feeCols = isTight ? 1 : (isNarrow ? 2 : 3);
 
   // ── documents (view-only) ──
@@ -660,6 +677,19 @@ export function UnitPreviewModal({
                         <div style={{ fontSize: 15, fontWeight: 700, color: C.ink2, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{f.value}</div>
                       </div>
                     ))}
+                  </div>
+                )}
+                {subFees.length > 0 && (
+                  <div style={{ borderTop: `1px solid ${C.line3}`, background: '#fbf6ea', padding: '13px 18px' }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', color: '#8a7a4e', textTransform: 'uppercase', marginBottom: 9 }}>Sub-lease charge · auto-calculated from Market Price</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: isTight ? '1fr' : 'repeat(2,1fr)', gap: '10px 18px' }}>
+                      {subFees.map((f, i) => (
+                        <div key={`${f.label}-${i}`}>
+                          <div style={{ fontSize: 11.5, color: C.mute2 }}>{f.label}</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: C.ink2, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{f.value}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

@@ -10,6 +10,7 @@ import { type AddendumTerms } from '@/lib/addendumTerms';
 import AddendumLayoutSection from './AddendumLayoutSection';
 import { RESIDENTIAL_UNIT_TYPES, isLandUnitType, isResidentialUnitType, effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 import { feeFromRules, type FeeRuleLite } from '@/lib/feeRules';
+import { SUBLEASE_NET_LABEL, SUBLEASE_VAT_LABEL, isSubleaseChargeRow } from '@/lib/unitForm';
 import ds from './unitForm.module.css';
 
 // ─── Unit type arrays (match backend UnitType enum) ───────
@@ -225,6 +226,10 @@ export interface UnitFormData {
    *  booking each is shown to the customer + added to the contract as an `other`
    *  payment row. */
   additionalPayments: Array<{ label: string; amount: string; vat: string }>;
+  /** Sub-lease properties only — when on, a 20%-of-Market-Price charge plus a 5%
+   *  VAT-on-that line are auto-synced from the Market Price and materialised into
+   *  `additionalPayments` on save. Optional (off by default). */
+  subleaseCharge: boolean;
   description: string;
 }
 
@@ -308,6 +313,7 @@ const EMPTY_UNIT: UnitFormData = {
   rentalType: 'yearly', numberOfPayments: '', advancePayment: '',
   gracePeriodDays: '', latePaymentFee: '', specialConditions: '',
   additionalPayments: [],
+  subleaseCharge: false,
   description: '',
 };
 
@@ -362,6 +368,10 @@ interface Props {
   layoutBulk?: boolean;
   /** Units on the layout — for the "applies to N units" copy. */
   layoutUnitCount?: number;
+  /** Parent property's ownership / leasing model. When `'sub'`, the pricing
+   *  section offers the optional auto-calculated sub-lease charge (20% of Market
+   *  Price + 5% VAT on that). Absent / any other value hides it entirely. */
+  leasingType?: 'direct' | 'sub' | 'management' | null;
 }
 
 interface UnitMediaRow { id: number; url: string; caption?: string | null }
@@ -555,7 +565,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title, layoutBulk = false, layoutUnitCount }: Props) {
+export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title, layoutBulk = false, layoutUnitCount, leasingType }: Props) {
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   // Fee fields the user has typed in this session — they stop auto-recomputing
   // off the rent / unit type (mirrors the plan-pricing editor's `overridden`).
@@ -608,6 +618,11 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
         noticePeriodDays: DEFAULT_NOTICE[resolveBaseCategory(propertyCategory)] ?? '60',
       };
       const seeded: UnitFormData = { ...defaults, ...initial };
+      // Sub-lease charge lives in its own auto-synced toggle, never the editable
+      // list — strip any persisted rows out and derive the toggle from them.
+      const hadSublease = seeded.subleaseCharge || seeded.additionalPayments.some(p => p.label === SUBLEASE_NET_LABEL);
+      seeded.additionalPayments = seeded.additionalPayments.filter(p => !isSubleaseChargeRow(p.label));
+      seeded.subleaseCharge = leasingType === 'sub' && hadSublease;
       // Auto-fill any BLANK fee from the RP's rules (resolved per unit type) so a
       // new unit starts pre-priced; stored / user-entered values are preserved.
       const rent = Number(seeded.rentalPrice) || 0;
@@ -662,6 +677,13 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     }));
   };
 
+  // Sub-lease charge — offered only for sub-lease properties. Both lines recompute
+  // live from the Market Price so the toggle is always exact ("auto-calculated
+  // with market price"). Rounded to whole AED like every other fee.
+  const showSublease = leasingType === 'sub';
+  const subleaseNet  = Math.round((Number(form.rentalPrice) || 0) * 0.20);
+  const subleaseVat  = Math.round(subleaseNet * 0.05);
+
   const validate = (): typeof errors => {
     const errs: typeof errors = {};
     if (!layoutBulk && !form.unitNumber.trim()) errs.unitNumber  = 'Required';
@@ -682,6 +704,16 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
     }
     setSaving(true);
     const payload = { ...form };
+    // Re-materialise the sub-lease charge as two persisted `additionalPayments`
+    // rows (kept out of the editable list while editing). Off / non-sub-lease /
+    // no price → nothing is added, so landlords without this arrangement are
+    // unaffected.
+    const baseAdd = payload.additionalPayments.filter(p => !isSubleaseChargeRow(p.label));
+    payload.additionalPayments = (showSublease && form.subleaseCharge && subleaseNet > 0)
+      ? [...baseAdd,
+         { label: SUBLEASE_NET_LABEL, amount: String(subleaseNet), vat: '' },
+         { label: SUBLEASE_VAT_LABEL, amount: String(subleaseVat), vat: '' }]
+      : baseAdd;
     try { await onSave(payload, floorPlan, propertyStandalone === false ? titleDeed : null, addendums); requestClose(); }
     finally { setSaving(false); }
   };
@@ -870,6 +902,31 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               <div><label className={ds.lbl}>Commission</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 4000" value={form.commission} onChange={e => upd('commission', e.target.value)} /></div>
               <div><label className={ds.lbl}>Service Charges (AED/yr)</label><input type="number" min="0" step="any" className={ds.input} placeholder="e.g. 8000" value={form.serviceCharges} onChange={e => upd('serviceCharges', e.target.value)} /></div>
             </div>
+
+            {showSublease && (
+              <div style={{ marginTop: 4, marginBottom: 14, padding: '12px 14px', borderRadius: 10, border: '1px solid #e4d8bf', background: '#fbf6ea' }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                  <input type="checkbox" style={{ marginTop: 3 }} checked={form.subleaseCharge}
+                    onChange={e => setForm(f => ({ ...f, subleaseCharge: e.target.checked }))} />
+                  <div style={{ flex: 1 }}>
+                    <div className={ds.addRowTitle}>Sub-lease charge <span style={{ fontWeight: 600, fontSize: 10.5, color: '#8a7a4e', border: '1px solid #d9c891', background: '#fff', borderRadius: 5, padding: '1px 6px', marginLeft: 6 }}>SUB-LEASE ONLY</span></div>
+                    <div className={ds.addRowSub}>Auto-calculated from Market Price. Optional — leave off if this landlord doesn’t apply it.</div>
+                  </div>
+                </label>
+                {form.subleaseCharge && (
+                  subleaseNet > 0 ? (
+                    <div style={{ marginTop: 10, borderTop: '1px solid #ece0c5', paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 7, columnGap: 12, fontSize: 12.5 }}>
+                      <span style={{ color: '#5c5647' }}>20% on sub-lease <span style={{ color: '#9b8f6b' }}>· 20% × Market Price</span></span>
+                      <strong style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {subleaseNet.toLocaleString('en-AE')}</strong>
+                      <span style={{ color: '#5c5647' }}>5% VAT on sub-lease <span style={{ color: '#9b8f6b' }}>· 5% × the 20%</span></span>
+                      <strong style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {subleaseVat.toLocaleString('en-AE')}</strong>
+                    </div>
+                  ) : (
+                    <p style={{ marginTop: 9, fontSize: 11.5, color: '#b06b2c', fontStyle: 'italic' }}>Enter a Market Price above to calculate the sub-lease charge.</p>
+                  )
+                )}
+              </div>
+            )}
 
             <div className={ds.addRow}>
               <div style={{ flex: 1 }}>

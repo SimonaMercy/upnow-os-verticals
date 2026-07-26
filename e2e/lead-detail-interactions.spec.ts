@@ -168,7 +168,7 @@ test.describe.serial('Lead detail — deep interactions', () => {
     await request.patch(`${BACKEND}/leads/${leadId}/cheques-ready`, { headers: auth(custToken) });
 
     await page.goto(url(), { waitUntil: 'networkidle' });
-    await expect(page.locator('.acard h2')).toContainText(/Payment advice/i);
+    await expect(page.locator('.acard h2')).toContainText(/Payment confirmation/i);
     // Customer uploads are surfaced (2 cheque references)
     await expect(page.locator('.acard')).toContainText(/Cheque 1/i, { timeout: 8000 });
     await page.screenshot({ path: `${SHOTS}/C1-cheques.png`, fullPage: true });
@@ -256,9 +256,9 @@ test.describe.serial('Lead detail — deep interactions', () => {
   });
 
   test('H. journey is CLICKABLE — inspect a completed & an upcoming step, then return', async ({ page, request }) => {
-    const L = await advanceLead(request, rpToken, unitId, 'cheques'); // current = Payment advice (node 4)
+    const L = await advanceLead(request, rpToken, unitId, 'cheques'); // current = Payment confirmation (node 4)
     await page.goto(`/rental-provider/dashboard/leads/${L.leadId}`, { waitUntil: 'networkidle' });
-    await expect(page.locator('.acard h2')).toContainText(/Payment advice/i);
+    await expect(page.locator('.acard h2')).toContainText(/Payment confirmation/i);
 
     // Click the "Viewing" waypoint (node 0 — completed) → read-only preview
     await page.locator('.qmap svg g.wp').nth(0).click();
@@ -273,7 +273,7 @@ test.describe.serial('Lead detail — deep interactions', () => {
 
     // Return to the real current step
     await page.getByRole('button', { name: /Return to current step/i }).click();
-    await expect(page.locator('.acard h2')).toContainText(/Payment advice/i, { timeout: 6000 });
+    await expect(page.locator('.acard h2')).toContainText(/Payment confirmation/i, { timeout: 6000 });
     await page.screenshot({ path: `${SHOTS}/H-journey-clickable.png`, fullPage: true });
   });
 

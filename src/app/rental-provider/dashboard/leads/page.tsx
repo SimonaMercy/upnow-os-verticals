@@ -75,8 +75,8 @@ const STAGE_LABELS: Record<LeadStage, string> = {
   documents_collection: 'Docs Collection',
   payment_plan_shared:  'Plan Shared',
   interested:           'Interested',
-  cheques_submitted:    'Payment Advice Ready',
-  cheques_collected:    'Payment Advice Collected',
+  cheques_submitted:    'Payment Confirmation Ready',
+  cheques_collected:    'Payment Confirmation Collected',
   contract_issued:      'Contract Issued',
   rejected:             'Rejected',
   converted:            'Converted',
@@ -294,7 +294,7 @@ function getUrgency(lead: ApiLead): Urgency | null {
     case 'interested':
       return idle >= 3 ? { level: idle >= 7 ? 'red' : 'amber', label: `No next step ${idle}d` } : null;
     case 'cheques_submitted':
-      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Payment advice ready ${idle}d — collect` } : null;
+      return idle >= 2 ? { level: idle >= 5 ? 'red' : 'amber', label: `Payment confirmation ready ${idle}d — collect` } : null;
     default:
       return null;
   }
@@ -320,7 +320,7 @@ const FUNNEL_COLS: [LeadStage, string][] = [
   ['interested',           'Interested'],
   ['documents_collection', 'Docs'],
   ['payment_plan_shared',  'Plan'],
-  ['cheques_submitted',    'Payment Advice'],
+  ['cheques_submitted',    'Payment Confirmation'],
   // `cheques_collected` is normally transient — the contract auto-issues and the
   // lead jumps straight to `converted`. It only ever rests here if the auto-create
   // failed (e.g. unit still occupied), so it stays in the funnel as the recovery

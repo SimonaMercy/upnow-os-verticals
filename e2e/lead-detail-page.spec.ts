@@ -180,8 +180,8 @@ test.describe.serial('Lead detail page — full workflow', () => {
     expect(cr.ok(), `cheques-ready: ${cr.status()}`).toBeTruthy();
 
     await page.goto(detailUrl(), { waitUntil: 'networkidle' });
-    await expect(page.locator('.acard h2')).toContainText(/Payment advice/i);
-    await expect(page.locator('.youare .yv')).toContainText('Payment advice');
+    await expect(page.locator('.acard h2')).toContainText(/Payment confirmation/i);
+    await expect(page.locator('.youare .yv')).toContainText('Payment confirmation');
     const approve = page.locator('.action-body').getByRole('button', { name: /Payment review & approve/i });
     await expect(approve).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/04-advice.png`, fullPage: true });

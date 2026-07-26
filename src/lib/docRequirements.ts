@@ -115,7 +115,7 @@ export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
  */
 export const CONTRACT_DOCS: DocReq[] = [
   { key: 'ejari_certificate', label: 'Contract Registration Certificate', category: 'contract', required: false, hint: 'Contract Registration / DLD tenancy-contract registration certificate' },
-  { key: 'payment_advice',    label: 'Payment Advice',        category: 'payment',  required: false, hint: 'Rent cheques / payment advice — the cheques recorded in the Payments section' },
+  { key: 'payment_advice',    label: 'Payment Confirmation',  category: 'payment',  required: false, hint: 'Rent cheques / payment confirmation — the cheques recorded in the Payments section' },
 ];
 
 /** Keys that become REQUIRED for a company tenant on a commercial/industrial

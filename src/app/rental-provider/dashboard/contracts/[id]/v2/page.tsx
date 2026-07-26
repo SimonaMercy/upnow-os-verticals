@@ -827,7 +827,7 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
         <button className="ca" style={{ justifySelf: 'start', padding: 0 }} onClick={() => h.openDrawer('payments')}>View the renewal cheque schedule</button>
         {chequeDocs.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <span className="note" style={{ fontWeight: 600 }}>Payment Advice already on file:</span>
+            <span className="note" style={{ fontWeight: 600 }}>Payment Confirmation already on file:</span>
             {chequeDocs.map((d, i) => (
               <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
                 <ExternalLink size={12} /> {d.displayName ?? `Cheque ${i + 1}`}
@@ -837,7 +837,7 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
         )}
         {canEdit && (
           <UploadAction
-            fileLabel="Payment-Advice.pdf"
+            fileLabel="Payment-Confirmation.pdf"
             onUpload={h.onUploadCheques}
             onMark={() => void h.onMarkChequesOnFile()}
           />
@@ -3486,7 +3486,7 @@ function DetailsDrawer({
             const showGovtVat = payments.some(p => (p.paymentType ?? '').toLowerCase() === 'vat');
             const binderSeq: BinderSlot[] = [
               { kind: 'link', key: 'offer',          label: 'Payment Summary', sub: 'Current payment summary', href: null },
-              { kind: 'doc',  key: 'payment_advice', label: 'Payment Advice' },
+              { kind: 'doc',  key: 'payment_advice', label: 'Payment Confirmation' },
               // One file → all receipts inside (Rental Income · Security Deposit · Management Fee · Government fee).
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: [isRenewal ? 'Rental income' : 'Rental income, security deposit', 'management fee', showGovtVat ? 'Government fee' : null].filter(Boolean).join(', '), href: receiptsReady ? receiptBase : null },
               { kind: 'link', key: 'agreement',      label: 'Agreement', sub: 'Tenancy contract', href: `${contractBase}/print` },
@@ -4496,7 +4496,26 @@ function RenewalProposeModal({
   });
   // Extra one-off charge lines (Municipality Fee, parking add-on, etc.) — each a
   // separate cheque on top of rent + fees. Posted as `extraCharges`.
-  const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>([]);
+  //
+  // A renewal continues THIS lease, so it repeats the current lease's Third Party
+  // ('other') charges — the sub-lease charge, service charge, etc. We carry them
+  // from the PARENT lease's own payment rows (deliberately NOT re-derived from the
+  // unit: a new lease reads the unit, a renewal shows what this contract already
+  // charges). Rent VAT is skipped — the renewal recomputes it as its own cheque,
+  // so carrying it forward would double-count. Every line stays editable/removable.
+  const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>(() => {
+    // Carried charges fall due on the FIRST installment date (same as the rent
+    // cheque #1 / fees), computed the same way the schedule below does.
+    const firstDue = buildInstallmentDueDates(
+      iso(ns), iso(ne), contract.numberOfInstallments ?? 4, contract.preferredChequeDays ?? [],
+    )[0] ?? iso(ns);
+    return (contract.payments ?? [])
+      .filter(p => (p.paymentType ?? '') === 'other')
+      .filter(p => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase()))
+      .filter(p => (p.amount ?? 0) > 0)
+      .filter(p => !(/rent/i.test(p.description ?? '') && /vat/i.test(p.description ?? '')))
+      .map(p => ({ description: (p.description ?? '').trim(), amount: String(p.amount ?? ''), dueDate: firstDue }));
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Installment plans + cheque days come from the contract payload (the OWNING
@@ -4706,10 +4725,13 @@ function RenewalProposeModal({
             <div className="field"><label>Deposit (carries over)</label><input className="input" value={fmtAed(contract.securityDepositAmount)} disabled style={{ background: 'var(--surface)', color: 'var(--ink-3)' }} /></div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <p className="subhead mut" style={{ margin: 0 }}>Additional charges</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: extras.length > 0 ? 4 : 8 }}>
+            <p className="subhead mut" style={{ margin: 0 }}>Additional charges <span style={{ fontWeight: 600, opacity: 0.75 }}>· Third Party</span></p>
             <button type="button" className="btn btn-ghost btn-sm" onClick={addExtra}><Plus size={13} /> Add charge</button>
           </div>
+          {extras.length > 0 && (
+            <p className="note mut" style={{ marginTop: 0, marginBottom: 8 }}>Carried forward from the current lease (e.g. sub-lease charge, service charge). Each is billed under Third Party — edit or remove any that don’t apply.</p>
+          )}
           {extras.map((e, i) => (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 150px 32px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
               <input className="input" placeholder="Description (e.g. Municipality Fee)" value={e.description} onChange={ev => setExtra(i, 'description', ev.target.value)} />
@@ -5332,9 +5354,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onChequesFilePicked = async (file: File) => {
     setChequesUploading(true);
     try {
-      await uploadContractDoc(file, 'Payment Advice', 'payment_advice');
+      await uploadContractDoc(file, 'Payment Confirmation', 'payment_advice');
       void reload();
-    } catch (e) { alert(e instanceof Error ? e.message : 'Payment Advice upload failed'); }
+    } catch (e) { alert(e instanceof Error ? e.message : 'Payment Confirmation upload failed'); }
     finally { setChequesUploading(false); if (chequesInputRef.current) chequesInputRef.current.value = ''; }
   };
   const onMarkChequesOnFile = async () => {
@@ -5343,7 +5365,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       if (!res.ok) throw new Error(`Mark cheques failed: ${res.status}`);
       const data = await res.json().catch(() => ({ matched: true }));
       if (data.matched === false) {
-        alert('No Payment Advice is on file for this lease yet. Please upload the cheques first.');
+        alert('No Payment Confirmation is on file for this lease yet. Please upload the cheques first.');
         return;
       }
       void reload();
@@ -6401,7 +6423,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         onChange={(e) => { const f = e.target.files?.[0]; const k = windDownKind; if (f && k) void onWindDownFilePicked(f, k); }} />
       {(ejariUploading || utilityUploading || chequesUploading || windDownUploading) && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
-          Uploading {ejariUploading ? 'Contract Registration' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Advice' : 'wind-down'} document…
+          Uploading {ejariUploading ? 'Contract Registration' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Confirmation' : 'wind-down'} document…
         </div>
       )}
 

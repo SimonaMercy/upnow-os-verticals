@@ -10,6 +10,16 @@ import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { isResidentialUnitType, unitHasBathrooms } from '@/lib/unitTaxonomy';
 import type { UnitFormData } from '@/components/upnow/UnitFormModal';
 
+// Sub-lease charge line items — persisted as two regular `additionalPayments`
+// rows so the customer / contract picks them up like any other charge, but the
+// unit editor recognises these exact labels to present them as a single
+// auto-synced toggle (20% of Market Price + 5% VAT on that 20%). Only offered
+// for sub-lease properties, and fully optional (not every landlord applies it).
+export const SUBLEASE_NET_LABEL = 'Sub-lease charge (20%)';
+export const SUBLEASE_VAT_LABEL = '5% VAT on sub-lease';
+export const isSubleaseChargeRow = (label: string) =>
+  label === SUBLEASE_NET_LABEL || label === SUBLEASE_VAT_LABEL;
+
 // Unit row as returned by GET /properties/:id/units (and units/all).
 export interface UnitRecord {
   id: number;
@@ -187,7 +197,11 @@ export function unitToFormInitial(u: UnitRecord): UnitFormData {
     commission:       u.commission != null ? String(u.commission) : '',
     serviceCharges:   u.serviceCharges != null ? String(u.serviceCharges) : '',
     ...leaseTermsFromUnit(u),
-    additionalPayments: additionalPaymentsFromUnit(u),
+    // Split the sub-lease charge rows out of the editable list — the editor
+    // shows them as the auto-synced "Sub-lease charge" toggle instead, and
+    // re-materialises them on save. Everything else stays a plain editable row.
+    additionalPayments: additionalPaymentsFromUnit(u).filter(p => !isSubleaseChargeRow(p.label)),
+    subleaseCharge:  additionalPaymentsFromUnit(u).some(p => p.label === SUBLEASE_NET_LABEL),
     description:      u.description ?? '',
   };
 }

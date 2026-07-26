@@ -1117,6 +1117,7 @@ export function PropertyDetailsModal({
             plan={plan}
             units={unitsOnLayout}
             propertyName={p.buildingName}
+            leasingType={p.leasingType}
             canEdit={pricingEditable && !!previewLayout.planLabel}
             onEdit={() => { setEditLayout({ planLabel: previewLayout.planLabel, unitCount: previewLayout.count }); setPreviewLayout(null); }}
             onClose={() => setPreviewLayout(null)}
@@ -1136,6 +1137,7 @@ export function PropertyDetailsModal({
             layoutUnitCount={editLayout.unitCount}
             title="Edit layout"
             propertyCategory={p.spaceCategory}
+            leasingType={p.leasingType}
             propertyStandalone
             propertyId={property.id}
             planLabel={editLayout.planLabel}

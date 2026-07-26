@@ -611,7 +611,7 @@ export function ManagerOperationsReport({
             <div className="px-5 py-3.5 border-b border-[#f0ede8]">
               <h2 className="text-sm font-bold text-[#1a1916]">Operations by stage — records each manager progressed</h2>
               <p className="text-xs text-[#6b6860] mt-0.5">
-                Stages down the side grouped by pipeline (KYC → Payment Advice serve both the Lead intake
+                Stages down the side grouped by pipeline (KYC → Payment Confirmation serve both the Lead intake
                 and lease setup); customer and landlord signatures kept separate. Click any number to see
                 the records behind it with their history.
               </p>

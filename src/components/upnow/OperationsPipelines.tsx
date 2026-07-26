@@ -91,7 +91,7 @@ const LEAD_STAGES: { key: string; title: string; match: string[] }[] = [
   { key: 'interested', title: 'Interested',      match: ['interested'] },
   { key: 'documents',  title: 'KYC / Documents', match: ['documents_collection'] },
   { key: 'plan',       title: 'Payment plan',    match: ['payment_plan_shared'] },
-  { key: 'cheques',    title: 'Payment Advice Ready',     match: ['cheques_submitted'] },
+  { key: 'cheques',    title: 'Payment Confirmation Ready',     match: ['cheques_submitted'] },
 ];
 const LEAD_MATCH = new Set(LEAD_STAGES.flatMap(s => s.match));
 

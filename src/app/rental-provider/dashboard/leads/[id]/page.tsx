@@ -156,7 +156,7 @@ function installmentsFromStart(startDate: string, installments: number): string[
 }
 
 /* ─── Journey nodes (must match the mock) ─────────────────────────────────── */
-const NODES = ['Viewing', 'Interested', 'Documents', 'Payment plan', 'Payment advice', 'Converted'] as const;
+const NODES = ['Viewing', 'Interested', 'Documents', 'Payment plan', 'Payment confirmation', 'Converted'] as const;
 const NODE_ICON = [Eye, UserPlus, FolderOpen, Wallet, Receipt, BadgeCheck];
 
 type Tone = 'action' | 'waiting' | 'celebrate' | 'danger' | 'neutral';
@@ -1074,8 +1074,8 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
     case 'cheques_submitted':
       return {
         tone: 'action', pill: urgency ? 'Needs action' : 'Your turn',
-        eyebrow: 'Step 5 · Payment advice',
-        headline: 'Payment advice — review & approve',
+        eyebrow: 'Step 5 · Payment confirmation',
+        headline: 'Payment confirmation — review & approve',
         body: 'The customer uploaded a cheque attachment for each instalment. Review each, then approve — which converts the lead into a contract.',
         HeroIcon: Receipt,
         banner: urgencyBanner,
@@ -1084,7 +1084,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
       const canIssue = !!(lead.unit?.id && lead.convertedTenant?.id);
       return {
         tone: 'danger', pill: canIssue ? 'Blocked' : 'Cannot issue',
-        eyebrow: 'Recovery · Payment advice collected',
+        eyebrow: 'Recovery · Payment confirmation collected',
         headline: canIssue ? 'Contract auto-create failed' : 'Missing unit or customer link',
         body: canIssue
           ? 'The cheques were confirmed but contract creation was blocked (e.g. the unit is still occupied). Fix the blocker and re-issue.'

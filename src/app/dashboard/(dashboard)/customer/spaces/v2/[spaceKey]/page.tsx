@@ -4911,7 +4911,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
           <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Upload your cheques / PDC {!submitted && <span style={{ color: 'var(--jade-deep)' }}>*</span>}</p>
           <span style={{ fontSize: 11, color: 'var(--mute)' }}>{pdcDocs.length} uploaded</span>
         </div>
-        <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>Attach a photo or PDF of your signed post-dated cheques (or bank-transfer receipts), matching the schedule above. These are filed as your Payment Advice for the renewal.</p>
+        <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>Attach a photo or PDF of your signed post-dated cheques (or bank-transfer receipts), matching the schedule above. These are filed as your Payment Confirmation for the renewal.</p>
         {!submitted && (
           <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)', background: 'var(--surface)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)' }}>
             <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={(e) => handleFiles(e.target.files)} style={{ display: 'none' }} data-testid="renewal-pdc-input" />
