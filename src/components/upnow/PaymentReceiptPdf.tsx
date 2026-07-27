@@ -131,6 +131,9 @@ export interface ReceiptContract {
     planRefNo?: string | null;
     /** payments.id → gapless receipt number. */
     receiptByPaymentId?: Record<number, string>;
+    /** payments.id whose receipt was soft-voided (cheque reverted from cleared) —
+     *  the number is retained but the receipt is stamped VOID and reads as unpaid. */
+    voidedPaymentIds?: Set<number>;
   } | null;
 }
 
@@ -538,7 +541,8 @@ function receiptRefsSig(contract: ReceiptContract): string {
   const r = contract.paymentRefs;
   if (!r) return '';
   const ids = Object.keys(r.receiptByPaymentId ?? {}).sort().join('.');
-  return `${r.planRefNo ?? ''}#${ids}`;
+  const voided = [...(r.voidedPaymentIds ?? [])].sort((a, b) => a - b).join('.');
+  return `${r.planRefNo ?? ''}#${ids}!${voided}`;
 }
 
 // ─── PDF styles ──────────────────────────────────────────────────────────────
@@ -558,6 +562,7 @@ function pillFor(label: string): { bg: string; fg: string } {
     case 'Collected (PDC)':
     case 'PDCs Collected': return { bg: '#d8f2e8', fg: '#1a5a4a' }; // --color-primary-light / -dark
     case 'Bounced': return { bg: '#fdede7', fg: '#9a3520' };        // --brick-soft / --brick-deep
+    case 'Void': return { bg: '#fdecea', fg: '#b3261e' };           // voided receipt
     case 'Cancelled': return { bg: '#f0ede8', fg: '#6b6860' };      // --mist / warm gray
     default: return { bg: '#fff7ed', fg: '#c2410c' };              // --saffron-soft / --saffron-deep (Pending)
   }
@@ -598,10 +603,15 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   // A receipt acknowledges money received. On the SECURITY DEPOSIT receipt an
   // un-cleared PDC reads as "Receipt" (the deposit is in hand) rather than the
   // ledger's "Collected (PDC)" / "Pending"; cleared/bounced/cancelled keep their label.
+  // A soft-voided receipt (its cheque was reverted from cleared) keeps its gapless
+  // number but no longer represents money received — stamp it VOID everywhere.
+  const isVoided = !!(single && contract.paymentRefs?.voidedPaymentIds?.has(single.id));
   const rawStatus = single ? statusLabel(single.chequeStatus, contract.pdcConfirmed) : 'Receipt';
-  const heroStatus = receipt.kind === 'deposit' && (rawStatus === 'Collected (PDC)' || rawStatus === 'Pending')
-    ? 'Receipt'
-    : rawStatus;
+  const heroStatus = isVoided
+    ? 'Void'
+    : receipt.kind === 'deposit' && (rawStatus === 'Collected (PDC)' || rawStatus === 'Pending')
+      ? 'Receipt'
+      : rawStatus;
   // When the lessor acts under a Power of Attorney, the contact number on the
   // receipt is the POA holder's (mirrors the Ejari contract renderer).
   const lessorPhone = contract.landlord?.hasPoa
@@ -616,6 +626,13 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
 
   return (
       <Page size="A4" style={st.page}>
+
+        {/* ── VOID watermark (soft-voided receipt: number retained, no money received) ── */}
+        {isVoided ? (
+          <View fixed style={{ position: 'absolute', top: 320, left: 0, right: 0, alignItems: 'center', transform: 'rotate(-24deg)' }}>
+            <Text style={{ fontSize: 120, fontWeight: 700, color: 'rgba(179,38,30,0.10)', letterSpacing: 8 }}>VOID</Text>
+          </View>
+        ) : null}
 
         {/* ── Header band (full-bleed) ── */}
         <View style={{ backgroundColor: HEADER, paddingHorizontal: PAD, paddingTop: 26, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>

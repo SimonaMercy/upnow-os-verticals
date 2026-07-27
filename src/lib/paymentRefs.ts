@@ -12,8 +12,12 @@
  */
 export interface PaymentRefs {
   planRefNo: string | null;
-  /** payments.id → gapless receipt number (cleared payments only). */
+  /** payments.id → gapless receipt number (retained even when voided). */
   receiptByPaymentId: Record<number, string>;
+  /** payments.id whose receipt was soft-voided (cheque reverted to a non-cleared
+   *  status). The number is kept for the gapless series; surfaces label it VOID
+   *  and exclude it from received-money figures. */
+  voidedPaymentIds: Set<number>;
 }
 
 interface RefRow {
@@ -21,18 +25,21 @@ interface RefRow {
   refNo: string;
   sourceKind: 'payment' | 'deposit' | null;
   sourceId: number | null;
+  voidedAt?: string | null;
 }
 
-export const EMPTY_PAYMENT_REFS: PaymentRefs = { planRefNo: null, receiptByPaymentId: {} };
+export const EMPTY_PAYMENT_REFS: PaymentRefs = { planRefNo: null, receiptByPaymentId: {}, voidedPaymentIds: new Set() };
 
 export function shapePaymentRefs(data: { planRef?: RefRow | null; receipts?: RefRow[] }): PaymentRefs {
   const receiptByPaymentId: Record<number, string> = {};
+  const voidedPaymentIds = new Set<number>();
   for (const r of data.receipts ?? []) {
     if (r.series === 'receipt' && r.sourceKind === 'payment' && r.sourceId != null) {
       receiptByPaymentId[r.sourceId] = r.refNo;
+      if (r.voidedAt) voidedPaymentIds.add(r.sourceId);
     }
   }
-  return { planRefNo: data.planRef?.refNo ?? null, receiptByPaymentId };
+  return { planRefNo: data.planRef?.refNo ?? null, receiptByPaymentId, voidedPaymentIds };
 }
 
 export async function fetchPaymentRefs(contractId: number | string, signal?: AbortSignal): Promise<PaymentRefs> {

@@ -2002,6 +2002,22 @@ function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amou
   );
 }
 
+/** Inline gapless receipt number shown under a payment/deposit/fee row. Struck
+ *  through and tagged "VOID" when the receipt was soft-voided (its cheque was
+ *  reverted from cleared) — the number is retained for the gapless series. */
+function ReceiptRefTag({ refs, id }: { refs: PaymentRefs; id: number }) {
+  const ref = refs.receiptByPaymentId[id];
+  if (!ref) return null;
+  const isVoid = refs.voidedPaymentIds.has(id);
+  return (
+    <span className="note"
+      title={isVoid ? 'Receipt voided — cheque reverted to a non-cleared status; number retained for the gapless series' : 'Issued receipt number — for bank reconciliation'}
+      style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: isVoid ? '#b3261e' : '#1a5a4a', marginTop: 2, textDecoration: isVoid ? 'line-through' : 'none' }}>
+      Receipt {ref}{isVoid ? ' · VOID' : ''}
+    </span>
+  );
+}
+
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
@@ -2697,11 +2713,7 @@ function DetailsDrawer({
                             <td><DollarSign size={13} /></td>
                             <td>
                               {depositRow.description?.trim() || 'Security deposit'}
-                              {paymentRefs.receiptByPaymentId[depositRow.id] && (
-                                <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
-                                  Receipt {paymentRefs.receiptByPaymentId[depositRow.id]}
-                                </span>
-                              )}
+                              <ReceiptRefTag refs={paymentRefs} id={depositRow.id} />
                             </td>
                             <td className="amt">{fmtAed(depositRow.amount)}</td>
                             <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
@@ -2916,11 +2928,7 @@ function DetailsDrawer({
                           <td>{i + 1}</td>
                           <td>
                             {p.description ?? '—'}
-                            {paymentRefs.receiptByPaymentId[p.id] && (
-                              <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
-                                Receipt {paymentRefs.receiptByPaymentId[p.id]}
-                              </span>
-                            )}
+                            <ReceiptRefTag refs={paymentRefs} id={p.id} />
                           </td>
                           <td className="amt">
                             {fmtAed(p.amount)}
@@ -3047,11 +3055,7 @@ function DetailsDrawer({
                           <tr>
                             <td>
                               {feeLabel(f.paymentType)}
-                              {paymentRefs.receiptByPaymentId[f.id] && (
-                                <span className="note" title="Issued receipt number — for bank reconciliation" style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: '#1a5a4a', marginTop: 2 }}>
-                                  Receipt {paymentRefs.receiptByPaymentId[f.id]}
-                                </span>
-                              )}
+                              <ReceiptRefTag refs={paymentRefs} id={f.id} />
                             </td>
                             <td>{f.description ?? '—'}</td>
                             <td className="amt">
