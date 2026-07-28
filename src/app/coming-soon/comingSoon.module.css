@@ -1,0 +1,464 @@
+/*
+ * "Something better is on the way." — holding page.
+ * Ported verbatim from the approved design (UpNow Coming Soon Final), which was
+ * drawn as a 1180x740 desktop frame and a 390x844 mobile frame. Here the two
+ * frames become one responsive page: the same DOM, re-ordered at 900px.
+ *
+ * Keyframes live in this module (not inline `style` strings) because CSS Modules
+ * scope @keyframes names — an inline `animation: drift ...` would reference a
+ * name that no longer exists after hashing.
+ */
+
+.page {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #08130e;
+  color: #f2fffa;
+}
+
+/* ── layout: mobile first (390x844 frame) ──────────────────────────────────── */
+
+.shell {
+  position: relative;
+  z-index: 1;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 22px 18px;
+}
+
+/* Desktop groups copy + actions in one column; on mobile they split apart, so
+   the wrapper dissolves and its children become flex items in their own right. */
+.left {
+  display: contents;
+}
+
+.brand {
+  order: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.copy {
+  order: 2;
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  animation: rise 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.5s both;
+}
+
+.actions {
+  order: 3;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.footer {
+  order: 4;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #1a2c24;
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #55705f;
+}
+
+/* ── brand mark ────────────────────────────────────────────────────────────── */
+
+.orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 124px;
+  height: 124px;
+  animation: float 7s ease-in-out infinite;
+}
+
+.orbGlow {
+  position: absolute;
+  inset: -18px;
+  background: radial-gradient(closest-side, rgba(53, 199, 159, 0.26), transparent 70%);
+  filter: blur(20px);
+}
+
+.ring1,
+.ring2,
+.ring3 {
+  position: absolute;
+  border-radius: 40%;
+}
+
+.ring1 {
+  inset: 0;
+  border: 1px solid rgba(53, 199, 159, 0.32);
+  animation: spin 30s linear infinite;
+}
+
+.ring2 {
+  inset: 16px;
+  border: 1px solid rgba(53, 199, 159, 0.2);
+  border-radius: 46%;
+  animation: spin 20s linear infinite reverse;
+}
+
+/* Third ring only exists on the desktop frame. */
+.ring3 {
+  display: none;
+  border: 1px solid rgba(53, 199, 159, 0.14);
+  border-radius: 44%;
+  animation: spin 14s linear infinite;
+}
+
+.mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 17px;
+  background: #35c79f;
+  color: #04150f;
+  font-size: 31px;
+  font-weight: 700;
+  overflow: hidden;
+  animation: markIn 1s cubic-bezier(0.2, 0.9, 0.2, 1) both,
+             markGlow 3.6s ease-in-out 1.1s infinite;
+}
+
+.shine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: shine 4.5s ease-in-out 1.5s infinite;
+}
+
+.wordmark {
+  display: flex;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: #eafff7;
+}
+
+.wordmark span {
+  animation: letterIn 0.6s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+/* ── copy ──────────────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 13px 7px 11px;
+  border: 1px solid rgba(53, 199, 159, 0.28);
+  border-radius: 999px;
+  background: rgba(53, 199, 159, 0.07);
+}
+
+.badgeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #35c79f;
+  animation: pulse 2.2s ease-in-out infinite;
+}
+
+.badgeText {
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9fd9c6;
+}
+
+.title {
+  margin: 0;
+  font-size: 38px;
+  line-height: 0.98;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: #f2fffa;
+}
+
+.titleAccent {
+  color: #35c79f;
+}
+
+.lede {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #a7c3b8;
+  text-wrap: pretty;
+}
+
+.ledeDesktop {
+  display: none;
+}
+
+/* ── actions ───────────────────────────────────────────────────────────────── */
+
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  border-radius: 999px;
+  background: #35c79f;
+  color: #04150f;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.cta:hover {
+  background: #4ee0b6;
+  color: #04150f;
+}
+
+.ctaArrow {
+  font-size: 17px;
+}
+
+/* Renders as a <button> (it opens the popup in place rather than navigating),
+   so it needs the button chrome stripped back to link-like. */
+.loginLink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: #7e9d90;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.loginLink:hover {
+  color: #eafff7;
+}
+
+.footer a {
+  color: #55705f;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.footer a:hover {
+  color: #7ce3c4;
+}
+
+.rightsLong {
+  display: inline;
+}
+
+.supportDesktop {
+  display: none;
+}
+
+/* ── desktop (1180x740 frame) ──────────────────────────────────────────────── */
+
+@media (min-width: 900px) {
+  .shell {
+    display: grid;
+    grid-template-columns: 1fr 440px;
+    align-items: center;
+    gap: 48px;
+    padding: 44px 60px 96px;
+    text-align: left;
+  }
+
+  .left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 26px;
+  }
+
+  .copy {
+    margin: 0;
+    align-items: flex-start;
+    gap: 26px;
+    animation: none;
+  }
+
+  .title {
+    font-size: clamp(60px, 6.8vw, 92px);
+    line-height: 0.92;
+    letter-spacing: -0.045em;
+    animation: rise 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.5s both;
+  }
+
+  .lede {
+    display: none;
+  }
+
+  .ledeDesktop {
+    display: block;
+    max-width: 470px;
+    font-size: 19px;
+    line-height: 1.55;
+  }
+
+  .actions {
+    align-self: flex-start;
+    flex-direction: row;
+    align-items: center;
+    gap: 26px;
+  }
+
+  .cta {
+    min-height: 0;
+    padding: 16px 26px;
+  }
+
+  .ctaArrow {
+    font-size: 18px;
+  }
+
+  .loginLink {
+    min-height: 0;
+    border-bottom: 1px solid rgba(126, 157, 144, 0.35);
+    padding-bottom: 2px;
+  }
+
+  .brand {
+    position: relative;
+    justify-content: center;
+    height: 100%;
+    gap: 34px;
+  }
+
+  .orb {
+    width: 400px;
+    height: 400px;
+  }
+
+  .orbGlow {
+    inset: -40px;
+    filter: blur(30px);
+  }
+
+  .ring2 {
+    inset: 44px;
+  }
+
+  .ring3 {
+    display: block;
+    inset: 92px;
+  }
+
+  .mark {
+    width: 168px;
+    height: 168px;
+    border-radius: 46px;
+    font-size: 88px;
+  }
+
+  .wordmark {
+    font-size: 46px;
+  }
+
+  .footer {
+    position: absolute;
+    left: 60px;
+    right: 60px;
+    bottom: 28px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0;
+    padding-top: 16px;
+    font-size: 12px;
+  }
+
+  .rightsLong {
+    display: none;
+  }
+
+  .supportDesktop {
+    display: inline;
+  }
+
+  .supportMobile {
+    display: none;
+  }
+}
+
+/* ── motion ────────────────────────────────────────────────────────────────── */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+
+@keyframes markIn {
+  0% { opacity: 0; transform: translateY(6px) rotate(-25deg) scale(0.6); }
+  60% { transform: translateY(0) rotate(4deg) scale(1.06); }
+  100% { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+}
+
+@keyframes markGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(53, 199, 159, 0.42), 0 6px 20px -6px rgba(53, 199, 159, 0.5); }
+  50% { box-shadow: 0 0 0 9px rgba(53, 199, 159, 0), 0 6px 26px -6px rgba(53, 199, 159, 0.75); }
+}
+
+@keyframes letterIn {
+  0% { opacity: 0; transform: translateY(14px); filter: blur(6px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes shine {
+  0% { transform: translateX(-140%) skewX(-18deg); }
+  55%, 100% { transform: translateX(320%) skewX(-18deg); }
+}
+
+/* Visitors who ask for less motion get the composition, held still. */
+@media (prefers-reduced-motion: reduce) {
+  .page *,
+  .page *::before,
+  .page *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

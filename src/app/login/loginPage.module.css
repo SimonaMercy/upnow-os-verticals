@@ -1,0 +1,166 @@
+/*
+ * Sign-in page — same visual system as /coming-soon (approved design), with the
+ * existing AuthModal popup (phone/email → 6-digit OTP) sitting on top of it.
+ * The backdrop itself comes from SiteBackdrop; this file styles the brand lockup
+ * that shows through behind the popup.
+ */
+
+.page {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #08130e;
+  color: #f2fffa;
+}
+
+/* Sits above the popup rather than behind it — the AuthModal is centred, so a
+   centred lockup would be completely hidden by the card and its scrim. */
+.brand {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 22px 0;
+}
+
+.orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 124px;
+  height: 124px;
+  animation: float 7s ease-in-out infinite;
+}
+
+.orbGlow {
+  position: absolute;
+  inset: -18px;
+  background: radial-gradient(closest-side, rgba(53, 199, 159, 0.26), transparent 70%);
+  filter: blur(20px);
+}
+
+.ring1,
+.ring2 {
+  position: absolute;
+  border-radius: 40%;
+}
+
+.ring1 {
+  inset: 0;
+  border: 1px solid rgba(53, 199, 159, 0.32);
+  animation: spin 30s linear infinite;
+}
+
+.ring2 {
+  inset: 16px;
+  border: 1px solid rgba(53, 199, 159, 0.2);
+  border-radius: 46%;
+  animation: spin 20s linear infinite reverse;
+}
+
+.mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 17px;
+  background: #35c79f;
+  color: #04150f;
+  font-size: 31px;
+  font-weight: 700;
+  overflow: hidden;
+  animation: markIn 1s cubic-bezier(0.2, 0.9, 0.2, 1) both,
+             markGlow 3.6s ease-in-out 1.1s infinite;
+}
+
+.shine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: shine 4.5s ease-in-out 1.5s infinite;
+}
+
+.wordmark {
+  display: flex;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: #eafff7;
+}
+
+.wordmark span {
+  animation: letterIn 0.6s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+@media (min-width: 900px) {
+  /* Sized so the lockup clears the top edge of the centred popup at 900px tall,
+     the shortest laptop viewport we care about. */
+  .brand {
+    padding-top: 26px;
+    gap: 10px;
+  }
+
+  .orb {
+    width: 140px;
+    height: 140px;
+  }
+
+  .ring2 {
+    inset: 20px;
+  }
+
+  .mark {
+    width: 70px;
+    height: 70px;
+    border-radius: 20px;
+    font-size: 36px;
+  }
+
+  .wordmark {
+    font-size: 28px;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+
+@keyframes markIn {
+  0% { opacity: 0; transform: translateY(6px) rotate(-25deg) scale(0.6); }
+  60% { transform: translateY(0) rotate(4deg) scale(1.06); }
+  100% { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+}
+
+@keyframes markGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(53, 199, 159, 0.42), 0 6px 20px -6px rgba(53, 199, 159, 0.5); }
+  50% { box-shadow: 0 0 0 9px rgba(53, 199, 159, 0), 0 6px 26px -6px rgba(53, 199, 159, 0.75); }
+}
+
+@keyframes letterIn {
+  0% { opacity: 0; transform: translateY(14px); filter: blur(6px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes shine {
+  0% { transform: translateX(-140%) skewX(-18deg); }
+  55%, 100% { transform: translateX(320%) skewX(-18deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page *,
+  .page *::before,
+  .page *::after {
+    animation: none !important;
+  }
+}

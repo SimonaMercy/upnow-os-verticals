@@ -72,10 +72,18 @@ export function AuthModal({
   mode,
   onClose,
   onModeChange,
+  dismissible = true,
 }: {
   mode: AuthModalMode;
   onClose: () => void;
   onModeChange: (m: AuthModalMode) => void;
+  /**
+   * As a popup over the landing page the modal is dismissible — backdrop click,
+   * Escape and the X all close it. On the standalone /login page there is
+   * nothing behind it to go back to, so dismissing would just eject the visitor
+   * mid-sign-in; that page passes false to pin it open.
+   */
+  dismissible?: boolean;
 }) {
   const router = useRouter();
   const { login, verifyLoginOtp, register, refresh, verifyOtp, requestOtp } = useAuth();
@@ -116,10 +124,11 @@ export function AuthModal({
 
   // Close on Escape.
   useEffect(() => {
+    if (!dismissible) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, dismissible]);
 
   // Lock body scroll while open.
   useEffect(() => {
@@ -420,7 +429,7 @@ export function AuthModal({
 
   return (
     <div
-      onMouseDown={onClose}
+      onMouseDown={dismissible ? onClose : undefined}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
         background: 'rgba(14,26,22,0.55)',
@@ -439,18 +448,20 @@ export function AuthModal({
           padding: 28, position: 'relative',
         }}
       >
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={{
-            position: 'absolute', top: 16, right: 16, width: 32, height: 32,
-            borderRadius: '50%', border: 'none', background: '#f2f5f3',
-            color: '#6b7a74', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <X size={16} />
-        </button>
+        {dismissible && (
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: 'absolute', top: 16, right: 16, width: 32, height: 32,
+              borderRadius: '50%', border: 'none', background: '#f2f5f3',
+              color: '#6b7a74', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <X size={16} />
+          </button>
+        )}
 
         {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 18 }}>
