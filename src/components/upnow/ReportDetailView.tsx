@@ -195,7 +195,7 @@ const NEEDS_CHEQUE_DATA = 'Cheque numbers, dates and amounts are from your scann
 const REPORTS: Record<ReportSlug, ReportDef> = {
   portfolio: {
     title: 'Portfolio',
-    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) — a live benchmark. "Annual Rent" is the contracted rent on the books from the tenancy contracts — the latest effective lease on the unit. The Occupancy filter scopes BOTH the rent figures and the units listed: Occupied (the default) = leased units only; Vacant = empty units and the hold-over rent they last let for; All = every unit summed together. Per-property occupied/vacant/total counts always show the live composition regardless of the filter.',
+    description: 'Snapshot of how each property is performing — units, occupied counts, and rent. "Market Rent" is the asking rent set on the units (units.rental_price) — a live benchmark. "Annual Rent" is the contracted rent on the books: for a leased unit, the lease running today or the next term whose cheques are already collected — a lease that has ended, been terminated, or that nobody has paid for does not count. The Occupancy filter scopes BOTH the rent figures and the units listed: Occupied (the default) = leased units only; Vacant = empty units and the hold-over rent they last let for; All = every unit summed together. Per-property occupied/vacant/total counts always show the live composition regardless of the filter. Picking a year switches Annual Rent to history — the lease that overlapped that year.',
     endpoint: '/api/reports/occupancy',
     buildingLeaseFilter: true,
     occupancyFilter: true,

@@ -49,7 +49,8 @@ export interface LayoutUnitLite {
   unitSizeSqft: number | null;
   planLabel?: string | null;
   rentalPrice: number | null;
-  lastLeaseRent?: number | null;   // latest lease annual_rent (net of discount); null/absent = never leased
+  lastLeaseRent?: number | null;      // latest lease annual_rent (net of discount); null/absent = never leased
+  currentLeaseRent?: number | null;   // annual_rent of the income-counting lease — running today, or next term with cheques collected; null/absent = none
 }
 
 /* ---------- colour tokens (shared with the unit / property views) ---------- */
@@ -169,16 +170,16 @@ export function LayoutPreviewModal({
     let sum = 0, annualSum = 0, priced = 0, unpriced = 0, occupied = 0;
     for (const u of units) {
       const sqft = numOrNull(u.unitSizeSqft), sqm = numOrNull(u.unitSizeSqm), rent = numOrNull(u.rentalPrice);
-      const lease = numOrNull(u.lastLeaseRent);
+      const lease = numOrNull(u.currentLeaseRent);
       sqftLo = minOf(sqftLo, sqft); sqftHi = maxOf(sqftHi, sqft);
       sqmLo = minOf(sqmLo, sqm); sqmHi = maxOf(sqmHi, sqm);
       if (rent != null && rent > 0) { sum += rent; priced += 1; rentLo = minOf(rentLo, rent); rentHi = maxOf(rentHi, rent); }
       else unpriced += 1;
       const isOccupied = (u.availability || '').toLowerCase() === 'occupied';
-      // Σ latest-lease annual_rent (net of discount), OCCUPIED units only: a vacant
-      // unit's last lease survives the lease ending, so counting it would overstate
-      // current contracted income — exclude it, matching the portfolio KPI + Unit
-      // Mix table. Vacant / never-leased units contribute nothing.
+      // Σ annual_rent of the income-counting lease (net of discount), OCCUPIED
+      // units only: a vacant unit's last lease survives the lease ending, and an
+      // ended / terminated lease or an unpaid draft is not current income —
+      // counting either would overstate it. Matches the portfolio KPI + Unit Mix.
       if (lease != null && lease > 0 && isOccupied) annualSum += lease;
       if (isOccupied) occupied += 1;
     }
@@ -345,9 +346,10 @@ export function LayoutPreviewModal({
                       {units.map((u, i) => {
                         const chip = availabilityChip(u.availability);
                         const market = numOrNull(u.rentalPrice);
-                        // Annual Rent counts only while occupied, so the column
-                        // reconciles with the occupied-only TOTAL (vacant → '—').
-                        const annual = (u.availability || '').toLowerCase() === 'occupied' ? numOrNull(u.lastLeaseRent) : null;
+                        // Annual Rent = the income-counting lease, counted only while
+                        // occupied, so the column reconciles with the occupied-only
+                        // TOTAL (vacant / nothing current or collected → '—').
+                        const annual = (u.availability || '').toLowerCase() === 'occupied' ? numOrNull(u.currentLeaseRent) : null;
                         return (
                           <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
                             <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>

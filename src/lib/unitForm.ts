@@ -42,6 +42,10 @@ export interface UnitRecord {
   // Contracted Annual Rent — annual_rent of the unit's latest lease (portfolio
   // canonical rule); null when never leased. Read-only, set server-side.
   lastLeaseRent?: number | null;
+  // Annual Rent as the portfolio shows it — annual_rent of the lease counting as
+  // current income: running today, or the next term whose cheques are already
+  // collected. Null when neither exists. Read-only, set server-side.
+  currentLeaseRent?: number | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;

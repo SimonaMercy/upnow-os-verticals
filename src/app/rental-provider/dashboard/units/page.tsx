@@ -612,10 +612,11 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const leaseRange = start && end ? `${start} → ${end}` : start ? `from ${start}` : end ? `until ${end}` : '';
     const size = u.unitSizeSqft ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
       : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
-    // Annual Rent counts only while occupied — a vacated unit's ended lease must
-    // not inflate the figure (matches the portfolio KPI + Unit Mix). Vacant units
-    // show "No lease yet".
-    const annual = u.availability === 'occupied' ? (u.lastLeaseRent ?? null) : null;
+    // Annual Rent = the income-counting lease (running today, or the next term
+    // whose cheques are collected), counted only while occupied — an ended /
+    // terminated lease or a draft nobody has paid for must not inflate the figure
+    // (matches the portfolio KPI + Unit Mix). Vacant units show "No lease yet".
+    const annual = u.availability === 'occupied' ? (u.currentLeaseRent ?? null) : null;
     return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, annual, busy: busyUnit === u.id };
   };
 

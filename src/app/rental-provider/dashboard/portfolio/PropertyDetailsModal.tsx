@@ -52,7 +52,8 @@ interface UnitLite {
   unitSizeSqft: number | null;
   planLabel: string | null;
   rentalPrice: number | null;
-  lastLeaseRent: number | null;   // annual rent of the unit's most recent lease (active OR ended); null = never leased
+  lastLeaseRent: number | null;      // annual rent of the unit's most recent lease (active OR ended); null = never leased
+  currentLeaseRent: number | null;   // annual rent of the lease counting as current income — running today, or next term with cheques collected; null = none
 }
 
 interface Property {
@@ -230,14 +231,15 @@ function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRo
     }
     // Two money figures per unit:
     //  • Market Price — the unit's asking rent (units.rental_price).
-    //  • Annual Rent  — the latest lease's annual_rent, counted ONLY while the unit
-    //    is occupied. It is ALREADY net of any discount (annual_rent = listed_price
-    //    − discount), so it is summed as-is. A vacant unit's last lease survives the
-    //    lease ending, so excluding vacant units keeps this a current-income figure
-    //    that reconciles with the portfolio KPI (annualRentTotalsFor). Never-leased
-    //    or vacated units contribute nothing.
+    //  • Annual Rent  — the annual_rent of the lease counting as current income
+    //    (backend currentLeaseRent: running today, or the next term whose cheques
+    //    are already collected), counted ONLY while the unit is occupied. It is
+    //    ALREADY net of any discount (annual_rent = listed_price − discount), so it
+    //    is summed as-is. Terminated / ended leases and drafts nobody has paid for
+    //    contribute nothing, so this reconciles with the portfolio KPI
+    //    (annualRentTotalsFor).
     const market = u.rentalPrice;
-    const leaseNet = u.availability === 'occupied' ? u.lastLeaseRent : null;
+    const leaseNet = u.availability === 'occupied' ? u.currentLeaseRent : null;
     for (const bucket of [g, l]) {
       bucket.count += 1;
       bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
@@ -400,6 +402,7 @@ export function PropertyDetailsModal({
         unitSizeSqft: numOrNull(r.unitSizeSqft),
         rentalPrice: numOrNull(r.rentalPrice),
         lastLeaseRent: numOrNull(r.lastLeaseRent),
+        currentLeaseRent: numOrNull(r.currentLeaseRent),
       }));
       rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
       setUnits(rows);
@@ -801,7 +804,7 @@ export function PropertyDetailsModal({
                             <span style={{ fontSize: 13, fontWeight: 700, color: r.marketSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.marketSum > 0 ? `AED ${aed(r.marketSum)}` : '—'}</span>
                             {r.unpriced > 0 && r.marketSum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
                           </div>
-                          {/* Annual Rent — Σ latest-lease annual_rent (already net of discount); occupied units only */}
+                          {/* Annual Rent — Σ annual_rent of the income-counting lease (already net of discount); occupied units only */}
                           <div style={{ textAlign: 'right' }}>
                             <span style={{ fontSize: 13, fontWeight: 700, color: r.leaseSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.leaseSum > 0 ? `AED ${aed(r.leaseSum)}` : '—'}</span>
                           </div>
@@ -835,7 +838,7 @@ export function PropertyDetailsModal({
               {!unitsLoading && units.length > 0 && (
                 <>
                   <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
-                    Tap a layout to see its grouped detail · Market Price = Σ asking rent · Annual Rent = Σ latest lease, net of discount (occupied units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
+                    Tap a layout to see its grouped detail · Market Price = Σ asking rent · Annual Rent = Σ current lease (running, or next term with cheques collected), net of discount (occupied units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
                   </div>
                 </>
               )}
