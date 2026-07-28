@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   Building2, FileText, Eye, Users, AlertTriangle, ChevronRight,
   RefreshCw, LogIn, LogOut, XCircle, Wrench, Clock,
+  PenLine, Stamp, Banknote, Scale,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,11 +25,15 @@ interface OverviewStats {
 interface ActionItem {
   id: number; tenant?: string; unit?: string | null; building?: string | null;
   vendor?: string; category?: string | null; doc?: string; reason?: string | null; date?: string | null;
+  awaitingTenant?: boolean; awaitingLandlord?: boolean; need?: string | null;
+  bounced?: number; overdue?: number;
 }
 interface Bucket { count: number; items: ActionItem[] }
 interface ActionCenter {
   days: number;
+  awaitingSignature: Bucket; registrationPending: Bucket;
   renewals: Bucket; terminationRequests: Bucket; moveIns: Bucket; moveOuts: Bucket;
+  chequesAttention: Bucket; settlementPending: Bucket;
   amcExpired: Bucket; delayedFollowups: Bucket;
 }
 
@@ -118,17 +123,43 @@ function ManagerMultiOverview() {
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
+        <ActionBucket icon={PenLine} color="#7c3aed" label="Awaiting Signature" href="/dashboard/manager/contracts"
+          loading={actionLoading} bucket={action?.awaitingSignature}
+          render={i => ({
+            title: i.tenant ?? `Contract #${i.id}`,
+            sub: [
+              [i.awaitingTenant ? 'Customer' : null, i.awaitingLandlord ? 'Landlord' : null].filter(Boolean).join(' & ') + ' to sign',
+              [i.unit, i.building].filter(Boolean).join(' · '),
+            ].filter(Boolean).join(' — '),
+            date: i.date,
+          })} />
+        <ActionBucket icon={Stamp} color="#0891b2" label="Registration Pending" href="/dashboard/manager/contracts"
+          loading={actionLoading} bucket={action?.registrationPending}
+          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.need, [i.unit, i.building].filter(Boolean).join(' · ')].filter(Boolean).join(' — '), date: i.date })} />
+        <ActionBucket icon={LogIn} color="#2563eb" label="Move-ins (inspection due)" href="/dashboard/manager/contracts"
+          loading={actionLoading} bucket={action?.moveIns}
+          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
         <ActionBucket icon={RefreshCw} color="#2e9f82" label={`Renewals (≤${days}d)`} href="/dashboard/manager/contracts"
           loading={actionLoading} bucket={action?.renewals}
           render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
         <ActionBucket icon={XCircle} color="#b91c1c" label="Termination Requests" href="/dashboard/manager/contracts"
           loading={actionLoading} bucket={action?.terminationRequests}
           render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: i.reason ?? [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={LogIn} color="#2563eb" label="Move-ins" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.moveIns}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={LogOut} color="#b45309" label="Move-outs" href="/dashboard/manager/contracts"
+        <ActionBucket icon={LogOut} color="#b45309" label="Move-outs (inspection due)" href="/dashboard/manager/contracts"
           loading={actionLoading} bucket={action?.moveOuts}
+          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
+        <ActionBucket icon={Banknote} color="#dc2626" label="Bounced / Overdue Cheques" href="/dashboard/manager/receivables"
+          loading={actionLoading} bucket={action?.chequesAttention}
+          render={i => ({
+            title: i.tenant ?? `Contract #${i.id}`,
+            sub: [
+              [i.bounced ? `${i.bounced} bounced` : null, i.overdue ? `${i.overdue} overdue` : null].filter(Boolean).join(', '),
+              [i.unit, i.building].filter(Boolean).join(' · '),
+            ].filter(Boolean).join(' — '),
+            date: i.date,
+          })} />
+        <ActionBucket icon={Scale} color="#0d9488" label="Settlement Pending" href="/dashboard/manager/contracts"
+          loading={actionLoading} bucket={action?.settlementPending}
           render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
         <ActionBucket icon={Wrench} color="#9a3412" label="AMC Expired" href="/dashboard/manager/amc"
           loading={actionLoading} bucket={action?.amcExpired}
