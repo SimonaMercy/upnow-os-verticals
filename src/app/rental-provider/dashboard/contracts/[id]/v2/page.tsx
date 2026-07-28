@@ -57,6 +57,7 @@ import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
+import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -4511,6 +4512,12 @@ function RenewalProposeModal({
   // unit: a new lease reads the unit, a renewal shows what this contract already
   // charges). Rent VAT is skipped — the renewal recomputes it as its own cheque,
   // so carrying it forward would double-count. Every line stays editable/removable.
+  //
+  // Carrying the AMOUNT forward is right for a flat charge but wrong for the
+  // sub-lease pass-through lines, whose labels declare them a percentage of the
+  // rent — and a renewal is exactly where the rent changes. Those two re-derive
+  // from the net rent below (and again whenever the rent field moves), so the
+  // offer can never quote last year's percentage.
   const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>(() => {
     // Carried charges fall due on the FIRST installment date (same as the rent
     // cheque #1 / fees), computed the same way the schedule below does.
@@ -4545,6 +4552,13 @@ function RenewalProposeModal({
     ? Math.round(listed * discVal) / 100
     : f.discountType === 'fixed' ? discVal : 0;
   const rent = Math.max(0, listed - Math.min(discountAmt, listed)); // net rent
+
+  // Keep the derived sub-lease lines pinned to the net rent as it is edited.
+  // recomputeSubleaseCharges returns the same array when nothing moved, so this
+  // settles in one pass instead of looping. Flat charges are returned untouched.
+  useEffect(() => {
+    setExtras(prev => recomputeSubleaseCharges(prev, rent));
+  }, [rent]);
   const adminN = parseFloat(f.adminFee) || 0;
   const ejariN = parseFloat(f.ejariFee) || 0;
   const commN = parseFloat(f.commission) || 0;
