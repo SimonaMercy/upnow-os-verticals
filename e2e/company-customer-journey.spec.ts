@@ -48,6 +48,20 @@ test.describe('Company customer — documents step', () => {
     await expect(companyCard).toBeVisible({ timeout: 15_000 });
     await expect(companyCard).toContainText('Company details');
     await expect(companyCard).toContainText(/Trade licence no/i);
+    // Issuing authority is a picker of UAE authorities by their short code —
+    // not free text that every customer spells differently.
+    const authority = companyCard.locator('select');
+    await expect(authority).toBeVisible();
+    await expect(authority.locator('optgroup')).toHaveCount(4);
+    // Options are SHORT CODES — a native select is as wide as its longest
+    // option, so full authority names would push the field off its column.
+    await expect(authority.locator('option', { hasText: /^DED Dubai$/ })).toHaveCount(1);
+    const longest = Math.max(...(await authority.locator('option').allInnerTexts()).map(t => t.length));
+    expect(longest, 'option labels must stay short').toBeLessThan(20);
+    // …and the field itself never spills out of the card.
+    const cardBox = await companyCard.boundingBox();
+    const selBox = await authority.boundingBox();
+    expect(selBox!.x + selBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
     // The name may be a read-only chip (complete profile) or a prefilled input
     // (licence still missing) — accept either.
     if (me.companyName) {

@@ -48,6 +48,7 @@ import { SignatureBlock, type SignaturePayload } from '@/components/upnow/Signat
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
 import { RESIDENTIAL_RENTAL_DOCS, getKycDocs, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
+import { authorityLabel, authorityName, isKnownAuthority, licenseAuthorityGroups } from '@/lib/tradeLicenseAuthorities';
 import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
@@ -1933,6 +1934,11 @@ function CompanyDetailsCard({
   const [name, setName] = useState(companyName ?? '');
   const [licence, setLicence] = useState(tradeLicenseNumber ?? '');
   const [authority, setAuthority] = useState(tradeLicenseAuthority ?? '');
+  // A legacy free-text authority (or one we don't list) opens the "Other" input
+  // instead of silently dropping the value the customer already has.
+  const [otherAuthority, setOtherAuthority] = useState(
+    !!tradeLicenseAuthority && !isKnownAuthority(tradeLicenseAuthority),
+  );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -1984,10 +1990,35 @@ function CompanyDetailsCard({
               <input value={licence} onChange={e => setLicence(e.target.value)} placeholder="123456"
                 style={{ fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} />
             </label>
-            <label style={{ display: 'grid', gap: 4 }}>
+            <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <span style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Issuing authority</span>
-              <input value={authority} onChange={e => setAuthority(e.target.value)} placeholder="DED Dubai"
-                style={{ fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'inherit' }} />
+              {/* Options carry the SHORT CODE only — a native select sizes itself
+                  to its longest option, and the full authority names blew the
+                  field past its column. The full name is shown underneath the
+                  chosen code instead. "Other" keeps an unlisted / legacy
+                  authority enterable rather than forcing a wrong pick. */}
+              <select
+                value={otherAuthority ? '__other__' : authority}
+                onChange={e => {
+                  if (e.target.value === '__other__') { setOtherAuthority(true); setAuthority(''); }
+                  else { setOtherAuthority(false); setAuthority(e.target.value); }
+                }}
+                style={{ width: '100%', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box', fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'inherit' }}
+              >
+                <option value="">Select…</option>
+                {licenseAuthorityGroups().map(g => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.items.map(a => <option key={a.code} value={a.code} title={a.name}>{a.code}</option>)}
+                  </optgroup>
+                ))}
+                <option value="__other__">Other…</option>
+              </select>
+              {otherAuthority ? (
+                <input value={authority} onChange={e => setAuthority(e.target.value)} placeholder="Name of the issuing authority" autoFocus
+                  style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', marginTop: 2, fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'inherit' }} />
+              ) : authorityName(authority) ? (
+                <span style={{ fontSize: 10.5, color: 'var(--mute)', lineHeight: 1.35 }}>{authorityName(authority)}</span>
+              ) : null}
             </label>
           </div>
           {err && <p style={{ fontSize: 11.5, color: 'var(--brick)', margin: '8px 0 0' }}>{err}</p>}
@@ -2001,7 +2032,7 @@ function CompanyDetailsCard({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
             <PersonalChip label="Company name"     value={companyName ?? '—'} />
             <PersonalChip label="Trade licence no." value={tradeLicenseNumber ?? '—'} mono />
-            <PersonalChip label="Issuing authority" value={tradeLicenseAuthority || '—'} />
+            <PersonalChip label="Issuing authority" value={authorityLabel(tradeLicenseAuthority) || '—'} />
           </div>
           <button type="button" onClick={() => setEditing(true)}
             style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--jade-deep)', fontSize: 12, fontWeight: 700, fontFamily: 'inherit' }}>
@@ -2331,7 +2362,15 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   // Identity details (name + Emirates ID number) must be present before the
   // customer can submit. Auto-filled by OCR when the Emirates ID is readable;
   // otherwise the customer types them into the Personal Details fallback form.
-  const personalDetailsComplete = !!(user?.firstName?.trim() && user?.emiratesIdNumber?.trim());
+  // A COMPANY tenancy is identified by the COMPANY — name + trade licence, captured
+  // in CompanyDetailsCard above. The signatory's own name/EID number are never
+  // collected on this screen: the personal-details card below renders for
+  // individuals only ("Individuals only", see !isCompany). Gating a company on
+  // those fields is therefore a dead end — when the Emirates ID auto-read returns
+  // nothing there is no UI anywhere to fill them, so Submit can never enable.
+  const personalDetailsComplete = isCompany
+    ? !!(resolved.companyName?.trim() && resolved.tradeLicenseNumber?.trim())
+    : !!(user?.firstName?.trim() && user?.emiratesIdNumber?.trim());
   const eidUploaded = uploadedKeys.has('emirates_id') || uploadedKeys.has('emirates_id_front');
 
   return (
@@ -2609,7 +2648,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
         {!allRequiredDone
           ? `Upload all required docs (${doneCount}/${totalCount} done)`
           : !personalDetailsComplete
-            ? 'Enter your name & Emirates ID above'
+            ? (isCompany ? 'Add your company name & trade licence above' : 'Enter your name & Emirates ID above')
             : 'Submit documents for review'}
       </PrimaryBtn>
     </div>

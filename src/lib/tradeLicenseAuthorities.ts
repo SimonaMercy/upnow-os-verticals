@@ -80,6 +80,13 @@ export function isKnownAuthority(value?: string | null): boolean {
   return !!v && LICENSE_AUTHORITIES.some(a => a.code === v);
 }
 
+/** Full authority name for a known short code — '' for anything unlisted, so a
+ *  free-text value never gets a misleading caption. */
+export function authorityName(value?: string | null): string {
+  const v = (value ?? '').trim();
+  return LICENSE_AUTHORITIES.find(a => a.code === v)?.name ?? '';
+}
+
 /** "DED Dubai — Dubai Department of Economy & Tourism", or the raw value for a
  *  legacy / free-text authority. */
 export function authorityLabel(value?: string | null): string {

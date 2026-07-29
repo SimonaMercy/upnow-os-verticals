@@ -28,6 +28,7 @@ import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { openDocViewer } from '@/lib/docViewer';
 import { RESIDENTIAL_RENTAL_DOCS } from '@/lib/docRequirements';
 import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
+import { authorityName, isKnownAuthority, licenseAuthorityGroups } from '@/lib/tradeLicenseAuthorities';
 import s from './profile.module.css';
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
@@ -1194,6 +1195,7 @@ function CompanyTenantCard() {
   const [companyName, setCompanyName] = useState('');
   const [licenseNo, setLicenseNo] = useState('');
   const [licenseAuth, setLicenseAuth] = useState('');
+  const [licenseAuthOther, setLicenseAuthOther] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1207,6 +1209,7 @@ function CompanyTenantCard() {
         setCompanyName(profile?.companyName ?? '');
         setLicenseNo(profile?.tradeLicenseNumber ?? '');
         setLicenseAuth(profile?.tradeLicenseAuthority ?? '');
+        setLicenseAuthOther(!!profile?.tradeLicenseAuthority && !isKnownAuthority(profile.tradeLicenseAuthority));
       })
       .catch(() => { /* non-fatal */ })
       .finally(() => { if (alive) setLoading(false); });
@@ -1262,13 +1265,37 @@ function CompanyTenantCard() {
               <input style={inputStyle} placeholder="As on the trade licence" value={companyName} onChange={e => setCompanyName(e.target.value)} />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b6860', marginBottom: 4 }}>Trade License No.</label>
                 <input style={inputStyle} placeholder="e.g. CN-1234567" value={licenseNo} onChange={e => setLicenseNo(e.target.value)} />
               </div>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b6860', marginBottom: 4 }}>Licensing Authority</label>
-                <input style={inputStyle} placeholder="e.g. DED Dubai" value={licenseAuth} onChange={e => setLicenseAuth(e.target.value)} />
+                {/* Same picker as the tenancy journey — stored as the licence's
+                    short code, with "Other" for anything not listed. */}
+                {/* Short codes only — a native select is as wide as its longest
+                    option, and the full names overflowed the column. */}
+                <select
+                  style={{ ...inputStyle, width: '100%', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box' }}
+                  value={licenseAuthOther ? '__other__' : licenseAuth}
+                  onChange={e => {
+                    if (e.target.value === '__other__') { setLicenseAuthOther(true); setLicenseAuth(''); }
+                    else { setLicenseAuthOther(false); setLicenseAuth(e.target.value); }
+                  }}
+                >
+                  <option value="">Select…</option>
+                  {licenseAuthorityGroups().map(g => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.items.map(a => <option key={a.code} value={a.code} title={a.name}>{a.code}</option>)}
+                    </optgroup>
+                  ))}
+                  <option value="__other__">Other…</option>
+                </select>
+                {licenseAuthOther ? (
+                  <input style={{ ...inputStyle, marginTop: 6 }} placeholder="Name of the issuing authority" value={licenseAuth} onChange={e => setLicenseAuth(e.target.value)} />
+                ) : authorityName(licenseAuth) ? (
+                  <p style={{ fontSize: 10.5, color: '#9b9890', margin: '4px 0 0', lineHeight: 1.35 }}>{authorityName(licenseAuth)}</p>
+                ) : null}
               </div>
             </div>
             <p style={{ fontSize: 11, color: '#9b9890', margin: 0 }}>
