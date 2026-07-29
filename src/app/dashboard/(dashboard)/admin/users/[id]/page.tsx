@@ -17,13 +17,14 @@ import {
   ArrowLeft, Building2, Home, Users as UsersIcon, FileText, Mail, Phone,
   ShieldCheck, ShieldAlert, BadgeCheck, Clock, ChevronRight,
   Wrench, Truck, MapPin, Star, UserCog, CheckCircle2, Zap, CalendarClock,
+  UserX, UserCheck, Ban, Banknote,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPatch } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
 
 const roleLabel: Record<string, string> = {
@@ -59,6 +60,17 @@ interface UserDetail {
     documents: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null }[];
     customers: { tenantId: number; userId: number; name: string; email: string | null; phone: string | null; hasLease: boolean }[];
     leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; tenantName: string; unitNumber: string | null }[];
+    payments: { id: number; contractId: number | null; customerName: string; unitNumber: string | null; paymentType: string | null; paymentMethod: string | null; chequeNumber: string | null; amountPaid: number; vatAmount: number; chequeStatus: string; transactionDate: string | null; description: string | null }[];
+    activity: {
+      summary: { totalActions: number; last30dActions: number; distinctEntities: number; lastActionAt: string | null };
+      recent: { actionKey: string; entityType: string; entityId: number; createdAt: string }[];
+    };
+    managers: { userId: number; name: string; email: string | null; accountStatus: string | null; grantedAt: string; grantedByRole: string | null; isActive: boolean; grantedCount: number }[];
+    settings: {
+      preferences: { startDays: number[] | null; chequeDays: number[] | null; allowedInstallments: number[] | null; rentVatMode: string | null; renewalRentIncrementPct: number | null };
+      penalties: Record<string, { enabled: boolean; fee: number | null; pct: number | null; months?: number | null; daily?: boolean }>;
+      settlementDiscountCaps: { rentPct: number | null; penaltiesPct: number | null; restorationPct: number | null; utilitiesPct: number | null };
+    };
     insights: {
       financials: { annualRecurringRent: number; totalContractValue: number; avgRentActive: number; depositsHeld: number; vatCollected: number };
       occupancy: { totalUnits: number; occupiedUnits: number; vacantUnits: number; occupancyPct: number; vacantRentPotential: number };
@@ -83,6 +95,7 @@ interface UserDetail {
       manageMaintenance: boolean; listProperties: boolean; publishListings: boolean; manageViewings: boolean;
       manageDocuments: boolean; inviteManager: boolean;
     };
+    allPermissions: Record<string, boolean>;
     attributed: { contractsSigned: number; auditActions: number; terminations: number; lastActionAt: string | null };
     risk: {
       tier: 'ok' | 'monitor' | 'review' | 'critical'; moneyPower: boolean; dormant: boolean; dormantDays: number | null; signalCount: number;
@@ -94,14 +107,25 @@ interface UserDetail {
       leaseLifecycle: { byStatus: Record<string, number>; expiring30: number; expiring60: number; expiring90: number; renewalBacklog: number; startedThisYear: number; renewalsCompleted: number };
       financials: { annualRentManaged: number; totalContractValue: number; depositsHeld: number };
     };
-    landlords: { rentalProviderId: number; userId: number | null; companyName: string | null; ownerName: string | null; grantedAt: string | null; tenureDays: number | null; properties: number; units: number; leases: number; activeLeases: number; badges: { poa: boolean; sign: boolean; money: boolean; contracts: boolean } }[];
+    landlords: { rentalProviderId: number; userId: number | null; companyName: string | null; ownerName: string | null; grantedAt: string | null; tenureDays: number | null; properties: number; units: number; leases: number; activeLeases: number; badges: { poa: boolean; sign: boolean; money: boolean; contracts: boolean }; permissions: Record<string, boolean>; grantedByRole: string | null; isActive: boolean }[];
   };
   customer?: null | {
-    profile: null | { tenantId: number; companyName: string | null };
+    profile: null | {
+      tenantId: number; companyName: string | null; entityType: string | null;
+      tradeLicenseNumber: string | null; tradeLicenseAuthority: string | null;
+      emiratesIdNumber: string | null; nationality: string | null;
+      gender: string | null; dateOfBirth: string | null;
+    };
     summary: { leases: number; activeLeases: number; landlords: number; annualRentActive: number; depositsHeld: number };
+    financials: null | { totalBilled: number; totalCollected: number; totalOutstanding: number; vatCollected: number; securityDepositHeld: number };
+    notes: { id: number; body: string; authorName: string | null; authorRole: string | null; createdAt: string; leaseId: number; unitNumber: string | null }[];
+    leaseDocuments: { leaseId: number; unitNumber: string | null; documents: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null }[] }[];
     payments: null | { byStatus: Record<string, { count: number; amount: number }>; paidAmount: number; pendingAmount: number; bouncedCount: number };
-    documents: null | { total: number; verified: number; pending: number; requested: number };
-    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; unitId: number | null; unitNumber: string | null; rentalProviderId: number | null; ownerUserId: number | null; companyName: string | null }[];
+    documents: null | {
+      total: number; verified: number; pending: number; requested: number;
+      list?: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null }[];
+    };
+    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; contractType: string | null; ejariStatus: string | null; securityDeposit: number; listedRent: number | null; discountAmount: number | null; billed: number; collected: number; outstanding: number; unitId: number | null; unitNumber: string | null; rentalProviderId: number | null; ownerUserId: number | null; companyName: string | null }[];
     landlords: { rentalProviderId: number; userId: number | null; companyName: string | null; ownerName: string | null; leases: number }[];
   };
   staff?: null | {
@@ -170,7 +194,60 @@ const statusColor: Record<string, { bg: string; color: string }> = {
   expired: { bg: '#fef2f2', color: 'var(--color-error)' },
   cancelled: { bg: '#fef2f2', color: 'var(--color-error)' },
   paused: { bg: 'var(--color-base-100)', color: 'var(--color-neutral-600)' },
+  // Cheque statuses
+  cleared: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
+  bounced: { bg: '#fef2f2', color: 'var(--color-error)' },
 };
+
+/**
+ * The delegated authorities a landlord can grant a manager, grouped and labelled
+ * as the RP-side Team panel presents them. Duplicated here rather than imported
+ * from components/dashboard/rp/TeamPanel so the admin bundle doesn't pull in the
+ * whole RP invite UI — keep the two in step when permissions change.
+ *
+ * `money` marks the authorities that move or reconcile cash; they get a stronger
+ * treatment because this page is where manager risk is reviewed.
+ */
+const PERM_GROUPS: { label: string; perms: { key: string; label: string; money?: boolean }[] }[] = [
+  { label: 'Leads & viewings', perms: [
+    { key: 'can_manage_viewings', label: 'Manage leads & viewings' },
+    { key: 'can_create_leads', label: 'Add new leads' },
+  ] },
+  { label: 'Properties & units', perms: [
+    { key: 'can_list_properties', label: 'View properties & units' },
+    { key: 'can_edit_properties', label: 'Edit property & unit details' },
+    { key: 'can_publish_listings', label: 'Publish / unpublish listings' },
+    { key: 'can_manage_documents', label: 'Upload & manage documents' },
+  ] },
+  { label: 'Leases & contracts', perms: [
+    { key: 'can_manage_agreements', label: 'View & manage leases + customers' },
+    { key: 'can_create_contracts', label: 'Create new contracts' },
+    { key: 'can_manage_contract_lifecycle', label: 'Issue / activate / cancel leases' },
+    { key: 'can_manage_renewals', label: 'Manage contract renewals' },
+    { key: 'can_manage_termination', label: 'Terminate leases' },
+    { key: 'can_manage_inspections', label: 'Inspections & Restoration List' },
+    { key: 'can_sign_documents', label: 'Sign tenancy contracts', money: true },
+    { key: 'can_sign_addenda', label: 'Sign addenda & amendments', money: true },
+    { key: 'can_manage_ejari', label: 'Register / manage Contract Registration' },
+    { key: 'can_act_as_poa', label: 'Act with full POA', money: true },
+  ] },
+  { label: 'Payments & deposits', perms: [
+    { key: 'can_manage_deposits', label: 'Manage security deposits', money: true },
+    { key: 'can_settle_deposits', label: 'Settle deposits (refund / deduct)', money: true },
+    { key: 'can_record_payments', label: 'Record & edit payments', money: true },
+    { key: 'can_clear_cheques', label: 'Change cheque status', money: true },
+    { key: 'can_manage_collections', label: 'Manage rent collections', money: true },
+    { key: 'can_view_financials', label: 'View financial statements', money: true },
+  ] },
+  { label: 'Other', perms: [
+    { key: 'can_manage_templates', label: 'Manage addendum templates' },
+    { key: 'can_manage_maintenance', label: 'Handle AMC & maintenance' },
+    { key: 'can_communicate_tenants', label: 'Communicate with customers' },
+    { key: 'can_view_reports', label: 'Access reports section' },
+    { key: 'can_invite_manager', label: 'Invite other managers', money: true },
+    { key: 'can_escalate_to_admin', label: 'Escalate to UpNow admin' },
+  ] },
+];
 
 const ROW = 'rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-3';
 const ROW_STYLE = { border: '1px solid var(--color-base-200)', backgroundColor: '#fff' };
@@ -288,6 +365,31 @@ function Caption({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>{children}</p>;
 }
 
+/** Human labels for the landlord's configurable penalties, in RP-settings order. */
+const PENALTY_LABELS: [string, string][] = [
+  ['bouncedCheque', 'Bounced cheque'],
+  ['chequeHold', 'Cheque hold'],
+  ['chequeDeferral', 'Cheque deferral / replacement'],
+  ['lateRenewal', 'Late renewal'],
+  ['earlyTermination', 'Early termination'],
+  ['lateMoveout', 'Late move-out'],
+  ['unauthorizedSharing', 'Sharing without notice / NOC'],
+  ['accessCardReplacement', 'Access card / remote replacement'],
+  ['contractNameChange', 'Contract name change'],
+  ['unitTransfer', 'Unit transfer'],
+];
+
+/** "AED 500", "5%", "AED 500 + 5%". Null when the landlord charges nothing. */
+function penaltyValue(p: { enabled: boolean; fee: number | null; pct: number | null; months?: number | null; daily?: boolean } | undefined): string | null {
+  if (!p || !p.enabled) return null;
+  const bits: string[] = [];
+  if (p.fee != null && p.fee > 0) bits.push(aed(p.fee));
+  if (p.pct != null && p.pct > 0) bits.push(`${p.pct}%`);
+  if (p.months != null && p.months > 0) bits.push(`${p.months} mo rent`);
+  if (!bits.length) return null;
+  return bits.join(' + ') + (p.daily ? ' / day' : '');
+}
+
 type LandlordInsights = NonNullable<UserDetail['landlord']>['insights'];
 
 function Insights({ ins }: { ins: LandlordInsights }) {
@@ -392,6 +494,47 @@ function Pill({ value }: { value: string }) {
   return <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0" style={{ backgroundColor: sc.bg, color: sc.color }}>{value.replace(/_/g, ' ')}</span>;
 }
 
+/**
+ * One owned document — name, category, expiry, and a View button that opens it
+ * through the secure viewer. An empty fileUrl means the document was requested
+ * but never uploaded. Shared by the landlord, customer and SP breakdowns.
+ */
+type OwnedDoc = {
+  id: number; documentKey: string; displayName: string | null; category: string | null;
+  fileUrl: string | null; expiryDate: string | null;
+};
+function DocRow({ d }: { d: OwnedDoc }) {
+  const label = d.displayName || titleCase((d.documentKey || '').replace(/_/g, ' '));
+  return (
+    <div className={ROW} style={ROW_STYLE}>
+      <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{label}</p>
+        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+          {d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}
+        </p>
+      </div>
+      {d.fileUrl ? (
+        <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
+      ) : (
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Requested</span>
+      )}
+    </div>
+  );
+}
+
+/** Whole years since a date of birth, or null if unparseable. */
+function ageFrom(dob: string | null): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 0 && age < 130 ? age : null;
+}
+
 /** Human duration from a day count: "today" / "12 days" / "5 mo" / "1y 3mo". */
 function fmtDuration(days: number | null): string {
   if (days == null) return '—';
@@ -485,15 +628,21 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
     { name: 'Pending', value: p.collections.byStatus.pending?.amount ?? 0, fill: CHART.amber },
     { name: 'Bounced', value: p.collections.byStatus.bounced?.amount ?? 0, fill: CHART.red },
   ] : [];
-  const authList: [string, boolean][] = [
-    ['Create contracts', auth.createContracts], ['Sign documents', auth.signDocuments],
-    ['Power of Attorney', auth.actAsPoa], ['Manage deposits', auth.manageDeposits],
-    ['Manage collections', auth.manageCollections], ['View financials', auth.viewFinancials],
-    ['Manage renewals', auth.manageRenewals], ['Manage agreements', auth.manageAgreements],
-    ['Manage maintenance', auth.manageMaintenance], ['List properties', auth.listProperties],
-    ['Publish listings', auth.publishListings], ['Manage viewings', auth.manageViewings],
-    ['Manage documents', auth.manageDocuments], ['Invite managers', auth.inviteManager],
-  ];
+  // Full grant matrix. Falls back to the legacy 14-flag `authority` object so an
+  // older cached payload still renders something sensible.
+  const perms: Record<string, boolean> = m.allPermissions ?? {
+    can_create_contracts: auth.createContracts, can_sign_documents: auth.signDocuments,
+    can_act_as_poa: auth.actAsPoa, can_manage_deposits: auth.manageDeposits,
+    can_manage_collections: auth.manageCollections, can_view_financials: auth.viewFinancials,
+    can_manage_renewals: auth.manageRenewals, can_manage_agreements: auth.manageAgreements,
+    can_manage_maintenance: auth.manageMaintenance, can_list_properties: auth.listProperties,
+    can_publish_listings: auth.publishListings, can_manage_viewings: auth.manageViewings,
+    can_manage_documents: auth.manageDocuments, can_invite_manager: auth.inviteManager,
+  };
+  const allPerms = PERM_GROUPS.flatMap((g) => g.perms);
+  const totalPerms = allPerms.length;
+  const grantedCount = allPerms.filter((p) => perms[p.key]).length;
+  const moneyGrants = allPerms.filter((p) => p.money && perms[p.key]);
   const hasProfile = !!prof && (!!prof.jobTitle || !!prof.specialization || prof.yearsExperience != null || prof.rating != null || (prof.languages?.length ?? 0) > 0 || (prof.areasServed?.length ?? 0) > 0);
   return (
     <>
@@ -548,14 +697,30 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
         </MiniPanel>
 
         <MiniPanel title="Authority footprint">
-          <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>Powers held for at least one managed landlord.</p>
-          <div className="flex flex-wrap gap-1.5">
-            {authList.map(([label, on]) => (
-              <span key={label} className="text-xs font-medium px-2 py-1 rounded-full" style={on ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' } : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>
-                {on ? '✓ ' : ''}{label}
-              </span>
-            ))}
-          </div>
+          <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+            Every permission a landlord can delegate, held for at least one managed landlord.{' '}
+            {grantedCount} of {totalPerms} granted{moneyGrants.length > 0 ? ` · ${moneyGrants.length} move or reconcile money` : ''}.
+          </p>
+          {PERM_GROUPS.map((g) => (
+            <div key={g.label} className="mb-2.5 last:mb-0">
+              <Caption>{g.label}</Caption>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {g.perms.map((p) => {
+                  const on = perms[p.key] === true;
+                  const style = on
+                    ? p.money
+                      ? { backgroundColor: '#fef2f2', color: 'var(--color-error)', border: '1px solid #fecaca' }
+                      : { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)', border: '1px solid transparent' }
+                    : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)', border: '1px solid transparent' };
+                  return (
+                    <span key={p.key} className="text-xs font-medium px-2 py-1 rounded-full" style={style}>
+                      {on ? '✓ ' : ''}{p.label}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </MiniPanel>
       </div>
 
@@ -586,26 +751,63 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
         </div>
       )}
 
-      {/* Landlords worked for */}
+      {/* Landlords worked for — each row expands to the exact grant, because
+          "who let this manager clear cheques?" can't be answered by a badge. */}
       <Section title="Landlords worked for" count={m.landlords.length}>
-        {m.landlords.map((l) => (
-          <Link key={l.rentalProviderId} href={l.userId ? `/dashboard/admin/users/${l.userId}` : '#'} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
-            <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{l.companyName || l.ownerName || `RP #${l.rentalProviderId}`}</p>
-              <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
-                {l.units} units · {l.activeLeases}/{l.leases} active leases · since {fmtDate(l.grantedAt)} ({fmtDuration(l.tenureDays)})
-              </p>
+        {m.landlords.map((l) => {
+          const granted = allPerms.filter((p) => l.permissions?.[p.key]);
+          const money = granted.filter((p) => p.money);
+          const revoked = l.isActive === false;
+          return (
+            <div key={l.rentalProviderId} className="rounded-xl mb-2 last:mb-0" style={{ ...ROW_STYLE, opacity: revoked ? 0.6 : 1 }}>
+              <Link href={l.userId ? `/dashboard/admin/users/${l.userId}` : '#'} className={`${ROW} transition-colors hover:brightness-95`} style={{ border: 'none' }}>
+                <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate flex items-center gap-2" style={{ color: 'var(--color-neutral-900)' }}>
+                    {l.companyName || l.ownerName || `RP #${l.rentalProviderId}`}
+                    {revoked && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide flex-shrink-0"
+                        style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>
+                        Access revoked
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                    {l.units} units · {l.activeLeases}/{l.leases} active leases · since {fmtDate(l.grantedAt)} ({fmtDuration(l.tenureDays)})
+                    {l.grantedByRole ? ` · granted by ${titleCase(l.grantedByRole)}` : ''}
+                  </p>
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  {l.badges.poa && <MiniBadge label="POA" />}
+                  {l.badges.sign && <MiniBadge label="Sign" />}
+                  {l.badges.money && <MiniBadge label="$" />}
+                  {l.badges.contracts && <MiniBadge label="Contracts" />}
+                </div>
+                <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+              </Link>
+              {l.permissions && (
+                <div className="px-3 pb-2.5 -mt-1">
+                  <p className="text-[11px] mb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    {granted.length} of {totalPerms} permissions{money.length > 0 ? ` · ${money.length} money-related` : ''}
+                    {revoked && ' · retained on record but no longer enforced'}
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {granted.length === 0
+                      ? <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>No permissions granted.</span>
+                      : granted.map((p) => (
+                        <span key={p.key} className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                          style={p.money
+                            ? { backgroundColor: '#fef2f2', color: 'var(--color-error)' }
+                            : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>
+                          {p.label}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex gap-1 flex-shrink-0">
-              {l.badges.poa && <MiniBadge label="POA" />}
-              {l.badges.sign && <MiniBadge label="Sign" />}
-              {l.badges.money && <MiniBadge label="$" />}
-              {l.badges.contracts && <MiniBadge label="Contracts" />}
-            </div>
-            <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
-          </Link>
-        ))}
+          );
+        })}
       </Section>
     </>
   );
@@ -614,6 +816,20 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
 /** Customer breakdown — tenancies, landlords, payment track record, KYC docs. */
 function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
   const s = c.summary, pay = c.payments, docs = c.documents;
+  const docList = docs?.list ?? [];
+  const p = c.profile, fin = c.financials;
+  const isCompany = (p?.entityType ?? '').toLowerCase() === 'company';
+
+  // Additional occupants have no table of their own — they exist as
+  // occupant_<n>_* identity documents hanging off the customer, exactly as the
+  // RP customer page derives them.
+  const occupantDocs = docList.filter((d) => /^occupant_\d+_/.test(d.documentKey ?? ''));
+  const occupants = [...new Set(occupantDocs.map((d) => Number(/^occupant_(\d+)_/.exec(d.documentKey)?.[1] ?? 0)))]
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b)
+    .map((n) => ({ n, docs: occupantDocs.filter((d) => d.documentKey.startsWith(`occupant_${n}_`)) }));
+  const primaryDocs = docList.filter((d) => !/^occupant_\d+_/.test(d.documentKey ?? ''));
+  const leaseDocCount = (c.leaseDocuments ?? []).reduce((s, g) => s + g.documents.length, 0);
   const payData = pay ? [
     { name: 'Cleared', value: pay.byStatus.cleared?.amount ?? 0, fill: CHART.teal },
     { name: 'Pending', value: pay.byStatus.pending?.amount ?? 0, fill: CHART.amber },
@@ -629,6 +845,21 @@ function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
   ].filter((d) => d.value > 0) : [];
   return (
     <>
+      {/* Identity & KYC particulars — the RP sees these on their own customer
+          page; admin previously had only nationality on the header card. */}
+      {p && (
+        <div className="bg-white rounded-2xl p-4 mb-4 flex flex-wrap gap-x-8 gap-y-2 text-sm" style={{ boxShadow: 'var(--shadow-sm)' }}>
+          <ProfileBit label="Renting as" value={isCompany ? 'Company' : 'Individual'} />
+          {p.emiratesIdNumber && <ProfileBit label="Emirates ID" value={p.emiratesIdNumber} />}
+          {p.nationality && <ProfileBit label="Nationality" value={p.nationality} />}
+          {p.gender && <ProfileBit label="Gender" value={titleCase(p.gender)} />}
+          {p.dateOfBirth && <ProfileBit label="Date of birth" value={`${fmtDate(p.dateOfBirth)}${ageFrom(p.dateOfBirth) != null ? ` · ${ageFrom(p.dateOfBirth)} yrs` : ''}`} />}
+          {p.companyName && <ProfileBit label="Company" value={p.companyName} />}
+          {p.tradeLicenseNumber && <ProfileBit label="Trade licence" value={p.tradeLicenseNumber} />}
+          {p.tradeLicenseAuthority && <ProfileBit label="Licence authority" value={p.tradeLicenseAuthority} />}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
         <KpiCard label="Tenancies" value={s.leases} sub={`${s.activeLeases} active`} accent="var(--color-primary)" />
         <KpiCard label="Landlords" value={s.landlords} sub="rented from" />
@@ -653,6 +884,39 @@ function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
         </ChartCard>
       </div>
 
+      {/* Rent money, same definitions the RP customer page uses. */}
+      {fin && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          <MiniPanel title="Financial summary">
+            <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+              Rent only — one-off fees (admin, registration, commission) are not counted as rent arrears.
+            </p>
+            <KV label="Total billed" value={aed(fin.totalBilled)} />
+            <KV label="Collected" value={aed(fin.totalCollected)} dot="var(--color-primary)" />
+            <KV label="Outstanding" value={aed(fin.totalOutstanding)} dot={fin.totalOutstanding > 0 ? 'var(--color-error)' : undefined} />
+            <Divider />
+            <KV label="VAT collected" value={aed(fin.vatCollected)} />
+            <KV label="Security deposit held" value={aed(fin.securityDepositHeld)} />
+            <KV label="Collection rate" value={fin.totalBilled > 0 ? `${Math.round((fin.totalCollected / fin.totalBilled) * 100)}%` : '—'} />
+          </MiniPanel>
+
+          <Section title="Notes journal" count={c.notes?.length ?? 0}>
+            <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+              The running operational log the landlord keeps across every tenancy.
+            </p>
+            {(c.notes ?? []).map((n) => (
+              <div key={n.id} className="rounded-xl px-3 py-2" style={ROW_STYLE}>
+                <p className="text-sm" style={{ color: 'var(--color-neutral-800)' }}>{n.body}</p>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--color-neutral-400)' }}>
+                  {n.authorName ?? 'Unknown'}{n.authorRole ? ` · ${titleCase(n.authorRole)}` : ''}
+                  {n.unitNumber ? ` · Unit ${n.unitNumber}` : ''} · {fmtDate(n.createdAt)}
+                </p>
+              </div>
+            ))}
+          </Section>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Section title="Tenancies" count={c.leases.length}>
           {c.leases.map((l) => {
@@ -663,7 +927,22 @@ function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
                   <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
                     {l.companyName || '—'}{l.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {l.unitNumber}</span>}
                   </p>
-                  <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{fmtDate(l.contractStartDate)} → {fmtDate(l.contractEndDate)} · {aed(l.annualRent)}/yr</p>
+                  <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+                    {fmtDate(l.contractStartDate)} → {fmtDate(l.contractEndDate)} · {aed(l.annualRent)}/yr
+                    {(l.discountAmount ?? 0) > 0 && l.listedRent != null && (
+                      <span style={{ color: 'var(--color-gold)' }}> · {aed(l.discountAmount)} off {aed(l.listedRent)}</span>
+                    )}
+                  </p>
+                  {/* Deposit is only shown when this lease itself carries one —
+                      on a renewal chain it sits on the root lease, so printing a
+                      hard "AED 0" on every child would read as "no deposit" when
+                      the summary above correctly shows one is held. */}
+                  <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+                    {l.securityDeposit > 0 && <>Deposit {aed(l.securityDeposit)} · </>}
+                    collected {aed(l.collected)}
+                    {l.outstanding > 0 && <span style={{ color: 'var(--color-error)' }}> · {aed(l.outstanding)} outstanding</span>}
+                    {l.ejariStatus && <span> · registration {titleCase(l.ejariStatus)}</span>}
+                  </p>
                 </div>
                 <Pill value={l.status} />
                 {l.unitId != null && <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />}
@@ -687,6 +966,61 @@ function CustomerView({ c }: { c: NonNullable<UserDetail['customer']> }) {
               </div>
               <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
             </Link>
+          ))}
+        </Section>
+
+        {/* KYC documents — the rows behind the counts chart above. Read-only:
+            verify / reject stays in the KYC Verification Center. */}
+        <Section title={isCompany ? 'Company KYC documents' : 'KYC documents'} count={primaryDocs.length}>
+          {primaryDocs.map((d) => <DocRow key={d.id} d={d} />)}
+        </Section>
+
+        {/* Lease paperwork, grouped per tenancy. These documents belong to the
+            CONTRACT, not the customer, so the customer-scoped list above never
+            included them — the signed agreement, registration certificate,
+            invoices and receipts all live here. */}
+        <Section title="Lease documents" count={leaseDocCount}>
+          {(c.leaseDocuments ?? []).map((g) => {
+            // A renewal chain puts every lease on the same unit, so the unit
+            // number alone can't tell two tenancies apart — carry the term.
+            const lease = c.leases.find((l) => l.id === g.leaseId);
+            return (
+            <div key={g.leaseId} className="rounded-xl px-3 py-2.5 mb-2 last:mb-0" style={ROW_STYLE}>
+              <p className="text-sm font-semibold mb-0.5" style={{ color: 'var(--color-neutral-900)' }}>
+                {g.unitNumber ? `Unit ${g.unitNumber}` : `Lease #${g.leaseId}`}
+                <span className="font-normal ml-1.5" style={{ color: 'var(--color-neutral-400)' }}>
+                  {g.documents.length} document{g.documents.length === 1 ? '' : 's'}
+                </span>
+              </p>
+              <p className="text-xs mb-1.5" style={{ color: 'var(--color-neutral-500)' }}>
+                {lease
+                  ? <>{fmtDate(lease.contractStartDate)} → {fmtDate(lease.contractEndDate)} · {titleCase(lease.status)}</>
+                  : `Lease #${g.leaseId}`}
+              </p>
+              <div className="space-y-1.5">
+                {g.documents.map((d) => <DocRow key={d.id} d={d} />)}
+              </div>
+            </div>
+            );
+          })}
+        </Section>
+
+        {/* Additional occupants — people living with the primary customer. They
+            have no table of their own; they exist as occupant_<n>_* identity
+            documents, which is how the RP page derives them too. */}
+        <Section title="Additional occupants" count={occupants.length}>
+          {occupants.map((o) => (
+            <div key={o.n} className="rounded-xl px-3 py-2.5" style={ROW_STYLE}>
+              <p className="text-sm font-semibold mb-1.5" style={{ color: 'var(--color-neutral-900)' }}>
+                Occupant {o.n}
+                <span className="font-normal ml-1.5" style={{ color: 'var(--color-neutral-400)' }}>
+                  {o.docs.length} document{o.docs.length === 1 ? '' : 's'}
+                </span>
+              </p>
+              <div className="space-y-1.5">
+                {o.docs.map((d) => <DocRow key={d.id} d={d} />)}
+              </div>
+            </div>
           ))}
         </Section>
       </div>
@@ -1030,24 +1364,7 @@ function SpView({ sp }: { sp: NonNullable<UserDetail['sp']> }) {
         <Section title="Documents" count={sp.documents.length}>
           {sp.documents.length === 0 ? (
             <p className="text-sm py-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents on file for this service provider.</p>
-          ) : sp.documents.map((d) => {
-            const label = d.displayName || titleCase((d.documentKey || '').replace(/_/g, ' '));
-            const hasFile = !!d.fileUrl;
-            return (
-              <div key={d.id} className={ROW} style={ROW_STYLE}>
-                <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{label}</p>
-                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}</p>
-                </div>
-                {hasFile ? (
-                  <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
-                ) : (
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Requested</span>
-                )}
-              </div>
-            );
-          })}
+          ) : sp.documents.map((d) => <DocRow key={d.id} d={d} />)}
         </Section>
       </div>
     </>
@@ -1062,6 +1379,7 @@ export default function AdminUserDetailPage() {
   const [data, setData] = useState<UserDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -1077,8 +1395,51 @@ export default function AdminUserDetailPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Suspend / ban / reactivate without going back to the list. Ban asks first —
+  // it locks the account out entirely.
+  const changeStatus = useCallback(async (next: string) => {
+    const target = data?.user;
+    if (!target) return;
+    if (next === 'banned' && !window.confirm(
+      `Ban ${target.name}?\n\nThey lose access to the platform immediately. You can reactivate them from this page.`,
+    )) return;
+    setStatusBusy(true);
+    try {
+      await apiPatch(`/admin/users/${target.id}/status`, { status: next });
+      setData((prev) => prev ? { ...prev, user: { ...prev.user, status: next } } : prev);
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }, [data?.user]);
+
   const u = data?.user;
   const L = data?.landlord;
+
+  // Only the rules this landlord actually configured. Anything left at its
+  // default is dropped rather than rendered as "not set" — the page shows data,
+  // not an empty settings form.
+  const prefs = L?.settings?.preferences;
+  const setPrefs: [string, string][] = [];
+  if (prefs?.rentVatMode) setPrefs.push(['VAT on rent', titleCase(prefs.rentVatMode)]);
+  if (prefs?.allowedInstallments?.length) setPrefs.push(['Installment plans', `${prefs.allowedInstallments.join(', ')} cheques`]);
+  if (prefs?.startDays?.length) setPrefs.push(['Contract start days', prefs.startDays.join(', ')]);
+  if (prefs?.chequeDays?.length) setPrefs.push(['Cheque due days', prefs.chequeDays.join(', ')]);
+  if (prefs?.renewalRentIncrementPct != null) setPrefs.push(['Annual rent increment', `${prefs.renewalRentIncrementPct}%`]);
+
+  const setPenalties: [string, string][] = PENALTY_LABELS
+    .map(([key, label]) => [label, penaltyValue(L?.settings?.penalties?.[key])] as [string, string | null])
+    .filter((e): e is [string, string] => e[1] != null);
+
+  const caps = L?.settings?.settlementDiscountCaps;
+  const setCaps: [string, string][] = ([
+    ['Rent', caps?.rentPct], ['Penalties', caps?.penaltiesPct],
+    ['Restoration', caps?.restorationPct], ['Utilities', caps?.utilitiesPct],
+  ] as [string, number | null | undefined][])
+    .filter((e): e is [string, number] => e[1] != null)
+    .map(([label, v]) => [label, `${v}%`]);
+
   const M = data?.manager;
   const C = data?.customer;
   const S = data?.staff;
@@ -1129,6 +1490,43 @@ export default function AdminUserDetailPage() {
                 <span className="flex items-center gap-1"><Clock size={13} /> Joined {fmtDate(u.createdAt)}</span>
               </div>
             </div>
+
+            {/* Account actions — super admins are never suspendable or bannable */}
+            {u.role !== 'super_admin' && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {u.status !== 'suspended' && u.status !== 'banned' && (
+                  <button
+                    onClick={() => void changeStatus('suspended')}
+                    disabled={statusBusy}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-opacity disabled:opacity-50"
+                    style={{ backgroundColor: '#fef2f2', color: 'var(--color-error)' }}
+                  >
+                    <UserX size={13} /> Suspend
+                  </button>
+                )}
+                {u.status !== 'banned' && (
+                  <button
+                    onClick={() => void changeStatus('banned')}
+                    disabled={statusBusy}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-opacity disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--color-error)', color: '#fff' }}
+                    title="Ban this user from the platform"
+                  >
+                    <Ban size={13} /> Ban
+                  </button>
+                )}
+                {(u.status === 'suspended' || u.status === 'banned') && (
+                  <button
+                    onClick={() => void changeStatus('active')}
+                    disabled={statusBusy}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-opacity disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}
+                  >
+                    <UserCheck size={13} /> Reactivate
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Role-specific breakdown ── */}
@@ -1145,6 +1543,71 @@ export default function AdminUserDetailPage() {
 
               {/* Platform insights */}
               <Insights ins={L.insights} />
+
+              {/* Charging rules + delegated access. Only what this landlord has
+                  actually set is rendered — empty slots are dropped, not shown
+                  as "not set", so the panel reads as data rather than a config form. */}
+              {L.settings && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                  {(setPrefs.length > 0 || setPenalties.length > 0) && (
+                    <MiniPanel title="Charging rules">
+                      <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+                        What this landlord charges customers. A fee dispute can be checked against this.
+                      </p>
+                      {setPrefs.length > 0 && (
+                        <>
+                          <Caption>Payment preferences</Caption>
+                          {setPrefs.map(([label, value]) => <KV key={label} label={label} value={value} />)}
+                        </>
+                      )}
+                      {setPenalties.length > 0 && (
+                        <>
+                          {setPrefs.length > 0 && <Divider />}
+                          <Caption>Penalties &amp; charges</Caption>
+                          {setPenalties.map(([label, value]) => (
+                            <KV key={label} label={label} value={value} dot="var(--color-gold)" />
+                          ))}
+                        </>
+                      )}
+                    </MiniPanel>
+                  )}
+
+                  <div className="flex flex-col gap-4">
+                    {setCaps.length > 0 && (
+                      <MiniPanel title="Settlement discount caps">
+                        <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+                          The most a manager may waive on a final settlement, per category.
+                        </p>
+                        {setCaps.map(([label, value]) => <KV key={label} label={label} value={value} />)}
+                      </MiniPanel>
+                    )}
+
+                    <Section title="Managers with access" count={L.managers?.length ?? 0}>
+                      {(L.managers ?? []).map((mg) => (
+                        <Link key={mg.userId} href={`/dashboard/admin/users/${mg.userId}`} className={`${ROW} transition-colors hover:brightness-95`} style={{ ...ROW_STYLE, opacity: mg.isActive ? 1 : 0.6 }}>
+                          <UserCog size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-sm truncate flex items-center gap-2" style={{ color: 'var(--color-neutral-900)' }}>
+                              {mg.name}
+                              {!mg.isActive && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>
+                                  Revoked
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                              {mg.grantedCount} permissions · since {fmtDate(mg.grantedAt)}
+                              {mg.grantedByRole ? ` · granted by ${titleCase(mg.grantedByRole)}` : ''}
+                            </p>
+                          </div>
+                          {mg.accountStatus && <Pill value={mg.accountStatus} />}
+                          <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+                        </Link>
+                      ))}
+                    </Section>
+                  </div>
+                </div>
+              )}
 
               {/* Breakdown — two per row, each scrolls internally */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1183,24 +1646,7 @@ export default function AdminUserDetailPage() {
                 <Section title="Documents" count={L.documents.length}>
                   {L.documents.length === 0 ? (
                     <p className="text-sm py-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents on file for this rental provider.</p>
-                  ) : L.documents.map((d) => {
-                    const label = d.displayName || titleCase((d.documentKey || '').replace(/_/g, ' '));
-                    const hasFile = !!d.fileUrl;
-                    return (
-                      <div key={d.id} className={ROW} style={ROW_STYLE}>
-                        <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{label}</p>
-                          <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}</p>
-                        </div>
-                        {hasFile ? (
-                          <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
-                        ) : (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Requested</span>
-                        )}
-                      </div>
-                    );
-                  })}
+                  ) : L.documents.map((d) => <DocRow key={d.id} d={d} />)}
                 </Section>
 
                 <Section title="Customers" count={L.customers.length}>
@@ -1229,6 +1675,52 @@ export default function AdminUserDetailPage() {
                         <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{fmtDate(c.contractStartDate)} → {fmtDate(c.contractEndDate)} · {aed(c.annualRent)}/yr</p>
                       </div>
                       <Pill value={c.status} />
+                    </div>
+                  ))}
+                </Section>
+
+                {/* Itemised money rows behind the collection KPIs. All payment
+                    types — the KPI strip above counts rent only. */}
+                <Section title="Payments" count={L.payments?.length ?? 0}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Most recent 200 rows. The collection figures above cover rent only; fee rows appear here too.
+                  </p>
+                  {(L.payments ?? []).map((p) => (
+                    <div key={p.id} className={ROW} style={ROW_STYLE}>
+                      <Banknote size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                          {p.customerName}
+                          {p.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {p.unitNumber}</span>}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                          {titleCase(p.paymentType)} · {fmtDate(p.transactionDate)}
+                          {p.chequeNumber ? ` · cheque ${p.chequeNumber}` : ''}
+                          {p.vatAmount > 0 ? ` · incl. VAT ${aed(p.vatAmount)}` : ''}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--color-neutral-900)' }}>{aed(p.amountPaid)}</span>
+                      <Pill value={p.chequeStatus} />
+                    </div>
+                  ))}
+                </Section>
+
+                {/* Own-account audit trail. Manager work for this landlord is
+                    attributed to the manager and lives on the manager's page. */}
+                <Section title="Recent activity" count={L.activity?.recent.length ?? 0}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    {L.activity
+                      ? `${L.activity.summary.totalActions} actions all time · ${L.activity.summary.last30dActions} in the last 30 days`
+                      : ''}
+                  </p>
+                  {(L.activity?.recent ?? []).map((a, i) => (
+                    <div key={i} className={ROW} style={ROW_STYLE}>
+                      <Clock size={14} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{titleCase(a.actionKey)}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{titleCase(a.entityType)} #{a.entityId}</p>
+                      </div>
+                      <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>{fmtDate(a.createdAt)}</span>
                     </div>
                   ))}
                 </Section>

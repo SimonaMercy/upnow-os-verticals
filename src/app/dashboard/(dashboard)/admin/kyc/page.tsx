@@ -280,14 +280,146 @@ function KycCard({
 
 // ─── RIGHT panel: RP content + actions ───────────────────────────────────────
 
+/**
+ * Per-document verdict controls — Approve (with an expiry date) / Reject.
+ *
+ * Approving opens a small confirm so the reviewer can record the expiry read
+ * off the document itself. The reviewer is the only person holding the physical
+ * document, so this is where a missing or wrong expiry gets fixed — customers
+ * never enter one. Leave the field blank for documents that don't expire.
+ *
+ * Self-contained (owns its own busy/modal state) so it can drop into any of the
+ * KYC panels. SCRUM-662.
+ */
+function DocReviewActions({
+  doc, onUpdate,
+}: {
+  doc: UploadedDoc;
+  onUpdate: (docId: number, patch: Partial<UploadedDoc>) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [expiry, setExpiry] = useState('');
+
+  const status = String(doc.status ?? '').toLowerCase();
+  const isVerified = ['processed', 'complete'].includes(status);
+  const isRejected = status === 'rejected';
+  const label = doc.documentKey.replace(/_/g, ' ');
+
+  function openConfirm() {
+    setExpiry(doc.expiryDate ? String(doc.expiryDate).slice(0, 10) : '');
+    setConfirming(true);
+  }
+
+  async function approve() {
+    setBusy(true);
+    try {
+      const updated = await apiPost<{ status?: string; expiryDate?: string | null }>(
+        `/admin/kyc/documents/${doc.id}/verify`,
+        expiry ? { expiryDate: expiry } : {},
+      );
+      onUpdate(doc.id, {
+        status: updated?.status ?? 'processed',
+        expiryDate: updated?.expiryDate ?? (expiry || doc.expiryDate),
+        notes: null,
+      });
+      setConfirming(false);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reject() {
+    const input = window.prompt('Reason for rejecting this document (shown to the owner):', '');
+    if (input === null) return; // cancelled
+    const reason = input.trim() || undefined;
+    setBusy(true);
+    try {
+      const updated = await apiPost<{ status?: string }>(
+        `/admin/kyc/documents/${doc.id}/reject`,
+        { reason },
+      );
+      onUpdate(doc.id, { status: updated?.status ?? 'rejected', notes: reason ?? null });
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {!isVerified && (
+        <button type="button" disabled={busy} onClick={openConfirm}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+          style={{ backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}
+          title="Approve this document">
+          <CheckCircle2 size={11} /> Approve
+        </button>
+      )}
+      {!isRejected && (
+        <button type="button" disabled={busy} onClick={() => void reject()}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+          style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}
+          title="Reject this document (owner must re-upload)">
+          <XCircle size={11} /> Reject
+        </button>
+      )}
+
+      {confirming && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
+          onClick={() => { if (!busy) setConfirming(false); }}>
+          <div className="w-full max-w-sm rounded-2xl p-5 bg-white" style={{ boxShadow: "0 12px 32px rgba(0,0,0,0.18)" }}
+            onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold mb-1" style={{ color: "var(--color-neutral-900)" }}>Approve document</h3>
+            <p className="text-xs mb-4" style={{ color: "var(--color-neutral-500)" }}>
+              {label.replace(/\b\w/g, (c) => c.toUpperCase())}
+            </p>
+
+            <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-neutral-600)" }}>
+              Expiry date
+            </label>
+            <input
+              type="date"
+              value={expiry}
+              onChange={(e) => setExpiry(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: "1px solid var(--color-base-200)", color: "var(--color-neutral-900)" }}
+            />
+            <p className="text-[11px] mt-1.5" style={{ color: "var(--color-neutral-400)" }}>
+              Read it off the document. Leave blank if this document doesn&apos;t expire.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button type="button" disabled={busy} onClick={() => setConfirming(false)}
+                className="px-3 py-2 rounded-lg text-xs font-medium cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral-700)" }}>
+                Cancel
+              </button>
+              <button type="button" disabled={busy} onClick={() => void approve()}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: "var(--color-primary)", color: "#fff" }}>
+                <CheckCircle2 size={12} /> {busy ? "Approving…" : "Approve"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function RpContentPanel({
-  detail, rpId, loading, error, onStatusChange,
+  detail, rpId, loading, error, onStatusChange, onDocUpdate,
 }: {
   detail: RpDetail | null;
   rpId: number;
   loading: boolean;
   error: string | null;
   onStatusChange: (id: number, status: ComplianceStatus) => void;
+  onDocUpdate: (docId: number, patch: Partial<UploadedDoc>) => void;
 }) {
   const [acting, setActing] = useState(false);
   const [notes, setNotes] = useState("");
@@ -563,35 +695,48 @@ function RpContentPanel({
                   )}
                 </div>
                 <div className="space-y-1.5">
-                  {docs.map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between gap-2 py-1.5 border-b"
-                      style={{ borderColor: "var(--color-base-100)" }}>
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium truncate" style={{ color: "var(--color-neutral-700)" }}>
-                          {doc.documentKey.replace(/_/g, " ")}
-                        </p>
-                        {doc.expiryDate && (
-                          <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
-                            Exp: {new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
+                  {docs.map((doc) => {
+                    const st = String(doc.status).toLowerCase();
+                    const ok = ["processed", "complete"].includes(st);
+                    const bad = st === "rejected";
+                    return (
+                      <div key={doc.id} className="py-1.5 border-b last:border-b-0" style={{ borderColor: "var(--color-base-100)" }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium truncate" style={{ color: "var(--color-neutral-700)" }}>
+                              {doc.documentKey.replace(/_/g, " ")}
+                            </p>
+                            {doc.expiryDate && (
+                              <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
+                                Exp: {new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                              style={{
+                                backgroundColor: ok ? "#dcfce7" : bad ? "#fee2e2" : "#fef3c7",
+                                color: ok ? "#15803d" : bad ? "#dc2626" : "#b45309",
+                              }}>
+                              {doc.status}
+                            </span>
+                            {doc.fileUrl && (
+                              <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="cursor-pointer">
+                                <ExternalLink size={11} style={{ color: "var(--color-primary)" }} />
+                              </button>
+                            )}
+                            {/* Per-document verdict — RP docs were view-only before (SCRUM-662) */}
+                            <DocReviewActions doc={doc} onUpdate={onDocUpdate} />
+                          </div>
+                        </div>
+                        {bad && doc.notes && (
+                          <p className="text-[11px] mt-1 px-2 py-1 rounded-lg" style={{ backgroundColor: "#fef2f2", color: "#991b1b" }}>
+                            <span className="font-semibold">Rejection reason: </span>{doc.notes}
                           </p>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                          style={{
-                            backgroundColor: ["processed", "complete"].includes(String(doc.status).toLowerCase()) ? "#dcfce7" : "#fef3c7",
-                            color: ["processed", "complete"].includes(String(doc.status).toLowerCase()) ? "#15803d" : "#b45309",
-                          }}>
-                          {doc.status}
-                        </span>
-                        {doc.fileUrl && (
-                          <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="cursor-pointer">
-                            <ExternalLink size={11} style={{ color: "var(--color-primary)" }} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -772,7 +917,6 @@ function SpContentPanel({
   onDocUpdate: (docId: number, patch: Partial<UploadedDoc>) => void;
 }) {
   const [acting, setActing] = useState(false);
-  const [docActing, setDocActing] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -933,32 +1077,6 @@ function SpContentPanel({
       alert((e as Error).message);
     } finally {
       setActing(false);
-    }
-  }
-
-  // Approve / reject a single document. Reject prompts for a reason — it's
-  // stored on the document and shown to the provider on their Documents page.
-  async function reviewDoc(docId: number, action: "verify" | "reject") {
-    let reason: string | undefined;
-    if (action === "reject") {
-      const input = window.prompt("Reason for rejecting this document (shown to the provider):", "");
-      if (input === null) return; // cancelled
-      reason = input.trim() || undefined;
-    }
-    setDocActing(docId);
-    try {
-      const updated = await apiPost<{ status?: string; notes?: string | null }>(
-        `/admin/kyc/documents/${docId}/${action}`,
-        action === "reject" ? { reason } : {},
-      );
-      onDocUpdate(docId, {
-        status: updated?.status ?? (action === "verify" ? "processed" : "rejected"),
-        notes: action === "reject" ? (reason ?? null) : null,
-      });
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDocActing(null);
     }
   }
 
@@ -1303,25 +1421,8 @@ function SpContentPanel({
                               <ExternalLink size={11} /> View
                             </button>
                           )}
-                          {/* Per-document review verdict */}
-                          {doc && !isVerified && (
-                            <button type="button" disabled={docActing === doc.id}
-                              onClick={() => void reviewDoc(doc.id, "verify")}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                              style={{ backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}
-                              title="Approve this document">
-                              <CheckCircle2 size={11} /> Approve
-                            </button>
-                          )}
-                          {doc && !isRejected && (
-                            <button type="button" disabled={docActing === doc.id}
-                              onClick={() => void reviewDoc(doc.id, "reject")}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                              style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}
-                              title="Reject this document (provider must re-upload)">
-                              <XCircle size={11} /> Reject
-                            </button>
-                          )}
+                          {/* Per-document review verdict (approve captures expiry) */}
+                          {doc && <DocReviewActions doc={doc} onUpdate={onDocUpdate} />}
                         </div>
                       </div>
                       {isRejected && doc?.notes && (
@@ -1945,6 +2046,12 @@ export default function AdminKycPage() {
       : prev);
   }
 
+  function handleRpDocUpdate(docId: number, patch: Partial<UploadedDoc>) {
+    setRpDetail((prev) => prev
+      ? { ...prev, uploadedDocs: prev.uploadedDocs.map((d) => d.id === docId ? { ...d, ...patch } : d) }
+      : prev);
+  }
+
   const filteredRps     = rps.filter((r)  => statusFilter === "all" || r.complianceStatus === statusFilter);
   const filteredSps     = sps.filter((sp) => statusFilter === "all" || sp.complianceStatus === statusFilter);
   const filteredTenants = tenants;
@@ -2129,6 +2236,7 @@ export default function AdminKycPage() {
                 </div>
               ) : selectedRp ? (
                 <RpContentPanel
+                  onDocUpdate={handleRpDocUpdate}
                   detail={rpDetail}
                   rpId={selectedRp.id}
                   loading={rpDetailLoading}

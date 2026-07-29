@@ -3,7 +3,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, ChevronDown, ChevronRight } from 'lucide-react';
+import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, Ban, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
@@ -123,7 +123,12 @@ export default function AdminUsersPage() {
     window.history.replaceState(null, '', url.toString());
   }, [roleFilter, engagementFilter]);
 
-  async function updateStatus(userId: number, status: string) {
+  // Ban is the one status change that isn't routine housekeeping — it locks the
+  // account out entirely, so it asks first. Suspend/reactivate stay one-click.
+  async function updateStatus(userId: number, status: string, userName?: string) {
+    if (status === 'banned' && !window.confirm(
+      `Ban ${userName ?? 'this user'}?\n\nThey lose access to the platform immediately. You can reactivate them later from this list.`,
+    )) return;
     setActionLoading(userId);
     try {
       await apiPatch(`/admin/users/${userId}/status`, { status });
@@ -321,11 +326,11 @@ export default function AdminUsersPage() {
                     </span>
                   )}
 
-                  {/* Actions */}
+                  {/* Actions — super admins are never suspendable or bannable */}
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {u.status !== 'suspended' && u.role !== 'super_admin' && (
+                    {u.status !== 'suspended' && u.status !== 'banned' && u.role !== 'super_admin' && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'suspended'); }}
+                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'suspended', u.name); }}
                         disabled={actionLoading === u.id}
                         className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
                         style={{
@@ -338,9 +343,25 @@ export default function AdminUsersPage() {
                         Suspend
                       </button>
                     )}
-                    {u.status === 'suspended' && (
+                    {u.status !== 'banned' && u.role !== 'super_admin' && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'active'); }}
+                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'banned', u.name); }}
+                        disabled={actionLoading === u.id}
+                        className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
+                        style={{
+                          backgroundColor: 'var(--color-error)',
+                          color: '#fff',
+                          opacity: actionLoading === u.id ? 0.5 : 1,
+                        }}
+                        title="Ban this user from the platform"
+                      >
+                        <Ban size={12} />
+                        Ban
+                      </button>
+                    )}
+                    {(u.status === 'suspended' || u.status === 'banned') && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'active', u.name); }}
                         disabled={actionLoading === u.id}
                         className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
                         style={{

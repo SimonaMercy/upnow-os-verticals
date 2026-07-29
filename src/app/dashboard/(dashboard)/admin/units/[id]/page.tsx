@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Home, Building2, ExternalLink, FileText, ImageIcon, Settings2, ScrollText, Paperclip } from 'lucide-react';
+import { ArrowLeft, Home, Building2, ExternalLink, FileText, ImageIcon, Settings2, ScrollText, Paperclip, History, ClipboardCheck } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
 import { leaseTermsFromUnit } from '@/lib/unitForm';
@@ -27,9 +27,48 @@ interface Media { id: number; url: string; caption: string | null; mediaType: st
 interface PlanAddendum { id: number; versionNo: number; planLabel: string; specialConditions: string | null; addendumFileUrl: string | null; addendumFileName: string | null; addendumMimeType: string | null; leaseTerms: Record<string, unknown> | null }
 interface Doc { id: number; documentKey: string; displayName: string | null; fileUrl: string; mimeType: string | null; status: string }
 interface Addendum { id: number; name: string; fileUrl: string; mimeType: string | null; tenantSigned: boolean; landlordSigned: boolean }
+/** One rent/repricing event on the unit's price timeline. */
+interface PriceEvent {
+  kind: 'lease' | 'reprice';
+  date: string | null;
+  effectiveTo?: string | null;
+  contractId?: number | null;
+  contractType?: string | null;
+  annualRent?: number | null;
+  listedPrice?: number | null;
+  discountAmount?: number | null;
+  field?: string | null;
+  oldPrice?: number | null;
+  newPrice?: number | null;
+  source?: string | null;
+  reason?: string | null;
+}
+interface PriceHistory {
+  currentRentalPrice: number | null;
+  leaseCount: number;
+  repriceCount: number;
+  timeline: PriceEvent[];
+}
+
+/** Summary of the unit's most recent move-out inspection. */
+interface LastMoveOut {
+  contractId: number;
+  recordedAt: string | null;
+  categories: number;
+  /** false = legacy inspection with no price book — costs are absent, not zero. */
+  priced: boolean;
+  itemsTotal: number;
+  itemsChargeable: number;
+  totalCostAed: number;
+  flagged: { category: string; component: string; outCondition: string; costAed: number }[];
+  flaggedTotal: number;
+}
+
 interface UnitDetail {
   unit: UnitFull;
   media: Media[];
+  priceHistory?: PriceHistory | null;
+  lastMoveOut?: LastMoveOut | null;
   owner: { rentalProviderId: number; userId: number | null; name: string | null } | null;
   currentTenancy: { id: number; ref: string; tenantName: string | null; tenantUserId: number | null; startDate: string | null; endDate: string | null; annualRent: number | null; status: string } | null;
   planAddendum: PlanAddendum | null;
@@ -101,7 +140,11 @@ export default function AdminUnitDetailPage() {
   const pricingRows: [string, string][] = [
     ['Security deposit', u.securityDeposit != null ? aed(u.securityDeposit) : ''],
     ['Admin fee', u.adminFee != null ? aed(u.adminFee) : ''],
-    ['Contract Registration Fee', u.ejariFeeFils != null ? aed(u.ejariFeeFils / 100) : ''],
+    // `ejariFeeFils` is a misnomer: it maps to units.ejari_fee, numeric(12,2) in
+    // WHOLE AED — not fils. Dividing by 100 rendered a 250 AED registration fee
+    // as "AED 2.5". The customer contract view multiplies by 100 to reach fils,
+    // which confirms the stored unit.
+    ['Contract Registration Fee', u.ejariFeeFils != null ? aed(u.ejariFeeFils) : ''],
     ['Commission', u.commission != null ? aed(u.commission) : ''],
     ['Service charges', u.serviceCharges != null ? aed(u.serviceCharges) : ''],
   ].filter(([, v]) => v) as [string, string][];
@@ -222,6 +265,110 @@ export default function AdminUnitDetailPage() {
           </div>
         ) : <p className="text-sm text-[#9b9890]">No documents uploaded for this unit.</p>}
       </Card>
+
+      {/* Last recorded move-out condition — the unit's last known state and what
+          was chargeable against the outgoing customer's deposit. */}
+      {d.lastMoveOut && (
+        <Card icon={ClipboardCheck} title="Last move-out condition">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <Stat label="Recorded" value={fmtDate(d.lastMoveOut.recordedAt)} />
+            <Stat label="Areas inspected" value={String(d.lastMoveOut.categories)} />
+            <Stat
+              label={d.lastMoveOut.priced ? 'Items charged' : 'Items inspected'}
+              value={d.lastMoveOut.priced
+                ? `${d.lastMoveOut.itemsChargeable} of ${d.lastMoveOut.itemsTotal}`
+                : String(d.lastMoveOut.itemsTotal)}
+            />
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Chargeable</div>
+              {/* A legacy inspection carries no price book — showing "AED 0"
+                  would read as "nothing chargeable" when it means "not priced". */}
+              <div className={`text-sm font-semibold mt-0.5 ${d.lastMoveOut.priced && d.lastMoveOut.totalCostAed > 0 ? 'text-[#b45309]' : 'text-[#3f3d39]'}`}>
+                {d.lastMoveOut.priced ? aed(d.lastMoveOut.totalCostAed) : <span className="text-[#9b9890] font-normal">Not priced</span>}
+              </div>
+            </div>
+          </div>
+
+          {d.lastMoveOut.flagged.length > 0 ? (
+            <>
+              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">
+                Flagged items{d.lastMoveOut.flaggedTotal > d.lastMoveOut.flagged.length
+                  ? ` · showing ${d.lastMoveOut.flagged.length} of ${d.lastMoveOut.flaggedTotal}`
+                  : ''}
+              </p>
+              <div className="space-y-1.5">
+                {d.lastMoveOut.flagged.map((f, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-[#e8e6e0]">
+                    <span className="text-sm text-[#3f3d39] flex-1 truncate">
+                      {f.component}
+                      <span className="text-[#9b9890]"> · {f.category}</span>
+                    </span>
+                    {f.outCondition && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860] capitalize shrink-0">
+                        {f.outCondition.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                    {f.costAed > 0 && (
+                      <span className="text-sm font-medium text-[#b45309] tabular-nums shrink-0">{aed(f.costAed)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-[#9b9890]">Inspection recorded with nothing flagged and nothing chargeable.</p>
+          )}
+        </Card>
+      )}
+
+      {/* Price history — lease rents + between-tenancy repricing. Rendered only
+          when there is something to show, per the data-not-configuration rule. */}
+      {(d.priceHistory?.timeline?.length ?? 0) > 0 && (
+        <Card icon={History} title={`Price history (${d.priceHistory!.leaseCount} lease${d.priceHistory!.leaseCount === 1 ? '' : 's'} · ${d.priceHistory!.repriceCount} repricing${d.priceHistory!.repriceCount === 1 ? '' : 's'})`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#e8e6e0] text-left text-xs font-semibold uppercase tracking-wide text-[#9b9890]">
+                  <th className="py-2 pr-4">Date</th>
+                  <th className="py-2 pr-4">Event</th>
+                  <th className="py-2 text-right">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.priceHistory!.timeline.map((ev, i) => (
+                  <tr key={i} className="border-b border-[#f4f3ef] last:border-b-0">
+                    <td className="py-2.5 pr-4 whitespace-nowrap text-[#1a1916]">{fmtDate(ev.date)}</td>
+                    <td className="py-2.5 pr-4 text-[#6b6860]">
+                      {ev.kind === 'lease' ? (
+                        <>
+                          <span className="font-medium text-[#1a1916]">Lease</span>
+                          {ev.contractType ? ` · ${titleCase(ev.contractType)}` : ''}
+                          {ev.effectiveTo ? ` · to ${fmtDate(ev.effectiveTo)}` : ''}
+                          {(ev.discountAmount ?? 0) > 0 && ev.listedPrice != null && (
+                            <span className="text-[#b45309]"> · {aed(ev.discountAmount)} off {aed(ev.listedPrice)}</span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-medium text-[#1a1916]">Repriced</span>
+                          {ev.field ? ` · ${titleCase(ev.field)}` : ''}
+                          {ev.source ? ` · ${titleCase(ev.source)}` : ''}
+                          {ev.reason ? ` · ${ev.reason}` : ''}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-2.5 text-right tabular-nums text-[#1a1916] whitespace-nowrap">
+                      {ev.kind === 'lease'
+                        ? aed(ev.annualRent)
+                        : <>{ev.oldPrice != null && <span className="text-[#9b9890] line-through mr-1.5">{aed(ev.oldPrice)}</span>}{aed(ev.newPrice)}</>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* Current tenancy + its contract addendums */}
       <Card icon={FileText} title="Current tenancy">

@@ -190,6 +190,8 @@ const STATUS_FILTERS: { id: string; label: string }[] = [
   { id: 'pending',  label: 'Pending' },
   { id: 'approved', label: 'Approved' },
   { id: 'rejected', label: 'Rejected' },
+  // Without this bucket an expired listing vanishes from every tab but All.
+  { id: 'expired',  label: 'Expired' },
 ];
 
 const categoryColor: Record<string, { bg: string; color: string }> = {
@@ -290,11 +292,13 @@ function TypesDropdown({ options, selected, onChange, labelFor }: {
   );
 }
 
-// Status as tabs (Pending / Approved / Rejected) — the primary filter.
-function StatusTabs({ value, onChange }: { value: string; onChange: (s: string) => void }) {
+// Status as tabs (Pending / Approved / Rejected / Expired) — the primary filter.
+// Expired is rental-only: a service listing is never taken off the market for
+// ageing out, so the bucket would always be empty on the SP side.
+function StatusTabs({ value, onChange, mode }: { value: string; onChange: (s: string) => void; mode: 'rp' | 'sp' }) {
   return (
     <div className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--color-base-200)' }}>
-      {STATUS_FILTERS.filter((s) => s.id).map((st) => (
+      {STATUS_FILTERS.filter((s) => s.id && (mode === 'rp' || s.id !== 'expired')).map((st) => (
         <button key={st.id} onClick={() => onChange(st.id)}
           className="px-3 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors"
           style={value === st.id
@@ -370,11 +374,11 @@ function ProviderCard({ p, selected, onClick }: { p: SpProviderRow; selected: bo
 
 // ─── Right-column detail panels ───────────────────────────────────────────────
 
-function ActionBar({ canApprove, canReject, acting, onApprove, onReject }: {
-  canApprove: boolean; canReject: boolean; acting: boolean;
-  onApprove: () => void; onReject: () => void;
+function ActionBar({ canApprove, canReject, canExpire, acting, onApprove, onReject, onExpire }: {
+  canApprove: boolean; canReject: boolean; canExpire: boolean; acting: boolean;
+  onApprove: () => void; onReject: () => void; onExpire: () => void;
 }) {
-  if (!canApprove && !canReject) return null;
+  if (!canApprove && !canReject && !canExpire) return null;
   return (
     <div className="shrink-0 border-t px-4 py-3 flex gap-2" style={{ borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
       {canApprove && (
@@ -389,6 +393,16 @@ function ActionBar({ canApprove, canReject, acting, onApprove, onReject }: {
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
           style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
           <XCircle size={15} /> Reject
+        </button>
+      )}
+      {/* Expire — for a listing that was legitimately live and has simply aged
+          out. Rejecting one of those would be the wrong verdict (SCRUM-663). */}
+      {canExpire && (
+        <button onClick={onExpire} disabled={acting}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+          style={{ backgroundColor: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}
+          title="Take this listing off the market as expired">
+          <Clock size={15} /> Expire
         </button>
       )}
     </div>
@@ -416,9 +430,9 @@ function Field({ label, value }: { label: string; value: string | null | undefin
   );
 }
 
-function UnitDetailPanel({ row, acting, onApprove, onReject }: {
+function UnitDetailPanel({ row, acting, onApprove, onReject, onExpire }: {
   row: UnitListing; acting: boolean;
-  onApprove: (u: UnitListing) => void; onReject: (u: UnitListing) => void;
+  onApprove: (u: UnitListing) => void; onReject: (u: UnitListing) => void; onExpire: (u: UnitListing) => void;
 }) {
   const [detail, setDetail] = useState<UnitDetail | null>(null);
   const [media, setMedia] = useState<UnitMedia[]>([]);
@@ -446,6 +460,8 @@ function UnitDetailPanel({ row, acting, onApprove, onReject }: {
   const locationParts = [p?.emirate?.name, p?.community?.name, p?.subCommunity?.name].filter(Boolean);
   const canApprove = row.listingStatus !== 'published';
   const canReject  = row.listingStatus !== 'rejected';
+  // Only a listing that actually reached the market can expire.
+  const canExpire  = ['published', 'approved'].includes(row.listingStatus);
 
   return (
     <div className="flex flex-col h-full">
@@ -586,8 +602,8 @@ function UnitDetailPanel({ row, acting, onApprove, onReject }: {
           </div>
         )}
       </div>
-      <ActionBar canApprove={canApprove} canReject={canReject} acting={acting}
-        onApprove={() => onApprove(row)} onReject={() => onReject(row)} />
+      <ActionBar canApprove={canApprove} canReject={canReject} canExpire={canExpire} acting={acting}
+        onApprove={() => onApprove(row)} onReject={() => onReject(row)} onExpire={() => onExpire(row)} />
     </div>
   );
 }
@@ -962,9 +978,11 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
   function handleSpCategory(c: string[]) { setSpCategory(c); setSpPage(0); setSpSel(null); }
   function handleSpStatus(s: string)     { setSpStatus(s); setSpPage(0); setSpSel(null); }
 
-  async function actOnUnit(u: UnitListing, action: 'approve' | 'reject') {
+  async function actOnUnit(u: UnitListing, action: 'approve' | 'reject' | 'expire') {
     if (!u.property) return;
-    if (!confirm(`${action === 'approve' ? 'Approve' : 'Reject'} unit ${u.unitNumber} at ${u.property.buildingName}?`)) return;
+    const verb = action === 'approve' ? 'Approve' : action === 'reject' ? 'Reject' : 'Expire';
+    const suffix = action === 'expire' ? ' It comes off the market and stops showing to customers.' : '';
+    if (!confirm(`${verb} unit ${u.unitNumber} at ${u.property.buildingName}?${suffix}`)) return;
     setActing(true);
     try {
       await apiPatch(`/admin/listings/${u.property.id}/units/${u.id}/${action}`, {});
@@ -1023,7 +1041,7 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
       {/* Filters + split panel */}
       <div className="flex flex-col flex-1 min-h-0 mt-2">
         <div className="flex items-end justify-between gap-3 mb-2 flex-shrink-0">
-          <StatusTabs value={mode === 'rp' ? rpStatus : spStatus} onChange={mode === 'rp' ? handleRpStatus : handleSpStatus} />
+          <StatusTabs mode={mode} value={mode === 'rp' ? rpStatus : spStatus} onChange={mode === 'rp' ? handleRpStatus : handleSpStatus} />
           <TypesDropdown
             options={mode === 'rp'
               ? SPACE_CATEGORIES.map((c) => ({ id: c.id, label: categoryDisplayLabel(c.id) }))
@@ -1072,7 +1090,8 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
                 </div>
               ) : selectedUnit ? (
                 <UnitDetailPanel row={selectedUnit} acting={acting}
-                  onApprove={(u) => void actOnUnit(u, 'approve')} onReject={(u) => void actOnUnit(u, 'reject')} />
+                  onApprove={(u) => void actOnUnit(u, 'approve')} onReject={(u) => void actOnUnit(u, 'reject')}
+                  onExpire={(u) => void actOnUnit(u, 'expire')} />
               ) : selectedProvider ? (
                 <ProviderReviewPanel providerId={selectedProvider.id} onChanged={refreshProviderCounts} />
               ) : null}

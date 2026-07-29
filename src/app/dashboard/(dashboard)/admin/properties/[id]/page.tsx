@@ -24,10 +24,19 @@ interface PropertyDetail {
     hasGym: boolean; hasPool: boolean; hasParking: boolean;
     emirate?: { nameEn?: string | null } | null; community?: { nameEn?: string | null } | null;
   };
+  financials?: {
+    marketPrice: number; annualRent: number; leasedUnits: number;
+    occupiedUnits: number; totalUnits: number; occupancyPct: number;
+  } | null;
+  unitMix?: Record<string, number> | null;
   owner: { rentalProviderId: number; userId: number | null; name: string | null } | null;
   units: UnitRow[];
   documents: { id: number; documentKey: string; displayName: string | null; fileUrl: string | null; status: string | null }[];
 }
+
+/** Whole AED — money on units/leases is stored in AED, not fils. */
+const aed = (n: number | null | undefined) =>
+  n == null ? '—' : `AED ${Math.round(Number(n)).toLocaleString('en-AE')}`;
 
 const availCls: Record<string, string> = {
   available: 'bg-[#d8f2e8] text-[#1a7a5a]', occupied: 'bg-[#e8f0fb] text-[#1a5fb4]',
@@ -59,6 +68,8 @@ export default function AdminPropertyDetailPage() {
   const listed = units.filter((u) => u.listingStatus === 'published').length;
   const occupied = units.filter((u) => u.availability === 'occupied').length;
   const available = units.filter((u) => u.availability === 'available').length;
+  const fin = d.financials ?? null;
+  const mix = Object.entries(d.unitMix ?? {}).sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="p-6 md:p-8 max-w-5xl mx-auto">
@@ -88,17 +99,57 @@ export default function AdminPropertyDetailPage() {
       {/* Stats overview */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         {[
-          { label: 'Units', value: units.length },
-          { label: 'Listed', value: listed },
-          { label: 'Occupied', value: occupied },
-          { label: 'Available', value: available },
+          { label: 'Units', value: String(units.length), sub: '' },
+          { label: 'Listed', value: String(listed), sub: '' },
+          { label: 'Occupancy', value: fin ? `${fin.occupancyPct}%` : `${occupied}`, sub: fin ? `${fin.occupiedUnits}/${fin.totalUnits} occupied` : 'occupied' },
+          { label: 'Available', value: String(available), sub: '' },
         ].map((s) => (
           <div key={s.label} className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
             <div className="text-2xl font-bold text-[#1a1916] tabular-nums">{s.value}</div>
             <div className="text-xs text-[#6b6860] mt-0.5">{s.label}</div>
+            {s.sub && <div className="text-[11px] text-[#9b9890] mt-0.5">{s.sub}</div>}
           </div>
         ))}
       </div>
+
+      {/* Money for the building. Market Price is the asking rent across every
+          unit; Annual Rent is what is actually contracted, counting one
+          qualifying lease per unit — so the pair reads asking vs earning. */}
+      {fin && (fin.marketPrice > 0 || fin.annualRent > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
+            <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Market price</div>
+            <div className="text-2xl font-bold text-[#1a1916] tabular-nums mt-1">{aed(fin.marketPrice)}</div>
+            <div className="text-[11px] text-[#9b9890] mt-0.5">asking rent · all {fin.totalUnits} units</div>
+          </div>
+          <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
+            <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Annual rent</div>
+            <div className="text-2xl font-bold text-[#1a7a5a] tabular-nums mt-1">{aed(fin.annualRent)}</div>
+            <div className="text-[11px] text-[#9b9890] mt-0.5">
+              contracted · {fin.leasedUnits} leased unit{fin.leasedUnits === 1 ? '' : 's'}
+              {fin.marketPrice > 0 && ` · ${Math.round((fin.annualRent / fin.marketPrice) * 100)}% of asking`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unit mix — what this building is made of. */}
+      {mix.length > 0 && (
+        <div className="rounded-2xl border border-[#e8e6e0] bg-white p-6 mb-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Home size={15} className="text-[#9b9890]" />
+            <span className="text-sm font-semibold text-[#3f3d39]">Unit mix</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {mix.map(([type, count]) => (
+              <span key={type} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-[#f4f3ef] text-[#6b6860]">
+                <span className="capitalize">{type.replace(/_/g, ' ')}</span>
+                <span className="font-semibold text-[#1a1916]">{count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Property details — shown before the units list */}
       <div className="rounded-2xl border border-[#e8e6e0] bg-white p-6 mb-5">
