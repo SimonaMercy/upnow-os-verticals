@@ -28,6 +28,46 @@ export const KYC_DOCS: DocReq[] = [
 export const KYC_DOC_KEYS = new Set(KYC_DOCS.map(d => d.key));
 
 /**
+ * Identity/licensing pack for a COMPANY customer — the company signs the
+ * tenancy, so what's collected is the company's licence plus the identity of
+ * the person authorised to sign it. Mirrors the backend CUSTOMER_COMPANY
+ * matrix (documents/document-requirements.ts) so the customer journey, the RP
+ * checklist and the KYC review all ask for the same things.
+ *
+ * Keys are shared with the individual pack where the document is the same file
+ * in the same slot (`emirates_id_front/_back`, `passport`) — only the labels
+ * change, so an upload made under either entity type still counts.
+ */
+export const COMPANY_KYC_DOCS: DocReq[] = [
+  { key: 'trade_license',     label: 'Trade License',                          category: 'license',  required: true,  hint: 'Valid UAE trade licence of the company taking the tenancy' },
+  { key: 'emirates_id_front', label: 'Signatory Emirates ID — Front',          category: 'identity', required: true,  hint: 'FRONT of the Emirates ID of the person authorised to sign' },
+  { key: 'emirates_id_back',  label: 'Signatory Emirates ID — Back',           category: 'identity', required: true,  hint: 'BACK of the same Emirates ID' },
+  { key: 'passport',          label: 'Signatory Passport',                     category: 'identity', required: false, hint: 'Bio-data page — required if the signatory is not a UAE national' },
+  { key: 'moa',               label: 'MOA / Establishment Card',               category: 'legal',    required: false, hint: 'Memorandum of Association or establishment card (optional)' },
+  { key: 'board_resolution',  label: 'Board Resolution / Power of Attorney',   category: 'legal',    required: false, hint: 'Authorises the signatory to sign the tenancy (optional)' },
+];
+
+/** Supporting documents for a COMPANY customer — the company equivalents of the
+ *  individual's salary certificate / personal bank statement. Never personal
+ *  ones: a company has no employment letter or marriage certificate. */
+export const COMPANY_SUPPORTING_DOCS: DocReq[] = [
+  { key: 'vat_certificate',        label: 'VAT / TRN Certificate',   category: 'compliance', required: false, hint: 'VAT registration certificate, if the company is registered' },
+  { key: 'company_bank_statement', label: 'Company Bank Statement',  category: 'banking',    required: false, hint: 'Last 3 months, on the company account' },
+];
+
+/** The identity pack for this customer — personal, or the company's. */
+export function getKycDocs(entityType?: 'individual' | 'company' | null): DocReq[] {
+  return entityType === 'company' ? COMPANY_KYC_DOCS : KYC_DOCS;
+}
+
+/** First-wins de-dupe, so a company renting a commercial unit doesn't get the
+ *  trade licence (or VAT certificate) asked for twice under two labels. */
+function dedupeByKey(docs: DocReq[]): DocReq[] {
+  const seen = new Set<string>();
+  return docs.filter(d => (seen.has(d.key) ? false : (seen.add(d.key), true)));
+}
+
+/**
  * Base document keys whose physical document carries an expiry date the RP
  * should record on upload (identity + licensing docs). Matched on the base key
  * so any suffixed variant resolves — `emirates_id_front`, `occupant_2_passport`,
@@ -130,6 +170,12 @@ export function getRentalSectionDocs(
   const t = unitType ?? '';
   const isCommercial = COMMERCIAL_TYPES.includes(t);
   const isIndustrial = INDUSTRIAL_TYPES.includes(t);
+  // A company renting a RESIDENTIAL unit (staff accommodation, a director's
+  // apartment) is still a company: asking it for an employment letter or a
+  // marriage certificate is nonsense. It gets the company supporting pack.
+  if (entityType === 'company' && !isCommercial && !isIndustrial) {
+    return COMPANY_SUPPORTING_DOCS;
+  }
   const base = isCommercial ? COMMERCIAL_RENTAL_DOCS
     : isIndustrial ? INDUSTRIAL_RENTAL_DOCS
     : RESIDENTIAL_RENTAL_DOCS;
@@ -150,7 +196,10 @@ export function getRequiredDocs(
   unitType: string | null | undefined,
   entityType?: 'individual' | 'company' | null,
 ): DocReq[] {
-  return [...KYC_DOCS, ...getRentalSectionDocs(unitType, entityType)];
+  return dedupeByKey([
+    ...getKycDocs(entityType),
+    ...getRentalSectionDocs(unitType, entityType),
+  ]);
 }
 
 /**

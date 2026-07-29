@@ -38,5 +38,13 @@ export default function ManagerLeadsPage() {
   if (permsLoading || effectiveRp == null) {
     return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
   }
-  return <LeadsWorkspace manager={{ rp: effectiveRp }} />;
+  // "Add new leads" is granted separately from working the pipeline — creating a
+  // lead also creates the customer's portal account (migration 0165). Per-landlord,
+  // never an ANY-landlord `can`.
+  return (
+    <LeadsWorkspace
+      manager={{ rp: effectiveRp }}
+      canCreateLeads={canForRp('canCreateLeads', effectiveRp)}
+    />
+  );
 }

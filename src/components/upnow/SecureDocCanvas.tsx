@@ -154,6 +154,14 @@ export function SecureDocCanvas({
       for (let n = 1; n <= pages; n++) {
         if (cancelled) return;
         const page = await pdf.getPage(n);
+        // A scanned page often carries its own /Rotate (an upside-down or sideways
+        // scan the producer flagged for the viewer to correct). pdf.js applies it by
+        // DEFAULT, but an explicit `rotation` REPLACES it rather than adding to it —
+        // so passing the viewer's own rotation alone silently discards /Rotate and
+        // renders the page as-scanned (a /Rotate 180 passport comes out upside down).
+        // Compose the two instead: page rotation first, viewer rotation on top.
+        const pageRot = ((((page.rotate ?? 0) % 360) + 360) % 360);
+        const totalRot = (pageRot + rot) % 360;
         const base = page.getViewport({ scale: 1 });
         // On-screen dims after rotation (90/270 swap width & height).
         const swap = rot === 90 || rot === 270;
@@ -167,7 +175,7 @@ export function SecureDocCanvas({
           MAX_SIDE / dispH,
           Math.sqrt(MAX_AREA / (dispW * dispH)),
         );
-        const vp = page.getViewport({ scale, rotation: rot });
+        const vp = page.getViewport({ scale, rotation: totalRot });
         const ctx = addCanvas(Math.ceil(vp.width), Math.ceil(vp.height), n > 1);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         if (cancelled) return;

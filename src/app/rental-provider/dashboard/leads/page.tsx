@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
+import { NewLeadModal } from '@/components/leads/NewLeadModal';
 import { getRequiredDocs, type DocReq } from '@/lib/docRequirements';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
@@ -20,6 +21,7 @@ import { putKycSlot } from '@/lib/kycSlotUpload';
 import { docLabel } from '@/lib/docLabel';
 import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { leadContactPerson, leadDisplayName } from '@/lib/leadJourney';
 
 /* ─── Types ───────────────────────────────────────────────────────────────── */
 
@@ -201,7 +203,12 @@ interface ApiLead {
   createdAt: string;
   updatedAt: string;
   viewings?: ApiViewing[];
-  convertedTenant: { id: number; user?: { name?: string; email?: string; phone?: string } } | null;
+  convertedTenant: {
+    id: number;
+    entityType?: string | null;
+    companyName?: string | null;
+    user?: { name?: string; email?: string; phone?: string };
+  } | null;
   unit: {
     id: number; unitNumber: string; unitName: string | null;
     unitType: string | null;
@@ -657,7 +664,9 @@ function LeadRow({
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  const displayName  = lead.convertedTenant?.user?.name ?? lead.customerName;
+  const displayName  = leadDisplayName(lead);
+  // On a company lead the person who called is the CONTACT, shown beside the company.
+  const contactPerson = leadContactPerson(lead);
   const email        = lead.leadEmail ?? lead.convertedTenant?.user?.email ?? null;
   const phone        = lead.leadPhone ?? lead.convertedTenant?.user?.phone ?? null;
   const unitLabel    = lead.unit?.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit?.unitName ?? null);
@@ -1012,7 +1021,9 @@ function LeadRow({
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-[#1a1916] truncate">{displayName}</p>
-              <p className="text-xs text-[#9b9890] truncate mt-0.5">{email ?? 'No email'}{phone ? ` · ${phone}` : ''}</p>
+              <p className="text-xs text-[#9b9890] truncate mt-0.5">
+                {contactPerson ? `${contactPerson} · ` : ''}{email ?? 'No email'}{phone ? ` · ${phone}` : ''}
+              </p>
             </div>
             <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-1 shrink-0 ${STAGE_PILL[lead.stage]}`}>
               {STAGE_LABELS[lead.stage]}
@@ -1079,7 +1090,9 @@ function LeadRow({
         {/* Customer */}
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-[#1a1916] truncate">{displayName}</p>
-          <p className="text-xs text-[#9b9890] truncate mt-0.5">{email ?? 'No email'}{phone ? ` · ${phone}` : ''}</p>
+          <p className="text-xs text-[#9b9890] truncate mt-0.5">
+            {contactPerson ? `${contactPerson} · ` : ''}{email ?? 'No email'}{phone ? ` · ${phone}` : ''}
+          </p>
         </div>
 
         {/* Property */}
@@ -1159,7 +1172,12 @@ function LeadRow({
  * Manager portal (rendered with `manager={{ rp }}`), which swaps every action to
  * the landlord-scoped /api/manager/leads/* endpoints via leadUrl().
  */
-export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
+/**
+ * `canCreateLeads` gates the "Add Lead" affordance. The RP owns their pipeline,
+ * so the RP route passes nothing and gets it; a manager only gets it when the
+ * landlord granted them "Add new leads" (per-landlord — see migration 0165).
+ */
+export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: { rp: number }; canCreateLeads?: boolean }) {
   const router = useRouter();
   const [leads, setLeads]           = useState<ApiLead[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -1173,6 +1191,13 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
   // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
   const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
+  // "Add lead" — enquiries that came in off-platform (walk-in, call, WhatsApp).
+  const [addingLead, setAddingLead] = useState(false);
+  const createdLeadRef = useRef<number | null>(null);
+
+  const openLead = useCallback((id: number) => {
+    router.push(manager ? `/dashboard/manager/leads/${id}?rp=${manager.rp}` : `/rental-provider/dashboard/leads/${id}`);
+  }, [router, manager]);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true); setError(null);
@@ -1254,7 +1279,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
   }
 
   function handleConvert(lead: ApiLead) {
-    const name = encodeURIComponent(lead.convertedTenant?.user?.name ?? lead.customerName ?? '');
+    const name = encodeURIComponent(leadDisplayName(lead) ?? '');
     // Prefer the payment plan's first_bundle date (the agreed start date) over the
     // tenant's original desiredMoveIn (just their initial preference at viewing time).
     const planStart = lead.paymentPlan?.items?.find(it => it.type === 'first_bundle')?.dueDate
@@ -1277,7 +1302,8 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
     if (activeTab !== 'all' && l.stage !== activeTab) return false;
     if (search) {
       const q    = search.toLowerCase();
-      const name = (l.convertedTenant?.user?.name ?? l.customerName).toLowerCase();
+      // Search matches the company AND the person who called for a company lead.
+      const name = `${leadDisplayName(l)} ${leadContactPerson(l) ?? ''}`.toLowerCase();
       const unit = (l.unit?.unitName ?? l.unit?.unitNumber ?? '').toLowerCase();
       const bldg = (l.unit?.property?.buildingName ?? '').toLowerCase();
       const eml  = (l.leadEmail ?? l.convertedTenant?.user?.email ?? '').toLowerCase();
@@ -1333,6 +1359,14 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
+          {canCreateLeads && (
+            <button
+              onClick={() => setAddingLead(true)}
+              className="flex items-center gap-2 text-sm font-semibold text-white bg-[#2e9f82] rounded-lg px-4 py-2 hover:bg-[#27856d] transition-colors cursor-pointer"
+            >
+              <Plus size={14} /> Add Lead
+            </button>
+          )}
         </div>
       </div>
 
@@ -1444,7 +1478,19 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
             <User size={22} className="text-[#2e9f82]" />
           </div>
           <p className="font-semibold text-[#1a1916] text-sm mb-1">No leads yet</p>
-          <p className="text-xs text-[#9b9890]">Leads appear when customers book viewings on your units.</p>
+          <p className="text-xs text-[#9b9890]">
+            {canCreateLeads
+              ? 'Leads appear when customers book viewings on your units — or add one yourself for a walk-in or phone enquiry.'
+              : 'Leads appear when customers book viewings on your units.'}
+          </p>
+          {canCreateLeads && (
+            <button
+              onClick={() => setAddingLead(true)}
+              className="mt-4 flex items-center gap-2 text-sm font-semibold text-white bg-[#2e9f82] rounded-lg px-4 py-2 hover:bg-[#27856d] transition-colors cursor-pointer"
+            >
+              <Plus size={14} /> Add Lead
+            </button>
+          )}
         </div>
       )}
 
@@ -1459,12 +1505,7 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
           filter + search chrome above. */}
       {view === 'calendar' ? (
         !loading && leads.length > 0 && (
-          <LeadsCalendarView
-            leads={filtered}
-            onOpenLead={(id) => router.push(manager
-              ? `/dashboard/manager/leads/${id}?rp=${manager.rp}`
-              : `/rental-provider/dashboard/leads/${id}`)}
-          />
+          <LeadsCalendarView leads={filtered} onOpenLead={openLead} />
         )
       ) : (
         !loading && filtered.length > 0 && (
@@ -1487,6 +1528,24 @@ export function LeadsWorkspace({ manager }: { manager?: { rp: number } }) {
             ))}
           </div>
         )
+      )}
+
+      {addingLead && canCreateLeads && (
+        <NewLeadModal
+          manager={manager}
+          preferredStartDays={preferredStartDays}
+          allowedInstallments={allowedInstallments}
+          // Navigate on CLOSE, not on create: the overlay closes through
+          // history.back() (see useBackClose), which would undo a router.push
+          // fired in the same tick. The id is parked until the overlay is gone.
+          onClose={() => {
+            setAddingLead(false);
+            const id = createdLeadRef.current;
+            createdLeadRef.current = null;
+            if (id) openLead(id);
+          }}
+          onCreated={(leadId) => { createdLeadRef.current = leadId; fetchLeads(); }}
+        />
       )}
     </div>
   );

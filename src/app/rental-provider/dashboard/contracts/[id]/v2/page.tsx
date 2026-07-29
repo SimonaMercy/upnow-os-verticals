@@ -32,7 +32,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment, type CSSPr
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
-import { KYC_DOCS, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
+import { KYC_DOCS, getRequiredDocs, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
@@ -2543,7 +2543,9 @@ function DetailsDrawer({
   // residential section (company promotions applied). Shown on new contracts;
   // renewals show only the re-verification slots (renewalDocs).
   const fullPackDocs = useMemo<DocReq[]>(
-    () => [...KYC_DOCS, ...getRentalSectionDocs(contract.unit.type, contract.tenant.entityType)],
+    // getRequiredDocs picks the identity pack by entity type — a company tenant
+    // gets trade licence + authorised signatory, not personal KYC.
+    () => getRequiredDocs(contract.unit.type, contract.tenant.entityType),
     [contract.unit.type, contract.tenant.entityType]);
   // Renewal-specific re-verification slots (empty for new contracts).
   const renewalDocs = useMemo<DocReq[]>(

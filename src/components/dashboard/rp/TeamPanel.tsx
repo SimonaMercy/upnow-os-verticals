@@ -40,6 +40,7 @@ interface ManagerPermissions {
   canManageDocuments:   boolean;
   // Leads & viewings
   canManageViewings:    boolean;
+  canCreateLeads:       boolean;
   // Customers & contracts
   canManageAgreements:  boolean;
   canCreateContracts:   boolean;
@@ -100,6 +101,9 @@ export const PERM_GROUPS = [
     description: 'The Leads section',
     perms: [
       { key: 'canManageViewings',    label: 'Manage leads & viewings',      meta: 'can_manage_viewings' },
+      // Creating a lead also creates the customer's portal account, so it's its
+      // own grant — same split as "View & manage leases" vs "Create contracts".
+      { key: 'canCreateLeads',       label: 'Add new leads',                meta: 'can_create_leads' },
     ],
   },
   {
@@ -182,6 +186,7 @@ export const metaDefaults = {
   can_manage_documents:   false,
   // Leads & viewings
   can_manage_viewings:    true,
+  can_create_leads:       false,
   // Customers & contracts
   can_manage_agreements:  true,
   can_create_contracts:   false,
@@ -215,7 +220,7 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'leasing_agent',
     label: 'Leasing Agent',
-    keys: ['canListProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canManageAgreements', 'canCreateContracts', 'canCommunicateTenants'],
+    keys: ['canListProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canManageAgreements', 'canCreateContracts', 'canCommunicateTenants'],
   },
   {
     id: 'accountant',
@@ -225,7 +230,7 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'operations',
     label: 'Operations / Property Manager',
-    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canViewFinancials', 'canViewReports'],
+    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canViewFinancials', 'canViewReports'],
   },
   {
     id: 'maintenance',

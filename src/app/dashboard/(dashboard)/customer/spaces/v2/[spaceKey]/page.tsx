@@ -46,7 +46,8 @@ import { buildSegregatedPlan, segRowsFromCustomerPlan } from '@/lib/segregatedPl
 import { openDocViewer } from '@/lib/docViewer';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
-import { KYC_DOCS, RESIDENTIAL_RENTAL_DOCS, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
+import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
+import { RESIDENTIAL_RENTAL_DOCS, getKycDocs, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
@@ -417,6 +418,12 @@ interface Resolved {
    *  even when every required file is uploaded. */
   docsSubmitted?: boolean;
   tenantProfileId: number | null;
+  /** Individual or company — decides whether we ask for personal identity docs
+   *  or the company's licence + authorised signatory (see docRequirements). */
+  entityType: 'individual' | 'company' | null;
+  companyName: string | null;
+  tradeLicenseNumber: string | null;
+  tradeLicenseAuthority: string | null;
   myDocs: TenantDoc[];
   /** Extra documents the RP requested (free-text names from additionalDocsNote).
    *  Rendered as their own upload slots; while any is unfulfilled the customer is
@@ -1236,10 +1243,10 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
         )}
       </div>
 
-      {/* Cost summary — totals only. The customer hasn't picked a payment
-          frequency yet, so we deliberately omit the cheque schedule + count.
-          The breakdown by cheques renders inside the InterestedPopup once
-          they actually choose Annual / Quarterly / Monthly etc. */}
+      {/* Cost summary — totals only, and the only place money appears in
+          Step 1. No cheque schedule / count here or in the InterestedPopup:
+          the customer commits to the unit first, and the payment breakdown
+          reaches them with the rental provider's offer. */}
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost summary</p>
 
@@ -1262,7 +1269,7 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
             <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
             <p style={{ fontSize: 11, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
-              You&rsquo;ll pick a payment frequency (annual, semi-annual, quarterly, etc.) when you tap <b>I&rsquo;m Interested</b> — the full cheque schedule appears before you confirm.
+              You&rsquo;ll pick a payment frequency (annual, semi-annual, quarterly, etc.) when you tap <b>I&rsquo;m Interested</b> — your rental provider confirms the payment schedule with your offer.
             </p>
           </div>
         ) : null}
@@ -1350,6 +1357,7 @@ function InterestedPopup({
   }, [rpAllowedInstallments]);
   const [calOpen, setCalOpen] = useState(false);
   const calRef = useRef<HTMLDivElement>(null);
+  const calBodyRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -1363,23 +1371,11 @@ function InterestedPopup({
       if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false);
     };
     document.addEventListener('mousedown', close);
+    // The calendar expands in flow — if it opens near the bottom of the modal
+    // body, bring it fully into view instead of leaving it half cut off.
+    calBodyRef.current?.scrollIntoView({ block: 'nearest' });
     return () => document.removeEventListener('mousedown', close);
   }, [calOpen]);
-
-  // Live plan preview as the customer flips payments / move-in.
-  const [preview, setPreview] = useState<ApiPaymentPlan | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/leads/my-viewings/${viewing.id}/plan-preview`, {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contractStartDate: moveIn, paymentsCount }),
-    })
-      .then(r => r.ok ? r.json() as Promise<ApiPaymentPlan> : null)
-      .then(p => { if (!cancelled) setPreview(p); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [viewing.id, moveIn, paymentsCount]);
 
   const dayAllowed = (day: number) => rpPreferredDays.length === 0 || rpPreferredDays.includes(day);
   const calFirstDow = new Date(calYear, calMonth, 1).getDay();
@@ -1460,8 +1456,12 @@ function InterestedPopup({
               </span>
               <ChevronDown size={14} color="var(--mute)" style={{ transition: 'transform 0.15s', transform: calOpen ? 'rotate(180deg)' : 'none' }} />
             </button>
+            {/* Inline (in-flow) calendar, NOT an absolute popover: the modal
+                body is a scroll container, so an overlay would be clipped by
+                it and collide with the footer. Expanding in flow lets the
+                modal grow / scroll around it. */}
             {calOpen && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--paper)', borderRadius: 12, border: '1px solid var(--mist-strong)', boxShadow: '0 10px 25px rgba(0,0,0,0.12)', zIndex: 30, padding: 14 }}>
+              <div ref={calBodyRef} style={{ marginTop: 6, background: 'var(--paper)', borderRadius: 12, border: '1px solid var(--mist-strong)', padding: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <button type="button" onClick={calPrev} style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer' }}><ChevronLeft size={16} /></button>
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{calMonthLabel}</span>
@@ -1522,63 +1522,10 @@ function InterestedPopup({
           </div>
         </div>
 
-        {/* Live total + full payment schedule — updates every time the
-            customer flips occupants, move-in or frequency. Shows the
-            mental-model breakdown (e.g. "Semi-annual = 2 rent payments
-            + 1 security deposit payment") and then the per-row amounts
-            and due dates so the customer sees exactly what they're
-            committing to before tapping Confirm. Method (cheque / bank
-            transfer / card / cash) is picked later on Step 3 — the
-            preview here intentionally stays method-neutral. */}
-        {preview && (
-          <div style={{ display: 'grid', gap: 8 }}>
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <div>
-                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, fontWeight: 600 }}>Total payable</p>
-                {(() => {
-                  const rent = preview.installmentCount ?? Math.max(1, preview.chequeCount - 1);
-                  const hasDeposit = (preview.securityDepositFils ?? 0) > 0;
-                  return (
-                    <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>
-                      {rent} rent {rent === 1 ? 'payment' : 'payments'}
-                      {hasDeposit ? ' + 1 security deposit payment' : ''}
-                    </p>
-                  );
-                })()}
-              </div>
-              <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', margin: 0, fontVariantNumeric: 'tabular-nums' }}>{fmtAedFils(preview.totalAmountFils)}</p>
-            </div>
-
-            {preview.items && preview.items.length > 0 && (
-              <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '12px 14px' }}>
-                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px', fontWeight: 600 }}>Payment schedule</p>
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {sortPlanItems(preview.items).map((it, i) => {
-                    const isDeposit = it.type === 'security_deposit';
-                    return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: isDeposit ? 'var(--saffron)' : 'var(--jade-deep)', background: isDeposit ? 'var(--saffron-soft)' : 'var(--jade-soft)', borderRadius: 6, padding: '2px 6px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                            #{i + 1}
-                          </span>
-                          <span style={{ color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {it.description ?? (isDeposit ? 'Security deposit' : `Installment ${i + 1}`)}
-                          </span>
-                        </div>
-                        <span style={{ color: 'var(--mute)', fontSize: 11, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                          {it.dueDate ? new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short' }) : '—'}
-                        </span>
-                        <span style={{ fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', minWidth: 90, textAlign: 'right' }}>
-                          {fmtAedFils(it.amountFils)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {/* No money is shown here by design — the customer only answers the
+            three questions above. Amounts, the cheque schedule and payment
+            method all come later, once the rental provider has reviewed the
+            lead and issued the offer. */}
 
         {err && <ErrorBox msg={err} />}
       </div>
@@ -1717,7 +1664,7 @@ function PersonalDetailsEditor({ user, onSaved }: { user: AuthUser; onSaved: () 
       <PersonalEditField label="First name" initial={user?.firstName ?? ''} fieldKey="firstName" onSaved={onSaved} />
       <PersonalEditField label="Last name"  initial={user?.lastName ?? ''}  fieldKey="lastName"  onSaved={onSaved} />
       <PersonalGenderField initial={user?.gender ?? ''} onSaved={onSaved} />
-      <PersonalEditField label="Nationality" initial={user?.nationality ?? ''} fieldKey="nationality" onSaved={onSaved} />
+      <PersonalNationalityField initial={user?.nationality ?? ''} onSaved={onSaved} />
       <PersonalEditField label="Emirates ID" initial={user?.emiratesIdNumber ?? ''} fieldKey="emiratesIdNumber" mono onSaved={onSaved} placeholder="784-YYYY-NNNNNNN-D" />
     </div>
   );
@@ -1791,6 +1738,70 @@ function PersonalEditField({
           fontVariantNumeric: mono ? 'tabular-nums' : undefined,
         }}
       />
+      {err && <span style={{ fontSize: 11, color: 'var(--brick)' }}>{err}</span>}
+    </label>
+  );
+}
+
+/**
+ * Nationality is a closed list, not free text — a typed value would never
+ * match what contracts / Ejari expect. Rendered as a dropdown whether the
+ * value came from the Emirates ID scan or from the customer.
+ *
+ * A scanned value is snapped onto the list (the ID prints the COUNTRY,
+ * "Pakistan", while we store the demonym, "Pakistani"). If it still can't be
+ * matched it is kept as a selectable option flagged "from your Emirates ID",
+ * so an unusual scan is never silently dropped — the customer just picks the
+ * right entry over it.
+ */
+function PersonalNationalityField({ initial, onSaved }: { initial: string; onSaved: () => Promise<unknown> | void }) {
+  const [value, setValue] = useState(() => normalizeNationality(initial));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setValue(normalizeNationality(initial));
+  }, [initial]);
+
+  const scannedExtra = value && !NATIONALITIES.includes(value) ? value : null;
+
+  async function setAndSave(next: string) {
+    if (next === value) return;
+    setValue(next);
+    setSaving(true); setErr(null);
+    try {
+      await apiPatch('/auth/me', { nationality: next || null });
+      setSaved(true);
+      await onSaved();
+      setTimeout(() => setSaved(false), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <label style={{ display: 'grid', gap: 4 }}>
+      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
+        Nationality
+        {saving && <span style={{ color: 'var(--saffron)', display: 'inline-flex', alignItems: 'center', gap: 4, textTransform: 'none', letterSpacing: 0 }}><Loader2 size={10} className="animate-spin" /> Saving</span>}
+        {saved && !saving && <span style={{ color: 'var(--jade-deep)', textTransform: 'none', letterSpacing: 0 }}>Saved ✓</span>}
+      </span>
+      <select
+        value={value}
+        onChange={e => setAndSave(e.target.value)}
+        style={{
+          padding: '8px 10px', borderRadius: 9, border: `1px solid ${err ? 'var(--brick)' : 'var(--mist-strong)'}`,
+          background: 'var(--paper)', fontSize: 13, color: value ? 'var(--ink)' : 'var(--mute)',
+          outline: 'none', fontFamily: 'inherit', width: '100%', appearance: 'auto',
+        }}>
+        <option value="">Select nationality…</option>
+        {scannedExtra && <option value={scannedExtra}>{scannedExtra} (from your Emirates ID)</option>}
+        {NATIONALITIES.map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
       {err && <span style={{ fontSize: 11, color: 'var(--brick)' }}>{err}</span>}
     </label>
   );
@@ -1890,7 +1901,9 @@ function PersonalDetailsConfirm({ user, onSaved }: { user: AuthUser; onSaved: ()
         <PersonalChip label="First name"  value={user?.firstName ?? '—'} />
         <PersonalChip label="Last name"   value={user?.lastName ?? '—'} />
         <PersonalChip label="Gender"      value={gender} />
-        <PersonalChip label="Nationality" value={user?.nationality ?? '—'} />
+        {/* Shown as the country, matching the dropdown — an older record holding
+            the adjective ("Pakistani") reads back as "Pakistan". */}
+        <PersonalChip label="Nationality" value={normalizeNationality(user?.nationality) || '—'} />
         <PersonalChip label="Emirates ID" value={user?.emiratesIdNumber ?? '—'} mono />
       </div>
       <button type="button" onClick={() => setEditing(true)}
@@ -1898,6 +1911,105 @@ function PersonalDetailsConfirm({ user, onSaved }: { user: AuthUser; onSaved: ()
         <Pen size={12} /> Something not right? Edit details
       </button>
     </>
+  );
+}
+
+/**
+ * Company details for a COMPANY customer — who the tenancy is actually with.
+ * The company name and trade licence go on the Ejari contract, so they're shown
+ * (and editable) here rather than left implicit behind the signatory's ID.
+ * Saves through PATCH /profiles/customer/me, the same endpoint the profile page
+ * uses, so the value the contract reads is the value edited here.
+ */
+function CompanyDetailsCard({
+  companyName, tradeLicenseNumber, tradeLicenseAuthority, onSaved,
+}: {
+  companyName: string | null;
+  tradeLicenseNumber: string | null;
+  tradeLicenseAuthority: string | null;
+  onSaved: () => Promise<unknown> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(companyName ?? '');
+  const [licence, setLicence] = useState(tradeLicenseNumber ?? '');
+  const [authority, setAuthority] = useState(tradeLicenseAuthority ?? '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const complete = !!(companyName && tradeLicenseNumber);
+  const pill = complete
+    ? { text: 'Provided', color: 'var(--jade-deep)', bg: 'var(--jade-soft)' }
+    : { text: 'Action needed', color: 'var(--brick)', bg: 'var(--brick-soft)' };
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const res = await fetch('/api/profiles/customer/me', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: name.trim(),
+          tradeLicenseNumber: licence.trim(),
+          tradeLicenseAuthority: authority.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error('Could not save your company details');
+      await onSaved();
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save your company details');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div data-testid="company-details" style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>Company details</p>
+        <span style={{ fontSize: 10, fontWeight: 700, color: pill.color, background: pill.bg, padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{pill.text}</span>
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--mute)', margin: '0 0 10px', lineHeight: 1.4 }}>
+        The tenancy is in the company&rsquo;s name — these go on the contract and its registration.
+      </p>
+
+      {editing || !complete ? (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Company name</span>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="Upnow Trading LLC"
+                style={{ fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'inherit' }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Trade licence no.</span>
+              <input value={licence} onChange={e => setLicence(e.target.value)} placeholder="123456"
+                style={{ fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Issuing authority</span>
+              <input value={authority} onChange={e => setAuthority(e.target.value)} placeholder="DED Dubai"
+                style={{ fontSize: 13, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--mist-strong)', background: 'var(--paper)', color: 'var(--ink)', fontFamily: 'inherit' }} />
+            </label>
+          </div>
+          {err && <p style={{ fontSize: 11.5, color: 'var(--brick)', margin: '8px 0 0' }}>{err}</p>}
+          <button type="button" onClick={save} disabled={saving || !name.trim() || !licence.trim()}
+            style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--jade)', border: 'none', borderRadius: 9, padding: '8px 14px', cursor: saving ? 'default' : 'pointer', color: '#fff', fontSize: 12, fontWeight: 700, fontFamily: 'inherit', opacity: saving || !name.trim() || !licence.trim() ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : 'Save company details'}
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            <PersonalChip label="Company name"     value={companyName ?? '—'} />
+            <PersonalChip label="Trade licence no." value={tradeLicenseNumber ?? '—'} mono />
+            <PersonalChip label="Issuing authority" value={tradeLicenseAuthority || '—'} />
+          </div>
+          <button type="button" onClick={() => setEditing(true)}
+            style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--jade-deep)', fontSize: 12, fontWeight: 700, fontFamily: 'inherit' }}>
+            <Pen size={12} /> Something not right? Edit company details
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -2142,16 +2254,24 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   // Base rendered doc lists (keys are stable — promotion below only flips the
   // `required` flag, never the set of rows shown).
-  const kycBase = KYC_DOCS;
+  // A COMPANY customer is asked for the company's licence + the identity of the
+  // person authorised to sign — never a salary certificate or a marriage
+  // certificate, which is what the individual pack asks for.
+  const isCompany = resolved.entityType === 'company';
+  const kycBase = getKycDocs(resolved.entityType);
+  const rentalSection = getRentalSectionDocs(unitType, resolved.entityType);
   // Always render these rows in the Supporting Documents section, even
   // though `required: false`. The customer's natural mental model is
   // "Employment Letter + Bank Statement + Marriage Cert" — hiding them
   // because they're optional would feel like missing UI.
-  const SUPPORTING_SHOWN_KEYS = isRes
-    ? ['employment_letter', 'bank_statement', 'marriage_certificate']
-    : getRentalSectionDocs(unitType).slice(0, 3).map(d => d.key);
-  const financialReqBase = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => SUPPORTING_SHOWN_KEYS.includes(d.key));
-  const financialOpt     = (isRes ? RESIDENTIAL_RENTAL_DOCS : getRentalSectionDocs(unitType)).filter(d => !SUPPORTING_SHOWN_KEYS.includes(d.key));
+  const SUPPORTING_SHOWN_KEYS = isCompany
+    ? rentalSection.map(d => d.key)
+    : isRes
+      ? ['employment_letter', 'bank_statement', 'marriage_certificate']
+      : rentalSection.slice(0, 3).map(d => d.key);
+  const supportingPool = isCompany ? rentalSection : (isRes ? RESIDENTIAL_RENTAL_DOCS : rentalSection);
+  const financialReqBase = supportingPool.filter(d => SUPPORTING_SHOWN_KEYS.includes(d.key));
+  const financialOpt     = supportingPool.filter(d => !SUPPORTING_SHOWN_KEYS.includes(d.key));
   const occupantDocBase  = isRes && occupantCount > 1 ? getOccupantDocs(occupantCount) : [];
 
   // ── RP-requested additional docs + promotion ────────────────────────────
@@ -2241,7 +2361,21 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           The auto-OCR pipeline (OcrService + runEmiratesIdOcr) is still
           in the codebase but gated off via OCR_ENABLED=false. Flip the
           env back on post-launch to resume auto-extract. */}
-      {(() => {
+      {/* A company tenancy is in the COMPANY's name — show (and let them fix)
+          the company + trade licence before the signatory's own details. */}
+      {isCompany && (
+        <CompanyDetailsCard
+          companyName={resolved.companyName}
+          tradeLicenseNumber={resolved.tradeLicenseNumber}
+          tradeLicenseAuthority={resolved.tradeLicenseAuthority}
+          onSaved={onRefresh}
+        />
+      )}
+
+      {/* Individuals only. A company tenancy is identified by the company card
+          above; the person signing is captured by their Signatory Emirates ID
+          upload, so a second card of personal chips adds nothing. */}
+      {!isCompany && (() => {
         const populated = !!(user?.firstName || user?.lastName || user?.emiratesIdNumber);
         // "Error / issue" = the customer uploaded their Emirates ID but we still
         // couldn't capture their details (auto-read failed / returned nothing).
@@ -2258,7 +2392,9 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
         return (
           <div data-testid="personal-details" data-state={populated ? 'populated' : eidReading ? 'reading' : needsManual ? 'manual' : 'blank'} style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>Personal details</p>
+              <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>
+                {isCompany ? 'Authorised signatory' : 'Personal details'}
+              </p>
               <span style={{ fontSize: 10, fontWeight: 700, color: pill.color, background: pill.bg, padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{pill.text}</span>
             </div>
             {populated ? (
@@ -2266,7 +2402,9 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
                  "Something not right? Edit details" toggle (issue path). */
               <>
                 <p style={{ fontSize: 11, color: 'var(--mute)', margin: '0 0 10px', lineHeight: 1.4 }}>
-                  Filled automatically from your Emirates ID — please check they match it exactly.
+                  {isCompany
+                    ? 'The person signing for the company — filled from their Emirates ID. Please check it matches exactly.'
+                    : 'Filled automatically from your Emirates ID — please check they match it exactly.'}
                 </p>
                 <PersonalDetailsConfirm user={user} onSaved={refreshUser} />
               </>
@@ -2392,6 +2530,15 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
                     style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
                 </div>
               )}
+              {/* The code only appears here when the backend exposes it
+                  (EXPOSE_DEV_OTP=true) — and that same flag deliberately
+                  suppresses the real email, so say so rather than leaving
+                  the tester waiting on an inbox. */}
+              {emailDevOtp && (
+                <p style={{ fontSize: 11, color: 'var(--mute)', margin: 0, lineHeight: 1.4 }}>
+                  Dev environment — the verification email is not sent while the code is shown here. Use the code above.
+                </p>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input type="text" inputMode="numeric" maxLength={6} placeholder="6-digit code"
                   value={emailOtp} onChange={e => setEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -2416,12 +2563,12 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
           auto-collapses with a "Done ✓" pill when every required KYC
           doc is uploaded, so finished work stays visible instead of
           disappearing on the customer. */}
-      <KycSection title="Identity documents (KYC)" accent allDone={kycAllDone}>
+      <KycSection title={isCompany ? 'Company & signatory documents' : 'Identity documents (KYC)'} accent allDone={kycAllDone}>
         {kycRequired.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
       </KycSection>
 
       {/* Supporting / business documents. Same persistent-Done pattern. */}
-      <KycSection title={isRes ? 'Supporting documents' : 'Business documents'} allDone={supportingAllDone}>
+      <KycSection title={isCompany ? 'Company supporting documents' : isRes ? 'Supporting documents' : 'Business documents'} allDone={supportingAllDone}>
         {supportingDocs.map(req => <KycDocRow key={req.key} req={req} myDocs={resolved.myDocs} localPreviews={localPreviews} docUploading={docUploading} onUpload={uploadDoc} />)}
       </KycSection>
 
@@ -2502,7 +2649,10 @@ function RenewalDocumentsAction({
   const unitType = unit?.unitType ?? null;
   const renewal = true;
 
-  const requiredDocs: DocReq[] = useMemo(() => getRentalSectionDocs(unitType).filter(d => d.required), [unitType]);
+  const requiredDocs: DocReq[] = useMemo(
+    () => getRentalSectionDocs(unitType, resolved.entityType).filter(d => d.required),
+    [unitType, resolved.entityType],
+  );
   // Rejected/missing docs do NOT satisfy a requirement — keep the Continue gate
   // honest so a rejected doc forces a re-upload before payment.
   const uploadedKeys = useMemo(() => new Set(resolved.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey)), [resolved.myDocs]);
@@ -5005,10 +5155,19 @@ export default function CustomerSpaceV2Page() {
         apiGet<ApiViewing[]>('/leads/my-viewings').catch(() => [] as ApiViewing[]),
         apiGet<ApiLead[]>('/leads/my-applications').catch(() => [] as ApiLead[]),
         apiGet<ApiContract[]>('/contracts/tenant').catch(() => [] as ApiContract[]),
-        apiGet<{ documents: TenantDoc[]; tenantProfileId?: number | null }>('/documents/my').catch(() => ({ documents: [], tenantProfileId: null })),
+        apiGet<{
+          documents: TenantDoc[]; tenantProfileId?: number | null;
+          entityType?: 'individual' | 'company' | null; companyName?: string | null;
+          tradeLicenseNumber?: string | null; tradeLicenseAuthority?: string | null;
+        }>('/documents/my')
+          .catch(() => ({ documents: [], tenantProfileId: null, entityType: null, companyName: null, tradeLicenseNumber: null, tradeLicenseAuthority: null })),
       ]);
       const docs = docsResp.documents ?? [];
       const tenantProfileId = (docsResp as { tenantProfileId?: number | null }).tenantProfileId ?? null;
+      const entityType = (docsResp as { entityType?: 'individual' | 'company' | null }).entityType ?? null;
+      const companyName = (docsResp as { companyName?: string | null }).companyName ?? null;
+      const tradeLicenseNumber = (docsResp as { tradeLicenseNumber?: string | null }).tradeLicenseNumber ?? null;
+      const tradeLicenseAuthority = (docsResp as { tradeLicenseAuthority?: string | null }).tradeLicenseAuthority ?? null;
       const kind = spaceKey.startsWith('v-') ? 'viewing' : spaceKey.startsWith('d-') ? 'direct' : spaceKey.startsWith('c-') ? 'contract' : null;
       const refId = Number(spaceKey.slice(2));
       let unit: ApiUnit | null = null;
@@ -5086,14 +5245,14 @@ export default function CustomerSpaceV2Page() {
       // Use getRequiredDocs (which prepends KYC_DOCS to the rental section)
       // so a customer who's uploaded financials but skipped KYC still gets
       // routed to docs_required, not payment_review.
-      const requiredKeys = getRequiredDocs(unit.unitType).filter(d => d.required).map(d => d.key);
+      const requiredKeys = getRequiredDocs(unit.unitType, entityType).filter(d => d.required).map(d => d.key);
       const uploadedKeys = new Set(docs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
       // Emirates ID is satisfied by a combined file OR both separate sides.
       const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => isDocKeySatisfied(k, uploadedKeys));
       const paymentPlan = lead?.paymentPlan ?? viewing?.lead?.paymentPlan ?? null;
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
       const requestedAdditionalDocs = parseAdditionalDocs(lead?.additionalDocsNote ?? viewing?.lead?.additionalDocsNote);
-      setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, docsSubmitted: readDocsSubmitted(spaceKey), tenantProfileId, myDocs: docs, requestedAdditionalDocs });
+      setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, docsSubmitted: readDocsSubmitted(spaceKey), tenantProfileId, entityType, companyName, tradeLicenseNumber, tradeLicenseAuthority, myDocs: docs, requestedAdditionalDocs });
       setLoading(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');

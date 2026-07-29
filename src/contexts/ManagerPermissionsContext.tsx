@@ -23,8 +23,9 @@ export interface RpPermissions {
     canListProperties:    boolean;
     canEditProperties:    boolean;
     canPublishListings:   boolean;
-    // Viewings
+    // Leads & viewings
     canManageViewings:    boolean;
+    canCreateLeads:       boolean;
     // Contracts & signing
     canManageAgreements:  boolean;
     canCreateContracts:   boolean;

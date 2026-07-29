@@ -27,23 +27,14 @@ import {
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { openDocViewer } from '@/lib/docViewer';
 import { RESIDENTIAL_RENTAL_DOCS } from '@/lib/docRequirements';
+import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
 import s from './profile.module.css';
 
 const cn = (...x: Array<string | false | null | undefined>) => x.filter(Boolean).join(' ');
 
-const NATIONALITIES = [
-  'Afghan','Albanian','Algerian','American','Angolan','Argentinian','Armenian','Australian','Austrian',
-  'Azerbaijani','Bahraini','Bangladeshi','Belgian','Bolivian','Bosnian','Brazilian','British','Bulgarian','Burmese',
-  'Cambodian','Cameroonian','Canadian','Chilean','Chinese','Colombian','Congolese','Croatian','Cuban',
-  'Czech','Danish','Egyptian','Emirati','Ethiopian','Filipino','Finnish','French','Georgian','German',
-  'Ghanaian','Greek','Guatemalan','Haitian','Honduran','Hungarian','Indian','Indonesian','Iranian','Iraqi',
-  'Irish','Israeli','Italian','Jamaican','Japanese','Jordanian','Kazakh','Kenyan','Korean','Kuwaiti',
-  'Lebanese','Libyan','Malaysian','Mexican','Moroccan','Namibian','Nepali','New Zealander','Nigerian',
-  'Norwegian','Omani','Pakistani','Palestinian','Paraguayan','Peruvian','Polish','Portuguese','Qatari',
-  'Romanian','Russian','Saudi','Serbian','Singaporean','Slovak','Somali','South African','Spanish',
-  'Sri Lankan','Sudanese','Swedish','Swiss','Syrian','Taiwanese','Tanzanian','Thai','Tunisian','Turkish',
-  'Ugandan','Ukrainian','Venezuelan','Vietnamese','Yemeni','Zambian','Zimbabwean',
-].sort();
+// Country names, shared with the Step 2 KYC form — both write users.nationality,
+// so they must offer the same options. An older demonym value ("Pakistani") is
+// snapped to its country on load rather than showing the field as blank.
 
 export default function CustomerProfilePage() {
   const { user, refresh } = useAuth();
@@ -102,7 +93,7 @@ export default function CustomerProfilePage() {
       // Auto-fill form fields that are currently empty
       if (user.firstName  && !firstName)   setFirstName(user.firstName);
       if (user.lastName   && !lastName)    setLastName(user.lastName);
-      if (user.nationality && !nationality) setNationality(user.nationality);
+      if (user.nationality && !nationality) setNationality(normalizeNationality(user.nationality));
       if (user.emiratesIdNumber && !emiratesId) setEmiratesId(user.emiratesIdNumber);
       if (user.gender && !gender && (user.gender === 'male' || user.gender === 'female')) setGender(user.gender);
       setTimeout(() => setOcrExtracted(false), 5000);
@@ -513,6 +504,11 @@ export default function CustomerProfilePage() {
                       <div className={cn(s.input, s.dropdown)}>
                         <select ref={fieldRefs.nationality} value={nationality} onChange={(e) => setNationality(e.target.value)}>
                           <option value="">Select nationality…</option>
+                          {/* Keep a stored value that isn't on the list selectable,
+                              so opening this page can't silently blank it. */}
+                          {nationality && !NATIONALITIES.includes(nationality) && (
+                            <option value={nationality}>{nationality}</option>
+                          )}
                           {NATIONALITIES.map((n) => <option key={n} value={n}>{n}</option>)}
                         </select>
                       </div>

@@ -41,6 +41,7 @@ import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
   STAGE_LABELS, getPendingViewing, getLatestViewing, getUrgency, getPrimary,
+  leadContactPerson, leadDisplayName,
 } from '@/lib/leadJourney';
 
 /* ─── Formatting ──────────────────────────────────────────────────────────── */
@@ -620,7 +621,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   /* ── Derived state (real data → the one rendered view) ── */
-  const displayName = lead.convertedTenant?.user?.name ?? lead.customerName;
+  // A company lead is named by the company; the person who called is the contact.
+  const displayName = leadDisplayName(lead);
+  const contactPerson = leadContactPerson(lead);
   const email  = lead.leadEmail ?? lead.convertedTenant?.user?.email ?? null;
   const phone  = lead.leadPhone ?? lead.convertedTenant?.user?.phone ?? null;
   const unitLabel = lead.unit?.unitNumber ? `Unit ${lead.unit.unitNumber}` : (lead.unit?.unitName ?? '—');
@@ -747,6 +750,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               ? <Link href={customerHref} className="chain-link" style={{ fontSize: 13 }} title="Open customer details">{displayName}</Link>
               : <span className="pv">{displayName}</span>}
           </div>
+          {contactPerson && <div className="pitem"><span className="pk">Contact</span><span className="pv">{contactPerson}</span></div>}
           {phone && <div className="pitem"><span className="pk">Phone</span><span className="pv">{phone}</span></div>}
           <span className="isep" />
           {annualRentAed != null && <div className="pitem"><span className="pk">Annual rent</span><span className="pv">{aedWhole(annualRentAed)}</span></div>}
@@ -1496,7 +1500,12 @@ function DocsSection({
   const [menuOpen, setMenuOpen] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);   // "View all documents" reader popup
 
-  const reqDocs = getRequiredDocs(lead.unit?.unitType);
+  // A company customer is asked for the company's pack (trade licence +
+  // authorised signatory), never the personal one — same rule the customer sees.
+  const reqDocs = getRequiredDocs(
+    lead.unit?.unitType,
+    lead.convertedTenant?.entityType === 'company' ? 'company' : 'individual',
+  );
   const okKeys = new Set((docs ?? []).filter(d => !['missing', 'rejected'].includes(d.status)).map(d => d.documentKey));
   const required = reqDocs.filter(d => d.required);
   const optional = reqDocs.filter(d => !d.required);

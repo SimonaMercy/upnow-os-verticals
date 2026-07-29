@@ -133,7 +133,12 @@ export interface ApiLead {
   createdAt: string;
   updatedAt: string;
   viewings?: ApiViewing[];
-  convertedTenant: { id: number; user?: { name?: string; email?: string; phone?: string } } | null;
+  convertedTenant: {
+    id: number;
+    entityType?: string | null;
+    companyName?: string | null;
+    user?: { name?: string; email?: string; phone?: string };
+  } | null;
   unit: {
     id: number; unitNumber: string; unitName: string | null;
     unitType: string | null;
@@ -162,6 +167,22 @@ export interface ApiLead {
   /** Set on converted leads when getLeadById links the created contract. Optional
    *  — falls back to a contracts search when absent. */
   contractId?: number | null;
+}
+
+/** Who the lead is FOR. A company lead is known by the company — the person who
+ *  called is the contact, not the customer — so the company name wins wherever a
+ *  lead is named (list rows, calendar, detail header, search). */
+export function leadDisplayName(lead: Pick<ApiLead, 'convertedTenant' | 'customerName'>): string {
+  const t = lead.convertedTenant;
+  if (t?.entityType === 'company' && t.companyName?.trim()) return t.companyName.trim();
+  return t?.user?.name ?? lead.customerName;
+}
+
+/** The human to contact on a company lead — null for an individual, where the
+ *  customer and the contact are the same person. */
+export function leadContactPerson(lead: Pick<ApiLead, 'convertedTenant'>): string | null {
+  const t = lead.convertedTenant;
+  return t?.entityType === 'company' ? (t.user?.name ?? null) : null;
 }
 
 /* ─── Pending viewing selector ────────────────────────────────────────────── */
