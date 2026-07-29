@@ -331,9 +331,13 @@ export function AuthModal({
     <h2 style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em', color: '#0e1a16', margin: 0 }}>{text}</h2>
   );
 
+  // `color` is explicit, not inherited: the modal is a DOM child of whatever
+  // page opened it, and on the dark holding page that meant near-white text on
+  // the white card — invisible as you typed.
   const inputStyle = {
     width: '100%', padding: '12px 14px 12px 40px', borderRadius: 12,
     border: '1.5px solid #e8ece9', fontSize: 15, outline: 'none', fontFamily: 'inherit',
+    color: '#0e1a16', background: 'white',
   } as const;
 
   // Six-box OTP input — shared by the sign-in and sign-up verify steps.
@@ -446,6 +450,8 @@ export function AuthModal({
           maxWidth: 420,
           boxShadow: '0 24px 64px -12px rgba(0,0,0,0.35)',
           padding: 28, position: 'relative',
+          // The card is always light, whatever the page behind it uses.
+          color: '#0e1a16',
         }}
       >
         {dismissible && (
