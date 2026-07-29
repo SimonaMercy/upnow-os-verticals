@@ -43,3 +43,6 @@ next-env.d.ts
 # e2e build output (Tailwind v4 scans non-ignored dirs — keep this ignored)
 .next-e2e/
 playwright-report-fullcycle/
+
+# Playwright journey suite — ephemeral run state (holds portal magic-link tokens)
+e2e/journey/.state.json
