@@ -41,7 +41,8 @@ test('02 — customer uploads documents and submits for review', async ({ page }
   const scanSlots = () =>
     page.locator('input[type="file"]').evaluateAll((els) =>
       els.map((e) => {
-        const t = ((e as HTMLInputElement).closest('label')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+        // The row is a [data-doc-key] div; the <label> wraps only the action pill.
+        const t = ((e as HTMLInputElement).closest('[data-doc-key]')?.textContent ?? '').replace(/\s+/g, ' ').trim();
         const m = t.match(/^(.*?)(Required|Optional)/);
         return {
           name: (m ? m[1] : t).trim(),
@@ -59,7 +60,7 @@ test('02 — customer uploads documents and submits for review', async ({ page }
   // Upload the required set; re-locate by name because finishing them re-renders the list
   for (const slot of slots.filter((s) => s.required && !s.done)) {
     const isPdfish = /tenancy|contract|salary|bank|statement|trade|licence|license/i.test(slot.name);
-    const input = page.locator('label', { hasText: slot.name }).locator('input[type="file"]').first();
+    const input = page.locator('[data-doc-key]', { hasText: slot.name }).locator('input[type="file"]').first();
     await input.setInputFiles(isPdfish ? pdf('doc.pdf') : png('doc.png'), { timeout: 20_000 });
     act('customer', 'Uploaded document', slot.name);
     await page.waitForTimeout(2500);

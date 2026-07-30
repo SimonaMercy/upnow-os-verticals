@@ -326,16 +326,22 @@ export default function CustomerDetailPage() {
   const isEidCombined = (k: string) => isEidKey(k) && !isEidFront(k) && !isEidBack(k);
   const kycChecklist = KYC_REQS.map(req => {
     const docs = kycDocs.filter(d => req.match(d.documentKey));
-    let satisfied = docs.length > 0;
+    // A REQUESTED document is a row with NO file yet (status 'pending',
+    // file_url ''), so satisfaction is counted over the rows that actually
+    // carry a file — otherwise the slot reads "on record · pending review" for
+    // a document nobody has sent. `docs` keeps the fileless row so an upload
+    // fills that placeholder in place (see slotsFor).
+    const filed = docs.filter(d => !!d.fileUrl);
+    let satisfied = filed.length > 0;
     let partialHint: string | null = null;
     if (req.key === 'emirates_id') {
-      const front = docs.some(d => isEidFront(d.documentKey));
-      const back = docs.some(d => isEidBack(d.documentKey));
-      const combined = docs.some(d => isEidCombined(d.documentKey));
+      const front = filed.some(d => isEidFront(d.documentKey));
+      const back = filed.some(d => isEidBack(d.documentKey));
+      const combined = filed.some(d => isEidCombined(d.documentKey));
       satisfied = combined || (front && back);
-      if (!satisfied && docs.length > 0) partialHint = front ? 'Back side required' : 'Front side required';
+      if (!satisfied && filed.length > 0) partialHint = front ? 'Back side required' : 'Front side required';
     }
-    return { req, docs, satisfied, partialHint };
+    return { req, docs, filed, satisfied, partialHint };
   });
   const matchedKycIds = new Set(kycChecklist.flatMap(x => x.docs.map(d => d.id)));
   const extraKycDocs = kycDocs.filter(d => !matchedKycIds.has(d.id)); // KYC docs outside the standard checklist
@@ -423,7 +429,14 @@ export default function CustomerDetailPage() {
     if (d !== null && d < 0) actions.push(`Lease ${l.ref} expired ${plural(Math.abs(d), 'day')} ago · renew`);
     else if (d !== null && d <= 90) actions.push(`Renewal in ${plural(d, 'day')} · propose terms`);
   }
-  for (const d of data.documents.filter(d => d.status === 'pending')) actions.push(`${docLabel(d, data.documents)} pending review`);
+  // 'pending' covers two different asks: a file is sitting here to be reviewed,
+  // or the document has no file at all. The chip must name the action that's
+  // actually outstanding.
+  for (const d of data.documents.filter(d => d.status === 'pending')) {
+    actions.push(d.fileUrl
+      ? `${docLabel(d, data.documents)} pending review`
+      : `${docLabel(d, data.documents)} not uploaded`);
+  }
   if (kycDocs.length === 0) actions.push('Upload KYC documents');
   if (!c.emiratesId) actions.push('Add Emirates ID');
   if (!c.phone) actions.push('Add phone number');
@@ -757,12 +770,12 @@ export default function CustomerDetailPage() {
           <DocsLinkButton tenantId={Number(params.id)} label="Request documents" />
         </div>
         <div className="p-2 max-h-[480px] overflow-y-auto">
-          {kycChecklist.map(({ req, docs, satisfied, partialHint }) => {
-            const hasAnyFile = docs.length > 0;
+          {kycChecklist.map(({ req, docs, filed, satisfied, partialHint }) => {
+            const hasAnyFile = filed.length > 0;
             const uploaded = satisfied;                 // "done" = the slot's requirement is fully met
             const partial = hasAnyFile && !satisfied;   // e.g. Emirates ID front on file but back missing
-            const hasFile = docs.some(d => d.fileUrl);
-            const pending = hasAnyFile && docs[0].status === 'pending';
+            const hasFile = hasAnyFile;
+            const pending = hasAnyFile && filed[0].status === 'pending';
             const twoSided = req.key === 'emirates_id';
             const busy = directBusy === req.key;
             // Emirates ID (two-sided) and any doc that carries an expiry — trade
@@ -782,13 +795,13 @@ export default function CustomerDetailPage() {
                     {uploaded ? (
                       <>
                         {pending && <span className="text-[#b91c1c]">Pending review</span>}
-                        {docs[0].expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(docs[0].expiryDate)}</span>}
-                        <span className="text-[#1a7a5a]">{docs.length} file{docs.length !== 1 ? 's' : ''} on record</span>
+                        {filed[0].expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(filed[0].expiryDate)}</span>}
+                        <span className="text-[#1a7a5a]">{filed.length} file{filed.length !== 1 ? 's' : ''} on record</span>
                       </>
                     ) : partial ? (
                       <>
                         <span className="text-[#b07415]">{partialHint}{req.required ? ' · required' : ''}</span>
-                        <span className="text-[#9b9890]">{docs.length} of 2 sides on file</span>
+                        <span className="text-[#9b9890]">{filed.length} of 2 sides on file</span>
                       </>
                     ) : (
                       <span className="text-[#b07415]">Not uploaded{req.required ? ' · required' : ' · optional'}</span>
@@ -814,13 +827,18 @@ export default function CustomerDetailPage() {
           {/* KYC docs outside the standard checklist (e.g. labour card) — still listed */}
           {extraKycDocs.map(d => (
             <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-              <span className="w-9 h-9 rounded-lg bg-[#eef9f4] text-[#1a7a5a] flex items-center justify-center shrink-0"><Check size={16} /></span>
+              {/* No file = nothing has been sent. A tick and "Pending review"
+                  would both claim a document that never arrived. */}
+              <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${d.fileUrl ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                {d.fileUrl ? <Check size={16} /> : <FileText size={16} />}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-bold text-[#1a1916] truncate">{docLabel(d, data.documents)}</div>
                 <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
-                  {d.status === 'pending' && <span className="text-[#b91c1c]">Pending review</span>}
+                  {!d.fileUrl && <span className="text-[#b07415]">Not uploaded</span>}
+                  {d.fileUrl && d.status === 'pending' && <span className="text-[#b91c1c]">Pending review</span>}
                   {d.expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(d.expiryDate)}</span>}
-                  {!d.expiryDate && d.status !== 'pending' && <span className="text-[#1a7a5a]">On record</span>}
+                  {d.fileUrl && !d.expiryDate && d.status !== 'pending' && <span className="text-[#1a7a5a]">On record</span>}
                 </div>
               </div>
               {d.fileUrl && (
@@ -927,7 +945,10 @@ export default function CustomerDetailPage() {
                 <div className="text-[11px] font-bold uppercase tracking-wide text-[#6b6860] mb-1 px-2">Occupant {idx}</div>
                 {reqs.map(req => {
                   const existing = findOccupantDoc(req.key);
-                  const uploaded = !!existing;
+                  // A requested slot HAS a row but no file — it is not uploaded.
+                  // `existing` still goes into the upload slot so the file fills
+                  // that placeholder rather than creating a second row.
+                  const uploaded = !!existing?.fileUrl;
                   const busy = directBusy === req.key;
                   const occSlot: UploadSlot = { label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) };
                   // Occupant identity docs (EID / passport / visa) carry an expiry —
@@ -988,7 +1009,9 @@ export default function CustomerDetailPage() {
           <div className="p-2">
             {SUPPORTING_DOCS.map(req => {
               const existing = findSupportingDoc(req.key);
-              const uploaded = !!existing;
+              // Requested (row, no file) is NOT uploaded — see the occupant card.
+              const uploaded = !!existing?.fileUrl;
+              const notUploaded = !!existing && !existing.fileUrl;
               const busy = directBusy === req.key;
               const onUpload = () => pickDirect({ label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) });
               return (
@@ -1001,7 +1024,9 @@ export default function CustomerDetailPage() {
                     <div className="text-[11px] font-semibold mt-0.5">
                       {uploaded
                         ? <span className="text-[#1a7a5a]">{existing!.status === 'pending' ? 'Pending review' : 'On record'}</span>
-                        : <span className="text-[#9b9890]">{req.hint ?? 'Not uploaded'}</span>}
+                        : notUploaded
+                          ? <span className="text-[#b07415]">Not uploaded</span>
+                          : <span className="text-[#9b9890]">{req.hint ?? 'Not uploaded'}</span>}
                     </div>
                     {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                   </div>

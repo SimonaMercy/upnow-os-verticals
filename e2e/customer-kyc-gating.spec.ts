@@ -63,7 +63,9 @@ async function fillIdentity(request: APIRequestContext, custToken: string) {
 }
 
 const spaceUrl = (leadId: number) => `/dashboard/customer/spaces/v2/v-${leadId}`;
-const visaRow = (page: Page) => page.locator('label').filter({ hasText: 'UAE Visa / Residency' });
+// A doc row is a [data-doc-key] div; only its small action pill is a <label>
+// (a row-wide label would hand every click to the preview button — see KycDocRow).
+const visaRow = (page: Page) => page.locator('[data-doc-key]').filter({ hasText: 'UAE Visa / Residency' });
 
 test.describe.serial('Customer KYC — UAE Visa gating', () => {
   let rpToken = '';

@@ -43,6 +43,7 @@ import {
   Trash2, Plus,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
+import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
@@ -206,6 +207,14 @@ interface ContractDetail {
   fees?: ContractPayment[];
 }
 
+/**
+ * This contract IS the next term of another lease (a renewal child), not a
+ * standalone lease. Cancelling one ends the renewal (a termination of the next
+ * term); cancelling a standalone pre-active lease only resets it to setup.
+ */
+const isRenewalChild = (c: Pick<ContractDetail, 'contractType' | 'parentContractId'>) =>
+  c.contractType === 'renewal' && !!c.parentContractId;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Step model
 // ────────────────────────────────────────────────────────────────────────────
@@ -345,6 +354,14 @@ const BASE_DOC_TYPES = [
   { value: 'passport',               label: 'Passport',               category: 'identity',   needsExpiry: true  },
   { value: 'visa',                   label: 'Visa',                   category: 'identity',   needsExpiry: true  },
   { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
+  // Identity of the OTHER people on a company tenancy — a partner named on the
+  // trade licence, and the visa of the authorised signatory (whose EID/passport
+  // are the plain `emirates_id` / `passport` slots above). Kept as their own
+  // keys so they never collapse into the primary customer's identity slots.
+  { value: 'partner_emirates_id',    label: 'Partner EID',            category: 'identity',   needsExpiry: true  },
+  { value: 'partner_passport',       label: 'Partner Passport',       category: 'identity',   needsExpiry: true  },
+  { value: 'partner_visa',           label: 'Partner Visa',           category: 'identity',   needsExpiry: true  },
+  { value: 'signatory_visa',         label: 'Signatory Visa',         category: 'identity',   needsExpiry: true  },
   { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: false },
   { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
   { value: 'ejari_certificate',      label: 'Contract Registration Certificate',                  category: 'property',   needsExpiry: false },
@@ -923,6 +940,15 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
   const LABELS: Record<string, string> = {
     emirates_id: 'Emirates ID', passport: 'Passport', visa: 'UAE Visa / Residency', trade_license: 'Trade License',
   };
+  // The slot each flagged base is uploaded into — the SAME keys the customer's
+  // own renewal step writes to (spaces v2 BASE_DOC), so a copy sent through the
+  // upload link refreshes the base here instead of landing as a stray file.
+  const UPLOAD_SLOT: Record<string, { key: string; category: string }> = {
+    emirates_id:   { key: 'emirates_id',   category: 'identity' },
+    passport:      { key: 'passport',      category: 'identity' },
+    visa:          { key: 'uae_visa',      category: 'identity' },
+    trade_license: { key: 'trade_license', category: 'license'  },
+  };
   const baseOf = (k: string): string | null => {
     const s = (k ?? '').toLowerCase();
     if (s.includes('emirates_id') || s.includes('eid')) return 'emirates_id';
@@ -934,7 +960,10 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
   // Collect ALL docs per flagged KYC base — Emirates ID is two files (front + back),
   // so View must open both, not just one side. `freshestByBase` is the representative
   // used for the status/expiry line (prefer latest future expiry, else id).
-  const kycDocs = (h.contract.documents ?? []).filter(d => baseOf(d.documentKey ?? ''));
+  // `!!d.fileUrl` — a document REQUESTED through the upload link is a row with no
+  // file yet. It must not stand in as the base's freshest copy, or the row would
+  // read "Pending review" for a document nobody has sent.
+  const kycDocs = (h.contract.documents ?? []).filter(d => !!d.fileUrl && baseOf(d.documentKey ?? ''));
   const docsByBase = new Map<string, ContractDoc[]>();
   const freshestByBase = new Map<string, ContractDoc>();
   for (const d of kycDocs) {
@@ -1049,6 +1078,30 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
           );
         })}
       </div>
+      {/* One upload link carrying exactly the documents still owed — the customer
+          attaches them all without logging in, and without the RP re-typing the
+          list into a request picker. Same control as the lead docs step. */}
+      {canEdit && h.contract.tenant.id && bases.length > 0 && (
+        <div style={{ paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+            Customer document upload link
+          </div>
+          {/* Every KYC document on this renewal, refreshed or not — the customer's
+              page marks what is already on file and what is still expected. */}
+          <DocsLinkButton
+            tenantId={h.contract.tenant.id}
+            contractId={h.contract.id}
+            variant="inline"
+            label={`Send upload link (${bases.length})`}
+            presetDocs={bases.map(b => ({
+              key: UPLOAD_SLOT[b]?.key ?? b,
+              label: LABELS[b] ?? b,
+              category: UPLOAD_SLOT[b]?.category ?? 'identity',
+              required: true,
+            }))}
+          />
+        </div>
+      )}
       {err && <p className="note" style={{ color: 'var(--brick)' }}>{err}</p>}
       {allRefreshed ? (
         canEdit && (
@@ -2006,10 +2059,12 @@ function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amou
 /** Inline gapless receipt number shown under a payment/deposit/fee row. Struck
  *  through and tagged "VOID" when the receipt was soft-voided (its cheque was
  *  reverted from cleared) — the number is retained for the gapless series. */
-function ReceiptRefTag({ refs, id }: { refs: PaymentRefs; id: number }) {
-  const ref = refs.receiptByPaymentId[id];
+function ReceiptRefTag({ refs, id, kind = 'payment' }: { refs: PaymentRefs; id: number; kind?: 'payment' | 'deposit' }) {
+  // A register-booked deposit is numbered against security_deposits.id, a payment
+  // against payments.id — two separate id spaces, never interchangeable.
+  const ref = kind === 'deposit' ? refs.receiptByDepositId[id] : refs.receiptByPaymentId[id];
   if (!ref) return null;
-  const isVoid = refs.voidedPaymentIds.has(id);
+  const isVoid = kind === 'deposit' ? refs.voidedDepositIds.has(id) : refs.voidedPaymentIds.has(id);
   return (
     <span className="note"
       title={isVoid ? 'Receipt voided — cheque reverted to a non-cleared status; number retained for the gapless series' : 'Issued receipt number — for bank reconciliation'}
@@ -2807,6 +2862,7 @@ function DetailsDrawer({
                               <td><DollarSign size={13} /></td>
                               <td>
                                 Security deposit
+                                {sd.depositId != null && <ReceiptRefTag refs={paymentRefs} id={sd.depositId} kind="deposit" />}
                                 {sd.isCarried && sd.sourceContractId != null && (
                                   <span className="note" style={{ display: 'block', fontSize: 11 }}>
                                     held — carried from{' '}
@@ -3653,23 +3709,49 @@ function DetailsDrawer({
                       </div>
                       <div className="doclist">
                         {kycDocs.map(d => {
+                          // A REQUESTED document is a row with no file yet (status
+                          // 'pending', file_url ''). There is nothing to view and
+                          // nothing to review, so it must read as awaiting the
+                          // customer's upload — "Pending review" claims a file
+                          // arrived. Same rule as renderMissing above and the
+                          // customer-documents popup.
+                          const awaitingUpload = !d.fileUrl;
                           const ok = ['processed', 'complete'].includes(d.status);
                           const rejected = d.status === 'rejected';
-                          const stt = ok ? 'approved' : rejected ? 'rejected' : 'pending';
+                          const expired = d.status === 'expired';
+                          const stt = awaitingUpload ? 'docmiss' : ok ? 'approved' : rejected ? 'rejected' : 'pending';
                           const lbl = docLabel(d, kycDocs);
+                          const req: DocReq = { key: d.documentKey, label: lbl, category: d.category, required: false };
                           return (
                             <div key={d.id} className={'docitem ' + stt}>
                               <FileText size={14} />
                               <div>
                                 <div className="dn">{lbl}</div>
-                                <div className="ds">{ok ? 'Approved' : rejected ? 'Rejected — re-upload requested' : 'Pending review'}</div>
+                                <div className="ds">
+                                  {awaitingUpload ? 'Not uploaded'
+                                    : ok ? 'Approved'
+                                    : rejected ? 'Rejected — re-upload requested'
+                                    : expired ? (d.expiryDate ? `Expired ${fmtDate(d.expiryDate)} — awaiting a fresh copy` : 'Expired — awaiting a fresh copy')
+                                    : 'Pending review'}
+                                </div>
                               </div>
                               <div className="dacts">
-                                <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: lbl })}><ExternalLink size={12} /> View</button>
-                                {!ok && (
+                                {awaitingUpload ? (
+                                  // Already asked for — the only action left on the
+                                  // landlord's side is uploading a copy they were sent
+                                  // directly (email/WhatsApp), which fills this slot.
+                                  <button type="button" className="mini-btn ok cursor-pointer" title={`Upload the ${lbl} on the customer's behalf`} onClick={() => prefillUpload(req)}>
+                                    <UploadCloud size={12} /> Upload
+                                  </button>
+                                ) : (
                                   <>
-                                    <button type="button" className="mini-btn ok cursor-pointer" onClick={() => onApproveDoc(d.id)}><Check size={12} /> Approve</button>
-                                    <button type="button" className="mini-btn view cursor-pointer" onClick={() => onRejectDoc(d.id)}><X size={12} /> Reject</button>
+                                    <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: lbl })}><ExternalLink size={12} /> View</button>
+                                    {!ok && (
+                                      <>
+                                        <button type="button" className="mini-btn ok cursor-pointer" onClick={() => onApproveDoc(d.id)}><Check size={12} /> Approve</button>
+                                        <button type="button" className="mini-btn view cursor-pointer" onClick={() => onRejectDoc(d.id)}><X size={12} /> Reject</button>
+                                      </>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -4419,9 +4501,18 @@ function RejectUtilityModal({
   );
 }
 
+/**
+ * Two different actions behind one button, because the backend treats a
+ * pre-active RENEWAL differently from a pre-active new lease:
+ *  · renewal child → a real cancellation (termination of the next term): the
+ *    child is voided, its cheques cancelled, and the parent lease keeps running
+ *    to its own end date. Not reversible — re-propose instead.
+ *  · new lease → NOT a void; it resets the lease back to the setup pipeline.
+ */
 function CancelLeaseModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
+  const isRenewal = isRenewalChild(contract);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -4434,7 +4525,10 @@ function CancelLeaseModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (!res.ok) throw new Error(`Cancel failed: ${res.status}`);
+      if (!res.ok) {
+        const b = await res.json().catch(() => null);
+        throw new Error(b?.message ?? `Cancel failed: ${res.status}`);
+      }
       onSubmitted();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Cancel failed');
@@ -4448,24 +4542,36 @@ function CancelLeaseModal({
         <div className="mh">
           <span className="mt">
             <span className="mti" style={{ background: 'var(--brick)' }}><AlertCircle size={17} /></span>
-            Cancel lease
+            {isRenewal ? 'Cancel renewal' : 'Reset lease to setup'}
           </span>
           <button className="x" onClick={onClose}><X size={17} /></button>
         </div>
         <div className="mb">
           <p className="note" style={{ marginBottom: 14 }}>
-            This lease has not started yet, so cancelling voids it cleanly — no move-out or settlement. The contract is marked terminated and any pending cheques are voided. This cannot be undone.
+            {isRenewal ? (
+              <>
+                This renewal has not started yet, so cancelling it ends the next term the way a termination ends a tenancy — no move-out or settlement. The renewal lease is marked terminated, its pending cheques are voided, and the current lease
+                {contract.parentContractId ? ` (#${contract.parentContractId})` : ''} keeps running to its own end date. This cannot be undone — propose a fresh renewal if new terms are needed.
+              </>
+            ) : (
+              <>This lease has not started yet, so it is not voided — it goes back to the setup pipeline at its uncompleted stage and stays on the Operations worklist. Any termination flags are cleared and previously-voided cheques are reinstated.</>
+            )}
           </p>
           <div className="field" style={{ margin: 0 }}>
             <label>Reason (optional)</label>
-            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Why are you cancelling this lease?" />
+            <textarea
+              className="input"
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              placeholder={isRenewal ? 'Why are you cancelling this renewal?' : 'Why are you sending this lease back to setup?'}
+            />
           </div>
           {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
         </div>
         <div className="mf">
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>Keep lease</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>{isRenewal ? 'Keep renewal' : 'Keep as is'}</button>
           <button className="btn btn-brick btn-sm" disabled={busy} onClick={submit}>
-            Cancel lease
+            {busy ? 'Working…' : isRenewal ? 'Cancel renewal' : 'Reset to setup'}
           </button>
         </div>
       </div>
@@ -5144,6 +5250,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     && contract.renewalAccepted === 'rejected'
     && contract.contractActive === false;
   const isSuperseded = contract.contractType !== 'renewal' && !contract.contractActive && (contract.status === 'pending' || contract.status === 'issued');
+  // The RP cancelled this renewal before it started — the next term is void and
+  // the parent lease keeps running. Another dead-end row: no setup work left.
+  const isCancelledRenewal = isRenewalChild(contract)
+    && contract.status === 'terminated'
+    && contract.termination?.method === 'cancelled';
 
   // Actions
   const setLocalState = (patch: Partial<DerivedState>) => {
@@ -5771,6 +5882,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         </Link>
       ),
     };
+  } else if (isCancelledRenewal) {
+    content = {
+      tone: 'declined', icon: 'alert', sub: 'Renewal cancelled', label: 'Cancelled',
+      headline: 'This renewal was cancelled before it started.',
+      body: 'The next term is void and its cheques were cancelled. The current lease keeps running to its own end date — propose a fresh renewal there if new terms are needed.',
+      timing: null,
+      node: contract.parentContractId ? (
+        <Link href={`${contractsBase}/${contract.parentContractId}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
+          <ChevronRight size={14} /> Go to the current lease
+        </Link>
+      ) : null,
+    };
   } else if (isDeclinedRenewal) {
     // Two flavours of decline:
     //  • vacate  → the customer is leaving; the active lease winds down to a
@@ -6017,10 +6140,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 && perms.renewals;
               const canTerminate = (contract.status === 'active' || contract.status === 'expired')
                 && contract.termination?.response !== 'accepted' && perms.agreements;
-              // Not-yet-active leases (pending/issued) can be cancelled cleanly
-              // (no move-out/settlement) — a void rather than a wind-down.
+              // Not-yet-active leases (pending/issued): a renewal child is
+              // CANCELLED outright (ends the next term), a standalone lease is
+              // sent back to setup. Either way, no move-out/settlement.
               const canCancel = (contract.status === 'pending' || contract.status === 'issued')
                 && perms.agreements;
+              const cancelIsRenewal = isRenewalChild(contract);
               return (
                 <>
                   {canRenew && (
@@ -6035,15 +6160,17 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                   )}
                   {canCancel && (
                     <button className="btn btn-ghost btn-sm" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => setModal('cancel-lease')}>
-                      <X size={14} /> Cancel lease
+                      <X size={14} /> {cancelIsRenewal ? 'Cancel renewal' : 'Reset to setup'}
                     </button>
                   )}
                 </>
               );
             })()}
             {/* A cancelled (pre-active void) lease can be rolled back to its
-                previous issued state — cheques reinstated. */}
-            {!showPipeline && contract.status === 'terminated'
+                previous issued state — cheques reinstated. A cancelled RENEWAL
+                cannot: the parent's renewal markers were cleared, so a new term
+                is re-proposed rather than restored. */}
+            {!showPipeline && contract.status === 'terminated' && !isRenewalChild(contract)
               && contract.termination?.method === 'cancelled' && perms.agreements && (
               <button
                 className="btn btn-ghost btn-sm"
@@ -6085,9 +6212,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 <X size={14} /> Terminate directly
               </button>
             )}
-            {/* Clean void for a not-yet-active (pending/issued) lease — the
-                tenant never started, so this cancels without a move-out/
-                settlement wind-down. Distinct from "Terminate directly". */}
+            {/* Not-yet-active (pending/issued) row — the tenant never started,
+                so neither action needs a move-out/settlement wind-down. On a
+                RENEWAL child this is a real cancellation (ends the next term,
+                parent lease keeps running); on a standalone lease it sends the
+                row back to setup. Distinct from "Terminate directly". */}
             {showPipeline && (contract.status === 'pending' || contract.status === 'issued')
               && perms.agreements && (
               <button
@@ -6095,7 +6224,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }}
                 onClick={() => setModal('cancel-lease')}
               >
-                <X size={14} /> Cancel lease
+                <X size={14} /> {isRenewalChild(contract) ? 'Cancel renewal' : 'Reset to setup'}
               </button>
             )}
             {/* Cancel/undo a termination that is still winding down (not yet
@@ -6201,7 +6330,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
           && contract.termination?.response !== 'accepted'
           && !contract.vacateAtEnd
           && !contract.hasSuccessor
-          && !isSuperseded && !isDeclinedRenewal && (
+          && !isSuperseded && !isDeclinedRenewal && !isCancelledRenewal && (
           <div className="qbanner waiting" style={{ marginBottom: 4 }}>
             <span className="bic"><Key size={18} /></span>
             <div style={{ flex: 1 }}>
@@ -6223,7 +6352,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         )}
 
         {/* Missing strip */}
-        {showPipeline && !isSuperseded && !isDeclinedRenewal && (
+        {showPipeline && !isSuperseded && !isDeclinedRenewal && !isCancelledRenewal && (
           <MissingStrip
             missing={missingSteps}
             allActive={allActive}
@@ -6233,7 +6362,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
         {showPipeline && (
         <div className="quest">
-          {!isSuperseded && !isDeclinedRenewal && (
+          {!isSuperseded && !isDeclinedRenewal && !isCancelledRenewal && (
             <QuestMap
               steps={steps}
               doneArr={doneArr}
@@ -6242,7 +6371,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
               mode={mode}
             />
           )}
-          <div className="acard" style={isSuperseded || isDeclinedRenewal ? { gridColumn: '1 / -1' } : undefined}>
+          <div className="acard" style={isSuperseded || isDeclinedRenewal || isCancelledRenewal ? { gridColumn: '1 / -1' } : undefined}>
             <div className="ahead">
               <div className="ahl">
                 <HeroIcon tone={content.tone} icon={content.icon} />

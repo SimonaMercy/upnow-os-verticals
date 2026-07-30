@@ -35,8 +35,8 @@ import { putKycSlot } from '@/lib/kycSlotUpload';
 import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
-import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
-import { buildSegregatedPlan, segRowsFromAggregatePlan } from '@/lib/segregatedPlan';
+import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
+import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
@@ -129,6 +129,8 @@ function feeToAed(rule: FeeRuleDto, annualRentAed: number): string {
 const PAYMENT_METHOD_LABEL: Record<PaymentMethodKind, string> = {
   cheque: 'Cheque', bank_transfer: 'Bank transfer', card: 'Card', cash: 'Cash',
 };
+const PAYMENT_METHOD_OPTIONS = (['cheque', 'bank_transfer', 'card', 'cash'] as PaymentMethodKind[])
+  .map(value => ({ value, label: PAYMENT_METHOD_LABEL[value] }));
 const CHEQUE_STATUSES = ['pending', 'cleared', 'bounced', 'cancelled'] as const;
 type ChequeRowStatus = typeof CHEQUE_STATUSES[number];
 
@@ -149,6 +151,16 @@ function addMonthsToISO(dateStr: string, months: number): string {
   while (newM < 1)  { newM += 12; newY -= 1; }
   const lastDay = new Date(Date.UTC(newY, newM, 0)).getUTCDate();
   return `${newY}-${String(newM).padStart(2, '0')}-${String(Math.min(d, lastDay)).padStart(2, '0')}`;
+}
+/** Last day of a term that STARTS on `startDate` and runs `months` months — the
+ *  day before the anniversary. A year from 1 Aug 2026 ends 31 Jul 2027, not
+ *  1 Aug 2027, which would be a year and a day. */
+function termEndISO(startDate: string, months: number): string {
+  const anniversary = addMonthsToISO(startDate, months);
+  const [y, m, d] = anniversary.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
 }
 function installmentsFromStart(startDate: string, installments: number): string[] {
   if (!startDate || installments <= 1) return Array.from({ length: Math.max(0, installments - 1) }, () => '');
@@ -630,16 +642,25 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const building  = lead.unit?.property?.buildingName ?? null;
 
   // Deep-links to the related entities (Property → portfolio popup, Unit → unit
-  // page, Customer → tenant page, Lead → this lead). Only rendered as links in
-  // the RP view — the manager mirror has no standalone unit/property pages, so
-  // those stay plain there (mirrors the contract page's chain-link gating).
+  // page, Customer → tenant page, Lead → this lead). The manager mirror gets the
+  // same links against its own landlord-scoped routes: it has no per-unit page,
+  // so the unit opens the units workspace pre-filtered to that unit number.
   const propertyId = lead.unit?.property?.id ?? null;
   const unitId     = lead.unit?.id ?? null;
   const customerId = lead.convertedTenant?.id ?? null;
-  const propertyHref = !manager && propertyId ? `/rental-provider/dashboard/portfolio?property=${propertyId}` : null;
-  const unitHref     = !manager && unitId     ? `/rental-provider/dashboard/units/${unitId}` : null;
-  const customerHref = !manager && customerId ? `/rental-provider/dashboard/tenants/${customerId}` : null;
-  const leadHref     = !manager ? `/rental-provider/dashboard/leads/${lead.id}` : null;
+  const rpQ = manager ? `rp=${manager.rp}` : '';
+  const propertyHref = !propertyId ? null
+    : manager ? `/dashboard/manager/properties?${rpQ}&property=${propertyId}`
+    : `/rental-provider/dashboard/portfolio?property=${propertyId}`;
+  const unitHref = !unitId ? null
+    : manager ? `/dashboard/manager/units?${rpQ}&q=${encodeURIComponent(lead.unit?.unitNumber ?? '')}`
+    : `/rental-provider/dashboard/units/${unitId}`;
+  const customerHref = !customerId ? null
+    : manager ? `/dashboard/manager/tenants/${customerId}?${rpQ}`
+    : `/rental-provider/dashboard/tenants/${customerId}`;
+  const leadHref = manager
+    ? `/dashboard/manager/leads/${lead.id}?${rpQ}`
+    : `/rental-provider/dashboard/leads/${lead.id}`;
   const node = stageNode(lead.stage);
   const effNode = selNode ?? node;              // journey step currently on screen
   const viewingCurrent = effNode === node;      // true → full interactive card; false → read-only preview
@@ -653,10 +674,18 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
   // Annual rent (whole AED) — from the firm plan if issued, else the unit price.
   const annualRentAed = plan ? plan.rentFils / 100 : (lead.unit?.rentalPrice != null ? Number(lead.unit.rentalPrice) : null);
-  const planLabel = plan ? `${plan.chequeCount} cheque${plan.chequeCount === 1 ? '' : 's'}` : null;
-  const moveIn = plan?.items?.find(it => it.type === 'first_bundle')?.dueDate
+  // The rent plan — how the RENT is split (Quarterly = 4). Not `chequeCount`,
+  // a legacy field that adds the deposit, ignores the fee lines, and calls every
+  // row a cheque even where the customer is paying by transfer.
+  const planInstalments = plan?.installmentCount ?? null;
+  const planLabel = planInstalments ? `${planInstalments} installment${planInstalments === 1 ? '' : 's'}` : null;
+  // The date the customer asked to move in — NOT the first cheque's due date,
+  // which is a payment date and drifts as the RP edits the schedule. Falls back
+  // to the plan's earliest date only when the customer never named one.
+  const moveIn = latestViewing?.desiredMoveIn?.slice(0, 10)
+    ?? plan?.items?.find(it => it.type === 'first_bundle')?.dueDate
     ?? plan?.items?.slice().sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))[0]?.dueDate
-    ?? latestViewing?.desiredMoveIn?.slice(0, 10) ?? null;
+    ?? null;
 
   // Tone/hero/headline/eyebrow/body — derived from stage + urgency (the mock's
   // per-state map, collapsed to the single real branch).
@@ -665,11 +694,15 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   // "Open lease" deep-link: when we know the created contract, jump straight to
   // the New Lease tab in Operations with that lease highlighted; otherwise fall
   // back to a name search so the RP can still find it.
-  const openLeaseHref = manager
-    ? `/dashboard/manager/contracts${manager ? `?rp=${manager.rp}` : ''}${lead.contractId ? `&focus=c-${lead.contractId}` : ''}`
-    : lead.contractId
-      ? `/rental-provider/dashboard/operations?tab=new&focus=c-${lead.contractId}`
-      : `/rental-provider/dashboard/operations?q=${encodeURIComponent(displayName)}`;
+  // Both sides land on OPERATIONS — the pipeline board that highlights the card
+  // (?focus=). The manager mirror used to point at the plain contracts list, which
+  // dropped the highlight and showed every lease instead of this one.
+  const opsBase = manager
+    ? `/dashboard/manager/operations?rp=${manager.rp}&`
+    : '/rental-provider/dashboard/operations?';
+  const openLeaseHref = lead.contractId
+    ? `${opsBase}tab=new&focus=c-${lead.contractId}`
+    : `${opsBase}q=${encodeURIComponent(displayName)}`;
 
   /* ── Header actions ── */
   const headerActions = (
@@ -751,7 +784,13 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               : <span className="pv">{displayName}</span>}
           </div>
           {contactPerson && <div className="pitem"><span className="pk">Contact</span><span className="pv">{contactPerson}</span></div>}
-          {phone && <div className="pitem"><span className="pk">Phone</span><span className="pv">{phone}</span></div>}
+          {phone && (
+            <div className="pitem"><span className="pk">Phone</span>
+              {/* Dialable — on a phone it calls, on a desktop it hands off to
+                  whatever handles tel: links. */}
+              <a href={`tel:${phone.replace(/\s+/g, '')}`} className="chain-link" style={{ fontSize: 13 }} title={`Call ${phone}`}>{phone}</a>
+            </div>
+          )}
           <span className="isep" />
           {annualRentAed != null && <div className="pitem"><span className="pk">Annual rent</span><span className="pv">{aedWhole(annualRentAed)}</span></div>}
           {planLabel && <div className="pitem"><span className="pk">Plan</span><span className="pv">{planLabel}</span></div>}
@@ -1388,7 +1427,7 @@ function StageBody(props: StageBodyProps) {
     case 'cheques_submitted':
       return (
         <>
-          {plan && <PlanTable plan={plan} advice />}
+          {plan && <PlanTable plan={plan} advice lead={lead} latestViewing={latestViewing} />}
           <ChequesSection
             plan={plan} cheques={cheques} busy={busy}
             onRecordCheque={onRecordCheque} onDeleteCheque={onDeleteCheque}
@@ -1406,7 +1445,7 @@ function StageBody(props: StageBodyProps) {
       const canIssue = !!(lead.unit?.id && lead.convertedTenant?.id);
       return (
         <>
-          {plan && <PlanTable plan={plan} advice />}
+          {plan && <PlanTable plan={plan} advice lead={lead} latestViewing={latestViewing} />}
           <ChequesSection
             plan={plan} cheques={cheques} busy={busy}
             onRecordCheque={onRecordCheque} onDeleteCheque={onDeleteCheque}
@@ -1506,10 +1545,27 @@ function DocsSection({
     lead.unit?.unitType,
     lead.convertedTenant?.entityType === 'company' ? 'company' : 'individual',
   );
-  const okKeys = new Set((docs ?? []).filter(d => !['missing', 'rejected'].includes(d.status)).map(d => d.documentKey));
+  // A requested-but-not-yet-uploaded slot is a real row (status 'pending', no
+  // file) — it is the request itself, not a document. Requiring a fileUrl keeps
+  // it out of "received", so asking for a document never ticks it off.
+  const okKeys = new Set((docs ?? []).filter(d => !!d.fileUrl && !['missing', 'rejected'].includes(d.status)).map(d => d.documentKey));
   const required = reqDocs.filter(d => d.required);
   const optional = reqDocs.filter(d => !d.required);
   const received = required.filter(d => okKeys.has(d.key)).length;
+
+  // What the upload link carries: this checklist in FULL — every requirement and
+  // every additional document asked for, whether or not it has already been
+  // uploaded. The customer's page marks what is done and what is still missing,
+  // so they see the same complete picture the RP is looking at here. Each goes
+  // under its own key, so an upload lands in the slot these rows read.
+  const checklistDocs = [
+    ...reqDocs.map(d => ({ key: d.key, label: d.label, category: d.category, required: d.required })),
+    // Additional documents were asked for by name — always mandatory.
+    ...noteItems.map(item => ({
+      key: resolveRequestedDocKey(item) ?? additionalDocKey(item),
+      label: item, category: 'other', required: true,
+    })),
+  ].filter((d, i, arr) => arr.findIndex(x => x.key === d.key) === i);
 
   // "View all documents" — opens the SHARED DocumentReaderModal (sidebar list +
   // gallery preview) the tenant / property / unit views use, so every surface
@@ -1555,10 +1611,14 @@ function DocsSection({
     const doc = (docs ?? []).find(x => x.documentKey === d.key);
     const on = okKeys.has(d.key);
     const st = docState(doc?.status, on);
+    // Row exists but holds no file → this is the request the RP sent, waiting on
+    // the customer. There is nothing to view, approve or reject yet.
+    const awaitingUpload = !!doc && !doc.fileUrl;
     const label = d.label + (d.required && !on ? ' *' : '');
     const statusText = st === 'approved' ? 'Approved'
       : st === 'rejected' ? 'Rejected'
       : st === 'pending' ? 'Uploaded · review'
+      : awaitingUpload ? 'Requested · awaiting upload'
       : d.required ? 'Missing · required' : 'Optional';
     const uploading = uploadingKey === d.key;
     return (
@@ -1569,12 +1629,12 @@ function DocsSection({
             <Eye size={12} /> View
           </button>
         )}
-        {doc && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
-        {doc && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: d.label }); setRejectReason(''); }}><X size={12} /></button>}
+        {doc?.fileUrl && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
+        {doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: d.label }); setRejectReason(''); }}><X size={12} /></button>}
         {canUpload && (
           <label className={`mini-btn view ${uploading ? 'is-busy' : ''}`} style={{ cursor: uploading ? 'progress' : 'pointer' }}>
             {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
-            {doc ? 'Replace' : 'Upload'}
+            {doc?.fileUrl ? 'Replace' : 'Upload'}
             <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="sr-only" disabled={uploading}
               onChange={e => { const f = e.target.files?.[0]; if (f) doUpload(d, f); e.currentTarget.value = ''; }} />
           </label>
@@ -1594,11 +1654,6 @@ function DocsSection({
                 <Eye size={11} /> View all documents ({allUploaded.length})
               </button>
             )}
-            {/* External upload link — send the lead's customer a no-login link to
-                upload the requested documents (in addition to their own journey). */}
-            {canUpload && lead.convertedTenant?.id && (
-              <DocsLinkButton tenantId={lead.convertedTenant.id} label="Request documents" />
-            )}
           </div>
         </div>
         <div className="doclist">{required.map(ReqRow)}</div>
@@ -1610,6 +1665,23 @@ function DocsSection({
         )}
         {uploadError && <div className="errline">{uploadError}</div>}
         {!canUpload && <div className="note" style={{ marginTop: 6 }}>Convert this lead to a customer to upload documents on their behalf.</div>}
+
+        {/* Customer upload link — the whole checklist above in one no-login link,
+            so nothing has to be picked document by document. Same control and
+            layout as the signing links on the contract's Signatures step. */}
+        {canUpload && lead.convertedTenant?.id && checklistDocs.length > 0 && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+              Customer document upload link
+            </div>
+            <DocsLinkButton
+              tenantId={lead.convertedTenant.id}
+              variant="inline"
+              label={`Send upload link (${checklistDocs.length})`}
+              presetDocs={checklistDocs}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Require additional document ── */}
@@ -1623,21 +1695,23 @@ function DocsSection({
               // by that existing upload — track the same key the customer uploads to.
               const key = resolveRequestedDocKey(item) ?? additionalDocKey(item);
               const doc = (docs ?? []).find(d => d.documentKey === key);
-              const on = !!doc && !['missing', 'rejected'].includes(doc.status);
+              // Same rule as the checklist rows: a row with no file is the
+              // request, not the document.
+              const on = !!doc?.fileUrl && !['missing', 'rejected'].includes(doc.status);
               const st = docState(doc?.status, on);
               const uploading = uploadingKey === key;
               return (
-                <DocItem key={idx} state={doc ? st : 'docmiss'} name={item}
-                  status={st === 'approved' ? 'Approved' : st === 'rejected' ? 'Rejected' : doc ? 'Uploaded · review' : 'Awaiting upload'}>
+                <DocItem key={idx} state={doc?.fileUrl ? st : 'docmiss'} name={item}
+                  status={st === 'approved' ? 'Approved' : st === 'rejected' ? 'Rejected' : doc?.fileUrl ? 'Uploaded · review' : 'Awaiting upload'}>
                   {doc?.fileUrl && (
                     <button className="mini-btn view" type="button"
                       onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType })}><Eye size={12} /> View</button>
                   )}
-                  {doc && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
-                  {doc && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: item }); setRejectReason(''); }}><X size={12} /></button>}
+                  {doc?.fileUrl && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
+                  {doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: item }); setRejectReason(''); }}><X size={12} /></button>}
                   {canUpload && (
                     <label className="mini-btn view" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
-                      {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}{doc ? 'Replace' : 'Upload'}
+                      {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}{doc?.fileUrl ? 'Replace' : 'Upload'}
                       <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="sr-only" disabled={uploading}
                         onChange={e => { const f = e.target.files?.[0]; if (f) doUpload({ key, label: item, category: 'other' }, f); e.currentTarget.value = ''; }} />
                     </label>
@@ -1746,7 +1820,7 @@ function PlanSection({
   if (!plan) return <div className="note">No plan on record.</div>;
   return (
     <>
-      <PlanTable plan={plan} />
+      <PlanTable plan={plan} lead={lead} latestViewing={latestViewing} />
       {!editing && (
         <>
           <div className="note">
@@ -1791,8 +1865,13 @@ function PlanEditor({
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
 }) {
   const defaultInstallments = plan.installmentCount ?? latestViewing?.preferredChequeCount ?? 4;
-  const startInit = plan.items?.find(it => it.type === 'first_bundle')?.dueDate
-    ?? plan.items?.[0]?.dueDate ?? latestViewing?.desiredMoveIn?.slice(0, 10) ?? '';
+  // The lease start, NOT the first cheque's due date. Those differ on purpose:
+  // cheque dates snap BACK to the landlord's collection day so each payment
+  // lands before the period it covers, which left this field showing a date
+  // before the customer even moves in.
+  const startInit = latestViewing?.desiredMoveIn?.slice(0, 10)
+    ?? plan.items?.find(it => it.type === 'first_bundle')?.dueDate
+    ?? plan.items?.[0]?.dueDate ?? '';
   // Prefill LISTED (pre-discount) rent when editing — the discount fields re-apply.
   const [rentAed, setRentAed] = useState(String((plan.originalRentFils ?? plan.rentFils) / 100));
   const [installmentCount, setInstallmentCount] = useState<number>(defaultInstallments);
@@ -1815,7 +1894,6 @@ function PlanEditor({
       : Array.from({ length: Math.max(0, defaultInstallments - 1) }, (_, i) => instDatesInit[i] ?? ''),
   );
   const [notes, setNotes] = useState(plan.notes ?? '');
-  const [payableTo, setPayableTo] = useState(plan.chequesPayableTo ?? '');
   const extrasInit = plan.items
     .filter(it => it.type === 'extra_installment' || (it.type === 'installment' && it.description && !/^Installment \d+$/.test(it.description)))
     .map(it => ({ description: it.description ?? '', amountAed: String(it.amountFils / 100), dueDate: it.dueDate }));
@@ -1827,24 +1905,38 @@ function PlanEditor({
   );
   const [error, setError] = useState<string | null>(null);
 
+  // How the customer pays, per row. Everything collected up front — the deposit,
+  // the fees and instalment 1 — is paid by transfer at signing; the remaining
+  // instalments are the post-dated cheques the customer hands over. Either can be
+  // changed on any row; rows are seeded from whatever the plan already carries so
+  // re-editing never resets a choice.
+  const defaultMethodFor = (slot: Slot): PaymentMethodKind =>
+    slot.kind === 'deposit' || slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)
+      ? 'bank_transfer'
+      : 'cheque';
+  const methodOfItem = (pred: (it: PaymentPlanItem) => boolean): PaymentMethodKind | undefined =>
+    plan.items.find(it => pred(it) && !!it.paymentMethod)?.paymentMethod as PaymentMethodKind | undefined;
+  const [methods, setMethods] = useState<{
+    deposit?: PaymentMethodKind; adminFee?: PaymentMethodKind; ejari?: PaymentMethodKind; commission?: PaymentMethodKind;
+    installments: (PaymentMethodKind | undefined)[]; extras: (PaymentMethodKind | undefined)[];
+  }>(() => ({
+    deposit: methodOfItem(it => it.type === 'security_deposit'),
+    adminFee: methodOfItem(it => it.type === 'fee' && !!it.description?.startsWith('Admin')),
+    ejari: methodOfItem(it => it.type === 'fee' && !!it.description?.startsWith('Contract Registration')),
+    commission: methodOfItem(it => it.type === 'fee' && !!it.description?.startsWith('Commission')),
+    installments: [
+      methodOfItem(it => it.type === 'first_bundle'),
+      ...instDatesInit.map((_, i) => methodOfItem(it => it.description === `Installment ${i + 2}`)),
+    ],
+    extras: extrasInit.map(e => methodOfItem(it => it.description === e.description)),
+  }));
+
   const applyStart = (d: string, n: number) => { setBundleDate(d); setInstDates(installmentsFromStart(d, n)); };
   const resizeInst = (n: number) => {
     if (startDate) setInstDates(installmentsFromStart(startDate, n));
     else setInstDates(prev => Array.from({ length: Math.max(0, n - 1) }, (_, i) => prev[i] ?? ''));
   };
 
-  // Prefill "cheques payable to" from the RP profile on first open (when blank).
-  useEffect(() => {
-    if (payableTo) return;
-    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { profile?: { bankAccountName?: string | null; companyName?: string | null; user?: { name?: string | null } } } | null) => {
-        const p = data?.profile; if (!p) return;
-        const name = p.bankAccountName?.trim() || p.companyName?.trim() || p.user?.name?.trim() || '';
-        if (name) setPayableTo(name);
-      }).catch(() => undefined);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Prefill fees from unit → global fee rules when they arrive & fields are blank.
   // Fee rules load async, so this genuinely needs an effect (setState-in-effect is
@@ -1882,17 +1974,81 @@ function PlanEditor({
   const commFils = Math.round((parseFloat(commAed) || 0) * 100);
   const depositFils = Math.round((parseFloat(depositAed) || 0) * 100);
 
-  type Row = { kind: 'bundle' | 'deposit' | 'installment'; instIndex?: number; label: string; amountFils: number; dueDate: string };
-  const KW: Record<Row['kind'], number> = { bundle: 0, installment: 1, deposit: 2 };
-  const rows: Row[] = (rentFils > 0 ? [
-    { kind: 'bundle' as const, label: 'Admin + Contract Registration + Commission + Installment 1', amountFils: adminFils + ejariFils + commFils + per, dueDate: bundleDate },
-    ...Array.from({ length: installmentCount - 1 }, (_, i) => ({
-      kind: 'installment' as const, instIndex: i, label: `Installment ${i + 2}`,
-      amountFils: i === installmentCount - 2 ? last : per, dueDate: instDates[i] ?? '',
-    })),
-    { kind: 'deposit' as const, label: 'Security Deposit', amountFils: depositFils, dueDate: depositDate },
-  ] : []).slice().sort((a, b) => (a.dueDate && b.dueDate && a.dueDate !== b.dueDate) ? a.dueDate.localeCompare(b.dueDate) : KW[a.kind] - KW[b.kind]);
-  const totalFils = effRent + adminFils + ejariFils + commFils + depositFils;
+  // The schedule, laid out as the four groups the customer is shown (Security
+  // Deposit · Rental Installments · Management Fee · Third Party) rather than one
+  // "Admin + Contract Registration + Commission + Installment 1" lump. Each line
+  // is its own cheque — which is exactly how the plan is stored and how it
+  // converts into the lease — so the RP edits what the customer will read.
+  // `slot` is what the row's date and method write back to.
+  type Slot =
+    | { kind: 'deposit' }
+    | { kind: 'installment'; index: number }        // 0 = instalment 1 (first cheque)
+    | { kind: 'fee'; fee: 'adminFee' | 'ejari' | 'commission' }
+    | { kind: 'extra'; index: number };
+  type Row = { key: string; label: string; amountFils: number; dueDate: string; slot: Slot };
+  type Group = { key: SegKey; title: string; rows: Row[] };
+
+  const instRows: Row[] = rentFils > 0 ? Array.from({ length: installmentCount }, (_, i) => ({
+    key: `inst-${i}`,
+    label: `Installment ${i + 1}`,
+    amountFils: i === installmentCount - 1 ? (installmentCount === 1 ? effRent : last) : per,
+    dueDate: i === 0 ? bundleDate : (instDates[i - 1] ?? ''),
+    slot: { kind: 'installment', index: i },
+  })) : [];
+  const extraRows: Row[] = extras
+    .map((e, i) => ({
+      key: `extra-${i}`,
+      label: e.description.trim() || `Extra installment ${i + 1}`,
+      amountFils: Math.round((parseFloat(e.amountAed) || 0) * 100),
+      dueDate: e.dueDate,
+      slot: { kind: 'extra' as const, index: i },
+    }))
+    .filter(r => r.amountFils > 0);
+  const groups: Group[] = ([
+    {
+      key: 'deposit' as const, title: 'Security Deposit',
+      rows: depositFils > 0 ? [{ key: 'deposit', label: 'Security Deposit', amountFils: depositFils, dueDate: depositDate, slot: { kind: 'deposit' as const } }] : [],
+    },
+    { key: 'rental' as const, title: 'Rental Installments', rows: instRows },
+    {
+      key: 'management' as const, title: 'Management Fee',
+      rows: [
+        ...(adminFils > 0 ? [{ key: 'admin', label: 'Admin Fee', amountFils: adminFils, dueDate: bundleDate, slot: { kind: 'fee' as const, fee: 'adminFee' as const } }] : []),
+        ...(commFils > 0 ? [{ key: 'comm', label: 'Commission', amountFils: commFils, dueDate: bundleDate, slot: { kind: 'fee' as const, fee: 'commission' as const } }] : []),
+      ],
+    },
+    {
+      key: 'third_party' as const, title: 'Third Party',
+      rows: [
+        ...(ejariFils > 0 ? [{ key: 'ejari', label: 'Contract Registration Fee', amountFils: ejariFils, dueDate: bundleDate, slot: { kind: 'fee' as const, fee: 'ejari' as const } }] : []),
+        ...extraRows,
+      ],
+    },
+  ] as Group[]).filter(g => g.rows.length > 0);
+  const rowCount = groups.reduce((n, g) => n + g.rows.length, 0);
+  const extraTotalFils = extraRows.reduce((s, r) => s + r.amountFils, 0);
+  const totalFils = effRent + adminFils + ejariFils + commFils + depositFils + extraTotalFils;
+
+  const setRowDate = (slot: Slot, v: string) => {
+    if (slot.kind === 'deposit') setDepositDate(v);
+    // The fees ride on the first cheque, so their date IS the first instalment's.
+    else if (slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)) setBundleDate(v);
+    else if (slot.kind === 'installment') setInstDates(prev => prev.map((d, j) => j === slot.index - 1 ? v : d));
+    else setExtras(prev => prev.map((x, i) => i === slot.index ? { ...x, dueDate: v } : x));
+  };
+  const rowMethod = (slot: Slot): PaymentMethodKind =>
+    (slot.kind === 'deposit' ? methods.deposit
+      : slot.kind === 'fee' ? methods[slot.fee]
+      : slot.kind === 'installment' ? methods.installments[slot.index]
+      : methods.extras[slot.index]) ?? defaultMethodFor(slot);
+  const setRowMethod = (slot: Slot, v: PaymentMethodKind) => setMethods(prev => {
+    if (slot.kind === 'deposit') return { ...prev, deposit: v };
+    if (slot.kind === 'fee') return { ...prev, [slot.fee]: v };
+    if (slot.kind === 'installment') {
+      const next = [...prev.installments]; next[slot.index] = v; return { ...prev, installments: next };
+    }
+    const next = [...prev.extras]; next[slot.index] = v; return { ...prev, extras: next };
+  });
 
   async function submit() {
     if (!rentAed || isNaN(rentFils) || rentFils <= 0) { setError('Enter a valid annual rent'); return; }
@@ -1903,9 +2059,24 @@ function PlanEditor({
       rentFils, installmentCount, adminFeeFils: adminFils, ejariFils, commissionFils: commFils,
       securityDepositFils: depositFils, bundleDueDate: bundleDate, depositDueDate: depositDate,
       installmentDueDates: instDates,
+      // The lease start the RP settled on — persisted so reopening this editor
+      // shows it back, and so the contract inherits it on conversion.
+      ...(startDate ? { contractStartDate: startDate } : {}),
+      // Every row's method, exactly as shown in the schedule above — defaults
+      // included, so the customer's copy states how each payment is made.
+      paymentMethod: 'cheque',
+      paymentMethods: {
+        deposit: rowMethod({ kind: 'deposit' }),
+        adminFee: rowMethod({ kind: 'fee', fee: 'adminFee' }),
+        ejari: rowMethod({ kind: 'fee', fee: 'ejari' }),
+        commission: rowMethod({ kind: 'fee', fee: 'commission' }),
+        installments: Array.from({ length: installmentCount }, (_, i) => rowMethod({ kind: 'installment', index: i })),
+        extras: validExtra.map((_, i) => rowMethod({ kind: 'extra', index: i })),
+      },
       notes: notes.trim() || undefined,
       extraItems: validExtra.length ? validExtra.map(e => ({ description: e.description.trim(), amountFils: Math.round(parseFloat(e.amountAed) * 100), dueDate: e.dueDate })) : undefined,
-      chequesPayableTo: payableTo.trim() || undefined,
+      // `chequesPayableTo` is not asked for here — the backend fills it from the
+      // landlord's bank-account / company name.
       ...(discountType !== 'none' && discountValue && parseFloat(discountValue) > 0 && {
         discountType,
         ...(discountType === 'percent' ? { discountPercent: parseFloat(discountValue) } : { discountFils: Math.round(parseFloat(discountValue) * 100) }),
@@ -1959,27 +2130,33 @@ function PlanEditor({
             placeholder={discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'} />
         )}
       </div>
-      {rows.length > 0 && (
+      {groups.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div className="subhead">Cheque schedule ({rows.length}) · total {aed(totalFils)}</div>
-          <div className="doclist">
-            {rows.map((row, i) => {
-              const key = row.kind === 'bundle' ? 'bundle' : row.kind === 'deposit' ? 'deposit' : `inst-${row.instIndex}`;
-              const onChange = (v: string) => {
-                if (row.kind === 'bundle') setBundleDate(v);
-                else if (row.kind === 'deposit') setDepositDate(v);
-                else setInstDates(prev => prev.map((d, j) => j === row.instIndex ? v : d));
-              };
-              return (
-                <div key={key} className="schedrow">
-                  <span className="sq">#{i + 1}</span>
-                  <span className="sl">{row.label}</span>
-                  <span className="sa">{row.amountFils > 0 ? aed(row.amountFils) : '—'}</span>
-                  <input className="qinput sd" type="date" value={row.dueDate} onChange={e => onChange(e.target.value)} />
-                </div>
-              );
-            })}
-          </div>
+          <div className="subhead">Payment schedule ({rowCount}) · total {aed(totalFils)}</div>
+          <p className="note" style={{ margin: '0 0 8px' }}>
+            Grouped the way the customer sees it. Each line is its own payment: what is collected at signing goes by bank transfer, the later instalments are cheques — change any row.
+          </p>
+          {groups.map(g => (
+            <div key={g.key} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860', margin: '0 0 4px' }}>
+                {g.title}
+                {g.rows.length > 1 && <span style={{ fontWeight: 600, color: 'var(--mute, #9b9890)' }}> · {aed(g.rows.reduce((s, r) => s + r.amountFils, 0))}</span>}
+              </div>
+              <div className="doclist">
+                {g.rows.map(row => (
+                  <div key={row.key} className="schedrow">
+                    <span className="sl">{row.label}</span>
+                    <span className="sa">{row.amountFils > 0 ? aed(row.amountFils) : '—'}</span>
+                    <select className="qinput" style={{ width: 116 }} value={rowMethod(row.slot)}
+                      onChange={e => setRowMethod(row.slot, e.target.value as PaymentMethodKind)}>
+                      {PAYMENT_METHOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <input className="qinput sd" type="date" value={row.dueDate} onChange={e => setRowDate(row.slot, e.target.value)} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
       <div style={{ marginTop: 12 }}>
@@ -1995,6 +2172,12 @@ function PlanEditor({
                   onChange={e => setExtras(prev => prev.map((x, i) => i === idx ? { ...x, description: e.target.value } : x))} />
                 <input className="qinput" style={{ width: 76 }} type="number" value={it.amountAed} placeholder="AED"
                   onChange={e => setExtras(prev => prev.map((x, i) => i === idx ? { ...x, amountAed: e.target.value } : x))} />
+                {/* An extra row is paid like any other — say how, here, rather than
+                    leaving it to be guessed once the plan is out. */}
+                <select className="qinput" style={{ width: 116 }} value={rowMethod({ kind: 'extra', index: idx })}
+                  onChange={e => setRowMethod({ kind: 'extra', index: idx }, e.target.value as PaymentMethodKind)}>
+                  {PAYMENT_METHOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
                 <input className="qinput sd" type="date" value={it.dueDate}
                   onChange={e => setExtras(prev => prev.map((x, i) => i === idx ? { ...x, dueDate: e.target.value } : x))} />
                 <button type="button" className="mini-btn no" onClick={() => setExtras(prev => prev.filter((_, i) => i !== idx))}><X size={12} /></button>
@@ -2003,10 +2186,7 @@ function PlanEditor({
           </div>
         )}
       </div>
-      <label className="fblock" style={{ marginTop: 12 }}>Cheques payable to
-        <input className="qinput" type="text" value={payableTo} onChange={e => setPayableTo(e.target.value)} placeholder="e.g. ABC Real Estate LLC" />
-      </label>
-      <label className="fblock">Notes (optional)
+      <label className="fblock" style={{ marginTop: 12 }}>Notes (optional)
         <input className="qinput" type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. 4 quarterly cheques" />
       </label>
       {error && <div className="errline">{error}</div>}
@@ -2103,7 +2283,7 @@ function ChequesSection({
                 <div className="payrow-rec">
                   {recorded ? (
                     <>
-                      <select className="qinput" style={{ width: 92 }} value={(recorded.status as ChequeRowStatus) || 'pending'}
+                      <select className="qinput" value={(recorded.status as ChequeRowStatus) || 'pending'}
                         onChange={e => onSetChequeStatus(recorded.id, e.target.value as ChequeRowStatus)}>
                         {CHEQUE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
                       </select>
@@ -2203,13 +2383,38 @@ function ChequesSection({
   );
 }
 
-/* ─── PlanTable: the proposed plan, as the centralised four-group view ──────── */
-function PlanTable({ plan, advice }: { plan: NonNullable<ApiLead['paymentPlan']>; advice?: boolean }) {
-  const seg = buildSegregatedPlan(segRowsFromAggregatePlan(plan));
+/* ─── PlanTable: the proposed plan, rendered as the SAME Payment Summary card the
+ *  lease uses (PaymentPlanCard) — heading, landlord/unit meta, Download PDF and
+ *  the four groups. One component, so the plan a customer is quoted at lead stage
+ *  and the plan they sign look like the same document. ─────────────────────────── */
+function PlanTable({ plan, advice, lead, latestViewing }: {
+  plan: NonNullable<ApiLead['paymentPlan']>;
+  advice?: boolean;
+  lead?: ApiLead;
+  latestViewing?: ReturnType<typeof getLatestViewing>;
+}) {
+  const segRows = segRowsFromAggregatePlan(plan);
+  // No lease exists yet, so the period is the one the lease will be created with:
+  // move-in + 12 months, matching the new-lease form's own default.
+  const moveInDate = latestViewing?.desiredMoveIn?.slice(0, 10) ?? null;
   return (
     <div>
       <div className="subhead"><Wallet size={13} /> Payment plan{advice ? ' · advice submitted' : ' · proposed to customer'}</div>
-      <SegregatedPlanView plan={seg} />
+      <PaymentPlanCard
+        rows={segRows}
+        contractType="new"
+        tenantName={lead ? leadDisplayName(lead) : null}
+        // Same source the lease card uses for its Landlord line — the payee name
+        // the plan was issued with. No lease exists yet, so there is no period:
+        // the move-in date is the only real date, and the card shows it as such.
+        landlordName={plan.chequesPayableTo ?? null}
+        unitNumber={lead?.unit?.unitNumber ?? null}
+        buildingName={lead?.unit?.property?.buildingName ?? null}
+        community={lead?.unit?.property?.community?.nameEn ?? null}
+        periodStart={moveInDate}
+        periodEnd={moveInDate ? termEndISO(moveInDate, 12) : null}
+        bankDetails={plan.bankDetails}
+      />
     </div>
   );
 }
@@ -2373,10 +2578,12 @@ function GlobalStyle() {
 
       /* Record-payment grid (method + reference per instalment) */
       .quest-page .paygrid { display: grid; gap: 6px; margin-bottom: 10px; }
-      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 96px 122px 86px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
       .quest-page .payhead span:nth-child(2), .quest-page .payhead span:nth-child(3), .quest-page .payhead span:nth-child(4) { text-align: left; }
-      .quest-page .payrow-rec { display: flex; align-items: center; gap: 6px; }
-      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 122px 86px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
+      .quest-page .payrow-rec { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .quest-page .payrow-rec > select { flex: 1 1 auto; min-width: 0; }
+      .quest-page .payrow-rec > .mini-btn { flex: 0 0 auto; }
+      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
       .quest-page .payrow-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
       .quest-page .payrow-n { font-size: 10px; font-weight: 800; color: var(--jade-deep); background: var(--jade-soft); border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
       .quest-page .payrow-lbl { min-width: 0; display: flex; flex-direction: column; gap: 1px; }

@@ -100,6 +100,9 @@ export interface PaymentPlan {
   notes?: string;
   rentalIndexReportUrl?: string;
   chequesPayableTo?: string;
+  /** The landlord's account, snapshotted when the plan was issued — shown on the
+   *  plan whenever a row is paid by bank transfer. */
+  bankDetails?: { accountName: string | null; bankName: string | null; iban: string | null };
   issuedAt: string;
 }
 
@@ -147,7 +150,7 @@ export interface ApiLead {
     adminFee: number | null;
     ejariFeeFils: number | null;
     commission: number | null;
-    property?: { id: number; buildingName: string };
+    property?: { id: number; buildingName: string; community?: { nameEn?: string | null } | null };
   } | null;
   docStats: { total: number; pending: number } | null;
   paymentPlan?: PaymentPlan | null;

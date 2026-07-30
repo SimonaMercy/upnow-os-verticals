@@ -64,6 +64,13 @@ const isVisa = (d: BinderDoc) => norm(d.documentKey).includes('visa');
 const isLicense = (d: BinderDoc) => /trade_license|business_license|(^|_)licen[cs]e(_|$)/.test(norm(d.documentKey));
 const isIdentity = (d: BinderDoc) => isEid(d) || isPassport(d) || isVisa(d);
 const isOccupant = (d: BinderDoc) => /occupant/.test(norm(d.documentKey)) || /occupant/i.test(d.displayName || '');
+// A PARTNER on a company tenancy is a different person from the customer /
+// authorised signatory, so their EID, passport and visa are their own slots —
+// without this they would collapse into the signatory's identity slots below
+// and one of the two would silently vanish from the binder. (A `signatory_*`
+// doc needs no such split: the signatory IS the primary person, whose EID and
+// passport are the plain `emirates_id` / `passport` keys.)
+const isPartner = (d: BinderDoc) => /(^|_)partner(_|$)/.test(norm(d.documentKey)) || /\bpartner\b/i.test(d.displayName || '');
 const isDependant = (d: BinderDoc) => /depend[ae]nt/.test(norm(d.documentKey)) || /depend[ae]nt/i.test(d.displayName || '');
 const occNum = (d: BinderDoc) => { const m = norm(d.documentKey).match(/occupant_?(\d+)/); return m ? Number(m[1]) : 1; };
 const idRank = (d: BinderDoc) => (isEid(d) ? 0 : isPassport(d) ? 1 : isVisa(d) ? 2 : isLicense(d) ? 3 : 4);
@@ -81,7 +88,8 @@ const idRank = (d: BinderDoc) => (isEid(d) ? 0 : isPassport(d) ? 1 : isVisa(d) ?
 const idBaseKey = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
 const isEidBack = (d: BinderDoc) => /(^|_)back(_|$)/.test(idBaseKey(d)) || /_2$/.test(idBaseKey(d));
 const idType = (d: BinderDoc) => (isEid(d) ? 'eid' : isPassport(d) ? 'passport' : isVisa(d) ? 'visa' : idBaseKey(d));
-const idSlot = (d: BinderDoc) => `${isOccupant(d) ? `occ${occNum(d)}:` : ''}${idType(d)}${isEid(d) && isEidBack(d) ? ':back' : ''}`;
+const personPrefix = (d: BinderDoc) => (isOccupant(d) ? `occ${occNum(d)}:` : isPartner(d) ? 'partner:' : '');
+const idSlot = (d: BinderDoc) => `${personPrefix(d)}${idType(d)}${isEid(d) && isEidBack(d) ? ':back' : ''}`;
 // Within a slot prefer the canonical customer-KYC copy, then the clean-key one
 // (no upload-timestamp suffix), then the most recent upload.
 const idSourceRank = (d: BinderDoc) => (d.ownerType === 'customer' ? 0 : norm(d.documentKey) === idBaseKey(d) ? 1 : 2);
@@ -95,11 +103,12 @@ const dedupeIdentity = (docs: BinderDoc[]): BinderDoc[] => {
   return Array.from(best.values());
 };
 const idLabel = (d: BinderDoc) =>
-  isEid(d) ? (isEidBack(d) ? 'Emirates ID — Back' : 'Emirates ID')
-  : isPassport(d) ? 'Passport'
-  : isVisa(d) ? 'UAE Visa / Residency'
-  : isLicense(d) ? 'Trade Licence'
-  : (d.displayName ?? d.documentKey.replace(/_/g, ' '));
+  (isPartner(d) ? 'Partner — ' : '') + (
+    isEid(d) ? (isEidBack(d) ? 'Emirates ID — Back' : 'Emirates ID')
+    : isPassport(d) ? 'Passport'
+    : isVisa(d) ? 'UAE Visa / Residency'
+    : isLicense(d) ? 'Trade Licence'
+    : (d.displayName ?? d.documentKey.replace(/_/g, ' ')));
 
 const cardCss: React.CSSProperties = { border: '1px solid #e3e0d9', borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: '#fff' };
 const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontWeight: 700, color: '#1a1916', background: '#faf9f7', borderBottom: '1px solid #efece6' };
@@ -324,7 +333,10 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // LEFT column — primary tenant identity first, then occupants. Dedupe across
   // owner scopes so the same EID/passport/visa stored on both the customer KYC
   // record and this lease's contract record renders once (see dedupeIdentity).
-  const primaryId = dedupeIdentity(all.filter(d => isKyc(d) && !isOccupant(d))).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id);
+  // Partner identity docs sort AFTER the customer's own set, so the pane reads
+  // as one person's pack then the next rather than interleaving the two.
+  const primaryId = dedupeIdentity(all.filter(d => isKyc(d) && !isOccupant(d)))
+    .sort((a, b) => Number(isPartner(a)) - Number(isPartner(b)) || idRank(a) - idRank(b) || a.id - b.id);
   const occDocs = dedupeIdentity(all.filter(d => isIdentity(d) && isOccupant(d)));
   const occGroups = Array.from(new Set(occDocs.map(occNum))).sort((a, b) => a - b)
     .map(n => ({ n, docs: occDocs.filter(d => occNum(d) === n).sort((a, b) => idRank(a) - idRank(b) || a.id - b.id) }));

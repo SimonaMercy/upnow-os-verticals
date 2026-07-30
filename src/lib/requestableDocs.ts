@@ -44,6 +44,13 @@ export const REQUESTABLE_DOCS = [
   'VAT Certificate',
   'Power of Attorney (POA)',
   'Signatory Authorization Letter',
+  // Identity of the OTHER people on a company tenancy: a partner named on the
+  // trade licence, and the authorised signatory's visa (their EID and passport
+  // are the plain 'Emirates ID' / 'Passport' rows above).
+  'Partner EID',
+  'Partner Passport',
+  'Partner Visa',
+  'Signatory Visa',
   'Audited Financials / Company Profile',
   // Other
   'NOC (No Objection Certificate)',
@@ -82,6 +89,12 @@ export const REQUESTED_NAME_TO_DOC_KEY: Record<string, string> = {
   'trade license': 'trade_license',
   'vat / tax registration (trn)': 'tax_registration',
   'memorandum of association (moa)': 'moa',
+  // Same keys the contract upload picker writes, so a doc the RP uploads on the
+  // contract page fulfils the request instead of leaving an empty slot beside it.
+  'partner eid': 'partner_emirates_id',
+  'partner passport': 'partner_passport',
+  'partner visa': 'partner_visa',
+  'signatory visa': 'signatory_visa',
 };
 
 /**

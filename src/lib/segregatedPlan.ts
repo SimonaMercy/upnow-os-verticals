@@ -54,6 +54,19 @@ export interface SegregatedPlan {
 
 const round2 = (v: number) => Math.round((Number.isFinite(v) ? v : 0) * 100) / 100;
 
+/**
+ * How a plan row is paid when it carries no explicit method — every plan issued
+ * before methods existed, and any row the landlord never touched. What is
+ * collected at signing (the security deposit, the fees, instalment 1) goes by
+ * BANK TRANSFER; the later instalments are the post-dated CHEQUES the customer
+ * hands over. The landlord can override any row when editing the plan.
+ */
+export const UPFRONT_METHOD = 'bank_transfer';
+export const RECURRING_METHOD = 'cheque';
+export function defaultPlanMethod(kind: 'deposit' | 'fee' | 'first_instalment' | 'later_instalment'): string {
+  return kind === 'later_instalment' ? RECURRING_METHOD : UPFRONT_METHOD;
+}
+
 /** Payment-ref label for the "Payment Ref" column: prefixes the cheque/transfer
  *  number by how it was actually paid ("Chq 000173", "Cash …", "Transfer …") so a
  *  cash or bank-transfer payment is never mislabelled a cheque. */
@@ -142,30 +155,65 @@ export interface AggregatePlanInput {
   commissionFils?: number | null; commissionVatFils?: number | null;
   installmentCount?: number | null;
   customFees?: Array<{ label: string; netFils: number; vatFils: number }> | null;
-  /** Rent schedule — used only for the instalment due dates. */
-  items?: Array<{ dueDate?: string | null; type?: string | null }> | null;
+  /** Rent schedule — instalment due dates, the payment method the landlord set on
+   *  each row (see PaymentPlanItem.paymentMethod), and the amount, which is read
+   *  for the extra rows (they exist ONLY here, not in the category totals). */
+  items?: Array<{ dueDate?: string | null; type?: string | null; description?: string | null; paymentMethod?: string | null; amountFils?: number | null }> | null;
 }
 
 export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput[] {
   const rows: SegPaymentInput[] = [];
   const rentGross = (p.rentFils ?? 0) + (p.rentVatFils ?? 0);
-  // Instalment due dates from the rent rows of the schedule (exclude deposit/fee rows).
-  const rentDates = (p.items ?? [])
-    .filter(it => { const t = (it.type ?? '').toLowerCase(); return t !== 'security_deposit' && t !== 'fee'; })
-    .map(it => it.dueDate ?? null);
+  // Instalment due dates from the RENT rows of the schedule only. Deposit, fee and
+  // extra rows are excluded: an extra row sitting in here shifted every instalment
+  // onto the wrong date (instalment 2 inheriting the extra's date, and so on down).
+  const rentRows = (p.items ?? [])
+    .filter(it => { const t = (it.type ?? '').toLowerCase(); return t !== 'security_deposit' && t !== 'fee' && t !== 'extra_installment'; });
+  const rentDates = rentRows.map(it => it.dueDate ?? null);
+  // Payment methods live on the schedule items; the category totals above carry
+  // none, so each derived row is matched back to the item it came from.
+  const rowOf = (pred: (it: NonNullable<AggregatePlanInput['items']>[number]) => boolean) => (p.items ?? []).find(pred);
+  const methodOf = (pred: (it: NonNullable<AggregatePlanInput['items']>[number]) => boolean): string | null =>
+    rowOf(pred)?.paymentMethod ?? null;
+  // Deposit + fee rows carry their own due date on the schedule; without this
+  // they render as "—" while the instalments show dates, which reads as "no date
+  // agreed" for the very cheques the customer hands over first.
+  const dateOf = (pred: (it: NonNullable<AggregatePlanInput['items']>[number]) => boolean): string | null =>
+    rowOf(pred)?.dueDate ?? null;
+  const isFee = (prefix: string) => (it: NonNullable<AggregatePlanInput['items']>[number]) =>
+    (it.type ?? '') === 'fee' && !!it.description?.startsWith(prefix);
+  const feeMethod = (prefix: string) => methodOf(isFee(prefix));
   const n = Math.max(1, p.installmentCount ?? rentDates.length ?? 1);
   if (rentGross > 0) {
     const per = round2(rentGross / n / 100);
-    for (let i = 0; i < n; i++) rows.push({ paymentType: 'rental_income', description: n > 1 ? `Instalment ${i + 1} of ${n}` : 'Rent', amount: per, transactionDate: rentDates[i] ?? null, chequeNumber: null });
+    for (let i = 0; i < n; i++) rows.push({ paymentType: 'rental_income', description: n > 1 ? `Instalment ${i + 1}` : 'Rent', amount: per, transactionDate: rentDates[i] ?? null, chequeNumber: null, paymentMethod: rentRows[i]?.paymentMethod ?? defaultPlanMethod(i === 0 ? 'first_instalment' : 'later_instalment') });
   }
-  if ((p.securityDepositFils ?? 0) > 0) rows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: (p.securityDepositFils ?? 0) / 100, chequeNumber: null });
+  const isDeposit = (it: NonNullable<AggregatePlanInput['items']>[number]) => (it.type ?? '') === 'security_deposit';
+  if ((p.securityDepositFils ?? 0) > 0) rows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: (p.securityDepositFils ?? 0) / 100, chequeNumber: null, transactionDate: dateOf(isDeposit), paymentMethod: methodOf(isDeposit) ?? defaultPlanMethod('deposit') });
   const admin = (p.adminFeeFils ?? 0) + (p.adminFeeVatFils ?? 0);
-  if (admin > 0) rows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: admin / 100, chequeNumber: null });
+  if (admin > 0) rows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: admin / 100, chequeNumber: null, transactionDate: dateOf(isFee('Admin')), paymentMethod: feeMethod('Admin') ?? defaultPlanMethod('fee') });
   const comm = (p.commissionFils ?? 0) + (p.commissionVatFils ?? 0);
-  if (comm > 0) rows.push({ paymentType: 'commission', description: 'Commission', amount: comm / 100, chequeNumber: null });
+  if (comm > 0) rows.push({ paymentType: 'commission', description: 'Commission', amount: comm / 100, chequeNumber: null, transactionDate: dateOf(isFee('Commission')), paymentMethod: feeMethod('Commission') ?? defaultPlanMethod('fee') });
   const ejari = (p.ejariFils ?? 0) + (p.ejariVatFils ?? 0);
-  if (ejari > 0) rows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: ejari / 100, chequeNumber: null });
-  for (const f of (p.customFees ?? [])) rows.push({ paymentType: 'other', description: f.label, amount: (f.netFils + f.vatFils) / 100, chequeNumber: null });
+  if (ejari > 0) rows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: ejari / 100, chequeNumber: null, transactionDate: dateOf(isFee('Contract Registration')), paymentMethod: feeMethod('Contract Registration') ?? defaultPlanMethod('fee') });
+  for (const f of (p.customFees ?? [])) {
+    const match = (it: NonNullable<AggregatePlanInput['items']>[number]) => it.description === f.label;
+    rows.push({ paymentType: 'other', description: f.label, amount: (f.netFils + f.vatFils) / 100, chequeNumber: null, transactionDate: dateOf(match), paymentMethod: methodOf(match) ?? defaultPlanMethod('fee') });
+  }
+  // Extra rows the landlord added by hand. They have no category total to derive
+  // from — the schedule IS their only record — so they were silently missing from
+  // the plan and from its grand total.
+  for (const it of (p.items ?? [])) {
+    if ((it.type ?? '').toLowerCase() !== 'extra_installment') continue;
+    rows.push({
+      paymentType: 'other',
+      description: it.description || 'Extra payment',
+      amount: (it.amountFils ?? 0) / 100,
+      chequeNumber: null,
+      transactionDate: it.dueDate ?? null,
+      paymentMethod: it.paymentMethod ?? defaultPlanMethod('later_instalment'),
+    });
+  }
   return rows;
 }
 
@@ -177,7 +225,7 @@ export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput
  *  are authoritative, so the on-screen plan matches exactly what the RP issued
  *  (no even-split re-derivation, so extra installments are never dropped). */
 export function segRowsFromCustomerPlan(plan: {
-  items?: Array<{ amountFils?: number | null; dueDate?: string | null; description?: string | null; type?: string | null }> | null;
+  items?: Array<{ amountFils?: number | null; dueDate?: string | null; description?: string | null; type?: string | null; paymentMethod?: string | null }> | null;
 }): SegPaymentInput[] {
   const feePaymentType = (desc: string): string => {
     const d = desc.toLowerCase();
@@ -200,6 +248,16 @@ export function segRowsFromCustomerPlan(plan: {
       amount: (it.amountFils ?? 0) / 100,
       chequeNumber: null,
       transactionDate: it.dueDate ?? null,
+      // How the landlord said this line is paid. A plan issued before methods
+      // existed carries none, so it falls back to the same default the editor
+      // shows rather than leaving the customer's copy silent.
+      paymentMethod: it.paymentMethod
+        ?? defaultPlanMethod(
+          t === 'security_deposit' ? 'deposit'
+          : t === 'fee' ? 'fee'
+          : t === 'first_bundle' ? 'first_instalment'
+          : 'later_instalment',
+        ),
     };
   });
 }
@@ -280,10 +338,11 @@ export function buildSegregatedPlan(rows: SegPaymentInput[]): SegregatedPlan {
   // ── Security Deposit ──
   const depositLines: SegLine[] = deposits.map(p => lineOf(p, 'Security Deposit', p.amount || 0));
 
-  // ── Rental Income ── (labelled by instalment position)
+  // ── Rental Income ── (labelled by instalment position; "Instalment 2", not
+  // "Instalment 2 of 4" — the section header already carries the count)
   const n = rentals.length;
   const rentalLines: SegLine[] = rentals.map((p, i) =>
-    lineOf(p, n > 1 ? `Instalment ${i + 1} of ${n}` : 'Rent', p.amount || 0));
+    lineOf(p, n > 1 ? `Instalment ${i + 1}` : 'Rent', p.amount || 0));
 
   // ── Ejari → Third Party in FULL (not split), always on TOP of the section ──
   const ejariLines: SegLine[] = ejari.map(p => lineOf(p, p.description || 'Contract Registration Fee', p.amount || 0));

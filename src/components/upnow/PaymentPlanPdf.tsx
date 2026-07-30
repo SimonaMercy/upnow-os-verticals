@@ -55,6 +55,9 @@ export interface PaymentPlanMeta {
   landlordName?: string | null;
   /** 'renewal' → "Renewal" pill; anything else → "New Lease". */
   contractType?: string | null;
+  /** How to pay. A plan telling someone to transfer or hand over cheques is
+   *  incomplete without the account / payee, and the PDF is the copy they keep. */
+  bankDetails?: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null;
 }
 
 /** A contract shape sufficient to derive the plan rows + heading metadata. */
@@ -76,25 +79,53 @@ export { segRowsFromContract };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+// Spacing note: the header chrome (title → landlord → 2 meta rows → table) and
+// the closing note are FIXED cost on every plan, so slack there is what tips a
+// short plan onto a second page for the sake of one line of small print. These
+// values are deliberately tight; a plan with genuinely many line items is still
+// free to run over — that is the table growing, not the chrome.
 const s = StyleSheet.create({
-  page: { paddingTop: 34, paddingBottom: 40, paddingHorizontal: 38, fontSize: 10, color: INK, fontFamily: 'Roboto' },
-  headTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 2, borderBottomColor: GREEN, paddingBottom: 7 },
+  page: { paddingTop: 26, paddingBottom: 26, paddingHorizontal: 38, fontSize: 10, color: INK, fontFamily: 'Roboto' },
+  headTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 2, borderBottomColor: GREEN, paddingBottom: 6 },
   h1: { fontSize: 17, fontWeight: 700, color: GREEN },
   pill: { fontSize: 8, fontWeight: 700, color: GREEN, backgroundColor: '#e4efeb', paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10 },
-  sub: { fontSize: 9, color: MUTE, marginTop: 6 },
+  sub: { fontSize: 9, color: MUTE, marginTop: 5 },
   planref: { fontWeight: 700, color: GREEN },
-  landlordWrap: { marginTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: HAIR_SOFT },
+  landlordWrap: { marginTop: 9, paddingBottom: 7, borderBottomWidth: 1, borderBottomColor: HAIR_SOFT },
+  payTo: { marginTop: 9, padding: 8, borderWidth: 1, borderColor: HAIR_SOFT, borderRadius: 6 },
+  payToRow: { flexDirection: 'row', marginTop: 5 },
+  payToCol: { width: '50%', paddingRight: 10 },
   k: { fontSize: 8, color: FAINT, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
   landlordName: { fontSize: 15, fontWeight: 700, color: INK },
-  metaRow: { flexDirection: 'row', marginTop: 12 },
+  metaRow: { flexDirection: 'row', marginTop: 8 },
   metaCol: { width: '33.33%', paddingRight: 10 },
   v: { fontSize: 11, fontWeight: 700, color: INK },
-  muted: { fontSize: 8.5, color: FAINT, marginTop: 18 },
+  muted: { fontSize: 8.5, color: FAINT, marginTop: 10 },
 });
 
 /** Renewal → "Renewal" pill; else "New Lease". */
 function pillLabel(contractType?: string | null): string {
   return (contractType ?? '').toLowerCase() === 'renewal' ? 'Renewal' : 'New Lease';
+}
+
+/**
+ * Cache key for a rendered plan PDF.
+ *
+ * useReactPdfDoc regenerates ONLY when this string changes, so it has to cover
+ * everything the document shows. It used to be `rows.length`, which meant an
+ * edit that kept the row count — a discount, a changed amount, date, method or
+ * heading — handed back the previously rendered PDF, and the landlord downloaded
+ * stale figures until they reloaded the page. Hashed so the key stays short.
+ */
+function planDocKey(prefix: string, rows: SegPaymentInput[], refLabel?: string | null, planRefNo?: string | null, meta?: PaymentPlanMeta): string {
+  const parts = [
+    refLabel ?? '', planRefNo ?? '',
+    ...rows.map(r => `${r.description ?? ''}|${r.paymentType ?? ''}|${r.amount}|${r.vatAmount ?? ''}|${r.transactionDate ?? ''}|${r.paymentMethod ?? ''}|${r.chequeNumber ?? ''}|${r.chequeStatus ?? ''}`),
+    meta ? JSON.stringify(meta) : '',
+  ].join(';');
+  let h = 5381;
+  for (let i = 0; i < parts.length; i++) h = ((h << 5) + h + parts.charCodeAt(i)) | 0;
+  return `${prefix}|${rows.length}|${(h >>> 0).toString(36)}`;
 }
 
 export function PaymentPlanDoc({ rows, refLabel, planRefNo, meta }: {
@@ -108,10 +139,12 @@ export function PaymentPlanDoc({ rows, refLabel, planRefNo, meta }: {
           <Text style={s.h1}>Payment Summary</Text>
           <Text style={s.pill}>{pillLabel(meta?.contractType)}</Text>
         </View>
-        <Text style={s.sub}>
-          {refLabel ? `Contract ${refLabel}` : 'Payment plan'}
-          {planRefNo ? <Text>  ·  Plan ref <Text style={s.planref}>{planRefNo}</Text></Text> : null}
-        </Text>
+        {refLabel || planRefNo ? (
+          <Text style={s.sub}>
+            {refLabel ? `Contract ${refLabel}` : ''}
+            {planRefNo ? <Text>{refLabel ? '  ·  ' : ''}Plan ref <Text style={s.planref}>{planRefNo}</Text></Text> : null}
+          </Text>
+        ) : null}
 
         {meta?.landlordName ? (
           <View style={s.landlordWrap}>
@@ -134,13 +167,44 @@ export function PaymentPlanDoc({ rows, refLabel, planRefNo, meta }: {
           </View>
         ) : null}
 
-        <View style={{ marginTop: 16 }}>
+        <View style={{ marginTop: 11 }}>
           <SegregatedSections plan={plan} />
         </View>
 
-        <Text style={s.muted}>System-generated payment plan. Amounts in UAE Dirhams (AED).</Text>
+        <PayTo plan={plan} meta={meta} />
+
+        {/* Kept with the block above it so a one-page plan never spills a second
+            page for this single line of small print. */}
+        <Text style={s.muted} wrap={false}>System-generated payment plan. Amounts in UAE Dirhams (AED).</Text>
       </Page>
     </Document>
+  );
+}
+
+/**
+ * "Bank transfer to" footer — shown only when a row on this plan is actually paid
+ * by transfer. The cheque payee is deliberately NOT repeated here: it is the
+ * landlord, already named at the top of the summary.
+ */
+function PayTo({ plan, meta }: { plan: ReturnType<typeof buildSegregatedPlan>; meta?: PaymentPlanMeta }) {
+  const hasTransfer = plan.groups.some(g => g.lines.some(l => l.method === 'bank_transfer'));
+  const bank = meta?.bankDetails ?? null;
+  if (!hasTransfer || !(bank?.accountName || bank?.bankName || bank?.iban)) return null;
+  return (
+    <View style={s.payTo} wrap={false}>
+      <Text style={s.k}>Bank transfer to</Text>
+      {/* Two rows: account name + bank, then the IBAN on its own so the long
+          number is never squeezed into half a column. */}
+      <View style={s.payToRow}>
+        {bank.accountName ? <View style={s.payToCol}><Text style={s.k}>Account name</Text><Text style={s.v}>{bank.accountName}</Text></View> : null}
+        {bank.bankName ? <View style={s.payToCol}><Text style={s.k}>Bank</Text><Text style={s.v}>{bank.bankName}</Text></View> : null}
+      </View>
+      {bank.iban ? (
+        <View style={s.payToRow}>
+          <View style={{ width: '100%' }}><Text style={s.k}>IBAN</Text><Text style={s.v}>{bank.iban}</Text></View>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -168,7 +232,7 @@ export function planFromContract(contract: PlanViewerContract): { rows: SegPayme
 export function PaymentPlanInline({ rows, refLabel, planRefNo, meta, height = 100000, showDownload = false }: {
   rows: SegPaymentInput[]; refLabel?: string | null; planRefNo?: string | null; meta?: PaymentPlanMeta; height?: number; showDownload?: boolean;
 }) {
-  const key = `plan-inline|${refLabel ?? ''}|${planRefNo ?? ''}|${rows.length}`;
+  const key = planDocKey('plan-inline', rows, refLabel, planRefNo, meta);
   const { bytes, url, error } = useReactPdfDoc(() => <PaymentPlanDoc rows={rows} refLabel={refLabel} planRefNo={planRefNo} meta={meta} />, key);
   if (error) return <div style={{ padding: 24, textAlign: 'center', color: '#c00', fontSize: 13 }}>Payment plan unavailable.</div>;
   return (
@@ -181,7 +245,7 @@ export function PaymentPlanInline({ rows, refLabel, planRefNo, meta, height = 10
 
 /** Just the "⬇ Download PDF" row for the plan. */
 export function PaymentPlanDownloadLink({ rows, refLabel, planRefNo, meta }: { rows: SegPaymentInput[]; refLabel?: string | null; planRefNo?: string | null; meta?: PaymentPlanMeta }) {
-  const key = `plan-dl|${refLabel ?? ''}|${planRefNo ?? ''}|${rows.length}`;
+  const key = planDocKey('plan-dl', rows, refLabel, planRefNo, meta);
   const { url } = useReactPdfDoc(() => <PaymentPlanDoc rows={rows} refLabel={refLabel} planRefNo={planRefNo} meta={meta} />, key);
   return <InlineDownloadRow url={url} fileName={`Payment-plan-${refLabel ?? 'contract'}.pdf`} />;
 }
@@ -196,7 +260,7 @@ const DL_BTN = { padding: '6px 16px', background: GREEN, color: '#fff', borderRa
 export default function PaymentPlanViewer({ contract }: { contract: PlanViewerContract }) {
   const { rows, refLabel, planRefNo, meta } = planFromContract(contract);
   const fileName = `Payment-plan-${refLabel ?? 'contract'}.pdf`;
-  const key = `plan|${contract.id ?? refLabel ?? ''}|${planRefNo ?? ''}|${rows.length}`;
+  const key = planDocKey(`plan|${contract.id ?? ''}`, rows, refLabel, planRefNo, meta);
   const { bytes, url: downloadUrl, error } = useReactPdfDoc(() => <PaymentPlanDoc rows={rows} refLabel={refLabel} planRefNo={planRefNo} meta={meta} />, key);
 
   return (

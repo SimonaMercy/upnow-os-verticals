@@ -5,6 +5,13 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
+import { getRequiredDocs, isDocKeySatisfied } from '@/lib/docRequirements';
+import { parseAdditionalDocs } from '@/lib/requestableDocs';
+import {
+  deriveStateKey, resolveContractChain, readDocsSubmitted,
+  CUSTOMER_STATE_DEFS, journeyStepLabel, journeyTotalSteps,
+  type CustomerStateKey, type JourneyContract,
+} from '@/lib/customerJourney';
 import {
   Ban, AlertCircle, CheckCircle2, Clock,
   BedDouble, ChevronRight, RotateCcw,
@@ -31,6 +38,10 @@ interface SpaceUnit {
 interface Lead {
   id: number;
   stage: string;
+  /** Auto-generated on express-interest; feeds the journey resolver. */
+  paymentPlan?: unknown;
+  /** Free-text extra documents the RP asked for. */
+  additionalDocsNote?: string | null;
 }
 
 interface Viewing {
@@ -41,6 +52,7 @@ interface Viewing {
   outcome: string | null;
   unit: SpaceUnit | null;
   lead: Lead | null;
+  leadStage?: string | null;
 }
 
 interface DirectLead {
@@ -48,9 +60,20 @@ interface DirectLead {
   stage: string;
   unit: SpaceUnit | null;
   createdAt: string;
+  paymentPlan?: unknown;
+  additionalDocsNote?: string | null;
 }
 
-interface TenantContract {
+/** A customer document as returned by /documents/my. */
+interface TenantDoc {
+  documentKey: string;
+  status?: string | null;
+  fileUrl?: string | null;
+}
+
+// Extends JourneyContract so this row can be handed straight to deriveStateKey —
+// /contracts/tenant already returns those fields, they just weren't declared here.
+interface TenantContract extends JourneyContract {
   id: number;
   status: string;
   contractType?: string | null;
@@ -72,9 +95,9 @@ interface ViewingGroup {
 }
 
 type SpaceRow =
-  | { kind: 'viewing';  key: string; group: ViewingGroup; contract?: TenantContract }
-  | { kind: 'direct';   key: string; lead: DirectLead;    contract?: TenantContract }
-  | { kind: 'contract'; key: string; contract: TenantContract };
+  | { kind: 'viewing';  key: string; group: ViewingGroup; contract?: TenantContract; renewalContract?: TenantContract }
+  | { kind: 'direct';   key: string; lead: DirectLead;    contract?: TenantContract; renewalContract?: TenantContract }
+  | { kind: 'contract'; key: string; contract: TenantContract;                        renewalContract?: TenantContract };
 
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
 
@@ -95,75 +118,73 @@ function groupByLead(viewings: Viewing[]): ViewingGroup[] {
   return groups;
 }
 
-function pickPrimaryContract(contracts: TenantContract[], unitId: number | null | undefined): TenantContract | undefined {
-  if (!unitId) return undefined;
+/** Current lease + renewal-in-flight for a unit, via the SHARED chain walk the
+ *  space detail page uses — so a row can never disagree with the page it opens. */
+function chainForUnit(contracts: TenantContract[], unitId: number | null | undefined) {
+  if (!unitId) return { contract: undefined, renewalContract: undefined };
   const onUnit = contracts.filter(c => c.unit?.id === unitId);
-  if (onUnit.length === 0) return undefined;
-  // Walk from the TIP of the renewal chain (newest start date, then highest id)
-  // so the row reflects the CURRENT lease / live renewal — NOT the original root.
-  // The old "prefer the non-renewal rootless contract" rule returned the ORIGINAL
-  // lease, which on a renewed unit is expired → the row read "Lease Ended" and
-  // hid both the active renewal lease and its pending renewal offer. Mirrors the
-  // detail page's proven byRecency/tip resolution (spaces/v2/[spaceKey]).
-  const byRecency = (a: TenantContract, b: TenantContract) =>
-    (b.startDate ?? '').localeCompare(a.startDate ?? '') || (b.id - a.id);
-  const tip = [...onUnit].sort(byRecency)[0];
-  // Tip is a renewal still being processed (a pending/issued child) → the CURRENT
-  // in-force lease is its parent; surface the parent so an active lease with a
-  // proposed renewal reads Active/Renewal-Offered, not the pending child.
-  if (tip && tip.parentContractId && tip.status !== 'active') {
-    return onUnit.find(c => c.id === tip.parentContractId) ?? tip;
-  }
-  // Double-active glitch: a renewal that was activated BEFORE its term starts
-  // (e.g. Ejari registered early) is not the current tenancy — surface the
-  // still-running parent lease so the card reads the in-force lease, not next
-  // year's premature one.
-  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
-  if (tip && tip.parentContractId && tip.status === 'active' && (tip.startDate ?? '').slice(0, 10) > todayIso) {
-    return onUnit.find(c => c.id === tip.parentContractId) ?? tip;
-  }
-  return tip;
+  if (onUnit.length === 0) return { contract: undefined, renewalContract: undefined };
+  const { contract, renewalContract } = resolveContractChain(onUnit);
+  return { contract: contract ?? undefined, renewalContract: renewalContract ?? undefined };
 }
 
 function fmtShort(iso: string) {
   return new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: '2-digit', timeZone: APP_TIME_ZONE });
 }
 
-function rowStatusConfig(row: SpaceRow): { label: string; bg: string; text: string; isAction: boolean } {
-  const c = row.contract;
+/**
+ * Where this space actually is, using the SAME resolver the detail page runs.
+ *
+ * This replaced a local map off lead.stage / contract.status that could only
+ * name coarse buckets — a customer stuck on "Documents required, Step 2 of 8"
+ * read "Awaiting Next Step", which names neither the step nor the fact that it
+ * is waiting on THEM.
+ */
+function rowJourney(row: SpaceRow, docs: TenantDoc[], entityType: 'individual' | 'company' | null): CustomerStateKey {
+  const lead = row.kind === 'viewing' ? row.group.primary.lead : row.kind === 'direct' ? row.lead : null;
+  const unitType = row.kind === 'viewing'
+    ? row.group.unit?.unitType
+    : row.kind === 'direct'
+      ? row.lead.unit?.unitType
+      : row.contract.unit?.unitType;
 
-  if (c) {
-    // A live renewal offer is a call-to-action — surface it ahead of the plain
-    // status label so the customer acts on it. This applies both while the lease
-    // is still active AND once it has expired with the renewal still pending
-    // (the old term ended before the tenant accepted); otherwise the space would
-    // wrongly read "Lease Ended" and hide the offer.
-    if ((c.status === 'active' || c.status === 'expired') && c.renewalAccepted === 'pending')
-      return { label: 'Renewal Offered', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
-    if (c.status === 'active') return { label: 'Active Tenancy', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false };
-    if (c.status === 'issued' && !c.tenantSignedAt) return { label: 'Sign Contract', bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true };
-    if (c.status === 'issued' && c.tenantSignedAt)  return { label: 'Awaiting Contract Registration', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
-    if (c.status === 'expired')    return { label: 'Lease Ended', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
-    if (c.status === 'terminated') return { label: 'Terminated',  bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
-    return { label: 'Contract Pending', bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', isAction: false };
-  }
+  // Same docs-complete gate as the detail page: KYC identity + the rental
+  // section, so a customer who uploaded financials but skipped KYC is still
+  // routed to docs_required rather than payment_review. entityType matters —
+  // a COMPANY tenancy is asked for a trade licence + signatory ID, not the
+  // individual pack, so passing the wrong one would disagree with the page.
+  const requiredKeys = getRequiredDocs(unitType ?? null, entityType).filter(d => d.required).map(d => d.key);
+  const uploadedKeys = new Set(
+    docs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey),
+  );
+  const allRequiredDocsUploaded = requiredKeys.length > 0 && requiredKeys.every(k => isDocKeySatisfied(k, uploadedKeys));
 
-  // Non-contract rows are always viewing/direct here.
-  const stage = row.kind === 'viewing' ? row.group.leadStage : row.kind === 'direct' ? row.lead.stage : 'new';
-  const vstatus = row.kind === 'viewing' ? row.group.primary.status : undefined;
+  return deriveStateKey({
+    contract: row.contract ?? null,
+    renewalContract: row.renewalContract ?? null,
+    viewing: row.kind === 'viewing' ? row.group.primary : null,
+    stage: row.kind === 'viewing'
+      ? (row.group.primary.lead?.stage ?? row.group.leadStage ?? null)
+      : row.kind === 'direct' ? row.lead.stage : null,
+    paymentPlan: lead?.paymentPlan ?? null,
+    allRequiredDocsUploaded,
+    docsSubmitted: readDocsSubmitted(row.key),
+    myDocs: docs,
+    requestedAdditionalDocs: parseAdditionalDocs(lead?.additionalDocsNote ?? null),
+  });
+}
 
-  const stageMap: Record<string, { label: string; bg: string; text: string; isAction: boolean }> = {
-    documents_collection: { label: 'Documents in Review',     bg: 'bg-[#f0f9ff]', text: 'text-[#0369a1]', isAction: false },
-    payment_plan_shared:  { label: 'Review Payment Plan',     bg: 'bg-[#fff7ed]', text: 'text-[#c2410c]', isAction: true  },
-    cheques_submitted:    { label: 'Cheques Under Review',    bg: 'bg-[#fef9c3]', text: 'text-[#854d0e]', isAction: false },
-    cheques_collected:    { label: 'Preparing Your Contract', bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false },
-    contract_issued:      { label: 'Contract Being Issued',   bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false },
-    converted:            { label: 'Active Tenancy',          bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false },
-    interested:           { label: 'Interested',              bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', isAction: false },
-  };
-  if (stageMap[stage]) return stageMap[stage];
-  if (vstatus === 'completed') return { label: 'Awaiting Next Step', bg: 'bg-[#f0faf6]', text: 'text-[#2e9f82]', isAction: false };
-  return { label: 'Attend Your Viewing', bg: 'bg-[#fef3c7]', text: 'text-[#92400e]', isAction: false };
+/** Pill + tone for a resolved journey state. */
+function journeyStatusConfig(key: CustomerStateKey): { label: string; step: string; bg: string; text: string; isAction: boolean } {
+  const def = CUSTOMER_STATE_DEFS[key];
+  const step = journeyStepLabel(key);
+  const palette = {
+    action:    { bg: 'bg-[#fbe5dc]', text: 'text-[#c8492c]' },
+    waiting:   { bg: 'bg-[#fbebcc]', text: 'text-[#a0641b]' },
+    celebrate: { bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]' },
+    declined:  { bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]' },
+  }[def.tone];
+  return { label: def.label, step, ...palette, isAction: def.tone === 'action' };
 }
 
 /* ── InactiveCard ───────────────────────────────────────────────────────────── */
@@ -200,22 +221,35 @@ export default function MySpacesPage() {
   const [viewings,     setViewings]     = useState<Viewing[]>([]);
   const [directLeads,  setDirectLeads]  = useState<DirectLead[]>([]);
   const [contracts,    setContracts]    = useState<TenantContract[]>([]);
+  const [docs,         setDocs]         = useState<TenantDoc[]>([]);
+  const [entityType,   setEntityType]   = useState<'individual' | 'company' | null>(null);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [vRes, lRes, cRes] = await Promise.all([
+      const [vRes, lRes, cRes, dRes] = await Promise.all([
         fetch('/api/leads/my-viewings',     { credentials: 'include' }),
         fetch('/api/leads/my-applications', { credentials: 'include' }),
         fetch('/api/contracts/tenant',      { credentials: 'include' }),
+        // Needed to tell "documents required" from "documents under review" —
+        // without it every pre-contract space collapses to one vague label.
+        fetch('/api/documents/my',          { credentials: 'include' }),
       ]);
       if (!vRes.ok) throw new Error(`Failed to load viewings (${vRes.status})`);
       const vData = await vRes.json();
       setViewings(Array.isArray(vData) ? vData : []);
       if (lRes.ok) { const d = await lRes.json(); setDirectLeads(Array.isArray(d) ? d : []); }
       if (cRes.ok) { const d = await cRes.json(); setContracts(Array.isArray(d) ? d : []); }
+      if (dRes.ok) {
+        const d = await dRes.json();
+        // A doc the RP merely REQUESTED is a row with no file — it is the
+        // request, not the document, so it must not tick off the checklist.
+        const list: TenantDoc[] = Array.isArray(d?.documents) ? d.documents : [];
+        setDocs(list.filter(x => !!x.fileUrl));
+        setEntityType(d?.entityType ?? null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally { setLoading(false); }
@@ -268,36 +302,43 @@ export default function MySpacesPage() {
     new Set(contracts.map(c => c.unit?.id).filter((x): x is number => x != null)),
   )
     .filter(uid => !representedUnitIds.has(uid))
-    .map(uid => pickPrimaryContract(contracts, uid))
-    .filter((c): c is TenantContract => !!c);
+    .map(uid => chainForUnit(contracts, uid))
+    .filter((x): x is { contract: TenantContract; renewalContract: TenantContract | undefined } => !!x.contract);
   const activeContractRows: SpaceRow[] = contractOnly
-    .filter(c => !TERMINAL_CONTRACT.has(c.status) || hasLiveRenewalOffer(c))
-    .map(c => ({ kind: 'contract' as const, key: `c-${c.id}`, contract: c }));
-  const pastContractRows = contractOnly.filter(c => TERMINAL_CONTRACT.has(c.status) && !hasLiveRenewalOffer(c));
+    .filter(x => !TERMINAL_CONTRACT.has(x.contract.status) || hasLiveRenewalOffer(x.contract))
+    .map(x => ({ kind: 'contract' as const, key: `c-${x.contract.id}`, contract: x.contract, renewalContract: x.renewalContract }));
+  const pastContractRows = contractOnly
+    .filter(x => TERMINAL_CONTRACT.has(x.contract.status) && !hasLiveRenewalOffer(x.contract))
+    .map(x => x.contract);
 
   const activeRows: SpaceRow[] = [
     ...activeGroups.map(g => ({
       kind: 'viewing' as const,
       key: `v-${g.leadId}`,
       group: g,
-      contract: pickPrimaryContract(contracts, g.unit?.id),
+      ...chainForUnit(contracts, g.unit?.id),
     })),
     ...activeDirectLeads.map(l => ({
       kind: 'direct' as const,
       key: `d-${l.id}`,
       lead: l,
-      contract: pickPrimaryContract(contracts, l.unit?.id),
+      ...chainForUnit(contracts, l.unit?.id),
     })),
     ...activeContractRows,
   ];
 
-  const activeCount    = activeRows.filter(r => r.contract?.status === 'active').length;
-  const renewingCount  = activeRows.filter(r => r.contract?.renewalAccepted === 'pending').length;
-  // In-progress = still working toward a lease; exclude active tenancies AND
-  // rows already counted under "renewing" so an expired-with-pending-renewal
-  // space isn't tallied twice.
-  const inProgressCount = activeRows.filter(r =>
-    !r.contract || (r.contract.status !== 'active' && r.contract.renewalAccepted !== 'pending'),
+  // Resolve every row's journey state ONCE — the header counts and the card
+  // bodies must read the same number, so they share this list.
+  const rowStates = activeRows.map(r => rowJourney(r, docs, entityType));
+
+  const isLiveTenancy = (k: CustomerStateKey) => k === 'active' || k === 'renewal_active' || k === 'terminating';
+  const isRenewing = (k: CustomerStateKey) => CUSTOMER_STATE_DEFS[k].mode === 'renewal' && k !== 'renewal_active';
+  const activeCount   = rowStates.filter(isLiveTenancy).length;
+  const renewingCount = rowStates.filter(isRenewing).length;
+  // In-progress = still working toward a lease; excludes live tenancies, rows
+  // already counted under "renewing", and dead-ends (declined/superseded).
+  const inProgressCount = rowStates.filter(k =>
+    !isLiveTenancy(k) && !isRenewing(k) && CUSTOMER_STATE_DEFS[k].currentIndex >= 0,
   ).length;
   const firstName = (user?.name ?? '').trim().split(/\s+/)[0] || 'there';
 
@@ -361,7 +402,10 @@ export default function MySpacesPage() {
       {!loading && activeRows.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
           {activeRows.map((row, idx) => {
-            const sc = rowStatusConfig(row);
+            const stateKey = rowStates[idx];
+            const def = CUSTOMER_STATE_DEFS[stateKey];
+            const sc = journeyStatusConfig(stateKey);
+            const totalSteps = journeyTotalSteps(stateKey);
             // For contract-only rows, map the contract's unit/property payload
             // into the SpaceUnit shape the card expects.
             const unit: SpaceUnit | null = row.kind === 'viewing'
@@ -385,7 +429,7 @@ export default function MySpacesPage() {
                     }
                   : null;
             const c = row.contract;
-            const isActive = c?.status === 'active';
+            const isActive = def.tone === 'celebrate';
             const community = unit?.property?.community?.name ?? null;
             const emirate = unit?.property?.emirate?.name ?? null;
             const location = [community, emirate].filter(Boolean).join(', ') || null;
@@ -406,11 +450,16 @@ export default function MySpacesPage() {
             // identical across a building's units and makes cards indistinguishable.
             const unitLabel = unit?.unitNumber ? `Unit ${unit.unitNumber}` : (unit?.unitName ?? 'Property');
             const photo = DUMMY_PHOTOS[idx % DUMMY_PHOTOS.length];
-            const tone: 'action' | 'waiting' | 'settled' = sc.isAction ? 'action' : isActive ? 'settled' : 'waiting';
+            const tone: 'action' | 'waiting' | 'settled' | 'closed' =
+              def.tone === 'declined' ? 'closed' : sc.isAction ? 'action' : isActive ? 'settled' : 'waiting';
+            // The eyebrow names WHO the space is waiting on — the old copy said
+            // "In progress" for every non-active row, which is the one thing the
+            // customer can already see from the fact that it's on this list.
             const toneCfg = {
-              action:  { bg: 'bg-[#fbe5dc]', border: 'border-[#f3c4b3]', dot: 'bg-[#c8492c]', label: 'text-[#c8492c]', icon: <AlertCircle size={14} className="text-white" />, eyebrow: 'Action required' },
-              waiting: { bg: 'bg-[#fbebcc]', border: 'border-[#f0d68f]', dot: 'bg-[#a0641b]',  label: 'text-[#a0641b]',  icon: <Clock size={14} className="text-white" />,        eyebrow: 'In progress'      },
-              settled: { bg: 'bg-[#e0ede0]', border: 'border-[#bdd9b8]', dot: 'bg-[#1f5a3f]',  label: 'text-[#1f5a3f]',  icon: <CheckCircle2 size={14} className="text-white" />, eyebrow: 'Active'           },
+              action:  { bg: 'bg-[#fbe5dc]', border: 'border-[#f3c4b3]', dot: 'bg-[#c8492c]', label: 'text-[#c8492c]', icon: <AlertCircle size={14} className="text-white" />, eyebrow: 'Your turn' },
+              waiting: { bg: 'bg-[#fbebcc]', border: 'border-[#f0d68f]', dot: 'bg-[#a0641b]',  label: 'text-[#a0641b]',  icon: <Clock size={14} className="text-white" />,        eyebrow: 'With your rental provider' },
+              settled: { bg: 'bg-[#e0ede0]', border: 'border-[#bdd9b8]', dot: 'bg-[#1f5a3f]',  label: 'text-[#1f5a3f]',  icon: <CheckCircle2 size={14} className="text-white" />, eyebrow: 'Active' },
+              closed:  { bg: 'bg-[#f4f3ef]', border: 'border-[#e8e6e0]', dot: 'bg-[#9b9890]',  label: 'text-[#6b6860]',  icon: <Ban size={14} className="text-white" />,          eyebrow: 'Closed' },
             }[tone];
 
             return (
@@ -429,10 +478,20 @@ export default function MySpacesPage() {
                       <RotateCcw size={10} /> Renewal — Action
                     </span>
                   )}
-                  <span className={`absolute bottom-3 left-3 text-[11px] font-semibold rounded-full px-3 py-1.5 ${sc.bg} ${sc.text} shadow-sm ${sc.isAction ? 'upnow-action-pill' : ''}`}>
-                    {sc.isAction && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1.5 align-middle" />}
-                    {sc.label}
-                  </span>
+                  {/* The pill now names the actual journey step ("Documents
+                      required", "Awaiting your signature") rather than a coarse
+                      bucket, and carries its position in the 8-stop journey. */}
+                  <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
+                    <span className={`text-[11px] font-semibold rounded-full px-3 py-1.5 ${sc.bg} ${sc.text} shadow-sm ${sc.isAction ? 'upnow-action-pill' : ''}`}>
+                      {sc.isAction && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1.5 align-middle" />}
+                      {sc.label}
+                    </span>
+                    {sc.step && (
+                      <span className="text-[10px] font-semibold rounded-full px-2.5 py-1 bg-[#1a1916]/75 text-white shadow-sm whitespace-nowrap tabular-nums">
+                        {sc.step}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Body */}
@@ -448,6 +507,16 @@ export default function MySpacesPage() {
                       )}
                     </h3>
                   </div>
+
+                  {/* What is actually happening right now. Without this the card
+                      said only "In progress", which is the one thing the customer
+                      can already tell from the space being on this list. */}
+                  {totalSteps > 0 && (
+                    <p className="text-xs text-[#6b6860] leading-snug">
+                      <span className="font-semibold text-[#1a1916]">{def.headline}</span>
+                      {def.timing && <span className="text-[#9b9890]"> · {def.timing}</span>}
+                    </p>
+                  )}
 
                   {/* Stats strip */}
                   <div className="grid grid-cols-3 gap-3 py-3 border-y border-[#f0ede8]">

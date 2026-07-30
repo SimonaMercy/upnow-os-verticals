@@ -303,7 +303,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const [tab, setTab] = useState<TabKey>(() => {
     const t = sp.get('tab'); return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
   });
-  const [search, setSearch] = useState('');
+  // Seeded from `?q=` so a link that has no contract id yet (a just-converted
+  // lead) can still land with that customer filtered in.
+  const [search, setSearch] = useState(() => sp.get('q') ?? '');
   const [filterAsset, setFilterAsset] = useState('all');
   // Scope is fixed to the current calendar year (no picker) — the board always
   // shows this year's deals.

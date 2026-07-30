@@ -247,12 +247,6 @@ function initials(name: string) {
   return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
 }
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-AE', {
-    day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE,
-  });
-}
-
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-AE', {
     day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE,
@@ -1008,7 +1002,7 @@ function LeadRow({
       tabIndex={0}
       onClick={openDetail}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(); } }}
-      className="bg-white rounded-xl border border-[#ede9e3] cursor-pointer transition-colors hover:border-[#2e9f82]/50 hover:bg-[#fafdfb] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
+      className={`bg-white rounded-xl border border-[#ede9e3] cursor-pointer transition-colors hover:border-[#2e9f82]/50 hover:bg-[#fafdfb] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30${layout === 'grid' ? ' h-full' : ''}`}
     >
 
       {layout === 'grid' ? (
@@ -1036,19 +1030,14 @@ function LeadRow({
               <Building2 size={13} className="text-[#c8c6c0] shrink-0" />
               <span className="truncate">{unitLabel ? `${unitLabel}${building ? ` · ${building}` : ''}` : 'No unit assigned'}</span>
             </div>
-            <div className="flex items-center gap-2">
-              {viewing ? (
-                <>
-                  <Clock size={13} className={`shrink-0 ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-500' : 'text-[#c8c6c0]'}`} />
-                  <span className={new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600 font-medium' : 'text-[#6b6860]'}>{fmtDateTime(viewing.scheduledAt)}</span>
-                </>
-              ) : (
-                <>
-                  <Calendar size={13} className="text-[#c8c6c0] shrink-0" />
-                  <span className="text-[#9b9890]">Added {fmtDate(lead.createdAt)}</span>
-                </>
-              )}
-            </div>
+            {/* The enquiry date still orders the cards, but it is not shown —
+                the viewing appointment is the only date that reads as useful. */}
+            {viewing && (
+              <div className="flex items-center gap-2">
+                <Clock size={13} className={`shrink-0 ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-500' : 'text-[#c8c6c0]'}`} />
+                <span className={new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600 font-medium' : 'text-[#6b6860]'}>{fmtDateTime(viewing.scheduledAt)}</span>
+              </div>
+            )}
             {annualRentAed != null && (
               <div className="flex items-center gap-2">
                 <CreditCard size={13} className="text-[#c8c6c0] shrink-0" />
@@ -1129,15 +1118,13 @@ function LeadRow({
           )}
         </div>
 
-        {/* Date */}
-        <div className="shrink-0 w-[136px] hidden lg:block">
-          {viewing ? (
-            <div className={`flex items-center gap-1.5 text-xs font-medium ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600' : 'text-[#6b6860]'}`}>
+        {/* Date — the viewing appointment only. The list is still ordered by the
+            lead's created date (created_at DESC), but that date is no longer
+            shown: it is bookkeeping, not something acted on. */}
+        <div className="shrink-0 w-[180px] hidden lg:block">
+          {viewing && (
+            <div className={`flex items-center gap-1.5 text-xs font-medium mt-0.5 ${new Date(viewing.scheduledAt) <= new Date() ? 'text-amber-600' : 'text-[#6b6860]'}`}>
               <Clock size={12} className="shrink-0" />{fmtDateTime(viewing.scheduledAt)}
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-xs text-[#9b9890]">
-              <Calendar size={12} className="shrink-0" />{fmtDate(lead.createdAt)}
             </div>
           )}
         </div>
@@ -1511,7 +1498,7 @@ export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: {
         !loading && filtered.length > 0 && (
           <div className={view === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4' : 'space-y-2'}>
             {filtered.map(lead => (
-              <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`}>
+              <div key={`${lead.id}-${lead.updatedAt}`} id={`lead-${lead.id}`} className={view === 'grid' ? 'h-full' : undefined}>
                 <LeadRow
                   lead={lead}
                   onMoveStage={moveStage}

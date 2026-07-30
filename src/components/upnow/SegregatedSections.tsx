@@ -48,15 +48,23 @@ const s = StyleSheet.create({
   grandVal: { fontSize: 13, fontWeight: 700, color: '#1a5a4a' },
 });
 
+const METHOD_LABEL: Record<string, string> = {
+  cheque: 'Cheque', bank_transfer: 'Bank transfer', card: 'Card', cash: 'Cash', online: 'Online',
+};
+
 export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
   // Match the on-screen view: the Payment Ref column shows only when a real cheque/
   // transfer ref exists (contract, receipts); on proposals it's dropped and the other
   // columns widen so there's no dead "—" column.
   const showRef = plan.groups.some(g => g.lines.some(l => !!l.chequeNo));
-  const wItem = showRef ? '34%' : '52%';
-  const wDue = showRef ? '20%' : '26%';
+  // "Paid by" mirrors the on-screen view: shown once the landlord has actually
+  // chosen how a line is paid, so the PDF states it rather than implying cheques.
+  const showMethod = plan.groups.some(g => g.lines.some(l => !!l.method));
+  const wMethod = '16%';
+  const wItem = showRef ? (showMethod ? '28%' : '34%') : (showMethod ? '40%' : '52%');
+  const wDue = showRef ? '20%' : (showMethod ? '22%' : '26%');
   const wAmt = showRef ? '16%' : '22%';
-  const wTotalLab = showRef ? '84%' : '78%';
+  const wTotalLab = showRef ? (showMethod ? '84%' : '84%') : (showMethod ? '78%' : '78%');
   return (
     <View>
       {plan.groups.map((g) => {
@@ -66,12 +74,13 @@ export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
             <View style={[s.head, { borderLeftColor: c.accent, backgroundColor: c.tint }]}>
               <Text style={s.name}>{g.title}</Text>
               {g.key === 'rental' && g.lines.length > 1
-                ? <Text style={s.count}>{g.lines.length} cheques</Text>
+                ? <Text style={s.count}>{g.lines.length} payments</Text>
                 : null}
             </View>
             <View style={s.thead}>
               <Text style={[s.th, { width: wItem }]}>Item</Text>
               {showRef ? <Text style={[s.th, { width: '30%' }]}>Payment Ref</Text> : null}
+              {showMethod ? <Text style={[s.th, { width: wMethod }]}>Paid by</Text> : null}
               <Text style={[s.th, { width: wDue }]}>Due date</Text>
               <Text style={[s.th, { width: wAmt, textAlign: 'right' }]}>Amount</Text>
             </View>
@@ -79,6 +88,7 @@ export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
               <View key={i} style={s.row}>
                 <Text style={[s.cItem, { width: wItem }]}>{l.item}</Text>
                 {showRef ? <Text style={s.cRef}>{paymentRefLabel(l.chequeNo, l.method)}</Text> : null}
+                {showMethod ? <Text style={[s.cDue, { width: wMethod }]}>{METHOD_LABEL[l.method ?? ''] ?? '—'}</Text> : null}
                 <Text style={[s.cDue, { width: wDue }]}>{fmtDate(l.dueDate)}</Text>
                 <Text style={[s.cAmt, { width: wAmt }]}>{aed(l.amount)}</Text>
               </View>

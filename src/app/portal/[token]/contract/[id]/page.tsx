@@ -10,12 +10,15 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText, Stamp, ExternalLink } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
 import { collectClientMeta, collectGeo } from '@/lib/signEvidence';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
+import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
+import { leaseDocFileName, type LeaseDocKind } from '@/lib/leaseDocName';
 import { ContractDocsBinder, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
+import { shapePaymentRefs, type RawPaymentRefs } from '@/lib/paymentRefs';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
@@ -31,6 +34,11 @@ const ReceiptButtons = dynamic(() => import('@/components/upnow/PaymentReceiptPd
   loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing receipts…</div>,
 });
 
+const ContractButtons = dynamic(() => import('@/components/contract/ContractButtons'), {
+  ssr: false,
+  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing contract…</div>,
+});
+
 interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
 interface Detail {
@@ -44,8 +52,12 @@ interface Detail {
   addendums?: EjariAddendum[];
   tenantSigned: boolean;
   landlordSigned?: boolean;
-  /** Live payment-plan + receipts inputs (landlord links only). */
+  /** Live payment-plan + receipts inputs (not sent on inspector links). */
   plan?: { payments: PlanPayment[]; fees: PlanPayment[] };
+  /** The landlord's issued reconciliation numbers (plan + one receipt per received
+   *  cheque/deposit), so a receipt printed from this link carries the SAME numbers
+   *  as the RP and customer dashboards instead of a derived label. */
+  paymentRefs?: RawPaymentRefs | null;
   rentVatRate?: number;
   pdcConfirmed?: boolean;
   moveInAvailable: boolean;
@@ -153,8 +165,22 @@ export default function ContractReviewPage() {
   // on the customer link. Shown only when there are payment / fee rows to receipt.
   const receipt: ReceiptContract | null =
     d.plan && (d.plan.payments.length > 0 || (d.plan.fees?.length ?? 0) > 0)
-      ? ({ ...d.contract, payments: d.plan.payments, fees: d.plan.fees, pdcConfirmed: d.pdcConfirmed } as unknown as ReceiptContract)
+      ? ({
+          ...d.contract, payments: d.plan.payments, fees: d.plan.fees, pdcConfirmed: d.pdcConfirmed,
+          paymentRefs: shapePaymentRefs(d.paymentRefs ?? {}),
+        } as unknown as ReceiptContract)
       : null;
+
+  // The Contract Registration certificate the landlord or manager uploaded onto
+  // this contract. Every variant of the key is `ejari*` (`ejari_certificate`,
+  // plus the upload-timestamp-suffixed slots the RP page mints for re-uploads),
+  // so match on the prefix and take the most recent one on file.
+  const ejariCert = [...d.documents].reverse().find(doc => /^ejari/i.test(doc.documentKey) && !!doc.fileUrl) ?? null;
+
+  // Every download off this link is named the same way, so the files identify
+  // themselves in the customer's downloads folder: Receipt-Unit-317-CID-394.pdf.
+  const docName = (kind: LeaseDocKind) =>
+    leaseDocFileName(kind, { unitNumber: d.contract.unit?.number, ref: `CID-${d.contract.id}` });
 
   // Landlord links get a dedicated layout: the contract + every document in full
   // preview (no download) with a sticky sign menu — the lessor's equivalent of
@@ -206,10 +232,17 @@ export default function ContractReviewPage() {
         <p className="text-sm text-[#6b6860] mt-1">
           {inspType
             ? 'Review the condition your rental provider recorded, then sign at the bottom to confirm.'
-            : 'Please read the full contract below, then sign at the bottom.'}
+            : d.tenantSigned
+              ? 'You have signed this contract. Your documents are below — view or download a copy any time, no login needed.'
+              : 'Please read the full contract below, then sign at the bottom.'}
         </p>
 
-        {/* Inspection links show the inspection the RP recorded; contract links show the contract document. */}
+        {/* Inspection links show the inspection the RP recorded; contract links
+             show the contract document — but only until it has been signed. Once
+             signed there is nothing left to read and agree to, so the contract
+             moves to "Your documents" below as a view / download action instead
+             of a wall of PDF the customer has already accepted. */}
+        {(inspType || !d.tenantSigned) && (
         <div className="mt-5">
           {inspType ? (
             insp && insp.rpSubmittedAt ? (
@@ -237,6 +270,7 @@ export default function ContractReviewPage() {
             <EjariInline data={ejari} addendums={addendums} noScroll />
           )}
         </div>
+        )}
 
         {/* Sign the contract */}
         {showContract && (
@@ -249,13 +283,44 @@ export default function ContractReviewPage() {
           </Card>
         )}
 
-        {/* System-generated payment receipts — after signing; surfaced as
-             View / Download actions (no inline preview), since the tenancy
-             contract is the only inline preview. Contract links only. */}
-        {!inspType && receipt && (
-          <Card title="Payment receipts" icon={FileText}>
-            <p className="text-xs text-[#6b6860] mb-3">Your system-generated payment receipts for this tenancy.</p>
-            <ReceiptButtons contract={receipt} />
+        {/* Available to download — the ONLY three things this link hands over,
+             each as a View / Download action rather than an inline preview: the
+             payment receipts, the tenancy contract itself, and the Contract
+             Registration certificate the landlord or manager uploaded. Each row
+             appears only once that document actually exists for this lease, so
+             the card grows with the tenancy instead of listing dead entries.
+             Contract links only — inspection links are a sign-the-inspection
+             surface, not a document hand-over. */}
+        {!inspType && (receipt || d.tenantSigned || ejariCert) && (
+          <Card title="Available to download" icon={FileText}>
+            {/* All three behave identically: the row opens the document in a new
+                 tab to read, and a Download control beside it saves it straight
+                 to disk under a self-describing name. The two we generate hand
+                 over their blob URL; the certificate is a stored file, so its
+                 save goes through the token-scoped endpoint (a cross-origin
+                 signed URL ignores the anchor's `download` attribute — the name
+                 has to come from the server's Content-Disposition). */}
+            <div className="space-y-2.5">
+              {receipt && (
+                <ReceiptButtons contract={receipt} trigger={(_open, _ready, url) => (
+                  <DocRow title="Payment receipts" icon={FileText} href={url}
+                    download={{ url, fileName: docName('Receipt') }} />
+                )} />
+              )}
+              {/* Only once signed: before that the full contract is previewed
+                   right above for reading, so this row would just repeat it. */}
+              {d.tenantSigned && (
+                <ContractButtons data={ejari} addendums={addendums}
+                  trigger={(_open, _ready, url) => (
+                    <DocRow title="Tenancy contract" icon={FileText} href={url}
+                      download={{ url, fileName: docName('Tenancy-Contract') }} />
+                  )} />
+              )}
+              {ejariCert && (
+                <DocRow title="Contract Registration certificate" icon={Stamp} href={ejariCert.fileUrl}
+                  download={ejariCert.id != null ? { documentId: ejariCert.id, portalToken: token } : undefined} />
+              )}
+            </div>
           </Card>
         )}
 
@@ -351,6 +416,54 @@ function Card({ title, icon: Icon, children }: { title: string; icon: React.Comp
   );
 }
 
+/** One document in the portal's "Available to download" card — the same jade
+ *  tile-and-title row the customer sees on their dashboard. The row itself opens
+ *  the file in a new tab to read; the Download button beside it saves straight to
+ *  disk without previewing first. `href` is null only while a generated PDF is
+ *  still rendering, which the row says plainly.
+ *
+ *  The two controls are SIBLINGS, never nested — a <button> inside an <a> is
+ *  invalid and swallows one of the two clicks. */
+function DocRow({ title, icon: Icon, href, download }: {
+  title: string; icon: React.ComponentType<{ size?: number }>; href: string | null;
+  /** A same-origin blob to save directly, or a stored document to fetch a named
+   *  attachment URL for through the token-scoped endpoint. */
+  download?: { url: string | null; fileName: string } | { documentId: number; portalToken: string };
+}) {
+  const dlCls = 'text-xs font-semibold px-3 py-2 rounded-xl text-[#1f6f54] bg-white border border-[#cfe9e0] cursor-pointer whitespace-nowrap no-underline shrink-0 self-start sm:self-auto ml-12 sm:ml-0';
+  const blob = download && 'url' in download ? download : null;
+  const stored = download && 'documentId' in download ? download : null;
+  return (
+    // Stacks on phones — side by side, a wrapped title pushes the "opens in a new
+    // tab" arrow straight into the Download button.
+    <div className="rounded-2xl border border-[#2e9f82] bg-[#fbfaf8] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3">
+      {/* Read: opens in a new tab. */}
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-3 min-w-0 sm:flex-1 no-underline cursor-pointer">
+          <span className="w-9 h-9 rounded-xl bg-[#2e9f82] text-white grid place-items-center shrink-0"><Icon size={18} /></span>
+          <span className="text-sm font-bold text-[#1a1916] min-w-0">{title}</span>
+          <ExternalLink size={14} className="text-[#1f6f54] shrink-0" />
+        </a>
+      ) : (
+        <span className="flex items-center gap-3 min-w-0 sm:flex-1 opacity-70">
+          <span className="w-9 h-9 rounded-xl bg-[#2e9f82] text-white grid place-items-center shrink-0"><Icon size={18} /></span>
+          <span className="text-sm font-bold text-[#1a1916] min-w-0">{title}</span>
+          <span className="text-xs text-[#9b9890] whitespace-nowrap">⏳ Preparing…</span>
+        </span>
+      )}
+      {/* Save: straight to disk, correctly named, no preview step. */}
+      {blob && (blob.url
+        ? <a href={blob.url} download={blob.fileName} className={dlCls}>⬇ Download</a>
+        : <span className={`${dlCls} opacity-50`}>⬇ Download</span>)}
+      {stored && (
+        <DownloadDocButton documentId={stored.documentId} portalToken={stored.portalToken}
+          label="Download" className={dlCls} />
+      )}
+    </div>
+  );
+}
+
 function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector = false }: {
   token: string; contractId: number; kind: 'contract' | 'move_in' | 'move_out'; defaultName: string; onSigned: () => void; asInspector?: boolean;
 }) {
@@ -423,6 +536,8 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
   const receipt = d.plan
     ? ({ ...d.contract, payments: d.plan.payments, fees: d.plan.fees, pdcConfirmed: d.pdcConfirmed } as unknown as ReceiptContract)
     : null;
+  // Same issued numbers the RP sees — the binder merges these into the receipt.
+  const paymentRefs = shapePaymentRefs(d.paymentRefs ?? {});
 
   const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
     const res = await fetch(API(token, `/contracts/${id}/sign-landlord`), {
@@ -446,6 +561,7 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
       addendums={addendums}
       planContract={planContract}
       planPayments={d.plan?.payments ?? []}
+      paymentRefs={paymentRefs}
       receipt={receipt}
       watermark={watermark}
       portalToken={token}

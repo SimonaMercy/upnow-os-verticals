@@ -12,7 +12,7 @@
  *   • data comes from the scoped /manager/* endpoints
  */
 
-import { useState, useMemo, type CSSProperties, type ReactNode } from 'react';
+import { useState, useMemo, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -356,6 +356,23 @@ export default function ManagerPropertiesPage() {
     queryKey: ['manager-properties'],
     queryFn:  () => apiGet<ManagedProperty[]>('/manager/properties'),
   });
+  // `?property=<id>` opens that property's details popup once the list has loaded
+  // — the same deep-link the landlord's portfolio honours, so a link from a lead
+  // lands on the property rather than a bare list. Once per mount, so closing the
+  // popup doesn't immediately re-open it.
+  const deepLinkedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkedRef.current) return;
+    const pid = params.get('property');
+    if (!pid) return;
+    const match = properties.find((p) => String(p.id) === pid);
+    if (match) {
+      deepLinkedRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDetailsProperty(match);
+    }
+  }, [properties, params]);
+
   // Overview backs only the managed-landlord count in the hero subtitle.
   const { data: stats } = useQuery<OverviewStats>({
     queryKey: ['manager-overview'],

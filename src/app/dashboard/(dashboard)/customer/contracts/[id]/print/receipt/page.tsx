@@ -13,6 +13,12 @@ import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
+import { shapePaymentRefs, type RawPaymentRefs } from '@/lib/paymentRefs';
+
+/** The tenant endpoint embeds the landlord's issued reconciliation numbers in the
+ *  raw wire shape (same as GET /contracts/:id/payment-refs) — shape it through the
+ *  shared helper so the customer's receipts print the SAME numbers as the RP's. */
+type TenantReceiptPayload = Omit<ReceiptContract, 'paymentRefs'> & { paymentRefs?: RawPaymentRefs | null };
 
 function FullScreenLoader() {
   return (
@@ -40,8 +46,9 @@ export default function CustomerReceiptPage() {
   useEffect(() => {
     if (!params?.id) return;
     fetch(`/api/contracts/tenant/${params.id}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
-      .then(setContract).catch(e => setError(e.message));
+      .then(r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json() as Promise<TenantReceiptPayload>; })
+      .then(({ paymentRefs, ...rest }) => setContract({ ...rest, paymentRefs: shapePaymentRefs(paymentRefs ?? {}) }))
+      .catch(e => setError(e.message));
   }, [params?.id]);
 
   if (error) return <div style={{ padding: 40, color: '#c00' }}>Failed to load receipt: {error}</div>;

@@ -138,7 +138,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // RP target one specific layout so it's clear which plan they're editing.
   const [planFilter, setPlanFilter] = useState('all');
   const [sort, setSort] = useState('default');
-  const [query, setQuery] = useState('');
+  // Seeded from `?q=` so a link elsewhere (a lead's unit, say) can land here with
+  // that unit already filtered in — this workspace has no per-unit route.
+  const [query, setQuery] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('q') ?? '';
+  });
   const [view, setView] = useState<'grid' | 'row'>('row');
   // Primary axis: 'unit' = a flat list of every individual unit grouped by
   // building (default), 'type' = layout cards grouped by unit type (pricing).

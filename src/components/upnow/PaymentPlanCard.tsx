@@ -14,7 +14,7 @@
  */
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
-import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
+import { SegregatedPlanView, type PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, segRowsFromOfferPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 
 const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
@@ -36,7 +36,9 @@ function Meta({ label, value }: { label: string; value?: string | null }) {
 }
 
 export interface PaymentPlanCardProps {
-  plan: OfferPlan;
+  /** Optional when `rows` are supplied directly (a lead's proposed plan has no
+   *  OfferPlan to derive from — its rows come from the lead payment plan). */
+  plan?: OfferPlan;
   /** Raw payment/fee rows for the segregated view (carries cheque numbers). Falls
    *  back to deriving from `plan.items` when omitted. */
   rows?: SegPaymentInput[];
@@ -52,10 +54,17 @@ export interface PaymentPlanCardProps {
   community?: string | null;
   periodStart?: string | null;
   periodEnd?: string | null;
+  /** Landlord's account — rendered under the plan when a row is paid by transfer. */
+  bankDetails?: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null;
+  /** Extra control for the header (e.g. the customer's "Print / Save PDF"). */
+  headerAction?: React.ReactNode;
+  /** Per-payment attach control rendered inside the plan — see SegregatedPlanView.
+   *  Only the customer passes this; every landlord-side card stays read-only. */
+  renderAttach?: (slot: PlanAttachSlot) => React.ReactNode;
 }
 
-export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd }: PaymentPlanCardProps) {
-  const dlRows = rows ?? segRowsFromOfferPlan(plan);
+export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd, bankDetails, headerAction, renderAttach }: PaymentPlanCardProps) {
+  const dlRows = rows ?? (plan ? segRowsFromOfferPlan(plan) : []);
   const seg = buildSegregatedPlan(dlRows);
   const isRenewal = (contractType ?? '').toLowerCase() === 'renewal';
   const pill = contractType == null ? null
@@ -68,12 +77,17 @@ export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType,
       <div style={{ padding: '16px 16px 14px', borderBottom: '1px solid #efece6' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.01em', color: '#1a5a4a' }}>Payment Summary</div>
-          {pill && <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: pill.bg, color: pill.fg, whiteSpace: 'nowrap' }}>{pill.label}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {headerAction}
+            {pill && <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: pill.bg, color: pill.fg, whiteSpace: 'nowrap' }}>{pill.label}</span>}
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: '#6b6860', marginTop: 3 }}>
-          {refLabel ? `Contract ${refLabel}` : 'Payment plan'}
-          {planRefNo && <> · Plan ref <span style={{ fontWeight: 700, color: '#1a5a4a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{planRefNo}</span></>}
-        </div>
+        {(refLabel || planRefNo) && (
+          <div style={{ fontSize: 12, color: '#6b6860', marginTop: 3 }}>
+            {refLabel ? `Contract ${refLabel}` : null}
+            {planRefNo && <>{refLabel ? ' · ' : ''}Plan ref <span style={{ fontWeight: 700, color: '#1a5a4a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{planRefNo}</span></>}
+          </div>
+        )}
         {landlordName && (
           <div style={{ marginTop: 12, paddingBottom: 10, borderBottom: '1px solid #f0ece4' }}>
             <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>Landlord</div>
@@ -83,7 +97,14 @@ export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType,
         {(tenantName || periodStart) && (
           <div style={metaGrid(12)}>
             {tenantName && <div style={{ gridColumn: 1 }}><Meta label="Tenant" value={tenantName} /></div>}
-            {periodStart && <div style={{ gridColumn: 3 }}><Meta label="Contract period" value={`${fmtD(periodStart)} – ${fmtD(periodEnd)}`} /></div>}
+            {periodStart && (
+              <div style={{ gridColumn: 3 }}>
+                <Meta
+                  label="Contract period"
+                  value={periodEnd ? `${fmtD(periodStart)} – ${fmtD(periodEnd)}` : `From ${fmtD(periodStart)}`}
+                />
+              </div>
+            )}
           </div>
         )}
         {(unitNumber || buildingName || community) && (
@@ -95,9 +116,9 @@ export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType,
         )}
       </div>
 
-      <PaymentPlanDownloadLink rows={dlRows} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd }} />
+      <PaymentPlanDownloadLink rows={dlRows} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd, bankDetails }} />
 
-      <SegregatedPlanView plan={seg} style={{ padding: '6px 14px 14px' }} />
+      <SegregatedPlanView plan={seg} bankDetails={bankDetails} renderAttach={renderAttach} style={{ padding: '6px 14px 14px' }} />
     </div>
   );
 }

@@ -34,6 +34,7 @@ import { Document, Page, View, Text, Font } from '@react-pdf/renderer';
 import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
+import { leaseDocFileName } from '@/lib/leaseDocName';
 
 // Roboto — clean modern sans for the whole document (no Bold ttf shipped, so map
 // bold → Medium). Receipts are English-only — no Arabic font dependency (avoids the
@@ -86,6 +87,9 @@ export interface ReceiptContract {
   securityDepositAmount?: number | null;
   securityDepositHeld?: number | null;
   securityDeposit?: {
+    /** security_deposits.id — the register row this deposit is booked in. Keys the
+     *  deposit's issued receipt number (minted with source_kind='deposit'). */
+    depositId?: number | null;
     amount?: number | null;
     chequeNumber?: string | null;
     paymentMethod?: string | null;
@@ -124,16 +128,27 @@ export interface ReceiptContract {
   unit: { number: string | null; name: string | null };
   property: { buildingName: string | null; community?: string | null; emirate?: string | null; fullAddress?: string | null };
   payments?: ReceiptPayment[];
-  /** RP reconciliation references (GET /contracts/:id/payment-refs). When present,
-   *  a per-payment receipt prints its REAL gapless number (RCP-<rp>-<year>-<nnnnn>)
-   *  instead of the derived RCP-<ref>-* label, and receipts carry the plan number. */
+  /** RP reconciliation references — the SAME numbers on every surface: the RP /
+   *  manager refs endpoint, the customer contract payload and the magic-link portal
+   *  all shape them through lib/paymentRefs. When present a receipt prints its REAL
+   *  gapless number (RCP-<rp>-<year>-<nnnnn>) instead of the derived RCP-<ref>-*
+   *  label, and aggregate statements carry the plan number. */
   paymentRefs?: {
     planRefNo?: string | null;
     /** payments.id → gapless receipt number. */
     receiptByPaymentId?: Record<number, string>;
+    /** security_deposits.id → gapless receipt number. The backend mints a
+     *  register-booked deposit with source_kind='deposit', so its number lives in
+     *  a SEPARATE id space and must never be looked up by payments.id. */
+    receiptByDepositId?: Record<number, string>;
+    /** The contract's single register-booked deposit receipt, for surfaces that
+     *  don't carry the register row's id. */
+    depositReceipt?: { depositId: number; refNo: string; voided: boolean } | null;
     /** payments.id whose receipt was soft-voided (cheque reverted from cleared) —
      *  the number is retained but the receipt is stamped VOID and reads as unpaid. */
     voidedPaymentIds?: Set<number>;
+    /** security_deposits.id whose receipt was soft-voided — same semantics. */
+    voidedDepositIds?: Set<number>;
   } | null;
 }
 
@@ -231,15 +246,72 @@ function isRenewalContract(c: ReceiptContract): boolean {
   return (c.contractType ?? '').toLowerCase() === 'renewal';
 }
 
-interface LineItem { desc: string; net: number; vat: number; total: number; date?: string | null; method?: string | null; reference?: string | null; receiptNo?: string | null; }
+interface LineItem {
+  desc: string; net: number; vat: number; total: number;
+  date?: string | null; method?: string | null; reference?: string | null;
+  /** The gapless receipt number issued for THIS line's money event. Printed on the
+   *  line whenever it differs from the document's own header number, so an
+   *  aggregate statement traces every amount to its own receipt instead of
+   *  repeating one plan number. */
+  receiptNo?: string | null;
+  /** That receipt was soft-voided (its cheque was reverted from cleared) — the
+   *  number is retained, so say so rather than presenting it as money received. */
+  receiptVoided?: boolean;
+}
 interface Receipt {
   kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management' | 'vat';
   title: string;
   receiptNo: string;
+  /** receiptNo is the payment-plan number (PP-*) rather than a receipt number
+   *  (RCP-*) — the header must label it "PLAN REF", not "RECEIPT NO.". */
+  numberIsPlanRef?: boolean;
   date: string | null;
   lines: LineItem[];
   single?: ReceiptPayment;
   scheduleCount?: number;
+}
+
+/**
+ * Per-segment reference, derived from the payment plan number.
+ *
+ * A statement page has no money event of its own to number, so it falls back to
+ * the plan. Without a suffix all four pages printed the IDENTICAL plan number —
+ * most visibly on a lease where nothing has cleared yet, where there is no issued
+ * receipt number anywhere to tell them apart. The base stays the real plan ref, so
+ * a suffixed reference still reconciles straight back to the plan.
+ */
+const SEG_SUFFIX = { rental: 'R', deposit: 'D', management: 'M', vat: 'T', contract: 'C' } as const;
+function planSegRef(contract: ReceiptContract, seg: keyof typeof SEG_SUFFIX): string | null {
+  const plan = contract.paymentRefs?.planRefNo;
+  return plan ? `${plan}/${SEG_SUFFIX[seg]}` : null;
+}
+
+/**
+ * The issued gapless number for the contract's SECURITY DEPOSIT.
+ *
+ * A deposit is booked one of two ways, each numbered in its own id space:
+ *   • as a `payments` row (legacy bookings)   → source_kind='payment', payments.id
+ *   • in the `security_deposits` register     → source_kind='deposit', deposit id
+ * Check both — looking only in receiptByPaymentId (as this did) silently missed
+ * every register-booked deposit, so the deposit page always printed a derived
+ * label while the rest of the binder showed the real series.
+ *
+ * Returns `{ plan: true }` when it can only fall back to the plan number, so the
+ * header labels it PLAN REF instead of passing a PP-* off as a receipt number.
+ */
+function depositRefNo(contract: ReceiptContract, sel: ReceiptPayment): { no: string; plan: boolean } | null {
+  const r = contract.paymentRefs;
+  if (!r) return null;
+  // sel.id is -1 for the pseudo-row synthesised when the deposit has no payments row.
+  const byPayment = sel.id > 0 ? r.receiptByPaymentId?.[sel.id] : undefined;
+  const depositId = contract.securityDeposit?.depositId;
+  const byDeposit = depositId != null
+    ? r.receiptByDepositId?.[depositId]
+    : r.depositReceipt?.refNo;
+  const no = byPayment ?? byDeposit;
+  if (no) return { no, plan: false };
+  const seg = planSegRef(contract, 'deposit');
+  return seg ? { no: seg, plan: true } : null;
 }
 
 function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rentals: ReceiptPayment[]): Receipt {
@@ -256,8 +328,10 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
   const meta = { method: methodLabel(sel, contract), reference: sel.chequeNumber ?? null };
 
   if (type === 'security_deposit') {
+    const dep = depositRefNo(contract, sel);
     return { kind: 'deposit', title: 'SECURITY DEPOSIT RECEIPT',
-      receiptNo: realNo ?? `RCP-${contract.ref}-DEP`, date: sel.transactionDate, single: sel,
+      receiptNo: dep?.no ?? `RCP-${contract.ref}-DEP`, numberIsPlanRef: dep?.plan,
+      date: sel.transactionDate, single: sel,
       lines: [{ desc: 'Security Deposit', net: gross, vat: 0, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
   if (isFee(sel)) {
@@ -342,8 +416,9 @@ function feeLinesOf(contract: ReceiptContract, rentRows: ReceiptPayment[]): { li
   const contractMethod = titleCase(contract.modeOfPayment) || 'Bank Transfer';
   const feeMeta = (row?: ReceiptPayment) => row
     ? { method: methodLabel(row, contract), reference: row.chequeNumber ?? null, date: row.transactionDate ?? null,
-        receiptNo: contract.paymentRefs?.receiptByPaymentId?.[row.id] ?? null }
-    : { method: contractMethod, reference: null, receiptNo: null };
+        receiptNo: contract.paymentRefs?.receiptByPaymentId?.[row.id] ?? null,
+        receiptVoided: !!contract.paymentRefs?.voidedPaymentIds?.has(row.id) }
+    : { method: contractMethod, reference: null, receiptNo: null, receiptVoided: false };
   // Management Fee receipt = Admin + Commission only. Ejari is shown IN FULL on the
   // Third Party receipt (buildVatReceipt), so it is returned separately here — never
   // added to the Management lines.
@@ -373,12 +448,15 @@ function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]
     if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
     return { desc: `Rent — Installment ${i + 1} of ${n}`, net, vat, total: round2(net + vat), date: p.transactionDate ?? null,
       method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
-      receiptNo: contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null };
+      receiptNo: contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null,
+      receiptVoided: !!contract.paymentRefs?.voidedPaymentIds?.has(p.id) };
   });
   // Aggregate statement → reference the payment plan (each cleared cheque carries
   // its own gapless receipt number on its line); never a fake "-RENT" number.
   return { kind: 'rental', title: 'RENT INCOME RECEIPT',
-    receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-RENT`, date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
+    receiptNo: planSegRef(contract, 'rental') ?? `RCP-${contract.ref}-RENT`,
+    numberIsPlanRef: !!contract.paymentRefs?.planRefNo,
+    date: rentals[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: rentals.length };
 }
 
@@ -389,7 +467,8 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
   if (lines.length === 0) return null;
   const feeRows = (contract.fees ?? []).filter(isFee);
   return { kind: 'management', title: 'MANAGEMENT FEE RECEIPT',
-    receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-MGMT`,
+    receiptNo: planSegRef(contract, 'management') ?? `RCP-${contract.ref}-MGMT`,
+    numberIsPlanRef: !!contract.paymentRefs?.planRefNo,
     date: feeRows[0]?.transactionDate ?? rentRows[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: feeCount || lines.length };
 }
@@ -422,13 +501,16 @@ function buildVatReceipt(contract: ReceiptContract): Receipt | null {
       date: p.transactionDate ?? null,
       method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
       receiptNo: refOf(p),
+      receiptVoided: !!contract.paymentRefs?.voidedPaymentIds?.has(p.id),
     });
   }
   // A single charge prints its own gapless year-wise number as the header; multiple
   // aggregate under the plan number (each line still carries its own RCP number).
-  const header = lines.length === 1 && govRows.length === 1 ? (refOf(govRows[0]) ?? contract.paymentRefs?.planRefNo) : contract.paymentRefs?.planRefNo;
+  const segRef = planSegRef(contract, 'vat');
+  const header = lines.length === 1 && govRows.length === 1 ? (refOf(govRows[0]) ?? segRef) : segRef;
   return { kind: 'vat', title: 'THIRD PARTY RECEIPT',
     receiptNo: header ?? `RCP-${contract.ref}-TP`,
+    numberIsPlanRef: !!header && header === segRef,
     date: ejariLine?.date ?? govRows[0]?.transactionDate ?? contract.startDate ?? null,
     lines, scheduleCount: lines.length };
 }
@@ -464,7 +546,9 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   if (govTotal > 0) lines.push({ desc: 'Government & other charges', net: govNet, vat: govVat, total: govTotal });
 
   return { kind: 'contract', title: 'CONTRACT PAYMENT RECEIPT',
-    receiptNo: contract.paymentRefs?.planRefNo ?? `RCP-${contract.ref}-PAY`, date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
+    receiptNo: planSegRef(contract, 'contract') ?? `RCP-${contract.ref}-PAY`,
+    numberIsPlanRef: !!contract.paymentRefs?.planRefNo,
+    date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
     lines, scheduleCount: rentRows.length + vatRows.length + feeCount };
 }
 
@@ -541,8 +625,10 @@ function receiptRefsSig(contract: ReceiptContract): string {
   const r = contract.paymentRefs;
   if (!r) return '';
   const ids = Object.keys(r.receiptByPaymentId ?? {}).sort().join('.');
+  const depIds = Object.keys(r.receiptByDepositId ?? {}).sort().join('.');
   const voided = [...(r.voidedPaymentIds ?? [])].sort((a, b) => a - b).join('.');
-  return `${r.planRefNo ?? ''}#${ids}!${voided}`;
+  const voidedDeps = [...(r.voidedDepositIds ?? [])].sort((a, b) => a - b).join('.');
+  return `${r.planRefNo ?? ''}#${ids}@${depIds}!${voided}~${voidedDeps}`;
 }
 
 // ─── PDF styles ──────────────────────────────────────────────────────────────
@@ -586,10 +672,11 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const grandTotal = round2(receipt.lines.reduce((s, l) => s + l.total, 0));
   const showVat = totalVat > 0;
   const single = receipt.single;
-  // Aggregate statements (rent income / management fee / legacy combined) reference
-  // the payment plan; only a per-cheque single receipt has its own "RECEIPT NO.".
-  const isAggregate = receipt.kind === 'rental' || receipt.kind === 'management' || receipt.kind === 'contract';
-  const numberLabel = isAggregate && contract.paymentRefs?.planRefNo ? 'PLAN REF' : 'RECEIPT NO.';
+  // Aggregate statements (rent income / management fee / third party / legacy
+  // combined) reference the payment plan, as does a receipt whose own number has
+  // not been issued yet. Label what the number actually IS — printing a PP-* under
+  // "RECEIPT NO." reads as a receipt number that doesn't exist.
+  const numberLabel = receipt.numberIsPlanRef ? 'PLAN REF' : 'RECEIPT NO.';
   const landlordName = contract.landlord?.companyName || contract.landlord?.name || '';
   const isTenantCompany = contract.tenant?.entityType === 'company' || !!contract.tenant?.companyName;
   const tenantName = (isTenantCompany ? contract.tenant?.companyName : contract.tenant?.name) || contract.tenant?.name || '—';
@@ -605,7 +692,12 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   // ledger's "Collected (PDC)" / "Pending"; cleared/bounced/cancelled keep their label.
   // A soft-voided receipt (its cheque was reverted from cleared) keeps its gapless
   // number but no longer represents money received — stamp it VOID everywhere.
-  const isVoided = !!(single && contract.paymentRefs?.voidedPaymentIds?.has(single.id));
+  // A register-booked deposit is voided by security_deposits.id, not payments.id.
+  const depositId = contract.securityDeposit?.depositId ?? contract.paymentRefs?.depositReceipt?.depositId;
+  const isVoided = !!single && (
+    contract.paymentRefs?.voidedPaymentIds?.has(single.id)
+    || (receipt.kind === 'deposit' && depositId != null && !!contract.paymentRefs?.voidedDepositIds?.has(depositId))
+  );
   const rawStatus = single ? statusLabel(single.chequeStatus, contract.pdcConfirmed) : 'Receipt';
   const heroStatus = isVoided
     ? 'Void'
@@ -641,7 +733,10 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
             {issuerLines.map((l, i) => <Text key={i} style={{ fontSize: 7.5, color: HEADER_SUB, marginTop: 2 }}>{l}</Text>)}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            {!['rental', 'management', 'deposit'].includes(receipt.kind)
+            {/* The segmented pages (rental income · security deposit · management
+                fee · third party) are already named by the binder tab and the
+                section they came from — the title in the band just repeated it. */}
+            {!['rental', 'management', 'deposit', 'vat'].includes(receipt.kind)
               ? <Text style={{ fontSize: 8, color: '#fff', letterSpacing: 2, marginBottom: 9 }}>{receipt.title}</Text>
               : null}
             <View style={{ flexDirection: 'row', marginBottom: 2 }}>
@@ -701,10 +796,16 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
                     ].filter(Boolean).join(' - ')}
                   </Text>
                 ) : null}
-                {/* Per-line gapless receipt number intentionally NOT shown — the
-                    document-level reference in the header is the customer-facing
-                    receipt number; per-payment RCP refs live in the ledger for
-                    bank reconciliation. */}
+                {/* Each line's own issued receipt number — shown only when it isn't
+                    already the document's header number (so a single-event receipt
+                    never prints it twice). An aggregate statement references the
+                    payment plan in its header, so this is what makes every amount
+                    on it individually traceable and reconcilable. */}
+                {l.receiptNo && l.receiptNo !== receipt.receiptNo ? (
+                  <Text style={{ fontSize: 7, color: l.receiptVoided ? '#b3261e' : MUTE, marginTop: 2 }}>
+                    Receipt {l.receiptNo}{l.receiptVoided ? ' · VOID' : ''}
+                  </Text>
+                ) : null}
               </View>
               {showVat ? <Text style={[st.td, { width: 78, textAlign: 'right' }]}>{fmtAmt(l.net)}</Text> : null}
               {showVat ? <Text style={[st.td, { width: 60, textAlign: 'right' }]}>{l.vat ? fmtAmt(l.vat) : '—'}</Text> : null}
@@ -820,7 +921,11 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   const combined = isCombined(kind, selectedId);
   const receipt = combined ? null : resolveReceipt(contract, kind, selectedId, selectedIdx);
   // One file by default: "Receipts — <ref>.pdf" holding all three pages.
-  const fileName = combined ? `Receipts-${contract.ref}.pdf` : `${receipt?.receiptNo ?? `receipt-${contract.ref}`}.pdf`;
+  // A segment reference carries a "/" suffix (PP-…-00104/D) — a path separator that
+  // browsers mangle or truncate in a download filename, so flatten it to "-".
+  const fileName = combined
+    ? `Receipts-${contract.ref}.pdf`
+    : `${(receipt?.receiptNo ?? `receipt-${contract.ref}`).replace(/\//g, '-')}.pdf`;
 
   // Render the receipt to PDF bytes and rasterise to <canvas> (pdf.js) — NOT a
   // @react-pdf <PDFViewer> (iframe blob), which renders blank on mobile / in prod.
@@ -890,19 +995,31 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
 // embedded preview (e.g. the customer magic-link portal, where only the tenancy
 // contract is previewed inline). Both use the SAME generated bytes. Load via
 // next/dynamic ssr:false (pulls in @react-pdf).
+//
+// Pass `trigger` to supply your own single control instead of the default pair —
+// the viewer it opens already carries its own "⬇ Download PDF", so one control is
+// enough where a surface wants ONE view-and-download affordance per document.
 const RCPT_VIEW_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#2e9f82', color: '#fff', border: 'none' };
 const RCPT_DL_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#fff', color: '#2e9f82', border: '1px solid #cfe9e0', textDecoration: 'none' };
 
-export function ReceiptButtons({ contract }: { contract: ReceiptContract }) {
+export function ReceiptButtons({ contract, trigger }: {
+  contract: ReceiptContract;
+  /** Render your own single control. `open()` shows the in-page viewer, `url` is
+   *  the generated blob (open it in a new tab to hand the reader the browser's
+   *  own PDF view, save included), and `ready` is false while it is still being
+   *  generated. */
+  trigger?: (open: () => void, ready: boolean, url: string | null) => React.ReactNode;
+}) {
   const [open, setOpen] = React.useState(false);
   const docKey = `portal-actions|${contract.id}|all|${receiptRefsSig(contract)}`;
   const { bytes, url, error } = useReactPdfDoc(
     () => <PaymentReceiptDoc contract={contract} kind="all" selectedId={null} selectedIdx={0} />,
     docKey,
   );
-  const fileName = `Receipts-${contract.ref}.pdf`;
+  const fileName = leaseDocFileName('Receipt', { unitNumber: contract.unit?.number, ref: contract.ref });
   return (
     <>
+      {trigger ? trigger(() => setOpen(true), !!bytes, url) : (
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button type="button" onClick={() => setOpen(true)} disabled={!bytes}
           style={{ ...RCPT_VIEW_BTN, opacity: bytes ? 1 : 0.6, cursor: bytes ? 'pointer' : 'default' }}>
@@ -912,6 +1029,7 @@ export function ReceiptButtons({ contract }: { contract: ReceiptContract }) {
           ? <a href={url} download={fileName} style={RCPT_DL_BTN}>⬇ Download receipts</a>
           : <span style={{ ...RCPT_DL_BTN, opacity: 0.6 }}>⏳ Preparing…</span>}
       </div>
+      )}
       {open && (
         <div style={VIEWER_WRAP} role="dialog" aria-modal="true">
           <div style={VIEWER_BAR}>
