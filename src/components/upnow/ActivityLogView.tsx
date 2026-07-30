@@ -514,7 +514,13 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
       {/* ── BY LANE ─────────────────────────────────────────────────────── */}
       {view === 'phase' && (
         <div style={{ background: PANEL, borderBottom: `1px solid ${LINE}`, display: 'grid',
-          gridTemplateColumns: '190px 320px minmax(0,1fr)', gridTemplateRows: 'minmax(0,1fr)', height: 560, overflow: 'hidden' }}>
+          // Handoff: `190px 300px minmax(430px,1fr)`. The 430px floor stops the
+          // entries column collapsing under the diff text on a narrow laptop —
+          // but it also gives the row a 920px hard minimum, so the container must
+          // SCROLL rather than clip. With `overflow:hidden` the entries column and
+          // its pager were simply unreachable between ~1024px and ~1160px wide.
+          gridTemplateColumns: '190px 300px minmax(430px,1fr)', gridTemplateRows: 'minmax(0,1fr)',
+          height: 560, overflowX: 'auto', overflowY: 'hidden' }}>
 
           {/* pipelines */}
           <div style={{ overflow: 'auto', minHeight: 0, borderRight: `1px solid ${LINE}`, background: RAIL }}>
