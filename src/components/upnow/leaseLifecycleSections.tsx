@@ -291,8 +291,10 @@ export function DocGroupLabel({ children, right }: { children: React.ReactNode; 
 export function DocItem({ doc, label }: { doc: DocLink; label: string }) {
   const st = (doc.status ?? '').toLowerCase();
   const viewable = !!doc.fileUrl;
-  let box = 'bg-[#f3faf7] border-[#cfe9df]', tone = 'text-[#1a7a5a]', statusText = 'On file';
-  if (!viewable) { box = 'bg-white border-[#f1d9a8] border-dashed'; tone = 'text-[#92400e]'; statusText = st === 'requested' ? 'Requested' : 'Not on file'; }
+  // A present file is stated plainly as "Uploaded" (not the older "On file"
+  // jargon), matching the contract binder and the customer-document lists.
+  let box = 'bg-[#f3faf7] border-[#cfe9df]', tone = 'text-[#1a7a5a]', statusText = 'Uploaded';
+  if (!viewable) { box = 'bg-white border-[#f1d9a8] border-dashed'; tone = 'text-[#92400e]'; statusText = st === 'requested' ? 'Requested' : 'Not uploaded'; }
   else if (st === 'pending' || st === 'pending_review') { box = 'bg-[#fef9ec] border-[#f1d9a8]'; tone = 'text-[#92400e]'; statusText = 'Pending review'; }
   else if (st === 'rejected') { box = 'bg-[#fdf0f0] border-[#f3c9c9]'; tone = 'text-[#b91c1c]'; statusText = 'Rejected'; }
   return (

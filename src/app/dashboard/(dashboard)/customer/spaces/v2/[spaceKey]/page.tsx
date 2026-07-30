@@ -25,7 +25,7 @@
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
-import { comparePaymentSchedule } from '@/lib/paymentPlan';
+import { comparePaymentSchedule, instalmentLabel } from '@/lib/paymentPlan';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -265,7 +265,8 @@ interface ApiContract {
   tenantSignedAt: string | null;
   landlordSignedAt: string | null;
   unit: { id: number | null; number?: string | null; name?: string | null; unitNumber?: string | null; unitName?: string | null; unitType?: string | null; bedrooms?: number | null };
-  property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null } | null;
+  /** community / emirate arrive as plain name strings on the contract list. */
+  property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null; community?: string | null; emirate?: string | null } | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   /** You declined the renewal to vacate → move-out + deposit settlement wind-down. */
   vacateAtEnd?: boolean;
@@ -472,6 +473,220 @@ function sortPlanItems(items: ApiPaymentPlanItem[]): ApiPaymentPlanItem[] {
     const tb = PLAN_TYPE_ORDER[b.type ?? 'installment'] ?? 1;
     return ta !== tb ? ta - tb : a.index - b.index;
   });
+}
+
+/* ─── Payment runway model ─────────────────────────────────────────────
+ * ONE derivation shared by the left-hand payment summary and the Payments
+ * section, so the two can never disagree on order, labels or totals.
+ *
+ * Prefers the contract's REAL cheques (the source of truth once the tenancy is
+ * active) and only falls back to the payment-plan preview while the contract has
+ * no payment rows yet. Rows come out in the SHARED schedule order
+ * (lib/paymentPlan): rent instalments in date order, then Contract Registration →
+ * Admin → Commission → custom charges. Sorting by due date alone interleaved the
+ * one-off fees into the rent runway, because the fees and instalment 1 all share
+ * the first cheque date. */
+interface RunwayRow {
+  description: string | null;
+  amountFils: number;
+  dueDate: string | null;
+  status: string | null;
+}
+interface PaymentRunway {
+  items: RunwayRow[];
+  /** Rent instalments vs one-off charges — the row count is NOT the instalment count. */
+  rentRowCount: number;
+  oneOffRowCount: number;
+  /** Void (bounced / cancelled) rows are excluded — they'd double-count their replacement. */
+  totalFils: number;
+  clearedFils: number;
+  outstandingFils: number;
+  /** Next upcoming RENT instalment, skipping the before-move-in first cheque. */
+  next: RunwayRow | null;
+  /** The refundable security deposit. Kept OUT of `items` (it is not a rent /
+   *  charge cheque, and must never be a "next payment" candidate) but returned
+   *  here so a full schedule can show it — first, per the shared category order. */
+  deposit: RunwayRow | null;
+  /** `totalFils` + the deposit — what the lease is worth end to end. */
+  grandTotalFils: number;
+}
+const isVoidStatus = (s?: string | null) => ['bounced', 'cancelled'].includes((s ?? '').toLowerCase());
+const isRentPlanItem = (t?: string | null) =>
+  t === 'installment' || t === 'first_bundle' || t === 'extra_installment';
+
+function buildPaymentRunway(c: ApiContract | null, pp: ApiPaymentPlan | null): PaymentRunway {
+  // Rent-row totals up front: the uniform "Instalment N" label needs to know how
+  // many there are (a single-payment plan keeps its "Annual Rent" label).
+  const realRentTotal = (c?.payments ?? []).filter(p => p.paymentType === 'rental_income').length;
+  const planRentTotal = pp?.installmentCount ?? (pp?.items ?? []).filter(it => isRentPlanItem(it.type)).length;
+  let realRentSeen = 0;
+  let planRentSeen = 0;
+  const realCheques: RunwayRow[] = (c?.payments ?? [])
+    .filter(p => p.paymentType !== 'security_deposit')
+    .slice()
+    .sort(comparePaymentSchedule)
+    .map(p => ({
+      description: p.paymentType === 'rental_income'
+        ? instalmentLabel(p.description, realRentSeen++, realRentTotal)
+        : (p.description ?? (p.paymentType ?? 'Payment').replace(/_/g, ' ')),
+      amountFils: Math.round((p.amountPaid ?? 0) * 100),
+      dueDate: p.transactionDate ? p.transactionDate.slice(0, 10) : null,
+      status: p.chequeStatus ?? null,
+    }));
+  const planCheques: RunwayRow[] = (pp?.items ?? [])
+    .filter(it => it.type !== 'security_deposit')
+    .slice()
+    .sort(comparePaymentSchedule)
+    .map(it => ({
+      description: isRentPlanItem(it.type)
+        ? instalmentLabel(it.description, planRentSeen++, planRentTotal)
+        : (it.description ?? null),
+      amountFils: it.amountFils ?? 0,
+      dueDate: it.dueDate ?? null,
+      status: null,
+    }));
+  const items = realCheques.length ? realCheques : planCheques;
+  const rentRowCount = realCheques.length ? realRentTotal : planRentTotal;
+  const live = items.filter(it => !isVoidStatus(it.status));
+  const totalFils = live.reduce((s, it) => s + it.amountFils, 0);
+  const clearedFils = live
+    .filter(it => (it.status ?? '').toLowerCase() === 'cleared')
+    .reduce((s, it) => s + it.amountFils, 0);
+
+  // "Next payment" = the next upcoming RENT instalment, NOT the before-move-in
+  // first cheque (fees + deposit + installment 1 all share the earliest due
+  // date). On an active pass that first cheque is the current/collected one, so
+  // skip its date and surface the 2nd instalment. Falls back to any upcoming
+  // cheque when there's only the first one (e.g. a 1-installment plan).
+  const todayYmd = new Date().toISOString().slice(0, 10);
+  const firstDue = items.find(it => it.dueDate)?.dueDate ?? null;
+  const upcoming = (it: RunwayRow) => !!it.dueDate && it.dueDate >= todayYmd && !isVoidStatus(it.status);
+  const next =
+    items.find(it => upcoming(it) && it.dueDate !== firstDue)
+    ?? items.find(upcoming)
+    ?? null;
+
+  // The deposit row — from the real payment when there is one (so it carries its
+  // own cheque status), else the plan item, else the bare contract amount.
+  const depositPayment = (c?.payments ?? []).find(p => p.paymentType === 'security_deposit');
+  const depositPlanItem = (pp?.items ?? []).find(it => it.type === 'security_deposit');
+  const depositFallbackFils = pp?.securityDepositFils ?? Math.round((c?.securityDepositAmount ?? 0) * 100);
+  const deposit: RunwayRow | null = depositPayment
+    ? {
+        description: 'Security deposit',
+        amountFils: Math.round((depositPayment.amountPaid ?? 0) * 100),
+        dueDate: depositPayment.transactionDate ? depositPayment.transactionDate.slice(0, 10) : null,
+        status: depositPayment.chequeStatus ?? null,
+      }
+    : depositPlanItem
+      ? { description: 'Security deposit', amountFils: depositPlanItem.amountFils ?? 0, dueDate: depositPlanItem.dueDate ?? null, status: null }
+      : depositFallbackFils > 0
+        ? { description: 'Security deposit', amountFils: depositFallbackFils, dueDate: null, status: null }
+        : null;
+  const depositLiveFils = deposit && !isVoidStatus(deposit.status) ? deposit.amountFils : 0;
+
+  return {
+    items,
+    rentRowCount,
+    oneOffRowCount: Math.max(0, items.length - rentRowCount),
+    totalFils,
+    clearedFils,
+    outstandingFils: Math.max(0, totalFils - clearedFils),
+    next,
+    deposit,
+    grandTotalFils: totalFils + depositLiveFils,
+  };
+}
+
+/* ─── Payment summary rail (live tenancy) ──────────────────────────────
+ * Once the tenancy is live the journey map has nothing left to tell — every stop
+ * is done. This takes its place in the left column: the lease's full payment
+ * SCHEDULE — the security deposit first (shared category order), then the rent
+ * instalments, then the one-off charges — each with its own status, and the total
+ * they add up to. Nothing else: annual rent, lease period and the next cheque
+ * already live on the Tenancy Pass. */
+/** Monospace uppercase field label used across the payment summary. */
+function K({ children }: { children: React.ReactNode }) {
+  return <p style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0 }}>{children}</p>;
+}
+
+function PaymentSummaryRail({ resolved }: { resolved: Resolved }) {
+  const c = resolved.contract;
+  const run = buildPaymentRunway(c, resolved.paymentPlan);
+  const aed = (fils: number) => `AED ${Math.round(fils / 100).toLocaleString('en-AE')}`;
+  // Deposit first — rank 0 in the shared schedule order (lib/paymentPlan).
+  const rows = run.deposit ? [run.deposit, ...run.items] : run.items;
+
+  return (
+    <div style={{ background: 'var(--surface)', borderRadius: 22, border: '1px solid var(--mist-strong)', padding: 20, position: 'sticky', top: 88, display: 'grid', gap: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Wallet size={14} style={{ color: 'var(--jade-deep)' }} />
+          <span style={{ fontSize: 10, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 600 }}>Payment summary</span>
+        </div>
+        {c?.id != null && <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--mute)' }}>CID-{c.id}</span>}
+      </div>
+
+      {rows.length === 0 ? (
+        <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>No payment schedule on this lease yet.</p>
+      ) : (
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: 14, display: 'grid', gap: 7 }}>
+          <K>Schedule</K>
+          {rows.map((it, i) => (
+            <ScheduleRow key={i} n={i + 1} row={it} />
+          ))}
+          <div style={{ borderTop: '1px solid var(--mist-strong)', marginTop: 4, paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)' }}>Total</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--jade-deep)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+              {aed(run.grandTotalFils)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One scheduled payment: number, label + due date, amount, and its status.
+ *  Cleared vs Not cleared as a plain binary; a bounced / cancelled cheque keeps
+ *  its own explicit red label because it has been replaced. */
+function ScheduleRow({ n, row }: { n: number; row: RunwayRow }) {
+  const st = (row.status ?? '').toLowerCase();
+  const bounced = st === 'bounced' || st === 'cancelled';
+  const cleared = st === 'cleared';
+  const badge = bounced ? (row.status ?? 'bounced') : cleared ? 'Cleared' : 'Not cleared';
+  const due = row.dueDate
+    ? new Date(row.dueDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })
+    : null;
+  // Status reads off the row's own tint: collected = green, still to come = grey,
+  // void (bounced / replaced) = red. Colour AND the text label carry it, so it
+  // never depends on colour alone.
+  const tone = bounced
+    ? { bg: 'var(--brick-soft)', border: 'var(--brick)', fg: 'var(--brick)' }
+    : cleared
+      ? { bg: 'var(--jade-soft)', border: 'var(--jade)', fg: 'var(--jade-deep)' }
+      : { bg: 'var(--mist)', border: 'var(--mist-strong)', fg: 'var(--ink-2)' };
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '22px minmax(0,1fr) auto', gap: 9, alignItems: 'center',
+      padding: '9px 11px', borderRadius: 10, background: tone.bg, border: `1px solid ${tone.border}`,
+    }}>
+      <span style={{ fontFamily: 'monospace', fontSize: 10, color: tone.fg, fontVariantNumeric: 'tabular-nums' }}>{n}</span>
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {row.description ?? `Payment ${n}`}
+        </p>
+        <p style={{ fontSize: 10.5, color: 'var(--mute)', margin: '1px 0 0' }}>
+          {due ?? '—'}
+          {' · '}
+          <span style={{ color: tone.fg, fontWeight: 600, textTransform: 'capitalize' }}>{badge}</span>
+        </p>
+      </div>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+        AED {Math.round(row.amountFils / 100).toLocaleString('en-AE')}
+      </span>
+    </div>
+  );
 }
 
 /* ─── Quest map (SVG path + waypoints) ─────────────────────────────── */
@@ -833,9 +1048,11 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     // PHASE 6 → prefill premise number into the utility form
     case 'utility':                       return <UtilityAction resolved={resolved} onRefresh={onRefresh} />;
     case 'utility_review':                return <UtilityReviewWaitAction resolved={resolved} />;
-    // PHASE 6 → MoveInAction handles both halves (awaiting submit + counter-sign);
-    //          dispute / reject flow lands here too.
-    case 'move_in':                       return <MoveInAction resolved={resolved} />;
+    // PHASE 6 → MoveInAction handles every half of step 7: awaiting the RP's
+    //          submission, the customer's counter-sign, and (move_in_review) the
+    //          wait for the RP/manager counter-signature that activates the tenancy.
+    case 'move_in':
+    case 'move_in_review':                return <MoveInAction resolved={resolved} />;
     case 'active':                        return <ActiveAction resolved={resolved} onRefresh={onRefresh} />;
     case 'termination_request_sent':      return <TerminationSentAction resolved={resolved} />;
     case 'termination_request_received':  return <TerminationReceivedAction resolved={resolved} onRefresh={onRefresh} />;
@@ -3427,19 +3644,6 @@ interface MoveInInspectionData {
   rpCounterSig?: string | null;
 }
 
-function condLabel(c?: string) {
-  if (c === 'G') return 'good';
-  if (c === 'F') return 'fair';
-  if (c === 'D') return 'damaged';
-  return '—';
-}
-function condTone(c?: string): { bg: string; fg: string } {
-  if (c === 'G') return { bg: 'var(--jade-soft)',    fg: 'var(--jade-deep)' };
-  if (c === 'F') return { bg: 'var(--saffron-soft)', fg: 'var(--saffron-deep)' };
-  if (c === 'D') return { bg: 'var(--brick-soft)',   fg: 'var(--brick)' };
-  return                   { bg: 'var(--mist)',         fg: 'var(--ink-2)' };
-}
-
 function MoveInAction({ resolved }: { resolved: Resolved }) {
   const { user } = useAuth();
   const c = resolved.contract;
@@ -3495,28 +3699,15 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
   }
 
   const inspectionUrl = `/dashboard/customer/contracts/${c.id}/inspection?type=move_in`;
-  const submittedAt = insp?.reportGeneratedDate ?? insp?.inspectionDate ?? c.moveInInspection?.signedAt ?? null;
-  const submittedLabel = submittedAt
-    ? `Submitted ${new Date(submittedAt).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE })}`
-    : 'Submitted by rental provider';
-  // v2 stores categories[]; map to the legacy area-row shape this summary renders
-  // (condition good/fair/poor → G/F/D) so the customer sees a real preview.
-  const areas: MoveInInspectionArea[] = (insp?.areas && insp.areas.length)
-    ? insp.areas
-    : (insp?.categories ?? []).map((cat, i) => ({
-        id: cat.sectionId ?? `cat-${i}`,
-        name: cat.label ?? 'Section',
-        items: (cat.items ?? []).map((it, j) => ({
-          id: it.id ?? `it-${i}-${j}`,
-          name: it.componentName ?? '',
-          inCondition: it.inCondition === 'good' ? 'G' : it.inCondition === 'fair' ? 'F' : it.inCondition === 'poor' ? 'D' : '',
-        })),
-      }));
-  const photoCount = insp?.photos?.length ?? 0;
+  // Once the customer has signed there is nothing left for THEM to do — the
+  // inspection sits with the rental provider (or their property manager) to
+  // counter-sign, and that counter-signature is what activates the tenancy.
+  const customerSigned = !!insp?.tenantSig;
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {/* "Review inspection report" pulsing button — TOP of the section */}
+      {/* "Review inspection report" pulsing button — TOP of the section. The pulse
+          is an action prompt, so it stops once the customer has signed. */}
       <style>{`
         @keyframes inspectReviewPulse {
           0%, 100% { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 0 rgba(46,159,130,0.45); }
@@ -3524,8 +3715,12 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
         }
         .inspect-review-pulse { animation: inspectReviewPulse 1.8s ease-out infinite; }
       `}</style>
+
+      {/* The "signed — awaiting the rental provider" message is the step's own
+          headline (journey state `move_in_review`), so it is NOT repeated here. */}
+
       <a href={inspectionUrl} target="_blank" rel="noopener noreferrer"
-        className="inspect-review-pulse"
+        className={customerSigned ? undefined : 'inspect-review-pulse'}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14,
           padding: '16px 20px', borderRadius: 14,
@@ -3537,118 +3732,31 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
             <FileText size={18} />
           </span>
           <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 10, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Step 1 — review</p>
-            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '2px 0 0' }}>View full inspection report (photos &amp; details)</p>
+            <p style={{ fontSize: 10, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>
+              {customerSigned ? 'Your document' : 'Step 1 — review'}
+            </p>
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '2px 0 0' }}>View full inspection report</p>
           </div>
         </div>
         <ExternalLink size={16} style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
       </a>
 
-      {/* Inspection summary card — live data */}
-      <div style={{ padding: 16, borderRadius: 14, background: 'var(--paper)', border: '1px solid var(--mist-strong)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-          <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>
-            Inspection report
-          </p>
-          <span style={{ background: 'var(--saffron-soft)', color: 'var(--saffron-deep)', padding: '4px 10px', borderRadius: 999, fontSize: 10, fontWeight: 700 }}>
-            {submittedLabel}
-          </span>
-        </div>
-
-        {/* Meta line — inspector / move-in date */}
-        {(insp?.inspectorName || insp?.moveInDate) && (
-          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 12, paddingBottom: 10, borderBottom: '1px dashed var(--mist)' }}>
-            {insp?.inspectorName && (
-              <div>
-                <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Inspector</p>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: '2px 0 0' }}>{insp.inspectorName}</p>
-              </div>
-            )}
-            {insp?.moveInDate && (
-              <div>
-                <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Move-in date</p>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: '2px 0 0' }}>
-                  {new Date(insp.moveInDate).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE })}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Per-area condition rows — live */}
-        {loadingInsp ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0' }}>
-            <Loader2 size={14} className="animate-spin" style={{ color: 'var(--mute)' }} />
-            <span style={{ fontSize: 12, color: 'var(--mute)' }}>Loading inspection report…</span>
-          </div>
-        ) : inspErr ? (
-          <ErrorBox msg={`Couldn't load inspection: ${inspErr}`} />
-        ) : areas.length === 0 ? (
-          <p style={{ fontSize: 12, color: 'var(--mute)', margin: '8px 0', fontStyle: 'italic' }}>
-            No inspection areas recorded yet. The full report opens in the inspection view.
-          </p>
-        ) : (
-          <div style={{ display: 'grid', gap: 6 }}>
-            {areas.map(a => {
-              // Pick the "worst" item condition as the row's overall — damaged > fair > good
-              const itemConds = a.items?.map(i => i.inCondition).filter(Boolean) ?? [];
-              const worst = itemConds.includes('D') ? 'D' : itemConds.includes('F') ? 'F' : itemConds.includes('G') ? 'G' : '';
-              const tone = condTone(worst);
-              const itemNames = a.items?.map(i => i.name).filter(Boolean).slice(0, 4).join(' · ') || '—';
-              return (
-                <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, padding: '8px 0', borderBottom: '1px dashed var(--mist)' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{a.name}</p>
-                    <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{itemNames}</p>
-                  </div>
-                  <span style={{
-                    background: tone.bg, color: tone.fg,
-                    padding: '4px 10px', borderRadius: 999, fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-                    alignSelf: 'center', whiteSpace: 'nowrap',
-                  }}>{condLabel(worst)}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Footer meta — photos + general notes */}
-        {(photoCount > 0 || insp?.generalNotes) && (
-          <div style={{ marginTop: 12, padding: '12px 14px', background: 'var(--surface)', borderRadius: 10, display: 'grid', gap: 8 }}>
-            {photoCount > 0 && (
-              <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: 0 }}>
-                <strong style={{ color: 'var(--ink)' }}>{photoCount}</strong> photo{photoCount === 1 ? '' : 's'} attached — view in the full inspection.
-              </p>
-            )}
-            {insp?.generalNotes && (
-              <div>
-                <p style={{ fontSize: 9, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>Rental provider notes</p>
-                <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>{insp.generalNotes}</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* No inline report summary here — the customer opens the real inspection
+          document from the link above; this panel only captures the signature.
+          A failed load still gets surfaced so the miss isn't silent. */}
+      {inspErr && <ErrorBox msg={`Couldn't load inspection: ${inspErr}`} />}
 
       {/* Counter-signature card — REAL signing happens here OR on the inspection page */}
       <div style={{ padding: 16, borderRadius: 14, background: 'var(--paper)', border: '1px solid var(--mist-strong)' }}>
         <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: '0 0 10px' }}>Your counter-signature</p>
 
         {insp?.tenantSig ? (
-          /* Already signed — show the captured signature image */
-          <div style={{ display: 'grid', gap: 8 }}>
-            <div style={{
-              border: '1px solid var(--mist-strong)', borderRadius: 10, padding: 12,
-              background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={insp.tenantSig} alt="Your signature"
-                style={{ maxHeight: 80, maxWidth: '100%', objectFit: 'contain' }} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--jade-deep)', fontWeight: 600 }}>
-              <CheckCircle2 size={14} />
-              Signed {insp.tenantSignedAt ? fmtDateLong(insp.tenantSignedAt) : ''}
-            </div>
+          /* Already signed — confirm it and when, but do NOT reproduce the
+             signature image here. The signature belongs on the inspection
+             document itself (open it from the link above). */
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--jade-deep)', fontWeight: 600 }}>
+            <CheckCircle2 size={15} />
+            Signed {insp.tenantSignedAt ? fmtDateLong(insp.tenantSignedAt) : ''}
           </div>
         ) : (
           /* Not signed yet — the shared signing block, so customer can sign without leaving this page */
@@ -3748,7 +3856,9 @@ const DOC_LABELS: Record<string, string> = {
 function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const c = resolved.contract ?? resolved.renewalContract;
   const pathname = usePathname(); // current space URL — passed as the inspection "back" target
-  const [section, setSection] = useState<'payments' | 'documents'>('payments');
+  // The payment runway moved to the left-hand PaymentSummaryRail, so this column
+  // only carries Documents now.
+  const [section, setSection] = useState<'documents'>('documents');
   const [showTerm, setShowTerm] = useState(false);
   const tenantDocs = resolved.myDocs;
 
@@ -3784,7 +3894,11 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const unitName = u?.unitName ?? null;
   const community = u?.property?.community?.name ?? '';
   const emirate   = u?.property?.emirate?.name ?? '';
-  const location  = [community, emirate].filter(Boolean).join(', ') || '—';
+  // Fall back to the property's street address when the community / emirate
+  // lookups are missing, rather than printing a bare em dash.
+  const location  = [community, emirate].filter(Boolean).join(', ')
+    || u?.property?.fullAddress
+    || '—';
   const rp = u?.property?.rentalProvider ?? u?.property?.rental_provider;
   const landlordName = rp?.user?.name?.trim() || rp?.companyName?.trim() || 'Your rental provider';
   const tenantName   = ''; // not on Resolved; omit rather than guess
@@ -3792,47 +3906,39 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   const today = new Date();
   const effDate = term?.effectiveDate ? new Date(term.effectiveDate + 'T00:00:00') : null;
   const daysLeft = effDate ? Math.ceil((effDate.getTime() - today.getTime()) / 86400000) : null;
-  // Prefer the contract's REAL cheques (the source of truth once the tenancy is
-  // active) and only fall back to the payment-plan preview while the contract has
-  // no payment rows yet. Normalised to {description, amountFils, dueDate, status}
-  // so the renderer below works for either source. (c.payments.amountPaid is whole
-  // AED → ×100 to fils; pp items are already fils.)
-  const realCheques = (c.payments ?? [])
-    .filter(p => p.paymentType !== 'security_deposit')
-    .map(p => ({
-      description: p.description ?? (p.paymentType === 'rental_income' ? 'Rent cheque' : (p.paymentType ?? 'Payment').replace(/_/g, ' ')),
-      amountFils: Math.round((p.amountPaid ?? 0) * 100),
-      dueDate: p.transactionDate ? p.transactionDate.slice(0, 10) : null,
-      status: p.chequeStatus ?? null,
-    }))
-    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
-  const planCheques = (pp?.items ?? [])
-    .filter(it => it.type !== 'security_deposit')
-    .map(it => ({ description: it.description ?? null, amountFils: it.amountFils ?? 0, dueDate: it.dueDate ?? null, status: null as string | null }));
-  const chequeItems = realCheques.length ? realCheques : planCheques;
-  // Bounced / cancelled cheques are void (replaced) — they still show in the list as
-  // history, but must NOT count in the total (else they double-count the replacement).
-  const chequesTotalFils = chequeItems.reduce(
-    (s, it) => s + (['bounced', 'cancelled'].includes((it.status ?? '').toLowerCase()) ? 0 : it.amountFils),
-    0,
-  );
-  // "Next cheque" = the next upcoming RENT installment, NOT the before-move-in
-  // first cheque (fees + deposit + installment 1 all share the earliest due
-  // date). On an active pass that first cheque is the current/collected one, so
-  // skip its date and surface the 2nd installment. Falls back to any upcoming
-  // cheque when there's only the first one (e.g. a 1-installment plan).
-  const firstChequeDue = chequeItems.find(it => it.dueDate)?.dueDate ?? null;
-  const nextCheque =
-    chequeItems.find(it => it.dueDate && it.dueDate !== firstChequeDue && new Date(it.dueDate + 'T00:00:00') >= today)
-    ?? chequeItems.find(it => it.dueDate && new Date(it.dueDate + 'T00:00:00') >= today);
+  // One shared derivation (order, "Instalment N" labels, totals, next due) — the
+  // same one the left-hand PaymentSummaryRail renders, so they cannot disagree.
+  // Only "next cheque" is read here now; the runway itself lives in the rail.
+  const nextCheque = buildPaymentRunway(c, pp).next;
 
+  // The Contract Registration certificate the landlord uploaded onto this lease.
+  // Every variant of the key is `ejari*` ([[Ejari Rename]] kept the DB keys), so
+  // match on the prefix and take the most recent one on file.
+  const ejariCertDoc = [...(tenantDocs ?? [])].reverse().find(d => /^ejari/i.test(d.documentKey) && !!d.fileUrl) ?? null;
   const sections = [
-    { k: 'payments'  as const, label: 'Payments',  sub: chequeItems.length ? `${chequeItems.length} cheques · ${aed(chequesTotalFils)}` : 'No schedule yet' },
-    { k: 'documents' as const, label: 'Documents', sub: tenantDocs ? `${tenantDocs.filter(d => d.documentKey !== 'profile_picture').length} docs on file` : 'KYC + Contract Registration + utility' },
+    // No sub-label: the card below is already headed "Tenancy Documents", so a
+    // count line here just repeated it.
+    { k: 'documents' as const, label: 'Documents', sub: null as string | null },
   ];
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
+
+      {/* ── Request Termination — kept at the TOP of the live-tenancy column so it
+           is reachable without scrolling past the pass and documents. No wrapper
+           card or lease reference: the CID is already on the Tenancy Pass and the
+           payment summary. ── */}
+      {!winding && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={() => setShowTerm(true)} style={{
+            padding: '7px 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+            background: 'var(--brick-soft)', color: 'var(--brick)', border: '1px solid var(--brick)',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+          }}>
+            <X size={12} /> Request Termination
+          </button>
+        </div>
+      )}
 
       {/* ── Action required: review + sign the move-out inspection (top, prominent) ── */}
       {winding && c.moveOutInspection?.submitted && !c.moveOutInspection?.signedByTenant && (
@@ -3934,10 +4040,9 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
             </p>
           </div>
 
-          {/* People row */}
+          {/* People row — the landlord is not named on the customer's pass. */}
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
             {tenantName && <PassField label="Tenant"   value={tenantName} />}
-            <PassField label="Landlord" value={landlordName} />
             {u?.unitType && <PassField label={u.unitType.replace(/_/g, ' ')} value={u.bedrooms ? `${u.bedrooms} BR` : (unitNum ? `No. ${unitNum}` : '—')} mono />}
           </div>
         </div>
@@ -3988,7 +4093,7 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
       </div>
 
       {/* ── Section selector slabs ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sections.length}, minmax(0, 1fr))`, gap: 10 }}>
         {sections.map(s => {
           const active = s.k === section;
           return (
@@ -4003,125 +4108,30 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
               transition: 'all 180ms ease',
             }}>
               <p style={{ fontSize: 14, fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>{s.label}</p>
-              <p style={{ fontSize: 11, color: active ? 'rgba(255,255,255,0.7)' : 'var(--mute)', margin: 0 }}>{s.sub}</p>
+              {s.sub && <p style={{ fontSize: 11, color: active ? 'rgba(255,255,255,0.7)' : 'var(--mute)', margin: 0 }}>{s.sub}</p>}
             </button>
           );
         })}
       </div>
 
-      {/* ── Payments section ── */}
-      {section === 'payments' && (
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{
-            padding: '14px 18px', borderBottom: '1px solid var(--mist)',
-            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
-          }}>
-            <div>
-              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.015em' }}>Payment runway</p>
-              {chequeItems.length > 0 && (
-                <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0' }}>{chequeItems.length} instalments through the year</p>
-              )}
-            </div>
-            {(pp || chequeItems.length > 0) && (
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, margin: 0 }}>{pp ? 'Contract value' : 'Total cheques'}</p>
-                <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--jade-deep)', margin: '2px 0 0', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                  {pp ? aed(pp.totalAmountFils) : aed(chequesTotalFils)}
-                </p>
-              </div>
-            )}
-          </div>
-          <div style={{ padding: 14, display: 'grid', gap: 8 }}>
-            {chequeItems.length === 0 && (
-              <p style={{ fontSize: 12, color: 'var(--mute)', textAlign: 'center', padding: '12px 0', margin: 0 }}>No payment schedule available</p>
-            )}
-            {chequeItems.map((it, i) => {
-              // Per-payment status as a clear binary — Cleared vs Not cleared —
-              // while bounced/cancelled cheques keep their own explicit red label.
-              const bounced = it.status === 'bounced' || it.status === 'cancelled';
-              const cleared = it.status === 'cleared';
-              const badgeTxt = bounced ? (it.status ?? 'bounced') : cleared ? 'Cleared' : 'Not cleared';
-              return (
-                <div key={i} style={{
-                  display: 'grid', gridTemplateColumns: '36px 1fr auto auto', gap: 12, alignItems: 'center',
-                  padding: '10px 14px', background: '#f4efe8', border: '1px solid var(--mist)', borderRadius: 12,
-                }}>
-                  <span style={{
-                    width: 28, height: 28, borderRadius: 8, background: 'var(--paper)',
-                    border: '1px solid var(--mist-strong)', display: 'grid', placeItems: 'center',
-                    fontSize: 11, fontWeight: 700, color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums',
-                  }}>{i + 1}</span>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{it.description ?? `Cheque ${i + 1}`}</p>
-                    {it.dueDate && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{fmtD(it.dueDate)}</p>}
-                  </div>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{aed(it.amountFils)}</span>
-                  <span style={{
-                    padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 600, textTransform: 'capitalize',
-                    background: bounced ? 'var(--brick-soft)' : cleared ? 'var(--jade-soft)' : 'var(--saffron-soft)',
-                    color: bounced ? 'var(--brick)' : cleared ? 'var(--jade-deep)' : 'var(--saffron-deep)',
-                  }}>{badgeTxt}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Payment runway removed from this column — it now lives in the left-hand
+          PaymentSummaryRail, instalment by instalment with its status. */}
 
       {/* ── Documents section ── */}
       {section === 'documents' && (
         <div style={{ display: 'grid', gap: 12 }}>
 
-          {/* Your documents — fetched from /api/documents/my.
-              Status display intentionally suppressed once the tenancy is
-              active — the customer has already finished the verification
-              loop, so the per-doc "Approved / Rejected / In review" pills
-              and the X/Y counter only add noise on this view. */}
+          {/* Tenancy Documents — EXACTLY the four the lease hands over. The KYC
+              uploads the customer supplied during onboarding are deliberately not
+              re-listed here: by this point they've been verified, and the customer
+              manages them from their own profile page. */}
           <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: 18 }}>
-            {(() => {
-              const visible = (tenantDocs ?? []).filter(d => d.documentKey !== 'profile_picture');
-              return (
-                <>
-                  <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '0 0 14px', letterSpacing: '-0.015em' }}>Your documents</p>
-                  {visible.length === 0 ? (
-                    <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0 }}>No documents uploaded yet.</p>
-                  ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                      {visible.map((d, i) => {
-                        const label = d.displayName || DOC_LABELS[d.documentKey] || d.documentKey.replace(/_/g, ' ');
-                        const inner = (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            <FileText size={14} color="var(--jade-deep)" />
-                            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-                          </div>
-                        );
-                        const tileStyle: React.CSSProperties = {
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
-                          padding: '10px 12px', background: '#f4efe8', border: '1px solid var(--mist)',
-                          borderRadius: 12, textDecoration: 'none', cursor: d.fileUrl ? 'pointer' : 'default',
-                          fontFamily: 'inherit',
-                        };
-                        return d.fileUrl
-                          ? <button key={i} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} style={{ ...tileStyle, textAlign: 'left', width: '100%' }}>{inner}</button>
-                          : <div key={i} style={tileStyle}>{inner}</div>;
-                      })}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-
-          {/* Contract documents */}
-          <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: 18 }}>
-            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '0 0 12px', letterSpacing: '-0.015em' }}>Contract documents</p>
             <div style={{ display: 'grid', gap: 8 }}>
               {[
-                { label: 'Signed tenancy contract',   href: `/dashboard/customer/contracts/${c.id}/print`, newTab: false },
-                { label: 'Payment plan',              href: `/dashboard/customer/contracts/${c.id}/print/plan`, newTab: true },
-                { label: 'Move-in inspection report', href: `/dashboard/customer/contracts/${c.id}/inspection?type=move_in`, newTab: false },
-                // One receipts file → three receipts inside (rental income · security deposit · management fee).
-                { label: 'Payment receipts',          href: `/dashboard/customer/contracts/${c.id}/print/receipt`, newTab: true },
+                { label: 'Payment Plan',            href: `/dashboard/customer/contracts/${c.id}/print/plan`, newTab: true },
+                // One receipts file → a receipt per collected payment inside.
+                { label: 'Receipts',                href: `/dashboard/customer/contracts/${c.id}/print/receipt`, newTab: true },
+                { label: 'Signed Tenancy Contract', href: `/dashboard/customer/contracts/${c.id}/print`, newTab: false },
               ].map((d, i) => (
                 <Link key={i} href={d.href} target={d.newTab ? '_blank' : undefined} rel={d.newTab ? 'noopener noreferrer' : undefined} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
@@ -4135,49 +4145,27 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
                   <ArrowRight size={14} color="var(--ink-2)" />
                 </Link>
               ))}
+              {/* The registration certificate is a STORED file (keys stay `ejari*`),
+                  so it opens in the doc viewer — and only once it's actually on file. */}
+              {ejariCertDoc?.fileUrl && (
+                <button type="button"
+                  onClick={() => openDocViewer({ fileUrl: ejariCertDoc.fileUrl, caption: 'Contract Registration Certification' })}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    padding: '11px 14px', background: '#f4efe8', border: '1px solid var(--mist)',
+                    borderRadius: 12, textAlign: 'left', width: '100%', cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <FileText size={16} color="var(--jade-deep)" />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Contract Registration Certification</span>
+                  </div>
+                  <ArrowRight size={14} color="var(--ink-2)" />
+                </button>
+              )}
             </div>
           </div>
-
-          {/* "Manage & upload documents" link removed on the active-tenancy
-              Documents tab — the customer has finished onboarding by this
-              point and shouldn't be nudged back into the upload flow here.
-              Uploads still happen during the pre-contract steps and from the
-              customer's own profile page. */}
         </div>
       )}
-
-      {/* ── Lease toolbox strip ── */}
-      <div style={{
-        background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14,
-        padding: '14px 18px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <FileText size={16} color="var(--jade-deep)" />
-          <div>
-            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Lease toolbox</p>
-            {c.ref && <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{c.ref}</p>}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Link href={`/dashboard/customer/contracts/${c.id}/print`} target="_blank" rel="noopener noreferrer" style={{
-            padding: '7px 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-            background: 'var(--paper)', color: 'var(--ink)', border: '1px solid var(--mist-strong)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, textDecoration: 'none',
-          }}>
-            <FileText size={12} /> Preview Tenancy Contract
-          </Link>
-          {!winding && (
-            <button onClick={() => setShowTerm(true)} style={{
-              padding: '7px 13px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-              background: 'var(--brick-soft)', color: 'var(--brick)', border: '1px solid var(--brick)',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
-            }}>
-              <X size={12} /> Request Termination
-            </button>
-          )}
-        </div>
-      </div>
 
       {showTerm && <TerminationRequestModal contract={c} onClose={() => setShowTerm(false)} onSuccess={() => { setShowTerm(false); onRefresh(); }} />}
     </div>
@@ -5070,6 +5058,10 @@ export default function CustomerSpaceV2Page() {
             property: cFound.property ? {
               buildingName: cFound.property.buildingName ?? undefined,
               fullAddress: cFound.property.fullAddress ?? null,
+              // The contract list returns these as plain strings; the unit shape
+              // (shared with the viewing / lead paths) nests them as { name }.
+              community: cFound.property.community ? { name: cFound.property.community } : null,
+              emirate: cFound.property.emirate ? { name: cFound.property.emirate } : null,
             } : undefined,
           } : null;
         }
@@ -5172,7 +5164,11 @@ export default function CustomerSpaceV2Page() {
       <TopBar resolved={resolved} />
       <div style={{ maxWidth: 1240, margin: '0 auto', padding: '28px 24px 60px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
-          <QuestMap steps={steps} currentIndex={currentIndex} mode={def.mode} />
+          {/* Live tenancy → the journey map has nothing left to say (every stop is
+              done), so the left column carries the lease's payment summary instead. */}
+          {stateKey === 'active' || stateKey === 'renewal_active'
+            ? <PaymentSummaryRail resolved={resolved} />
+            : <QuestMap steps={steps} currentIndex={currentIndex} mode={def.mode} />}
           <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
             <QuestActionCard stateKey={stateKey} resolved={resolved} onRefresh={fetchAll} />
             <SetupDownloads resolved={resolved} stateKey={stateKey} />

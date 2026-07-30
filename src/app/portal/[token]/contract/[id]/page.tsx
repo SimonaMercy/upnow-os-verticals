@@ -21,12 +21,17 @@ import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import { shapePaymentRefs, type RawPaymentRefs } from '@/lib/paymentRefs';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
-import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import type { ReportMeta } from '@/components/contract/InspectionReportView';
 import type { InspectionDoc } from '@/lib/inspectionCatalog';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
+});
+
+const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering the inspection report…</div>,
 });
 
 const ReceiptButtons = dynamic(() => import('@/components/upnow/PaymentReceiptPdf').then(m => ({ default: m.ReceiptButtons })), {
@@ -246,18 +251,18 @@ export default function ContractReviewPage() {
         <div className="mt-5">
           {inspType ? (
             insp && insp.rpSubmittedAt ? (
-              <InspectionReportView
+              /* Same canvas treatment as the tenancy contract below: the report is
+                 the DOCUMENT, scaled to the viewport, not a responsive layout that
+                 reflows on a phone. Signing happens in the card further down. */
+              <InspectionInline
                 doc={insp as unknown as InspectionDoc}
                 meta={reportMeta}
                 phase={inspType}
-                audience="customer"
-                dates={{
-                  inspectionDate: (insp as { reportGeneratedDate?: string; inspectionDate?: string }).reportGeneratedDate
-                    ?? (insp as { inspectionDate?: string }).inspectionDate ?? null,
-                  moveInDate: d.contract.startDate ?? null,
-                  moveOutDate: d.contract.endDate ?? null,
-                }}
-                hideSignatures
+                contractRef={`CID-${d.contract.id}`}
+                inspectionDate={(insp as { reportGeneratedDate?: string; inspectionDate?: string }).reportGeneratedDate
+                  ?? (insp as { inspectionDate?: string }).inspectionDate ?? null}
+                moveInDate={d.contract.startDate ?? null}
+                moveOutDate={d.contract.endDate ?? null}
               />
             ) : (
               <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">

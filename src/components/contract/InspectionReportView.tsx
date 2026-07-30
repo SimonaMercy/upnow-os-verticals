@@ -20,7 +20,7 @@ import {
   ZoomIn, ImageOff,
 } from 'lucide-react';
 import {
-  InspectionDoc, InspectionItem, Condition,
+  InspectionDoc, InspectionItem, InspectionPhoto, Condition,
   computeInspectionTotals, quantityOf, canonicalKey,
 } from '@/lib/inspectionCatalog';
 import { displayInspectionPhotoUrl } from '@/lib/inspectionPhotos';
@@ -76,6 +76,15 @@ interface Props {
   onRemoveItemPhoto?: (sectionId: string, itemId: string, photoId: string) => void;
   /** Item id currently uploading — shows a spinner on that row's add button. */
   uploadingItemId?: string | null;
+  /** Report-level photo gallery. Per-item attachments answer "what is wrong with
+   *  THIS component"; these answer "here is the whole walk-through" — the manager
+   *  / landlord / inspector selects the images in bulk rather than one row at a
+   *  time. Read-only (thumbnails only) when onAddPhotos is omitted. */
+  photos?: InspectionPhoto[];
+  onAddPhotos?: (files: File[]) => void;
+  onRemovePhoto?: (photoId: string) => void;
+  photosUploading?: boolean;
+  photosProgress?: { done: number; total: number } | null;
   /** Hide the built-in two-party signature block (e.g. the portal supplies its own). */
   hideSignatures?: boolean;
 }
@@ -87,6 +96,10 @@ function fmtDate(d?: string | null): string {
   return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 const cap = (v: string) => (v ? v[0].toUpperCase() + v.slice(1) : '');
+/** Unit types are stored as snake_case enums (`staff_accommodation`) — print them
+ *  as words: "Staff Accommodation". */
+const titleCase = (v: string) =>
+  (v ?? '').split(/[_\-\s]+/).filter(Boolean).map(cap).join(' ');
 /** A bare YYYY-MM-DD for a native date <input> (Dubai-local), or '' if unparseable. */
 function toDateInput(d?: string | null): string {
   if (!d) return '';
@@ -109,6 +122,7 @@ export function InspectionReportView({
   onPatch, onAddCategory, onAddComponent, onRemoveComponent, onRemoveCategory,
   generalNotes, onGeneralNotes, onInspectorName, onMoveOutDate, signatures, signSlot, showPrices,
   onAddItemPhotos, onRemoveItemPhoto, uploadingItemId, hideSignatures,
+  photos, onAddPhotos, onRemovePhoto, photosUploading, photosProgress,
 }: Props) {
   const isMoveIn = phase === 'move_in';
   const showMoney = phase === 'move_out' && (showPrices ?? audience === 'rp');
@@ -124,10 +138,10 @@ export function InspectionReportView({
       {/* Title + date boxes */}
       <div className={s.titlerow}>
         <div className={s.title}>
-          <span className={`${s.homeIcon} ${s.ico}`}><Home strokeWidth={2} /></span>
           <div>
-            <h1>{isMoveIn ? 'MOVE-IN' : 'MOVE-OUT'} INSPECTION REPORT</h1>
-            <p>Detailed inspection of property components and fixtures</p>
+            {/* Phase lives in the "Inspection Type" box beside the title, so the
+                heading itself stays the neutral document name. */}
+            <h1>INSPECTION REPORT</h1>
           </div>
         </div>
         <div className={s.dates}>
@@ -147,7 +161,7 @@ export function InspectionReportView({
       {/* Detail cards */}
       <div className={s.cards}>
         <DetailCard icon={<Home />} title="Property Details" rows={[
-          ['Property Name', meta.property], ['Unit No.', meta.unitNo], ['Property Type', meta.propertyType], ['Floor', meta.floor],
+          ['Property Name', meta.property], ['Unit No.', meta.unitNo], ['Property Type', titleCase(meta.propertyType)], ['Floor', meta.floor],
         ]} />
         <DetailCard icon={<User />} title="Tenant Details" rows={[
           ['Tenant Name', meta.tenantName], ['Phone', meta.tenantPhone], ['Email', meta.tenantEmail],
@@ -213,7 +227,7 @@ export function InspectionReportView({
                     <td className={s.catnameCell}>
                       <div className={s.catcell}>
                         <span className={s.caticon}><CatIcon size={18} /></span>
-                        <div><div className={s.catname}>{cat.label || 'Untitled category'}</div><div className={s.catmeta}>{cat.unitLabel}</div></div>
+                        <div><div className={s.catname}>{cat.label || 'Untitled category'}</div></div>
                       </div>
                     </td>
                     <td colSpan={totalCols - 2}>
@@ -245,7 +259,7 @@ export function InspectionReportView({
                         <td className={s.catnameCell} rowSpan={n}>
                           <div className={s.catcell}>
                             <span className={s.caticon}><CatIcon size={18} /></span>
-                            <div><div className={s.catname}>{cat.label}</div><div className={s.catmeta}>{cat.unitLabel} · {cat.count}</div></div>
+                            <div><div className={s.catname}>{cat.label}</div></div>
                           </div>
                         </td>
                       </>
@@ -329,6 +343,15 @@ export function InspectionReportView({
         </div>
       </div>
 
+      {/* Walk-through photos — bulk upload for the whole report. */}
+      <ReportPhotos
+        photos={photos ?? []}
+        onAdd={onAddPhotos}
+        onRemove={onRemovePhoto}
+        uploading={!!photosUploading}
+        progress={photosProgress ?? null}
+      />
+
       {/* Signatures — bordered two-party block. Hidden when the caller supplies its
           own sign box (e.g. the magic-link portal). */}
       {!hideSignatures && (
@@ -336,9 +359,11 @@ export function InspectionReportView({
         <div className={s.sigBar}>Signatures</div>
         <div className={s.sigBox}>
           <div className={`${s.sigCell} ${s.sigCellDivider}`}>
+            {/* Inspector cell names the PERSON who inspected and their role — the
+                landlord's own name/company is not repeated here. */}
             <div className={s.sigRole}>Inspected By — Property Representative</div>
             <div className={s.sigName}>{meta.inspectorName || '—'}</div>
-            <div className={s.sigCompany}>{meta.inspectorCompany || meta.inspectorRole || 'Property Representative'}</div>
+            <div className={s.sigCompany}>{meta.inspectorRole || 'Property Representative'}</div>
             <div className={s.sigPad}>
               {signatures?.rpSig
                 ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={signatures.rpSig} alt="Inspector signature" />
@@ -406,6 +431,68 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+/** Report-level photo gallery: pick MANY images at once (or drop a folder on the
+ *  box) instead of attaching them row by row. Renders nothing for a reader when
+ *  the report carries no photos, so the customer copy stays clean. */
+function ReportPhotos({ photos, onAdd, onRemove, uploading, progress }: {
+  photos: InspectionPhoto[];
+  onAdd?: (files: File[]) => void;
+  onRemove?: (photoId: string) => void;
+  uploading: boolean;
+  progress: { done: number; total: number } | null;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  if (!photos.length && !onAdd) return null;
+  const take = (list: FileList | null) => {
+    const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
+    if (files.length && onAdd) onAdd(files);
+  };
+  return (
+    <div className={s.notesWrap}>
+      <div className={s.panel}>
+        <h4><span className={s.ico}><Camera /></span>Photos{photos.length ? ` (${photos.length})` : ''}</h4>
+        {!!photos.length && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: onAdd ? 10 : 0 }}>
+            {photos.map((p) => (
+              <PhotoThumb key={p.id} photo={p} removable={!!onRemove} onRemove={onRemove ? () => onRemove(p.id) : undefined} />
+            ))}
+          </div>
+        )}
+        {onAdd && (
+          <>
+            <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+              onChange={(e) => { take(e.target.files); if (inputRef.current) inputRef.current.value = ''; }} />
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); take(e.dataTransfer.files); }}
+              onClick={() => { if (!uploading) inputRef.current?.click(); }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (!uploading && (e.key === 'Enter' || e.key === ' ')) inputRef.current?.click(); }}
+              aria-label="Add photos"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '14px 12px', borderRadius: 10, cursor: uploading ? 'default' : 'pointer',
+                border: `1px dashed ${dragOver ? '#2e9f82' : '#c8c6be'}`,
+                background: dragOver ? '#f0faf6' : '#fbfcfb',
+                color: '#6b6860', fontSize: 12.5, fontWeight: 600, opacity: uploading ? 0.7 : 1,
+              }}>
+              {uploading ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
+              <span>
+                {uploading
+                  ? (progress ? `Uploading ${progress.done} of ${progress.total}…` : 'Uploading…')
+                  : 'Add photos — select several at once, or drop them here'}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

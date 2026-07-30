@@ -1383,24 +1383,23 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       : {
           tone: 'action', icon: 'key', sub: stopOf(5), label: 'Move-in',
           headline: 'Complete the move-in inspection.',
-          body: 'Walk the unit, collect signatures and counter-sign. Open the inspection page to act.',
+          body: 'Walk the unit, collect signatures and sign. Open the inspection page to act.',
           timing: 'Takes ~2 min',
           node: (
             <>
+              {/* `locked`: these three are a read-out of the inspection's real
+                  signature state, not switches. Their Undo buttons were wired to
+                  a no-op toggle — clicking one did nothing at all, and a
+                  submission or a customer's signature is not undoable from here
+                  anyway. Progress is driven from the inspection workspace. */}
               <div className="chklist">
-                <ChkRow on={st.moveIn.rpSubmitted} label="Inspection submitted" onToggle={() => {}} />
-                <ChkRow on={st.moveIn.tenantSig} label={`${TEN} signed`} onToggle={() => {}} />
-                <ChkRow on={st.moveIn.rpCounterSig} label="You counter-signed" onToggle={() => {}} />
+                <ChkRow locked on={st.moveIn.rpSubmitted} label="Inspection submitted" onToggle={() => {}} />
+                <ChkRow locked on={st.moveIn.tenantSig} label={`${TEN} signed`} onToggle={() => {}} />
+                <ChkRow locked on={st.moveIn.rpCounterSig} label="Manager / Landlord Sign" onToggle={() => {}} />
               </div>
               <Link href={h.inspectionUrl} className="btn btn-jade btn-block">
                 <ClipboardCheck size={14} /> Open inspection workspace
               </Link>
-              <p className="note" style={{ marginTop: 8 }}>
-                Lease already moved in? Upload the move-in document instead of a full inspection.
-              </p>
-              <button className="btn btn-ghost btn-block" onClick={h.onUploadMoveInDoc}>
-                <UploadCloud size={14} /> Upload move-in document instead
-              </button>
             </>
           ),
         };
@@ -1425,9 +1424,9 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           node: (
             <>
               <div className="chklist">
-                <ChkRow on={st.moveOut.rpSubmitted} label="Move-out inspection submitted" onToggle={() => {}} />
-                <ChkRow on={st.moveOut.tenantSig} label={`${TEN} signed`} onToggle={() => {}} />
-                <ChkRow on={st.moveOut.rpCounterSig} label="You counter-signed" onToggle={() => {}} />
+                <ChkRow locked on={st.moveOut.rpSubmitted} label="Move-out inspection submitted" onToggle={() => {}} />
+                <ChkRow locked on={st.moveOut.tenantSig} label={`${TEN} signed`} onToggle={() => {}} />
+                <ChkRow locked on={st.moveOut.rpCounterSig} label="Manager / Landlord Sign" onToggle={() => {}} />
               </div>
               <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
                 <ClipboardCheck size={14} /> Open move-out inspection
@@ -1712,12 +1711,6 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
   }
 
   if (isDone('active', st)) {
-    const next = h.contract.payments.find(p => (p.chequeStatus === 'pending' || (!p.paidAt && !p.chequeStatus)));
-    // Rent/fee payments already settled (cleared cheque or recorded paid date) →
-    // "collected". Excludes the security deposit — it has its own tile.
-    const collected = h.contract.payments
-      .filter(p => p.paymentType !== 'security_deposit' && (p.chequeStatus === 'cleared' || p.paidAt))
-      .reduce((s, p) => s + (p.amount || 0), 0);
     return {
       tone: 'celebrate', icon: 'active', sub: mode === 'renewal' ? 'Renewal · live' : 'Stop 6 · live',
       label: mode === 'renewal' ? 'Renewal active' : 'Active tenancy',
@@ -1726,38 +1719,22 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
       timing: null,
       node: (
         <>
-          {/* Live-lease summary — always populated (rent · term · deposit ·
-              collected) so a renewal with no pending cheque never shows blank
-              tiles; the next instalment, if any, surfaces as a flag below. */}
-          <div className="stats">
-            <div className="stat">
-              <div className="sl">Annual rent{(h.contract.discountAmount ?? 0) > 0 ? ' (after discount)' : ''}</div>
-              <div className="sv">
-                {(h.contract.discountAmount ?? 0) > 0 && h.contract.listedRent != null && (
-                  <span style={{ fontSize: 12, fontWeight: 400, color: '#9b9890', textDecoration: 'line-through', marginRight: 6 }}>{fmtAed(h.contract.listedRent)}</span>
-                )}
-                {fmtAed(h.contract.annualRent)}
-              </div>
-              {(h.contract.discountAmount ?? 0) > 0 && (
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', marginTop: 2 }}>− {fmtAed(h.contract.discountAmount!)} discount</div>
+          {/* Rent · term · deposit · collected · next payment all read off the
+              segregated summary below (and the page header), so the tiles that
+              used to sit here only repeated them. The DISCOUNT is the one figure
+              the plan does not carry, so it stays — as a single line. */}
+          {(h.contract.discountAmount ?? 0) > 0 && (
+            <div className="flag" style={{ alignSelf: 'flex-start', background: '#fdf1f1', borderColor: '#f3c9c9', color: '#b91c1c' }}>
+              Discount applied
+              {h.contract.listedRent != null && (
+                <>
+                  {' · '}
+                  <span style={{ textDecoration: 'line-through', opacity: 0.75 }}>{fmtAed(h.contract.listedRent)}</span>
+                  {' → '}
+                  <strong>{fmtAed(h.contract.annualRent)}</strong>
+                </>
               )}
-            </div>
-            <div className="stat">
-              <div className="sl">{mode === 'renewal' ? 'Renewal term' : 'Term'}</div>
-              <div className="sv" style={{ fontSize: 14 }}>{fmtDate(h.contract.startDate)} → {fmtDate(h.contract.endDate)}</div>
-            </div>
-            <div className="stat">
-              <div className="sl">Deposit held</div>
-              <div className="sv jade">{fmtAed(h.contract.securityDepositHeld ?? h.contract.securityDepositAmount)}</div>
-            </div>
-            <div className="stat">
-              <div className="sl">Collected</div>
-              <div className="sv jade">{fmtAed(collected)}</div>
-            </div>
-          </div>
-          {next && (
-            <div className="flag waiting" style={{ alignSelf: 'flex-start' }}>
-              <CreditCard size={13} /> Next payment {fmtAed(next.amount)} due {fmtDate(next.transactionDate)}
+              {' · '}− {fmtAed(h.contract.discountAmount!)}
             </div>
           )}
           {/* Only the PARENT lease (which owns the proposal) has a renewalChild.
@@ -1794,12 +1771,18 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               {h.contract.renewalChild.annualRent ? <> @ {fmtAed(h.contract.renewalChild.annualRent)}</> : null}
             </div>
           )}
+          {/* Payment summary — the SAME segregated view the Payment Plan document
+              renders (Security Deposit · Rental Income · Management Fee · Third
+              Party, each with its lines and total), built from the one canonical
+              grouping in segregatedPlan.ts rather than a second look-alike table.
+              It replaces the Record payment / Propose renewal / Terminate directly
+              buttons that used to sit here: all three already exist on this page,
+              so repeating them added noise instead of information. */}
+          <SegregatedPlanView
+            plan={buildSegregatedPlan(segRowsFromContract(h.contract, h.contract.payments ?? []))}
+            style={{ padding: 0 }}
+          />
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {h.perms.collections && (
-              <button className="btn btn-jade" onClick={() => h.openDrawer('payments')}>
-                <CreditCard size={14} /> Record payment
-              </button>
-            )}
             {h.contract.renewalAccepted === 'accepted' && h.contract.renewalChild && (
               <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} className="btn btn-jade">
                 <RotateCcw size={14} /> Open renewal contract · CID-{h.contract.renewalChild.id}
@@ -1818,16 +1801,6 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                   Discard draft
                 </button>
               </>
-            )}
-            {mode !== 'renewal' && !h.contract.renewalAccepted && h.contract.renewalStatus !== 'draft' && h.perms.renewals && (
-              <button className="btn btn-ghost" onClick={() => h.openModal('renew')}>
-                <RotateCcw size={14} /> Propose renewal
-              </button>
-            )}
-            {h.perms.agreements && (
-              <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => h.openModal('direct-terminate')}>
-                <X size={14} /> Terminate directly
-              </button>
             )}
           </div>
         </>
@@ -1998,6 +1971,23 @@ const RULE_FEE_DEFS: { pt: string; label: string; feeK: string; pctK: string; mo
 ];
 const RULE_FEE_LABELS: Record<string, string> = Object.fromEntries(RULE_FEE_DEFS.map(d => [d.pt, d.label]));
 
+/* ── Payment segmentation — ONE source of truth ────────────────────────────
+ * The plan table, the receipts and the live-lease summary must never disagree
+ * about which charge sits in which group, so the predicates live here rather
+ * than being re-derived per surface. Management Fee = what the landlord charges
+ * (admin + commission + every Rules penalty); Third Party = pass-throughs
+ * (Contract Registration, fees VAT, service charges, ad-hoc "other").
+ */
+/** Bounced / cancelled cheques are void — never counted in any total. */
+const feeActive = (p: { chequeStatus?: string | null }) =>
+  !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
+/** The combined VAT cheque on admin/commission fees is a pass-through tax — it
+ *  belongs with Third Party, never inside the rent schedule. */
+const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
+  (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
+const MGMT_FEE_TYPES = new Set<string>(['admin_fee', 'commission', ...RULE_FEE_DEFS.map(d => d.pt)]);
+
+
 /** Shared fixed column widths for BOTH payment tables (deposit/rent + fees) so
  *  every section's columns — amounts especially — line up in one vertical grid. */
 function PayCols() {
@@ -2074,9 +2064,25 @@ function ReceiptRefTag({ refs, id, kind = 'payment' }: { refs: PaymentRefs; id: 
   );
 }
 
+/** Every payment type the "New payment" popup can write. Which of these are
+ *  actually offered is decided by the segment that opened it (see `recTypes`) —
+ *  the Rental Income rail offers rental income only. */
+const REC_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'rental_income',   label: 'Rental income' },
+  { value: 'security_deposit', label: 'Security deposit' },
+  { value: 'admin_fee',       label: 'Admin fee' },
+  { value: 'ejari_fee',       label: 'Contract Registration fee' },
+  { value: 'commission',      label: 'Commission' },
+  { value: 'maintenance_fee', label: 'Maintenance fee' },
+  { value: 'service_charge',  label: 'Service charge' },
+  { value: 'other',           label: 'Other' },
+];
+
 function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
-  onRecordPayment, onUpdatePayment, onDeletePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
+  // onDeletePayment is intentionally not destructured — fee rows are corrected
+  // via Edit / Status, never deleted, so the drawer no longer offers Delete.
+  onRecordPayment, onUpdatePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
   notes, onAddNote, perms, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
@@ -2147,6 +2153,12 @@ function DetailsDrawer({
     description: '', amount: '', paymentType: 'rental_income',
     paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
   });
+  // Which payment types this popup may offer. The popup is opened from a SEGMENT
+  // rail ("Add" on Rental Income), so it only ever writes into that segment —
+  // offering the other types let a rent cheque be filed as a fee and land in the
+  // wrong section. Set by openRecordFor(); management / third-party fees have
+  // their own VAT-aware fee popup.
+  const [recTypes, setRecTypes] = useState<string[]>(['rental_income']);
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
   // ── Inline cheque editor — correct amount / reference / description on existing rows ──
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -2351,8 +2363,6 @@ function DetailsDrawer({
   // "Fees VAT" — the combined VAT cheque on admin/commission fees — is a
   // pass-through tax: it belongs under Third Party with the registration fee,
   // never inside the rent schedule (only rent + Rental VAT live there).
-  const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
-    (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
   const feesVatPaymentRows = rentRows.filter(p => isFeesVat(p));
   const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other' && !isFeesVat(p));
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
@@ -2361,7 +2371,6 @@ function DetailsDrawer({
   // (Contract Registration) + cheque-charge penalties → Third Party (with 'other' charges).
   // Management Fee = RP-charged fees: admin + commission + every Rules penalty/charge.
   // (Ejari / VAT / sub-lease / service charges stay Third Party — pass-through.)
-  const MGMT_FEE_TYPES = new Set<string>(['admin_fee', 'commission', ...RULE_FEE_DEFS.map(d => d.pt)]);
   const managementFeeRows = feeRows.filter(f => MGMT_FEE_TYPES.has(f.paymentType ?? ''));
   const thirdPartyFeeRows = [
     ...feeRows.filter(f => !MGMT_FEE_TYPES.has(f.paymentType ?? '')),
@@ -2369,7 +2378,6 @@ function DetailsDrawer({
   ];
   // Bounced / cancelled cheques are void — excluded from every section total and the
   // grand total, exactly as the header's Total payable does, so the two never diverge.
-  const feeActive = (p: { chequeStatus?: string | null }) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
   const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0);
   const otherActiveGross = otherPaymentRows.reduce((s, p) => s + (feeActive(p) ? (p.amount || 0) : 0), 0);
   const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0) + otherActiveGross;
@@ -2440,7 +2448,6 @@ function DetailsDrawer({
   const [feeEdit, setFeeEdit] = useState(emptyFeeForm);
   const [feeEditBusy, setFeeEditBusy] = useState(false);
   const [feeEditErr, setFeeEditErr] = useState<string | null>(null);
-  const [feeDeleteBusy, setFeeDeleteBusy] = useState<number | null>(null);
   const submitAddFee = async () => {
     const net = Number(feeAdd.amount); const vat = Number(feeAdd.vatAmount || 0);
     if (!Number.isFinite(net) || net <= 0) { setFeeAddErr('Enter a valid amount'); return; }
@@ -2493,15 +2500,11 @@ function DetailsDrawer({
     } catch (e) { setFeeEditErr(e instanceof Error ? e.message : 'Failed to save changes'); }
     finally { setFeeEditBusy(false); }
   };
-  const deleteFee = async (paymentId: number) => {
-    setFeeDeleteBusy(paymentId);
-    try { await onDeletePayment(paymentId); }
-    finally { setFeeDeleteBusy(null); }
-  };
   // Per-section "Add" → open the right popup pre-typed for that segment. Deposit + rent
   // use the payment popup; management + third-party fees use the fee popup (VAT-aware).
   const openRecordFor = (paymentType: string) => {
     setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '' }));
+    setRecTypes([paymentType]);
     setShowAddFee(false); setRecErr(null); setShowRec(true);
   };
   const openFeeFor = (paymentType: string) => {
@@ -3145,28 +3148,20 @@ function DetailsDrawer({
                                   </span>
                                 )}
                                 {/* A cleared fee is received money (and may carry an issued
-                                    receipt number) — no Edit and no Delete once cleared. */}
+                                    receipt number) — not editable once cleared.
+                                    Fees are never DELETED from a lease: an agreed
+                                    charge stays on the record and is corrected via
+                                    Edit (or cancelled through Status), so the plan
+                                    always reconciles against the receipts it issued. */}
                                 {perms.collections && f.chequeStatus !== 'cleared' && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="mini-btn view"
-                                      title="Edit fee amount / VAT / method / reference / date"
-                                      onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
-                                    >
-                                      <Pencil size={12} /> Edit
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="mini-btn"
-                                      title="Remove this fee"
-                                      disabled={feeDeleteBusy === f.id}
-                                      onClick={() => void deleteFee(f.id)}
-                                      style={{ color: 'var(--brick)' }}
-                                    >
-                                      <Trash2 size={12} /> {feeDeleteBusy === f.id ? '…' : 'Delete'}
-                                    </button>
-                                  </>
+                                  <button
+                                    type="button"
+                                    className="mini-btn view"
+                                    title="Edit fee amount / VAT / method / reference / date"
+                                    onClick={() => feeEditId === f.id ? setFeeEditId(null) : startFeeEdit(f)}
+                                  >
+                                    <Pencil size={12} /> Edit
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -3413,14 +3408,9 @@ function DetailsDrawer({
                       <div className="grid2">
                         <div className="field"><label>Type</label>
                           <select className="input" value={rec.paymentType} onChange={e => setRec(v => ({ ...v, paymentType: e.target.value }))}>
-                            <option value="rental_income">Rental income</option>
-                            <option value="security_deposit">Security deposit</option>
-                            <option value="admin_fee">Admin fee</option>
-                            <option value="ejari_fee">Contract Registration fee</option>
-                            <option value="commission">Commission</option>
-                            <option value="maintenance_fee">Maintenance fee</option>
-                            <option value="service_charge">Service charge</option>
-                            <option value="other">Other</option>
+                            {REC_TYPE_OPTIONS.filter(o => recTypes.includes(o.value)).map(o => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
                           </select>
                         </div>
                         <div className="field"><label>Method</label>
@@ -3524,7 +3514,7 @@ function DetailsDrawer({
                   <FileText size={14} />
                   <div>
                     <div className="dn">{req.label}</div>
-                    <div className="ds">{asked ? 'Requested — awaiting upload' : req.required ? 'Missing — required' : 'Not on file — optional'}</div>
+                    <div className="ds">{asked ? 'Requested — awaiting upload' : req.required ? 'Missing — required' : 'Not uploaded — optional'}</div>
                   </div>
                   <div className="dacts">
                     <button type="button" className="mini-btn ok" onClick={() => prefillUpload(req)}>
@@ -3626,13 +3616,15 @@ function DetailsDrawer({
               const doc = docs[0];
               // Payment Advice = the customer's uploaded cheque copies. They are
               // cleared in the Cheques/PDC step (Mark as Collected), NOT doc-reviewed,
-              // so they never sit in a "Pending review" state — always "On file".
+              // so they never sit in a "Pending review" state — always "Uploaded".
               const noReview = s.key === 'payment_advice';
               const ok  = noReview || ['approved', 'processed', 'complete'].includes(doc.status);
               const stt = ok ? 'approved' : doc.status === 'rejected' ? 'rejected' : 'pending';
+              // Say what actually happened: the file IS uploaded. "On file" was
+              // jargon that read as a filing state rather than a plain fact.
               const lbl = multi
-                ? `${docs.length} files · on file`
-                : ok ? 'On file' : doc.status === 'rejected' ? 'Rejected' : 'Pending review';
+                ? `${docs.length} files · uploaded`
+                : ok ? 'Uploaded' : doc.status === 'rejected' ? 'Rejected' : 'Pending review';
               return (
                 <div key={s.key} className={'docitem ' + stt}>
                   <FileText size={14} />
@@ -4270,7 +4262,7 @@ function InlineInspectionCounterSign({ contractId, type, signerName, onBehalfOf,
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <span className="mti" style={{ background: 'var(--jade)' }}><FileSignature size={16} /></span>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink, #1a1916)' }}>Counter-sign the inspection</div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink, #1a1916)' }}>Sign the inspection</div>
           <div className="note">
             {type === 'move_in'
               ? 'The customer has signed — add your signature to complete move-in and activate the tenancy.'
@@ -4284,7 +4276,7 @@ function InlineInspectionCounterSign({ contractId, type, signerName, onBehalfOf,
         onBehalfOf={onBehalfOf}
         defaultName={signerName}
         termsText={`I confirm the condition recorded in this ${moveLabel} inspection is accurate.`}
-        submitLabel="Counter-sign inspection"
+        submitLabel="Sign inspection"
         alreadySigned={false}
         onSign={signInspection}
       />

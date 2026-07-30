@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useParams, useSearchParams, usePathname } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import Link from 'next/link';
 import { ArrowLeft, Save, Loader2, CheckCircle, Send, RotateCcw, Lock, Plus, X, Printer, Download } from 'lucide-react';
@@ -20,6 +21,25 @@ import {
 import { uploadInspectionItemPhoto, type InspectionPhotoRef } from '@/lib/inspectionPhotos';
 import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
+import { useBackClose } from '@/lib/useSlideOver';
+
+// Preview renders the EXACT document the customer reads — the same canvas-
+// rasterised report their portal page shows — instead of dumping a blob into a
+// new tab behind the browser's print dialog. @react-pdf + pdf.js are
+// browser-only, so it loads the same way the customer pages load it.
+const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[360px] grid place-items-center text-sm text-[#9b9890]">Preparing inspection report…</div>
+  ),
+});
+
+/** Top-bar action buttons: icon-only and compact on a phone (the labels would
+ *  otherwise eat the whole width next to the Back link), full size from `sm`. */
+const TOPBAR_BTN =
+  'inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] '
+  + 'text-[12.5px] sm:text-sm font-semibold px-2.5 py-2 sm:px-4 sm:py-2.5 '
+  + 'disabled:opacity-60 hover:border-[#c8c6be]';
 
 type Phase = 'move_in' | 'move_out';
 const AED = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -44,6 +64,10 @@ export default function CategoryInspectionPage() {
   const portalToken = (pathname ?? '').startsWith('/portal/') ? ((pathname ?? '').split('/')[2] ?? null) : null;
   const { canForRp } = useManagerPermissions();
   const [landlordId, setLandlordId] = useState<number | null>(null);
+  // Lease status, so Back can fall back to the right home when the opener did
+  // not pass `from=…`: a live lease is still an Operations row, an ended one
+  // (expired / terminated) only exists in the Leases register.
+  const [contractStatus, setContractStatus] = useState<string | null>(null);
   const phase = (search.get('type') ?? 'move_in') as Phase;
   const contractId = params?.id;
   // Token-scoped API base for the portal inspector; the RP/manager uses the
@@ -62,12 +86,17 @@ export default function CategoryInspectionPage() {
   const [reopening, setReopening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
+  // Report-level bulk photo upload (all images at once, not per component row).
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [photoProgress, setPhotoProgress] = useState<{ done: number; total: number } | null>(null);
   // The RP's inspection price book, so components added by hand from the restoration
   // list carry the RP's own rates (falls back to the platform seed when unavailable).
   const [priceBook, setPriceBook] = useState<InspectionPriceBookEntry[] | null>(null);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const [compPickerSection, setCompPickerSection] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // Preview = read the finished report exactly as the customer will.
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const docRef = useRef<InspectionDoc | null>(null);
   const dateSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,8 +131,14 @@ export default function CategoryInspectionPage() {
           const raw = await cRes.json();
           const c = portalToken ? (raw.contract ?? raw) : raw;
           setLandlordId(c.landlord?.id ?? null);
+          setContractStatus(c.status ?? null);
           setMeta({
-            property: c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
+            // "Building, Community" — the report names the location the same way
+            // on the RP/manager, inspector and customer copies.
+            property: [
+              c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
+              c.property?.community ?? c.unit?.property?.community?.nameEn ?? '',
+            ].filter(Boolean).join(', '),
             unitNo: c.unit?.number ?? c.unit?.unitNumber ?? '',
             propertyType: c.unit?.unitType ?? c.unit?.type ?? '',
             floor: c.unit?.floor != null ? String(c.unit.floor) : '',
@@ -301,6 +336,41 @@ export default function CategoryInspectionPage() {
     if (!(await persistDoc(next))) setError('Photo added but the save failed — click Save draft.');
   }, [contractId, persistDoc, portalToken, phase]);
 
+  // BULK photo upload for the whole report — walk the unit, then drop the entire
+  // camera roll in at once instead of attaching image-by-image to each component
+  // row. They land on `doc.photos` (already persisted, re-signed on read and
+  // normalised on save by the backend, exactly like per-item attachments).
+  const handleAddGeneralPhotos = useCallback(async (files: File[]) => {
+    if (!contractId || !files.length) return;
+    setUploadingPhotos(true); setError(null);
+    const added: InspectionPhotoRef[] = [];
+    // Sequential: the presigned-PUT endpoint is per-file, and a walk-through can
+    // be 30+ images — firing them all at once stalls on a site connection.
+    for (const f of files) {
+      const r = await uploadInspectionItemPhoto(contractId, 'general', f, { portalToken, type: phase });
+      if (r) added.push(r);
+      setPhotoProgress({ done: added.length, total: files.length });
+    }
+    setUploadingPhotos(false); setPhotoProgress(null);
+    if (!added.length) { setError('Photo upload failed — please retry.'); return; }
+    if (added.length < files.length) setError(`${files.length - added.length} of ${files.length} photos failed to upload.`);
+    const base = docRef.current;
+    if (!base) return;
+    const next: InspectionDoc = { ...base, photos: [...(base.photos ?? []), ...added] };
+    docRef.current = next;
+    setDoc(next);
+    if (!(await persistDoc(next))) setError('Photos added but the save failed — click Save draft.');
+  }, [contractId, persistDoc, portalToken, phase]);
+
+  const handleRemoveGeneralPhoto = useCallback(async (photoId: string) => {
+    const base = docRef.current;
+    if (!base) return;
+    const next: InspectionDoc = { ...base, photos: (base.photos ?? []).filter((p) => p.id !== photoId) };
+    docRef.current = next;
+    setDoc(next);
+    await persistDoc(next);
+  }, [persistDoc]);
+
   const handleRemoveItemPhoto = useCallback(async (sectionId: string, itemId: string, photoId: string) => {
     const base = docRef.current;
     if (!base) return;
@@ -404,6 +474,9 @@ export default function CategoryInspectionPage() {
       const totals = computeInspectionTotals(doc, phase);
       const showMoney = phase === 'move_out' && !portalToken; // inspector portal hides RP money
       const data = {
+        // No Status badge: it read "Draft" for everything short of the RP's
+        // counter-signature, so a report already submitted to the customer still
+        // printed as a draft. The report's real progress is the signature blocks.
         doc, phase, ref: `CID-${contractId}`, showMoney, totals,
         meta: {
           property: meta?.property ?? '', unitNo: meta?.unitNo ?? '', propertyType: meta?.propertyType ?? '', floor: meta?.floor ?? '',
@@ -440,12 +513,21 @@ export default function CategoryInspectionPage() {
   };
 
   // Back returns to wherever we came from (Operations pipeline when opened from
-  // there, via ?from=…), falling back to the lease record.
+  // there, via ?from=…). With no opener — a direct link, a refresh, or an entry
+  // point that doesn't pass `from` — fall back to where the lease actually
+  // lives: Operations while it is running, the Leases record once it has ended
+  // (ended leases never enter the Operations worklist).
   const backFrom = search?.get('from') || '';
+  const dashBase = isManagerView ? '/dashboard/manager' : '/rental-provider/dashboard';
+  const rpScope = search?.get('rp');           // manager sticky-landlord scope
+  const isEnded = contractStatus === 'expired' || contractStatus === 'terminated';
+  const homeHref = isEnded
+    ? `${dashBase}/contracts/${contractId}/v2`
+    : `${dashBase}/operations/${contractId}${rpScope ? `?rp=${rpScope}` : ''}`;
   const backHref = portalToken
     ? `/portal/${portalToken}/contract/${contractId}`
-    : (backFrom || `${isManagerView ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts'}/${contractId}/v2`);
-  const backLabel = backFrom.includes('/operations') ? 'Back to operations' : 'Back to contract';
+    : (backFrom || homeHref);
+  const backLabel = (backFrom || homeHref).includes('/operations') ? 'Back to operations' : 'Back to contract';
   // The move-out date stays editable until the inspection is approved (counter-signed).
   const canEditMoveOutDate = phase === 'move_out' && canEditInsp && !counterSigned;
 
@@ -455,31 +537,51 @@ export default function CategoryInspectionPage() {
           once submitted). The primary Save draft / Submit actions live at the
           bottom of the page, after the report. */}
       <div className="flex items-start justify-between gap-4 mb-5">
-        <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] pt-2">
-          <ArrowLeft size={15} /> {backLabel}
-        </Link>
+        {/* The magic link is a standalone page — there is no app behind it to go
+            "back" to, so it gets the document's name instead of a Back link. */}
+        {portalToken ? (
+          <p className="min-w-0 truncate text-[13.5px] sm:text-base font-bold text-[#1a1916] pt-1.5 sm:pt-2">
+            Inspection Report
+          </p>
+        ) : (
+          <Link href={backHref}
+            className="inline-flex items-center gap-1 min-w-0 text-[12.5px] sm:text-sm text-[#9b9890] hover:text-[#1a1916] pt-1.5 sm:pt-2">
+            <ArrowLeft size={14} className="shrink-0" /> <span className="truncate">{backLabel}</span>
+          </Link>
+        )}
         <div className="flex items-center gap-2 shrink-0">
-          <button type="button" onClick={() => handleDownloadPdf(true)} disabled={downloading || !doc}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] text-sm font-semibold px-4 py-2.5 disabled:opacity-60 hover:border-[#c8c6be]">
-            <Printer size={16} /> Preview
-          </button>
+          {/* Once the customer has signed, the page IS the preview — offering a
+              Preview button that opens the identical document is noise. */}
+          {!tenantSigned && (
+            <button type="button" onClick={() => setPreviewOpen(true)} disabled={!doc}
+              aria-label="Preview" title="Preview"
+              className={TOPBAR_BTN}>
+              <Printer size={15} /> <span className="hidden sm:inline">Preview</span>
+            </button>
+          )}
           <button type="button" onClick={() => handleDownloadPdf(false)} disabled={downloading || !doc}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] text-sm font-semibold px-4 py-2.5 disabled:opacity-60 hover:border-[#c8c6be]">
-            {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Download
+            aria-label="Download" title="Download"
+            className={TOPBAR_BTN}>
+            {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} <span className="hidden sm:inline">Download</span>
           </button>
           {canEditInsp && locked && !portalToken && (
             // On the portal the inspector cannot reopen — the submitted report is
             // handed to the customer to sign, then the inspector counter-signs below.
             <button type="button" onClick={handleReopen} disabled={reopening}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] text-sm font-semibold px-4 py-2.5 disabled:opacity-60 hover:border-[#c8c6be]">
-              {reopening ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
-              {reopening ? 'Reopening…' : 'Reopen to edit'}
+              aria-label="Reopen to edit" title="Reopen to edit"
+              className={TOPBAR_BTN}>
+              {reopening ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
+              <span className="hidden sm:inline">{reopening ? 'Reopening…' : 'Reopen to edit'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {locked && !counterSigned && (
+      {/* Only while the report is waiting on the customer. Once they have signed
+          this notice is stale — it tells you to wait for a signature that has
+          already arrived, and Reopen is no longer possible — so the signed view
+          is just the document plus the counter-signature. */}
+      {locked && !counterSigned && !tenantSigned && (
         <div className="mb-4 rounded-lg bg-[#fef9ec] border border-[#f3e2b8] text-[#8a6d1a] text-sm px-3 py-2 flex items-center gap-2">
           <Lock size={14} className="shrink-0" />
           <span>
@@ -491,7 +593,27 @@ export default function CategoryInspectionPage() {
       )}
       {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
 
-      {doc && (
+      {/* Once the CUSTOMER has signed, the report is final — nothing here is
+          editable and Reopen is gone. Show the finished document exactly as the
+          customer reads it (the same canvas), not the editable workspace chrome;
+          the counter-signature block sits below it. */}
+      {doc && tenantSigned && (
+        // Same container the customer's page uses (`max-w-3xl`), so the document
+        // rasterises to exactly the width — and therefore the look — they see.
+        <div className="max-w-3xl mx-auto">
+          <InspectionInline
+            doc={doc}
+            meta={reportMeta}
+            phase={phase}
+            contractRef={`CID-${contractId}`}
+            inspectionDate={doc.reportGeneratedDate ?? doc.inspectionDate ?? null}
+            moveInDate={doc.moveInDate ?? dates.moveInDate ?? null}
+            moveOutDate={(doc.moveOutDate as string | undefined) ?? dates.moveOutDate ?? null}
+          />
+        </div>
+      )}
+
+      {doc && !tenantSigned && (
         <InspectionReportView
           doc={doc}
           meta={reportMeta}
@@ -507,6 +629,11 @@ export default function CategoryInspectionPage() {
           onAddItemPhotos={handleAddItemPhotos}
           onRemoveItemPhoto={handleRemoveItemPhoto}
           uploadingItemId={uploadingItemId}
+          photos={doc.photos ?? []}
+          onAddPhotos={!locked && canEditInsp ? handleAddGeneralPhotos : undefined}
+          onRemovePhoto={!locked && canEditInsp ? handleRemoveGeneralPhoto : undefined}
+          photosUploading={uploadingPhotos}
+          photosProgress={photoProgress}
           generalNotes={doc.generalNotes ?? ''}
           onGeneralNotes={setGeneralNotes}
           onInspectorName={!locked && canEditInsp ? setInspectorName : undefined}
@@ -533,10 +660,16 @@ export default function CategoryInspectionPage() {
         </div>
       )}
 
-      {/* Portal inspector: counter-sign the RP side once the customer has signed. */}
-      {portalToken && doc && (
-        <div className="mt-6 bg-white rounded-2xl border border-[#e8e6e0] p-5">
-          <h3 className="text-sm font-bold text-[#1a1916] mb-3">Inspection Manager Counter-Signature</h3>
+      {/* Counter-sign the RP side once the customer has signed. Open to the
+          on-site inspector (magic link) AND to the landlord / delegated manager
+          in the dashboard — the contract page sends them here to "counter-sign
+          in the inspection workspace", so the control has to exist in both.
+          Move-in counter-signature activates the tenancy and locks the report. */}
+      {doc && (portalToken || canEditInsp) && (
+        <div className={`mt-6 bg-white rounded-2xl border border-[#e8e6e0] p-5${tenantSigned ? ' max-w-3xl mx-auto' : ''}`}>
+          <h3 className="text-sm font-bold text-[#1a1916] mb-3">
+            {portalToken ? 'Inspection Manager Counter-Signature' : 'Your Counter-Signature'}
+          </h3>
           {counterSigned ? (
             <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle size={16} /> This inspection has been counter-signed{doc.rpCounterSignedAt ? ` on ${new Date(doc.rpCounterSignedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}.</p>
           ) : !locked ? (
@@ -545,12 +678,14 @@ export default function CategoryInspectionPage() {
             <p className="text-sm text-[#9b9890]">Submitted — waiting for the customer to sign from their link. You counter-sign once they do.</p>
           ) : (
             <SignatureBlock
-              signerRole="Inspector"
-              signerName={doc?.inspectorName?.trim() || meta?.tenantName || 'Inspection Manager'}
+              // The RP-side signatory is the person inspecting — never the
+              // customer, so `tenantName` is not a fallback here.
+              signerRole={portalToken ? 'Inspector' : (doc.inspectorRole?.trim() || 'Property Representative')}
+              signerName={doc?.inspectorName?.trim() || 'Inspection Manager'}
               onBehalfOf="the rental provider"
               defaultName={doc?.inspectorName?.trim() || ''}
               termsText={`I confirm the condition recorded in this ${phase === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
-              submitLabel="Counter-sign inspection"
+              submitLabel="Sign inspection"
               alreadySigned={false}
               onSign={handleCounterSign}
             />
@@ -582,6 +717,84 @@ export default function CategoryInspectionPage() {
           onCancel={() => setConfirmSubmit(false)}
         />
       )}
+      {previewOpen && doc && (
+        <InspectionPreviewOverlay
+          doc={doc}
+          meta={reportMeta}
+          phase={phase}
+          contractRef={`CID-${contractId}`}
+          inspectionDate={doc.reportGeneratedDate ?? doc.inspectionDate ?? null}
+          moveInDate={doc.moveInDate ?? dates.moveInDate ?? null}
+          moveOutDate={(doc.moveOutDate as string | undefined) ?? dates.moveOutDate ?? null}
+          onDownload={() => void handleDownloadPdf(false)}
+          downloading={downloading}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Preview = the finished report exactly as the CUSTOMER reads it — the same
+ *  canvas-rasterised document their portal page renders, in an overlay, rather
+ *  than a blob in a new tab behind the browser print dialog. Shown to the
+ *  landlord, a delegated manager and the magic-link inspector alike (all three
+ *  routes render this one page). Money stays off: this is the customer's copy —
+ *  the RP's own copy, with restoration costs, is what Download produces. */
+function InspectionPreviewOverlay({
+  doc, meta, phase, contractRef, inspectionDate, moveInDate, moveOutDate, onDownload, downloading, onClose,
+}: {
+  doc: InspectionDoc; meta: ReportMeta; phase: Phase; contractRef: string;
+  inspectionDate: string | null; moveInDate: string | null; moveOutDate: string | null;
+  onDownload: () => void; downloading: boolean; onClose: () => void;
+}) {
+  // Browser Back closes the preview instead of navigating off the workspace.
+  const dismiss = useBackClose(onClose);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dismiss]);
+  return (
+    // Full-page sheet, NOT a modal card: the customer reads the report as a page
+    // of its own (`max-w-3xl px-4`, the page itself scrolling), so the preview
+    // uses the same container — the canvas then scales to exactly the width the
+    // customer's does, at every viewport.
+    <div className="fixed inset-0 z-[70] bg-[#f7f6f3] overflow-y-auto overscroll-contain">
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-[#eceae4]">
+        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+          <button type="button" onClick={dismiss} title="Close preview"
+            className="shrink-0 w-9 h-9 rounded-lg border border-[#e8e6e0] text-[#6b6860] flex items-center justify-center hover:border-[#c8c6be]">
+            <ArrowLeft size={17} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-[#1a1916] truncate">
+              {phase === 'move_out' ? 'Move-out' : 'Move-in'} inspection — {contractRef}
+            </p>
+            <p className="text-[11.5px] text-[#9b9890]">Exactly what the customer sees</p>
+          </div>
+          <button type="button" onClick={onDownload} disabled={downloading}
+            className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] text-sm font-semibold px-3.5 py-2 disabled:opacity-60 hover:border-[#c8c6be]">
+            {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+            <span className="hidden sm:inline">Download</span>
+          </button>
+          <button type="button" onClick={dismiss} title="Close"
+            className="shrink-0 w-9 h-9 rounded-lg text-[#6b6860] flex items-center justify-center hover:bg-[#f4f3ef]">
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <InspectionInline
+          doc={doc}
+          meta={meta}
+          phase={phase}
+          contractRef={contractRef}
+          inspectionDate={inspectionDate}
+          moveInDate={moveInDate}
+          moveOutDate={moveOutDate}
+        />
+      </div>
     </div>
   );
 }

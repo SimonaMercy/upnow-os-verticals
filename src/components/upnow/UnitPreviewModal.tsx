@@ -703,7 +703,7 @@ export function UnitPreviewModal({
                 {slots.map((slot) => {
                   const attached = slot.files.length > 0;
                   const multi = slot.files.length > 1;
-                  const statusText = attached ? (multi ? `${slot.files.length} files · on file` : 'On file · PDF') : 'Not uploaded';
+                  const statusText = attached ? (multi ? `${slot.files.length} files · uploaded` : 'Uploaded · PDF') : 'Not uploaded';
                   return (
                     <div key={slot.key} onClick={() => { if (attached) { setReader(slot.key); setReaderFile(0); } }}
                       style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 12px', border: `1px solid ${attached ? C.greenBd2 : C.line}`, background: attached ? C.soft2 : '#fff', borderRadius: 11, cursor: attached ? 'pointer' : 'default' }}>
@@ -840,7 +840,7 @@ export function UnitPreviewModal({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rActive?.name || rSlot.label}</div>
                 <div style={{ fontSize: 11, color: C.greenT, fontWeight: 600 }}>
-                  {rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImageFile(rActive) ? 'Image' : 'PDF'}` : `${isImageFile(rActive) ? 'Image' : 'PDF'} · On file`) : 'Not uploaded'}
+                  {rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImageFile(rActive) ? 'Image' : 'PDF'}` : `${isImageFile(rActive) ? 'Image' : 'PDF'} · Uploaded`) : 'Not uploaded'}
                 </div>
               </div>
               <div onClick={() => setReader(null)} style={{ width: 32, height: 32, flex: '0 0 32px', borderRadius: 9, border: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}><X size={17} /></div>
