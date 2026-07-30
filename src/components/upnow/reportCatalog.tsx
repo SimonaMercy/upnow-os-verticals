@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, FileBarChart, ScrollText,
-  Banknote, TrendingUp, ListChecks, CalendarDays,
+  Banknote, TrendingUp, ListChecks, CalendarDays, Activity,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'renewals' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -63,6 +63,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'payment-grouping',   title: 'Payment Grouping (custom)', description: 'Build your own statement — drag payment types into categories you name; Contract Registration splits into DLD + service. Per-year, session-only.', Icon: Banknote, available: true, group: 'financial', rpOnly: true },
   // ── Manager activity ───────────────────────────────────────────────────
   { slug: 'manager-operations', title: 'Manager Operations Report', description: 'The manager evaluation report — today / this week / this month compared to the previous period, day-by-day figures per manager, leases delivered, every stage as a clickable column, stage timing with customer & landlord wait separated, and what’s stuck right now. “On file” signatures are not counted. Landlord-only.', Icon: ListChecks, available: true, group: 'operations', rpOnly: true },
+  { slug: 'activity-log', title: 'Activity Log', description: 'Every recorded action in the shape an owner reads it — when, who (person and role, and who they acted for), what, where (lease · unit · property · customer), what changed before → after, and why. Includes a coverage matrix of every catalogued action and how often each line of the record can actually be filled. Anything never captured says so explicitly instead of showing a bare verb.', Icon: Activity, available: true, group: 'operations', rpOnly: true },
   { slug: 'operations-by-stage', title: 'Operations by Stage', description: 'Records each manager progressed, stage by stage — the operations pipeline matrix on its own. Click any number to see the records behind it with their history. Managers can open it to see their own activity and pipeline. “On file” signatures are not counted.', Icon: ListChecks, available: true, group: 'operations', hidden: true },
 ];
 
