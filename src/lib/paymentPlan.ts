@@ -92,3 +92,26 @@ export function comparePaymentSchedule(a: SchedulableRow, b: SchedulableRow): nu
   const db = String(b.dueDate ?? b.transactionDate ?? '');
   return da.localeCompare(db);
 }
+
+/**
+ * Uniform label for a RENT row in a payment schedule.
+ *
+ * The stored descriptions are inconsistent by origin: the first cheque is minted
+ * server-side as `"Rental Instalment 1 of 4"`, while the later ones carry the
+ * lead payment plan's own `"Installment 2"`. Rendering them verbatim made one
+ * schedule read "Rental Instalment 1 of 4 · Installment 2 · Installment 3".
+ * Print every rent row as `Instalment N` instead.
+ *
+ * `index` is the row's 0-based position AMONG THE RENT ROWS (they sort
+ * chronologically within their category, so position = instalment number).
+ * A single-payment plan keeps its stored label ("Annual Rent").
+ */
+export function instalmentLabel(
+  description: string | null | undefined,
+  index: number,
+  totalRentRows: number,
+): string {
+  const d = (description ?? '').trim();
+  if (totalRentRows <= 1) return d || 'Annual Rent';
+  return `Instalment ${index + 1}`;
+}

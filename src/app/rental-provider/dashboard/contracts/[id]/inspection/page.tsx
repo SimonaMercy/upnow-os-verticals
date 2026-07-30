@@ -746,9 +746,12 @@ export default function InspectionPage() {
     const base = isManager
       ? `/dashboard/manager/contracts/${params.id}`
       : `/rental-provider/dashboard/contracts/${params.id}`;
-    const q = new URLSearchParams({ type });
-    const rp = searchParams.get('rp');
-    if (rp) q.set('rp', rp); // preserve manager sticky-landlord scope
+    // Carry EVERY param through the hop — rebuilding the query from scratch used
+    // to drop `from=…` (where the opener came from), which silently sent the v2
+    // page's Back link to the lease record even when it was opened from
+    // Operations. `rp` (manager sticky-landlord scope) rides along the same way.
+    const q = new URLSearchParams(searchParams.toString());
+    q.set('type', type); // normalised above (anything not move_out ⇒ move_in)
     router.replace(`${base}/inspection/v2?${q.toString()}`);
   }, [isPortal, params, searchParams, pathname, router]);
   if (!isPortal) {

@@ -36,7 +36,11 @@ import OperationsViewToggle from '@/components/upnow/OperationsViewToggle';
 /** Who is handling a stage. inferred=true → not an exact recorded actor but the
  *  contract's responsible manager (stage carries only a timestamp, no actor). */
 export interface StageHandler { name: string; inferred: boolean }
-interface ChecklistItem { key: string; label: string; done: boolean; action: string | null; handler?: StageHandler | null }
+/** `custSigned` is set only on the co-signed stages (move-in / move-out /
+ *  settlement): true once the CUSTOMER's signature is in, so the worklist stops
+ *  listing them as an outstanding signatory while the manager's counter-signature
+ *  is still pending. */
+interface ChecklistItem { key: string; label: string; done: boolean; action: string | null; handler?: StageHandler | null; custSigned?: boolean }
 export interface OpsContract {
   id: number;
   ref: string;

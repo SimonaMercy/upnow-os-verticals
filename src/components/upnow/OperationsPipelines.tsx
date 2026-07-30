@@ -199,15 +199,15 @@ function contractStageKey(c: OpsContract, stages: StageDef[]): string {
 }
 
 // Stages co-signed by BOTH the manager and the customer — the manager conducts /
-// signs the inspection or settlement, and the customer counter-signs. Both names
-// show on these lanes (unlike the contract Signatures lane, where the manager is
-// never a signer).
+// signs the inspection or settlement, and the customer signs it too (unlike the
+// contract Signatures lane, where the manager is never a signer).
 const CO_SIGNED_KEYS = new Set(['move_in', 'move_out', 'settlement']);
 
 // The handler(s) for a lane. For the Signatures lane we surface the parties we're
 // still WAITING ON: once a party signs, their name drops off; while both are
-// unsigned, both names show. For move-in/out + settlement we show BOTH the manager
-// and the customer (both sign). Single-item lanes otherwise yield one person.
+// unsigned, both names show. Move-in/out + settlement follow the same rule — the
+// manager plus the customer while both signatures are outstanding, the manager
+// alone once the customer has signed. Single-item lanes otherwise yield one person.
 function laneHandlers(c: OpsContract, keys: string[]): StageHandler[] {
   const items = keys
     .map(k => c.checklist.find(i => i.key === k))
@@ -222,8 +222,15 @@ function laneHandlers(c: OpsContract, keys: string[]): StageHandler[] {
     if (!seen.has(h.name)) { seen.add(h.name); out.push(h); }
   }
   // Move-in/out + settlement are co-signed by the customer — add them alongside
-  // the manager who conducted the stage.
-  if (keys.some(k => CO_SIGNED_KEYS.has(k))) {
+  // the manager who conducted the stage, but only while their signature is still
+  // OUTSTANDING (custSigned). A move-in the customer has already signed is waiting
+  // solely on the manager's counter-signature, so only the manager shows. Completed
+  // lanes keep both names — both parties did sign.
+  const coItems = keys
+    .filter(k => CO_SIGNED_KEYS.has(k))
+    .map(k => c.checklist.find(i => i.key === k))
+    .filter((i): i is NonNullable<typeof i> => !!i);
+  if (coItems.some(i => i.done || i.custSigned !== true)) {
     const cust = tenantDisplayName(c.tenant);
     if (cust && !seen.has(cust)) { seen.add(cust); out.push({ name: cust, inferred: false }); }
   }

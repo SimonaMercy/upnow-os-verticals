@@ -36,6 +36,10 @@ const fmt = (d: string | null | undefined) =>
   d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const quantityOf = (it: InspectionItem) => it.quantity ?? it.quantityToReplace ?? 0;
 const cap = (v: string) => (v ? v[0].toUpperCase() + v.slice(1) : '—');
+/** Unit types are stored as snake_case enums (`staff_accommodation`) — print them
+ *  as words: "Staff Accommodation". */
+const titleCase = (v: string) =>
+  (v ?? '').split(/[_\-\s]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 const CONDC: Record<string, string> = { good: '#2e9f82', fair: '#c98a1a', poor: '#c0392b', '': '#9b9890' };
 
 // Jade palette mirroring InspectionReportView.module.css.
@@ -47,7 +51,6 @@ const s = StyleSheet.create({
   page: { paddingTop: 30, paddingBottom: 40, paddingHorizontal: 30, fontSize: 9, color: INK, fontFamily: 'Helvetica' },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
   title: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  homeIcon: { width: 26, height: 26, borderRadius: 7, backgroundColor: JADE, color: '#fff', fontSize: 13, fontFamily: 'Helvetica-Bold', textAlign: 'center', paddingTop: 6 },
   h1: { fontSize: 14, fontFamily: 'Helvetica-Bold', color: INK, letterSpacing: 0.3 },
   h1sub: { fontSize: 8, color: MUTE, marginTop: 1 },
   dateBoxes: { flexDirection: 'row', gap: 6 },
@@ -97,7 +100,6 @@ const s = StyleSheet.create({
 export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfData }) {
   const { doc, meta, phase, ref, showMoney, totals } = data;
   const isOut = phase === 'move_out';
-  const signed = !!doc.rpCounterSig;
   const categories = (doc.categories ?? []).filter((c) => (c.items ?? []).length > 0);
 
   return (
@@ -106,16 +108,17 @@ export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfD
         {/* Title + date boxes */}
         <View style={s.titleRow}>
           <View style={s.title}>
-            <Text style={s.homeIcon}>⌂</Text>
             <View>
-              <Text style={s.h1}>{isOut ? 'MOVE-OUT' : 'MOVE-IN'} INSPECTION REPORT</Text>
-              <Text style={s.h1sub}>Detailed inspection of property components and fixtures · Contract {ref}</Text>
+              {/* Phase lives in the "Inspection Type" box, so the heading itself
+                  stays the neutral document name. */}
+              <Text style={s.h1}>INSPECTION REPORT</Text>
+              <Text style={s.h1sub}>Contract {ref}</Text>
             </View>
           </View>
           <View style={s.dateBoxes}>
             <View style={s.dateBox}><Text style={s.dbK}>Move-In Date</Text><Text style={s.dbV}>{fmt(data.moveInDate)}</Text></View>
             {isOut && <View style={s.dateBox}><Text style={s.dbK}>Move-Out Date</Text><Text style={s.dbV}>{fmt(data.moveOutDate)}</Text></View>}
-            <View style={s.dateBox}><Text style={s.dbK}>Status</Text><Text style={[s.dbV, { color: signed ? JADE : MUTE }]}>{signed ? 'Signed' : 'Draft'}</Text></View>
+            <View style={s.dateBox}><Text style={s.dbK}>Inspection Type</Text><Text style={s.dbV}>{isOut ? 'Move-Out' : 'Move-In'}</Text></View>
           </View>
         </View>
 
@@ -125,7 +128,7 @@ export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfD
             <Text style={s.cardH}>Property Details</Text>
             <Kv k="Property Name" v={meta.property} />
             <Kv k="Unit No." v={meta.unitNo} />
-            <Kv k="Property Type" v={meta.propertyType} />
+            <Kv k="Property Type" v={titleCase(meta.propertyType)} />
             <Kv k="Floor" v={meta.floor} />
           </View>
           <View style={s.card}>
@@ -141,13 +144,17 @@ export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfD
           </View>
         </View>
 
-        {/* Summary tiles */}
-        <View style={s.tiles}>
-          <View style={s.tile}><Text style={s.tileL}>Total Categories</Text><Text style={s.tileV}>{totals.categories}</Text></View>
-          <View style={s.tile}><Text style={s.tileL}>Total Items</Text><Text style={s.tileV}>{totals.items}</Text></View>
-          <View style={s.tile}><Text style={s.tileL}>{isOut ? 'Items to be Replaced' : 'Items Flagged'}</Text><Text style={s.tileV}>{isOut ? totals.itemsToReplace : totals.defective}</Text></View>
-          {showMoney && <View style={s.tile}><Text style={s.tileL}>Est. Total Cost (AED)</Text><Text style={s.tileV}>{AED(totals.estCostAed)}</Text></View>}
-        </View>
+        {/* Summary tiles — move-out only, exactly as <InspectionReportView> renders
+            them. A move-in report carries no Total Categories / Total Items /
+            Items Flagged counters. */}
+        {isOut && (
+          <View style={s.tiles}>
+            <View style={s.tile}><Text style={s.tileL}>Total Categories</Text><Text style={s.tileV}>{totals.categories}</Text></View>
+            <View style={s.tile}><Text style={s.tileL}>Total Items</Text><Text style={s.tileV}>{totals.items}</Text></View>
+            <View style={s.tile}><Text style={s.tileL}>Items to be Replaced</Text><Text style={s.tileV}>{totals.itemsToReplace}</Text></View>
+            {showMoney && <View style={s.tile}><Text style={s.tileL}>Est. Total Cost (AED)</Text><Text style={s.tileV}>{AED(totals.estCostAed)}</Text></View>}
+          </View>
+        )}
 
         {/* Component table */}
         <Text style={s.secH}>Component Inspection Details</Text>
@@ -164,7 +171,6 @@ export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfD
           <View key={cat.sectionId} wrap={false}>
             <View style={s.catHead}>
               <Text style={s.catName}>{ci + 1}. {cat.label || 'Category'}</Text>
-              <Text style={s.catMeta}>{cat.unitLabel}{cat.count ? ` · ${cat.count}` : ''}</Text>
             </View>
             {cat.items.map((it, ri) => {
               const cond = ((isOut ? it.outCondition : it.inCondition) ?? '') as Condition;
@@ -196,8 +202,10 @@ export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfD
         <View style={s.sigRow} wrap={false}>
           <View style={s.sigCol}>
             <Text style={s.sigRole}>Inspected By — Property Representative</Text>
+            {/* Inspector cell names the PERSON who inspected and their role — the
+                landlord's own name/company is not repeated here. */}
             <Text style={s.sigName}>{doc.rpCounterSigName || meta.inspectorName || '—'}</Text>
-            <Text style={s.sigCompany}>{meta.inspectorCompany || meta.inspectorRole || 'Property Representative'}</Text>
+            <Text style={s.sigCompany}>{meta.inspectorRole || 'Property Representative'}</Text>
             {isImg(doc.rpCounterSig) ? <Image src={doc.rpCounterSig} style={s.sigImg} /> : <View style={s.sigPad} />}
             <Text style={s.sigDate}>Date: {doc.rpCounterSignedAt ? fmt(doc.rpCounterSignedAt) : '—'}</Text>
           </View>

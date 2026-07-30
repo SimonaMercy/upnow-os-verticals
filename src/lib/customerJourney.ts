@@ -26,7 +26,7 @@ export type CustomerStateKey =
   | 'payment_review'
   | 'awaiting_rp_confirm'
   | 'signature' | 'ejari' | 'utility' | 'utility_review'
-  | 'move_in' | 'active'
+  | 'move_in' | 'move_in_review' | 'active'
   | 'termination_request_received' | 'termination_request_sent'
   | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques'
   | 'renewal_progress' | 'renewal_ejari' | 'renewal_active'
@@ -112,7 +112,10 @@ export const CUSTOMER_STATE_DEFS: Record<CustomerStateKey, CustomerStateDef> = {
   utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
   utility_review:                { label: 'Utility under review',          sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'waiting',   headline: 'Your utility submission is under review.',         body: 'Your rental provider is checking your account number and proof of payment. You’ll move on to the inspection once it’s approved.',                                                               timing: 'Usually within 1 business day' },
   move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Walk through every room and meter reading, then counter-sign so the record is official.',                                                                                                       timing: 'Takes ~3 min' },
-  active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: 'Manage payments, raise issues, or start a renewal request from here any time.',                                                                                                                 timing: null },
+  // Customer has counter-signed; the inspection now sits with the rental provider
+  // (or their property manager) — their counter-signature is what activates the tenancy.
+  move_in_review:                { label: 'Inspection under review',       sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'waiting',   headline: 'You’ve signed — awaiting your rental provider’s approval.', body: 'Your rental provider or their property manager will counter-sign the inspection. Once they do, your tenancy goes live and you can collect your keys.',                                            timing: 'Usually within 1 business day' },
+  active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: '',                                                                                                                                                                                             timing: null },
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
   termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting rental provider',        mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the rental provider.',               body: "Your contract stays active until they accept. We'll notify you the moment they respond.",                                                                                                       timing: 'Awaiting rental provider response' },
 
@@ -328,7 +331,11 @@ export function deriveStateKey(r: JourneyInput): CustomerStateKey {
     // for the landlord to submit AND awaiting the customer's counter-sign.
     // The MoveInAction component decides which sub-UI to render based on
     // `inspectionSubmitted` + `inspectionSignedByTenant`.
-    if (c.ejariStatus === 'registered' && utilityVerified) return 'move_in';
+    if (c.ejariStatus === 'registered' && utilityVerified) {
+      // Split step 7: the customer still has to sign (`move_in`), or has signed
+      // and is waiting on the rental provider's counter-signature to go live.
+      return c.moveInInspection?.signedByTenant ? 'move_in_review' : 'move_in';
+    }
     if (c.ejariStatus === 'registered' && utilitySubmitted) return 'utility_review';
     if (c.ejariStatus === 'registered') return 'utility';
     if (c.status === 'issued' && c.tenantSignedAt) return 'ejari';

@@ -903,7 +903,7 @@ export function PropertyDetailsModal({
                 {slots.map((slot) => {
                   const attached = slot.files.length > 0;
                   const multi = slot.files.length > 1;
-                  const statusText = attached ? (multi ? `${slot.files.length} files` : 'On file') : 'Not uploaded';
+                  const statusText = attached ? (multi ? `${slot.files.length} files` : 'Uploaded') : 'Not uploaded';
                   const statusColor = attached ? C.greenT : C.amber;
                   return (
                     <div key={slot.key}
@@ -1001,7 +1001,7 @@ export function PropertyDetailsModal({
                       <span style={{ width: 30, height: 30, flex: '0 0 30px', borderRadius: 8, background: selected ? C.green : (attached ? C.greenBg2 : C.line4), color: selected ? '#fff' : (attached ? C.greenT : '#aab2ab'), display: 'flex', alignItems: 'center', justifyContent: 'center' }}><FileText size={15} /></span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: attached ? C.greenT : C.amber }}>{attached ? (s.files.length > 1 ? `${s.files.length} files` : 'On file') : 'Not uploaded'}</div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: attached ? C.greenT : C.amber }}>{attached ? (s.files.length > 1 ? `${s.files.length} files` : 'Uploaded') : 'Not uploaded'}</div>
                       </div>
                       {!attached && editable && (
                         <button type="button" onClick={(e) => { e.stopPropagation(); uploadToSlot(s); }}
@@ -1021,7 +1021,7 @@ export function PropertyDetailsModal({
                       {rActive
                         ? (rFiles.length > 1
                           ? `File ${rf + 1} of ${rFiles.length} · ${isImageFile(rActive) ? 'Image' : 'PDF'}`
-                          : `${isImageFile(rActive) ? 'Image' : 'PDF'} · On file`)
+                          : `${isImageFile(rActive) ? 'Image' : 'PDF'} · Uploaded`)
                         : 'Not uploaded yet'}
                     </div>
                   </div>

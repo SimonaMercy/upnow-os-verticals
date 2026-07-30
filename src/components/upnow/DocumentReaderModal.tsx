@@ -112,7 +112,7 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
                     <span style={{ width: 30, height: 30, flex: '0 0 30px', borderRadius: 8, background: selected ? C.green : (attached ? C.greenBg2 : C.line4), color: selected ? '#fff' : (attached ? C.greenT : '#aab2ab'), display: 'flex', alignItems: 'center', justifyContent: 'center' }}><FileText size={15} /></span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: attached ? C.greenT : C.amber }}>{attached ? (s.files.length > 1 ? `${s.files.length} files` : 'On file') : 'Not uploaded'}</div>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: attached ? C.greenT : C.amber }}>{attached ? (s.files.length > 1 ? `${s.files.length} files` : 'Uploaded') : 'Not uploaded'}</div>
                     </div>
                   </div>
                 </div>
@@ -125,7 +125,7 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 18px', borderBottom: `1px solid ${C.line2}`, flex: '0 0 auto' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rActive?.name || rSlot?.label || 'Document'}</div>
-                <div style={{ fontSize: 11, color: C.greenT, fontWeight: 600 }}>{rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImage(rActive) ? 'Image' : 'PDF'}` : `${isImage(rActive) ? 'Image' : 'PDF'} · On file`) : 'Not uploaded'}</div>
+                <div style={{ fontSize: 11, color: C.greenT, fontWeight: 600 }}>{rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImage(rActive) ? 'Image' : 'PDF'}` : `${isImage(rActive) ? 'Image' : 'PDF'} · Uploaded`) : 'Not uploaded'}</div>
               </div>
             </div>
 

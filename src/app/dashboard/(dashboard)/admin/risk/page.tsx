@@ -59,7 +59,7 @@ interface Flag {
 }
 interface ManagerRow {
   userId: number; name: string; email: string; lastLoginAt: string | null; landlordCount: number;
-  flags: { deposits: boolean; collections: boolean; financials: boolean; signDocs: boolean; poa: boolean; createContracts: boolean; inviteManager: boolean };
+  flags: { deposits: boolean; settleDeposits: boolean; recordPayments: boolean; clearCheques: boolean; collections: boolean; financials: boolean; signDocs: boolean; poa: boolean; createContracts: boolean; inviteManager: boolean };
   moneyPower: boolean; dormant: boolean; tier: Tier;
 }
 interface ManagerData { summary: Record<string, number>; managers: ManagerRow[] }
@@ -600,6 +600,9 @@ export default function AdminRiskPage() {
                           <div className="flex flex-wrap gap-1">
                             {m.flags.poa && <Chip c={RED}>POA</Chip>}
                             {m.flags.signDocs && <Chip c={RED}>Sign</Chip>}
+                            {m.flags.clearCheques && <Chip c={RED}>Clear cheques</Chip>}
+                            {m.flags.recordPayments && <Chip c={AMBER}>Record payments</Chip>}
+                            {m.flags.settleDeposits && <Chip c={AMBER}>Settle deposits</Chip>}
                             {m.flags.deposits && <Chip c={AMBER}>Deposits</Chip>}
                             {m.flags.collections && <Chip c={AMBER}>Collections</Chip>}
                             {m.flags.financials && <Chip c="#6b6860">Financials</Chip>}

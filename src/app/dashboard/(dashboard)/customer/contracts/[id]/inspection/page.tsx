@@ -1,17 +1,30 @@
 /**
  * Tenant-facing inspection viewer + signer. Renders the shared InspectionReportView
- * read-only (audience='customer' — no amounts) and lets the tenant counter-sign.
+ * read-only (audience='customer' — no amounts), exactly as the RP/manager workspace
+ * renders it, and lets the tenant counter-sign from a SEPARATE card below the
+ * report — the signing pad is never injected into the report's signature grid.
  * Signature posts to POST /contracts/tenant/:id/inspection/sign?type=...
  */
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useParams, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, Printer } from 'lucide-react';
-import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import type { ReportMeta } from '@/components/contract/InspectionReportView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import type { InspectionDoc, InspectionCategory } from '@/lib/inspectionCatalog';
+
+// @react-pdf + pdf.js are browser-only.
+const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
+  ssr: false,
+  loading: () => (
+    <div className="border border-[#e8e6e0] rounded-xl bg-white h-[360px] grid place-items-center text-sm text-[#9b9890]">
+      Preparing inspection report…
+    </div>
+  ),
+});
 
 function BackLink({ contractId }: { contractId: string | undefined }) {
   const sp = useSearchParams();
@@ -42,7 +55,8 @@ interface InspectionData {
   rpCounterSignedAt?: string | null;
 }
 interface InspMeta {
-  tenantName: string; tenantPhone: string; unitNumber: string; buildingName: string;
+  tenantName: string; tenantPhone: string; tenantEmail: string;
+  unitNumber: string; buildingName: string; propertyType: string; floor: string;
   handoverDate: string | null; contractEndDate: string | null;
 }
 
@@ -63,10 +77,12 @@ export default function TenantInspectionPage() {
     if (!contractId) return;
     setLoading(true); setLoadError(null);
     try {
-      const [res, listRes, meRes] = await Promise.all([
+      // The contract DETAIL endpoint (not the list) — it carries the unit type,
+      // floor and the customer's email, so the report's Property / Tenant cards
+      // read exactly like the RP/manager copy instead of showing dashes.
+      const [res, cRes] = await Promise.all([
         fetch(`/api/contracts/tenant/${contractId}/inspection?type=${inspType}`, { credentials: 'include' }),
-        fetch(`/api/contracts/tenant`, { credentials: 'include' }),
-        fetch(`/api/auth/me`, { credentials: 'include' }),
+        fetch(`/api/contracts/tenant/${contractId}`, { credentials: 'include' }),
       ]);
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
@@ -78,18 +94,18 @@ export default function TenantInspectionPage() {
       setData(body);
       if (body.tenantSig) setSigned(true);
       try {
-        const list = listRes.ok ? (await listRes.json()) : [];
-        const c = Array.isArray(list) ? list.find((x: { id: number }) => x.id === contractId) : null;
-        const me = meRes.ok ? await meRes.json() : null;
-        const composedName = [me?.firstName, me?.lastName].filter(Boolean).join(' ').trim();
-        const rawName = (me?.name ?? '').trim();
-        const personName = composedName || (/^\+?[\d\s()-]{6,}$/.test(rawName) ? '' : rawName);
+        const c = cRes.ok ? await cRes.json() : null;
         // Company tenants: the party name is the company, not the signatory.
-        const tenantName = (c?.tenantCompanyName as string | undefined)?.trim() || personName;
+        const tenantName = (c?.tenant?.companyName as string | undefined)?.trim() || (c?.tenant?.name ?? '').trim();
         setMeta({
-          tenantName, tenantPhone: me?.phone ?? '',
-          unitNumber: c?.unit?.unitNumber ?? c?.unit?.number ?? '',
-          buildingName: c?.property?.buildingName ?? '',
+          tenantName,
+          tenantPhone: c?.tenant?.phone ?? '',
+          tenantEmail: c?.tenant?.email ?? '',
+          unitNumber: c?.unit?.number ?? '',
+          // "Building, Community" — same location string the RP/manager copy shows.
+          buildingName: [c?.property?.buildingName ?? '', c?.property?.community ?? ''].filter(Boolean).join(', '),
+          propertyType: c?.unit?.type ?? '',
+          floor: c?.unit?.floor != null ? String(c.unit.floor) : '',
           handoverDate: body.moveInDate || c?.startDate || null,
           contractEndDate: c?.termination?.effectiveDate ?? c?.endDate ?? null,
         });
@@ -111,6 +127,7 @@ export default function TenantInspectionPage() {
       throw new Error((b as { message?: string }).message ?? 'Failed to submit signature');
     }
     setSigned(true);
+    void load();
   }
 
   if (loading) {
@@ -133,31 +150,36 @@ export default function TenantInspectionPage() {
   }
 
   const reportMeta: ReportMeta = {
-    property: meta?.buildingName ?? '', unitNo: meta?.unitNumber ?? '', propertyType: '', floor: '',
-    tenantName: meta?.tenantName ?? '', tenantPhone: meta?.tenantPhone ?? '', tenantEmail: '',
+    property: meta?.buildingName ?? '', unitNo: meta?.unitNumber ?? '',
+    propertyType: meta?.propertyType ?? '', floor: meta?.floor ?? '',
+    tenantName: meta?.tenantName ?? '', tenantPhone: meta?.tenantPhone ?? '', tenantEmail: meta?.tenantEmail ?? '',
     inspectorName: data.inspectorName ?? '', inspectorCompany: data.inspectorCompany ?? '', inspectorRole: data.inspectorRole ?? 'Property Representative',
   };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8" id="inspection-report">
-      <div className="no-print mb-4 flex items-center justify-between gap-3">
+      {/* No Preview / Download / Print here — the customer reads and signs the
+          report in place; exporting the document stays an RP/manager action. */}
+      <div className="no-print mb-4">
         <BackLink contractId={params?.id} />
-        <button type="button" onClick={() => window.print()}
-          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">
-          <Printer size={13} /> Print
-        </button>
       </div>
 
-      <InspectionReportView
+      {/* The report is the DOCUMENT itself, rasterised to canvas exactly like the
+          tenancy contract — it scales to the viewport instead of reflowing into a
+          responsive layout on a phone. Signing happens in the card below. */}
+      <InspectionInline
         doc={{ ...data, categories: data.categories ?? [] } as unknown as InspectionDoc}
         meta={reportMeta}
         phase={inspType}
-        audience="customer"
-        dates={{ inspectionDate: data.inspectionDate ?? data.reportGeneratedDate ?? null, moveInDate: meta?.handoverDate ?? null, moveOutDate: meta?.contractEndDate ?? null }}
-        editable={false}
-        generalNotes={data.generalNotes}
-        signatures={{ tenantSig: data.tenantSig, tenantSignedAt: data.tenantSignedAt, rpSig: data.rpCounterSig, rpSignedAt: data.rpCounterSignedAt }}
-        signSlot={!signed ? (
+        contractRef={`CID-${contractId}`}
+        inspectionDate={data.inspectionDate ?? data.reportGeneratedDate ?? null}
+        moveInDate={meta?.handoverDate ?? null}
+        moveOutDate={meta?.contractEndDate ?? null}
+      />
+
+      {!signed && (
+        <div className="no-print mt-6 bg-white rounded-2xl border border-[#e8e6e0] p-5">
+          <h3 className="text-sm font-bold text-[#1a1916] mb-3">Your Signature</h3>
           <SignatureBlock
             signerRole="Customer"
             signerName={meta?.tenantName ?? ''}
@@ -167,8 +189,8 @@ export default function TenantInspectionPage() {
             alreadySigned={false}
             onSign={handleSign}
           />
-        ) : undefined}
-      />
+        </div>
+      )}
 
       {signed && (
         <div className="no-print mt-5 flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
