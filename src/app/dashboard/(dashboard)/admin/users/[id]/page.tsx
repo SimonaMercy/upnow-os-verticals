@@ -91,6 +91,7 @@ interface UserDetail {
     tenure: { since: string | null; days: number | null };
     authority: {
       createContracts: boolean; signDocuments: boolean; actAsPoa: boolean; manageDeposits: boolean;
+      settleDeposits: boolean; recordPayments: boolean; clearCheques: boolean;
       manageCollections: boolean; viewFinancials: boolean; manageRenewals: boolean; manageAgreements: boolean;
       manageMaintenance: boolean; listProperties: boolean; publishListings: boolean; manageViewings: boolean;
       manageDocuments: boolean; inviteManager: boolean;
@@ -633,6 +634,8 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
   const perms: Record<string, boolean> = m.allPermissions ?? {
     can_create_contracts: auth.createContracts, can_sign_documents: auth.signDocuments,
     can_act_as_poa: auth.actAsPoa, can_manage_deposits: auth.manageDeposits,
+    can_settle_deposits: auth.settleDeposits, can_record_payments: auth.recordPayments,
+    can_clear_cheques: auth.clearCheques,
     can_manage_collections: auth.manageCollections, can_view_financials: auth.viewFinancials,
     can_manage_renewals: auth.manageRenewals, can_manage_agreements: auth.manageAgreements,
     can_manage_maintenance: auth.manageMaintenance, can_list_properties: auth.listProperties,
