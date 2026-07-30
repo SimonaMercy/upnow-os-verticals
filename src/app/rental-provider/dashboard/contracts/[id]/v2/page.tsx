@@ -791,6 +791,10 @@ interface StepHandlers {
   printUrl: string;
   /** Role-aware contracts list base (RP vs manager) for child/parent links. */
   contractsBase: string;
+  /** Role-aware Operations pipeline base (RP vs manager) — draft/proposal
+   *  links jump here (the live workflow) rather than into the read-only
+   *  contract record. */
+  operationsBase: string;
   /** Manager-permission gates for the action affordances in this step. RP
    *  owners get `true` for every flag; a manager gets the per-landlord flag
    *  value. The backend already 403s a manager without the flag — this just
@@ -1729,7 +1733,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               used to sit here only repeated them. The DISCOUNT is the one figure
               the plan does not carry, so it stays — as a single line. */}
           {(h.contract.discountAmount ?? 0) > 0 && (
-            <div className="flag" style={{ alignSelf: 'flex-start', background: '#fdf1f1', borderColor: '#f3c9c9', color: '#b91c1c' }}>
+            <div className="flag" style={{ justifySelf: 'flex-start', background: '#fdf1f1', borderColor: '#f3c9c9', color: '#b91c1c' }}>
               Discount applied
               {h.contract.listedRent != null && (
                 <>
@@ -1747,7 +1751,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               (from getContractById) but renewalChild=null — gate on renewalChild
               so the banner never self-references on the proposal row. */}
           {h.contract.renewalAccepted === 'pending' && h.contract.renewalChild && (
-            <div className="flag waiting" style={{ alignSelf: 'flex-start' }}>
+            <div className="flag waiting" style={{ justifySelf: 'flex-start' }}>
               <RotateCcw size={13} /> Renewal proposed — awaiting {TEN}
               {' · '}
               <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
@@ -1759,10 +1763,10 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               notified yet (gated on renewalAccepted='pending'). RP reviews then
               sends or discards. */}
           {h.contract.renewalStatus === 'draft' && h.contract.renewalAccepted !== 'pending' && h.contract.renewalChild && (
-            <div className="flag" style={{ alignSelf: 'flex-start', background: '#fdf7ea', borderColor: '#e7d8a8', color: '#8a6d1f' }}>
+            <div className="flag" style={{ justifySelf: 'flex-start', background: '#fdf7ea', borderColor: '#e7d8a8', color: '#8a6d1f' }}>
               <RotateCcw size={13} /> Renewal draft ready — not yet sent to {TEN}
               {' · '}
-              <Link href={`${h.contractsBase}/${h.contract.renewalChild.id}/v2`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
+              <Link href={`${h.operationsBase}/${h.contract.renewalChild.id}`} style={{ fontWeight: 700, textDecoration: 'underline' }}>
                 Review draft · CID-{h.contract.renewalChild.id}
               </Link>
             </div>
@@ -1771,7 +1775,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
               Without this block the renewal VANISHED from the parent page the
               moment it was accepted/issued. */}
           {h.contract.renewalAccepted === 'accepted' && h.contract.renewalChild && (
-            <div className="flag" style={{ alignSelf: 'flex-start', background: 'var(--jade-soft, #e7f5ef)', borderColor: 'var(--jade, #2e9f82)', color: 'var(--jade-deep, #1a7a5a)' }}>
+            <div className="flag" style={{ justifySelf: 'flex-start', background: 'var(--jade-soft, #e7f5ef)', borderColor: 'var(--jade, #2e9f82)', color: 'var(--jade-deep, #1a7a5a)' }}>
               <RotateCcw size={13} /> Renewal agreed — {fmtDate(h.contract.renewalChild.startDate ?? null)} → {fmtDate(h.contract.renewalChild.endDate ?? null)}
               {h.contract.renewalChild.annualRent ? <> @ {fmtAed(h.contract.renewalChild.annualRent)}</> : null}
             </div>
@@ -1793,19 +1797,11 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                 <RotateCcw size={14} /> Open renewal contract · CID-{h.contract.renewalChild.id}
               </Link>
             )}
-            {/* Draft review actions — send to the customer, edit the terms, or discard. */}
+            {/* Draft review action — send the reviewed draft to the customer. */}
             {h.contract.renewalStatus === 'draft' && h.contract.renewalAccepted !== 'pending' && h.perms.renewals && (
-              <>
-                <button className="btn btn-jade" onClick={() => void h.onRenewalDraft('send')}>
-                  <RotateCcw size={14} /> Send to {TEN}
-                </button>
-                <button className="btn btn-ghost" onClick={() => h.openModal('renew')}>
-                  <RotateCcw size={14} /> Edit draft
-                </button>
-                <button className="btn btn-ghost" style={{ color: 'var(--brick)', borderColor: 'var(--brick-edge)' }} onClick={() => void h.onRenewalDraft('discard')}>
-                  Discard draft
-                </button>
-              </>
+              <button className="btn btn-jade" onClick={() => void h.onRenewalDraft('send')}>
+                <RotateCcw size={14} /> Send to {TEN}
+              </button>
             )}
           </div>
         </>
@@ -5213,6 +5209,15 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     else if (action === 'terminate') { actionOpenedRef.current = true; setModal('direct-terminate'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contract]);
+  // Closing a deep-linked modal (?action=renew / ?action=terminate) must also drop
+  // `action` from the URL — otherwise a refresh or back-nav re-opens it every time.
+  const closeDeepLinkedModal = useCallback(() => {
+    setModal(null);
+    if (!searchParams.get('action')) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('action');
+    router.replace(`${pathname}${next.toString() ? `?${next.toString()}` : ''}`, { scroll: false });
+  }, [searchParams, pathname, router]);
   // Ejari / utility upload (ported from the old page so v2 is self-contained).
   const ejariInputRef = useRef<HTMLInputElement>(null);
   const utilityInputRef = useRef<HTMLInputElement>(null);
@@ -5996,6 +6001,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     settlementUrl: `${contractsBase}/${contract.id}/settlement?${fromQ}`,
     printUrl: `${contractsBase}/${contract.id}/print`,
     contractsBase,
+    operationsBase: isManagerView ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations',
     perms,
     readOnlyWorkflow,
   };
@@ -6691,9 +6697,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
       {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} signerName={landlordSignerName} onBehalfOf={landlordOnBehalfOf} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
-      {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); setSelKey('moveout'); void reload(); loadNotes(); }} />}
+      {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={closeDeepLinkedModal} onSubmitted={() => { closeDeepLinkedModal(); setSelKey('moveout'); void reload(); loadNotes(); }} />}
       {modal === 'cancel-lease' && perms.agreements && <CancelLeaseModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
-      {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
+      {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={closeDeepLinkedModal} onSubmitted={() => { closeDeepLinkedModal(); void reload(); }} />}
       {modal === 'reject-utility' && perms.agreements && <RejectUtilityModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
       {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
