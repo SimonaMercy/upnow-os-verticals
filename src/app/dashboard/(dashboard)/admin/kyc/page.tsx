@@ -291,6 +291,21 @@ function KycCard({
  * Self-contained (owns its own busy/modal state) so it can drop into any of the
  * KYC panels. SCRUM-662.
  */
+/**
+ * Document types that always carry an expiry date, matched on part of the key.
+ *
+ * Substring rather than prefix: occupant docs are prefixed
+ * (`occupant_2_passport`) and repeats are suffixed (`passport_2`), so the
+ * identifying word can sit anywhere. Mirrors `expiring-doc-types.ts` on the
+ * backend, which enforces the same rule — this copy exists so the reviewer is
+ * told before submitting rather than bounced by a 400.
+ */
+const EXPIRING_KEY_PARTS = ['emirates_id', 'passport', 'visa', 'trade_licen', 'poa_id'];
+function requiresExpiry(documentKey: string): boolean {
+  const key = (documentKey || '').toLowerCase();
+  return EXPIRING_KEY_PARTS.some((part) => key.includes(part));
+}
+
 function DocReviewActions({
   doc, onUpdate,
 }: {
@@ -305,6 +320,9 @@ function DocReviewActions({
   const isVerified = ['processed', 'complete'].includes(status);
   const isRejected = status === 'rejected';
   const label = doc.documentKey.replace(/_/g, ' ');
+  // An ID or licence always has an expiry, and the reviewer is holding it.
+  const expiryRequired = requiresExpiry(doc.documentKey);
+  const blocked = expiryRequired && !expiry.trim();
 
   function openConfirm() {
     setExpiry(doc.expiryDate ? String(doc.expiryDate).slice(0, 10) : '');
@@ -379,17 +397,22 @@ function DocReviewActions({
             </p>
 
             <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-neutral-600)" }}>
-              Expiry date
+              Expiry date{expiryRequired && <span style={{ color: "#dc2626" }}> *</span>}
             </label>
             <input
               type="date"
               value={expiry}
               onChange={(e) => setExpiry(e.target.value)}
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: "1px solid var(--color-base-200)", color: "var(--color-neutral-900)" }}
+              style={{
+                border: `1px solid ${blocked ? "#fecaca" : "var(--color-base-200)"}`,
+                color: "var(--color-neutral-900)",
+              }}
             />
-            <p className="text-[11px] mt-1.5" style={{ color: "var(--color-neutral-400)" }}>
-              Read it off the document. Leave blank if this document doesn&apos;t expire.
+            <p className="text-[11px] mt-1.5" style={{ color: blocked ? "#dc2626" : "var(--color-neutral-400)" }}>
+              {expiryRequired
+                ? "Read it off the document — this type always has one, and the reminders that warn before it lapses can't run without it."
+                : "Read it off the document. Leave blank if this document doesn't expire."}
             </p>
 
             <div className="flex items-center justify-end gap-2 mt-5">
@@ -398,8 +421,9 @@ function DocReviewActions({
                 style={{ backgroundColor: "var(--color-base-100)", color: "var(--color-neutral-700)" }}>
                 Cancel
               </button>
-              <button type="button" disabled={busy} onClick={() => void approve()}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50"
+              <button type="button" disabled={busy || blocked} onClick={() => void approve()}
+                title={blocked ? "Enter the expiry date shown on the document" : undefined}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: "var(--color-primary)", color: "#fff" }}>
                 <CheckCircle2 size={12} /> {busy ? "Approving…" : "Approve"}
               </button>
@@ -1511,7 +1535,12 @@ function KycBadge({ status }: { status?: string | null }) {
   );
 }
 
-function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detail: TenantDetail | null; loading: boolean }) {
+function TenantContentPanel({ tenant, detail, loading, onDocUpdate }: {
+  tenant: Tenant;
+  detail: TenantDetail | null;
+  loading: boolean;
+  onDocUpdate: (docId: number, patch: Partial<UploadedDoc>) => void;
+}) {
   const [showDocs, setShowDocs] = useState(false);
   const name = providerName(tenant, `Customer #${tenant.id}`);
   const p = detail?.profile;
@@ -1625,6 +1654,13 @@ function TenantContentPanel({ tenant, detail, loading }: { tenant: Tenant; detai
                             <ExternalLink size={11} /> View
                           </button>
                         )}
+                        {/* Approve / Reject — the same control the RP and SP
+                            panels use. Customers hold the ID documents (Emirates
+                            ID, passport, visa), so a review centre that could not
+                            act on them could not do its job: 203 customers sat in
+                            the queue read-only while 4 rental providers had
+                            working buttons. */}
+                        <DocReviewActions doc={doc} onUpdate={onDocUpdate} />
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-[18px]">
@@ -2052,6 +2088,12 @@ export default function AdminKycPage() {
       : prev);
   }
 
+  function handleTenantDocUpdate(docId: number, patch: Partial<UploadedDoc>) {
+    setTenantDetail((prev) => prev
+      ? { ...prev, uploadedDocs: prev.uploadedDocs.map((d) => d.id === docId ? { ...d, ...patch } : d) }
+      : prev);
+  }
+
   const filteredRps     = rps.filter((r)  => statusFilter === "all" || r.complianceStatus === statusFilter);
   const filteredSps     = sps.filter((sp) => statusFilter === "all" || sp.complianceStatus === statusFilter);
   const filteredTenants = tenants;
@@ -2254,7 +2296,7 @@ export default function AdminKycPage() {
                   onDocUpdate={handleSpDocUpdate}
                 />
               ) : selectedTenant ? (
-                <TenantContentPanel tenant={selectedTenant} detail={tenantDetail} loading={tenantDocsLoading} />
+                <TenantContentPanel tenant={selectedTenant} detail={tenantDetail} loading={tenantDocsLoading} onDocUpdate={handleTenantDocUpdate} />
               ) : selectedManager ? (
                 <ManagerContentPanel m={selectedManager} />
               ) : selectedTechnician ? (
