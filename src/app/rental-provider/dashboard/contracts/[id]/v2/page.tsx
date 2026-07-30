@@ -56,9 +56,10 @@ import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/pa
 import { openDocViewer } from '@/lib/docViewer';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
-import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { allowedInstallmentPlans, installmentLabel } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
+import { configuredFeeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -155,6 +156,10 @@ interface ContractDetail {
   /** Owning RP's rent-VAT collection mode (Settings → Rules): 'annual' = one Rental
    *  VAT cheque for the year, 'installment' = one beside each rent cheque. */
   rentVatMode?: 'annual' | 'installment';
+  /** Owning RP's fee rules (Settings → Fee Rules) resolved for THIS unit's space
+   *  category. Drives the Propose Renewal fee prefill — a rule switched off means
+   *  an explicit 0. `configured: false` = untouched platform defaults (no opinion). */
+  feeRules?: { spaceCategory: string; configured: boolean; rules: FeeRuleLite[] } | null;
   adminFeeFils: number;
   ejariFeeFils: number;
   customClauses: string[];
@@ -4571,6 +4576,35 @@ function CancelLeaseModal({
   );
 }
 
+/**
+ * "↑ 27.7% vs current AED 94,000" — how far a proposed rent moves off the current
+ * one, coloured by direction (up = saffron, down = jade, unchanged = muted). Shown
+ * as the RP types so an increase is a decision rather than a discovery: Dubai's
+ * rental index caps what can be asked in bands, and "94,000 → 120,000" doesn't read
+ * as +27.7% at a glance. `pct: null` renders nothing.
+ */
+function RentDeltaChip({ pct, label }: { pct: number | null; label: string }) {
+  if (pct == null) return null;
+  const flat = Math.abs(pct) < 0.05;
+  const up = pct > 0;
+  const tone = flat
+    ? { color: 'var(--mute)', background: 'var(--surface)' }
+    : up
+      ? { color: 'var(--saffron-deep)', background: 'var(--saffron-soft)' }
+      : { color: 'var(--jade-deep)', background: 'var(--jade-tint)' };
+  return (
+    <span
+      style={{
+        ...tone, display: 'inline-block', marginTop: 5, padding: '2px 7px', borderRadius: 6,
+        fontSize: 11, fontWeight: 700, letterSpacing: '0.01em',
+      }}
+    >
+      {flat ? 'Same as current' : `${up ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}%`}
+      {' '}<span style={{ fontWeight: 600, opacity: 0.85 }}>{label}</span>
+    </span>
+  );
+}
+
 function RenewalProposeModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
@@ -4585,6 +4619,24 @@ function RenewalProposeModal({
     const v = row ?? col ?? 0;
     return v > 0 ? String(v) : '';
   };
+  // …but the RP's own FEE RULES (Settings → Fee Rules → Renewal contract, resolved
+  // server-side for this unit's category) OUTRANK the parent lease when they exist.
+  // A rule switched OFF is a decision — "we don't charge commission on renewal" —
+  // so it prefills an explicit **0** that the RP can still override, rather than
+  // silently re-billing the figure the original lease happened to carry. Only an
+  // RP who has never configured the category falls back to the parent's fees.
+  const feeRules = contract.feeRules?.configured ? contract.feeRules.rules : undefined;
+  const ruleFeeAmt = (key: 'adminFee' | 'ejariFee' | 'commission', atRent: number) => {
+    const v = configuredFeeFromRules(feeRules, key, atRent);
+    return v == null ? null : String(v);
+  };
+  /** Rule amount if the RP configured one, else the parent lease's own figure. */
+  const seedFee = (
+    key: 'adminFee' | 'ejariFee' | 'commission',
+    paymentType: string,
+    atRent: number,
+    col?: number | null,
+  ) => ruleFeeAmt(key, atRent) ?? parentFeeAmt(paymentType, col);
   const [f, setF] = useState({
     // Default the renewal to the parent lease's current NET rent (annualRent is
     // net; the cheque schedule adds VAT on top). The RP explicitly enters any
@@ -4597,11 +4649,20 @@ function RenewalProposeModal({
     newStartDate: iso(ns),
     newEndDate: iso(ne),
     numberOfInstallments: String(contract.numberOfInstallments ?? 4),
+    // Inherited from the parent lease, not asked again on the renewal form: a renewal
+    // continues the same payment method, and it's editable on the contract itself.
+    // Still SENT, because the backend stamps each cheque row's method from the dto
+    // (only the contract header falls back to the parent), so dropping it would file
+    // a bank-transfer lease's renewal cheques as 'cheque'.
     modeOfPayment: contract.modeOfPayment ?? 'cheque',
-    chequePayeeName: '',
-    adminFee: parentFeeAmt('admin_fee', contract.adminFeeFils),
-    ejariFee: parentFeeAmt('ejari_fee', contract.ejariFeeFils),
-    commission: parentFeeAmt('commission'),
+    adminFee: seedFee('adminFee', 'admin_fee', contract.annualRent, contract.adminFeeFils),
+    ejariFee: seedFee('ejariFee', 'ejari_fee', contract.annualRent, contract.ejariFeeFils),
+    commission: seedFee('commission', 'commission', contract.annualRent),
+  });
+  // Which fee fields the RP has typed in — a touched field is theirs and is never
+  // re-derived from the rules again.
+  const [feeTouched, setFeeTouched] = useState<Record<'adminFee' | 'ejariFee' | 'commission', boolean>>({
+    adminFee: false, ejariFee: false, commission: false,
   });
   // Extra one-off charge lines (Municipality Fee, parking add-on, etc.) — each a
   // separate cheque on top of rent + fees. Posted as `extraCharges`.
@@ -4639,7 +4700,12 @@ function RenewalProposeModal({
   const allowedInstallments = contract.allowedInstallments ?? [];
   const chequeDays = contract.preferredChequeDays ?? [];
 
-  const set = (k: keyof typeof f, v: string) => setF(p => ({ ...p, [k]: v }));
+  const set = (k: keyof typeof f, v: string) => {
+    if (k === 'adminFee' || k === 'ejariFee' || k === 'commission') {
+      setFeeTouched(p => (p[k] ? p : { ...p, [k]: true }));
+    }
+    setF(p => ({ ...p, [k]: v }));
+  };
   const addExtra = () => setExtras(p => [...p, { description: '', amount: '', dueDate: '' }]);
   const setExtra = (i: number, k: 'description' | 'amount' | 'dueDate', v: string) =>
     setExtras(p => p.map((e, idx) => idx === i ? { ...e, [k]: v } : e));
@@ -4653,15 +4719,42 @@ function RenewalProposeModal({
     : f.discountType === 'fixed' ? discVal : 0;
   const rent = Math.max(0, listed - Math.min(discountAmt, listed)); // net rent
 
+  // How far the proposed rent moves off the CURRENT one. Surfaced as the RP types
+  // so the increase is a decision, not a discovery — Dubai's rental index caps what
+  // can be asked in bands, and "94,000 → 120,000" doesn't read as +27.7% at a glance.
+  // Compared against the parent's net rent, the same basis as the Contract Value.
+  const prevRent = Number(contract.annualRent) || 0;
+  const pctVsCurrent = (x: number) => (prevRent > 0 && x > 0 ? ((x - prevRent) / prevRent) * 100 : null);
+  // Length of the term being replaced, in whole months (inclusive end date), so the
+  // "Current contract" summary says 12 months rather than making the RP subtract dates.
+  const currentTermMonths = (() => {
+    const s = new Date(contract.startDate), e = new Date(contract.endDate);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
+    const m = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24 * 30.4375));
+    return m > 0 ? m : null;
+  })();
+  const listedDeltaPct = pctVsCurrent(listed);
+  const netDeltaPct = pctVsCurrent(rent);
+
   // Keep the derived sub-lease lines pinned to the net rent as it is edited.
   // recomputeSubleaseCharges returns the same array when nothing moved, so this
   // settles in one pass instead of looping. Flat charges are returned untouched.
   useEffect(() => {
     setExtras(prev => recomputeSubleaseCharges(prev, rent));
   }, [rent]);
-  const adminN = parseFloat(f.adminFee) || 0;
-  const ejariN = parseFloat(f.ejariFee) || 0;
-  const commN = parseFloat(f.commission) || 0;
+
+  /**
+   * What a fee field shows. Until the RP types in it, it stays DERIVED from their fee
+   * rules at the current rent — so a percentage rule (commission is typically 5% of
+   * rent) follows the rent field instead of quoting a figure computed off the old
+   * rent, and a renewal is exactly where the rent changes. Once they've typed, the
+   * value is theirs and is never recomputed.
+   */
+  const feeValue = (key: 'adminFee' | 'ejariFee' | 'commission') =>
+    (feeTouched[key] ? null : ruleFeeAmt(key, rent)) ?? f[key];
+  const adminN = parseFloat(feeValue('adminFee')) || 0;
+  const ejariN = parseFloat(feeValue('ejariFee')) || 0;
+  const commN = parseFloat(feeValue('commission')) || 0;
   // Rent VAT rate: the parent's stored rentVatRate can be stale/0 on older contracts,
   // but a renewal's rate is recomputed server-side from the UNIT category
   // (commercial/industrial = 5%, residential exempt). Mirror that so the preview
@@ -4741,7 +4834,6 @@ function RenewalProposeModal({
           newEndDate: f.newEndDate,
           numberOfInstallments: n,
           modeOfPayment: f.modeOfPayment,
-          chequePayeeName: f.chequePayeeName.trim() || undefined,
           adminFee: adminN,
           ejariFee: ejariN,
           commission: commN,
@@ -4763,8 +4855,11 @@ function RenewalProposeModal({
   };
 
   return (
-    <div className="mscrim" onClick={onClose}>
-      <div className="modal lg" onClick={e => e.stopPropagation()}>
+    // No onClick on the scrim: a renewal is a long form (term, rent, discount, fees,
+    // charges) and a stray click on the backdrop used to bin the whole thing. It closes
+    // via the × or Cancel only.
+    <div className="mscrim">
+      <div className="modal xl" onClick={e => e.stopPropagation()}>
         <div className="mh">
           <span className="mt">
             <span className="mti" style={{ background: 'var(--jade)' }}><RotateCcw size={17} /></span>
@@ -4773,79 +4868,123 @@ function RenewalProposeModal({
           <button className="x" onClick={onClose}><X size={17} /></button>
         </div>
         <div className="mb">
+          {/* What's being renewed, as four labelled facts instead of four loose lines
+              of grey text — the RP checks the customer, the unit, the term they're
+              replacing and the rent they're pricing against before touching anything
+              below, so each gets a name. */}
           <p className="subhead mut">Current contract</p>
-          <div className="infopanel" style={{ marginBottom: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 18px' }}>
-            <div className="note"><b style={{ color: 'var(--ink)' }}>{contract.tenant.name ?? '—'}</b></div>
-            <div className="note">{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</div>
-            <div className="note">Unit {contract.unit.number ?? '—'} · {contract.property.buildingName ?? '—'}</div>
-            <div className="note">Current rent <b style={{ color: 'var(--ink)' }}>{fmtAed(contract.annualRent)}</b></div>
+          <div className="infopanel curcontract" style={{ marginBottom: 18 }}>
+            <div>
+              <span className="eyebrow">Customer</span>
+              <b>{contract.tenant.name ?? '—'}</b>
+            </div>
+            <div>
+              <span className="eyebrow">Unit</span>
+              <b>{contract.unit.number ? `Unit ${contract.unit.number}` : '—'}</b>
+              <span className="note">{contract.property.buildingName ?? '—'}</span>
+            </div>
+            <div>
+              <span className="eyebrow">Current term</span>
+              <b>{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</b>
+              {currentTermMonths != null && <span className="note">{currentTermMonths} months</span>}
+            </div>
+            <div>
+              <span className="eyebrow">Current rent</span>
+              <b>{fmtAed(contract.annualRent)}</b>
+              {contract.numberOfInstallments
+                ? <span className="note">{contract.numberOfInstallments} × {installmentLabel(contract.numberOfInstallments).toLowerCase()}</span>
+                : null}
+            </div>
           </div>
           <p className="subhead mut">Renewal period</p>
-          <div className="grid2">
-            <div className="field"><label>Start date</label><input type="date" className="input" value={f.newStartDate} onChange={e => set('newStartDate', e.target.value)} /></div>
-            <div className="field"><label>End date</label><input type="date" className="input" value={f.newEndDate} onChange={e => set('newEndDate', e.target.value)} /></div>
-          </div>
-          <div className="grid2" style={{ marginBottom: 18 }}>
+          <div className="grid3" style={{ marginBottom: 18 }}>
+            <div className="field" style={{ margin: 0 }}><label>Start date</label><input type="date" className="input" value={f.newStartDate} onChange={e => set('newStartDate', e.target.value)} /></div>
+            <div className="field" style={{ margin: 0 }}><label>End date</label><input type="date" className="input" value={f.newEndDate} onChange={e => set('newEndDate', e.target.value)} /></div>
             <div className="field" style={{ margin: 0 }}>
-              <label>Installments</label>
+              <label>Payments / Year</label>
               <select className="input" value={f.numberOfInstallments} onChange={e => set('numberOfInstallments', e.target.value)}>
+                {/* "4 — Quarterly": the cheque count alone made the RP work out what
+                    the frequency was. longLabel is the shared label from lib/installmentPlans. */}
                 {allowedInstallmentPlans(allowedInstallments, [Number(f.numberOfInstallments)]).map(p => (
-                  <option key={p.value} value={p.value}>{p.value}</option>
+                  <option key={p.value} value={p.value}>{p.longLabel}</option>
                 ))}
               </select>
             </div>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Listed annual rent (AED)</label>
-              <input type="number" className="input" value={f.listedRent} onChange={e => set('listedRent', e.target.value)} />
-            </div>
           </div>
-          <div className="grid2" style={{ marginBottom: 18 }}>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Discount</label>
-              <select className="input" value={f.discountType} onChange={e => set('discountType', e.target.value)}>
-                <option value="none">No discount</option>
-                <option value="percent">Percentage (%)</option>
-                <option value="fixed">Fixed (AED)</option>
-              </select>
-            </div>
-            <div className="field" style={{ margin: 0 }}>
-              <label>{f.discountType === 'percent' ? 'Discount %' : f.discountType === 'fixed' ? 'Discount (AED)' : 'Net annual rent (AED)'}</label>
-              {f.discountType === 'none'
-                ? <input className="input" value={fmtAed(rent)} disabled style={{ background: 'var(--surface)', color: 'var(--ink-3)' }} />
-                : <input type="number" className="input" value={f.discountValue} onChange={e => set('discountValue', e.target.value)} />}
-            </div>
-          </div>
-          {f.discountType !== 'none' && (
-            <p className="note mut" style={{ marginTop: -8, marginBottom: 16 }}>
-              Net annual rent after discount: <b style={{ color: 'var(--ink)' }}>{fmtAed(rent)}</b>
-              {discountAmt > 0 && <> (−{fmtAed(discountAmt)})</>}
-            </p>
-          )}
-          <div className="grid2" style={{ marginBottom: 18 }}>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Mode of payment</label>
-              <select className="input" value={f.modeOfPayment} onChange={e => set('modeOfPayment', e.target.value)}>
-                <option value="cheque">Cheque</option>
-                <option value="bank_transfer">Bank transfer</option>
-                <option value="cash">Cash</option>
-                <option value="card">Card</option>
-                <option value="online">Online</option>
-              </select>
-            </div>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Cheques payable to (optional)</label>
-              <input className="input" value={f.chequePayeeName} placeholder={contract.landlord.companyName ?? contract.landlord.name ?? ''} onChange={e => set('chequePayeeName', e.target.value)} />
+          {/* The rent maths, laid out as the sum it actually is:
+                Annual Rent − Discount = Contract Value.
+              The discount is not a field in its own right — it's the thing that turns
+              what's asked into what's billed, so it sits between the two and both
+              sides carry their own "vs the current rent" readout. No "Mode of payment"
+              here either: a renewal continues the parent lease's payment method, set
+              on the contract itself rather than re-chosen every term. */}
+          <p className="subhead mut">Rent for the new term</p>
+          <div className="infopanel" style={{ padding: '14px 16px', marginBottom: 18 }}>
+            <div className="rentcalc">
+              <div className="field" style={{ margin: 0 }}>
+                <label>Annual Rent</label>
+                <input type="number" className="input" value={f.listedRent} onChange={e => set('listedRent', e.target.value)} />
+                <RentDeltaChip pct={listedDeltaPct} label={`vs current ${fmtAed(prevRent)}`} />
+              </div>
+              <span className="op">−</span>
+              <div className="field" style={{ margin: 0 }}>
+                <label>Discount</label>
+                <div className="disc">
+                  <select className="input" value={f.discountType} onChange={e => set('discountType', e.target.value)}>
+                    <option value="none">No discount</option>
+                    <option value="percent">Percentage (%)</option>
+                    <option value="fixed">Fixed (AED)</option>
+                  </select>
+                  <input
+                    type="number"
+                    className="input"
+                    aria-label="Discount value"
+                    value={f.discountType === 'none' ? '' : f.discountValue}
+                    disabled={f.discountType === 'none'}
+                    placeholder={f.discountType === 'percent' ? '%' : f.discountType === 'fixed' ? 'AED' : '—'}
+                    onChange={e => set('discountValue', e.target.value)}
+                    style={f.discountType === 'none' ? { background: 'var(--surface)', color: 'var(--mute)' } : undefined}
+                  />
+                </div>
+                {/* A "%" only becomes money once you see it against the rent. */}
+                {discountAmt > 0 && (
+                  <span style={{
+                    display: 'inline-block', marginTop: 5, padding: '2px 7px', borderRadius: 6,
+                    fontSize: 11, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-tint)',
+                  }}>
+                    − {fmtAed(discountAmt)}{' '}
+                    <span style={{ fontWeight: 600, opacity: 0.85 }}>off {fmtAed(listed)}</span>
+                  </span>
+                )}
+              </div>
+              <span className="op">=</span>
+              <div className="field" style={{ margin: 0 }}>
+                <label>{discountAmt > 0 ? 'Contract Value after discount' : 'Contract Value'}</label>
+                <input
+                  className="input"
+                  value={fmtAed(rent)}
+                  disabled
+                  style={{ background: '#fff', color: 'var(--ink)', fontWeight: 800, borderColor: 'var(--jade)' }}
+                />
+                {discountAmt > 0 && <RentDeltaChip pct={netDeltaPct} label="vs current, after discount" />}
+              </div>
             </div>
           </div>
           <p className="subhead mut">Fees (AED) — billed as their own cheques</p>
           <div className="grid2">
-            <div className="field"><label>Admin fee</label><input type="number" className="input" value={f.adminFee} onChange={e => set('adminFee', e.target.value)} /></div>
-            <div className="field"><label>Contract Registration fee</label><input type="number" className="input" value={f.ejariFee} onChange={e => set('ejariFee', e.target.value)} /></div>
+            <div className="field"><label>Admin fee</label><input type="number" className="input" value={feeValue('adminFee')} onChange={e => set('adminFee', e.target.value)} /></div>
+            <div className="field"><label>Contract Registration fee</label><input type="number" className="input" value={feeValue('ejariFee')} onChange={e => set('ejariFee', e.target.value)} /></div>
           </div>
-          <div className="grid2" style={{ marginBottom: 18 }}>
-            <div className="field"><label>Commission</label><input type="number" className="input" value={f.commission} onChange={e => set('commission', e.target.value)} /></div>
+          <div className="grid2" style={{ marginBottom: feeRules ? 6 : 18 }}>
+            <div className="field"><label>Commission</label><input type="number" className="input" value={feeValue('commission')} onChange={e => set('commission', e.target.value)} /></div>
             <div className="field"><label>Deposit (carries over)</label><input className="input" value={fmtAed(contract.securityDepositAmount)} disabled style={{ background: 'var(--surface)', color: 'var(--ink-3)' }} /></div>
           </div>
+          {feeRules && (
+            <p className="note mut" style={{ marginTop: 0, marginBottom: 18 }}>
+              Prefilled from your renewal fee rules for {contract.feeRules?.spaceCategory?.replace('_', ' ')} (Settings → Fee Rules → Renewal contract) — a fee
+              you switched off comes through as 0. Edit any of them for this renewal.
+            </p>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: extras.length > 0 ? 4 : 8 }}>
             <p className="subhead mut" style={{ margin: 0 }}>Additional charges <span style={{ fontWeight: 600, opacity: 0.75 }}>· Third Party</span></p>
@@ -6232,11 +6371,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 <RotateCcw size={14} /> Cancel termination
               </button>
             )}
-            {derived.landlordSigned && (
-              <span className="pill celebrate" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                <BadgeCheck size={13} /> You signed
-              </span>
-            )}
+            {/* No "You signed" pill here — the signature stop in the pipeline (and the
+                signatures section below) already say who signed and when, and in a
+                manager's view "you" was the wrong actor anyway. */}
           </div>
         </div>
 
@@ -6778,6 +6915,27 @@ function GlobalStyle() {
       .quest-page .subhead.mut { color: var(--mute); }
       .quest-page .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       @media (max-width: 520px) { .quest-page .grid2 { grid-template-columns: 1fr; } }
+      .quest-page .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      @media (max-width: 620px) { .quest-page .grid3 { grid-template-columns: 1fr; } }
+      /* Propose renewal — the "Current contract" summary: four labelled facts across,
+         divided, wrapping to 2×2 on a narrow screen. */
+      .quest-page .curcontract { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .quest-page .curcontract > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .quest-page .curcontract > div + div { border-left: 1px solid var(--mist-strong); padding-left: 12px; }
+      .quest-page .curcontract b { font-size: 13px; font-weight: 800; color: var(--ink); line-height: 1.35; }
+      @media (max-width: 760px) {
+        .quest-page .curcontract { grid-template-columns: 1fr 1fr; }
+        .quest-page .curcontract > div + div { border-left: 0; padding-left: 0; }
+      }
+      /* Propose renewal — "Annual Rent − Discount = Contract Value" as one row, with
+         the operators between the fields. Stacks (operators hidden) when narrow. */
+      .quest-page .rentcalc { display: grid; grid-template-columns: 1fr 14px 1.3fr 14px 1fr; gap: 10px; align-items: start; }
+      .quest-page .rentcalc .disc { display: grid; grid-template-columns: 1.25fr 1fr; gap: 8px; }
+      .quest-page .rentcalc .op { margin-top: 34px; text-align: center; font-size: 15px; font-weight: 800; color: var(--mute-2); }
+      @media (max-width: 760px) {
+        .quest-page .rentcalc { grid-template-columns: 1fr; }
+        .quest-page .rentcalc .op { display: none; }
+      }
       .quest-page .ptable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
       .quest-page .ptable th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); font-weight: 700; padding: 8px 8px; border-bottom: 1px solid var(--mist-strong); }
       .quest-page .ptable td { padding: 10px 8px; border-bottom: 1px solid var(--mist); color: var(--ink-2); overflow-wrap: anywhere; }
@@ -6842,6 +7000,9 @@ function GlobalStyle() {
       .quest-page .modal { background: #fff; border-radius: 20px; box-shadow: var(--sh-pop); width: 100%; display: flex; flex-direction: column; max-height: 92vh; overflow: hidden; }
       .quest-page .modal.sm { max-width: 460px; }
       .quest-page .modal.lg { max-width: 680px; }
+      /* Propose renewal: a whole term's terms + fee grid + planned schedule in one
+         pass, so it gets more room than a regular lg modal. */
+      .quest-page .modal.xl { max-width: 980px; }
       .quest-page .modal .mh { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--mist); flex-shrink: 0; }
       .quest-page .modal .mt { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
       .quest-page .modal .mt .mti { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: #fff; }

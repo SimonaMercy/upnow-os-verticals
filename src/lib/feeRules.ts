@@ -36,3 +36,24 @@ export const feeFromRules = (
   if (!r || !r.isActive) return null;
   return r.valueType === 'fixed_aed' ? Math.round(r.value) : Math.round((rent * r.value) / 100);
 };
+
+/**
+ * Same computation as feeFromRules, but a rule that EXISTS and is switched OFF
+ * resolves to an explicit **0** instead of null — the RP configured "don't charge
+ * this" and that has to win over any historic figure. Only a fee type with no rule
+ * at all returns null for the caller to fall back on.
+ *
+ * Use this where the RP's saved rules must OVERRIDE what a record already holds
+ * (Propose Renewal prefilling its fee fields from the renewal fee rules); use
+ * feeFromRules where an off rule just means "no suggestion".
+ */
+export const configuredFeeFromRules = (
+  rules: FeeRuleLite[] | undefined,
+  key: string,
+  rent: number,
+): number | null => {
+  const r = rules?.find((x) => x.feeType === FEE_RULE_TYPE[key]);
+  if (!r) return null;
+  if (!r.isActive) return 0;
+  return r.valueType === 'fixed_aed' ? Math.round(r.value) : Math.round((rent * r.value) / 100);
+};
