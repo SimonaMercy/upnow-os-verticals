@@ -295,13 +295,21 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     // Renewal KYC step — done if no re-verification was needed, or once the RP
     // has reviewed + accepted the customer's re-uploaded docs.
     case 'documents': return !st.renewalDocsRequired || st.renewalDocsAccepted;
-    // Renewal Cheques/PDC step — done once the RP confirms the cheques collected.
-    // Confirm-PDC is a PRE-signature action (it releases the contract for signing),
-    // so a lease that has already been signed or activated is inherently past this
-    // stage — treat cheques as done to avoid offering a moot "Mark as Collected"
-    // button that the backend (status must be 'issued') would reject with a 400.
+    // Renewal Cheques/PDC step — done once the RP confirms the cheques collected,
+    // or once the lease actually reached activation. A lease that RAN is inherently
+    // past this stage, so the terminal statuses keep the step quiet and avoid
+    // offering a moot "Mark as Collected" button the backend would reject.
+    //
+    // Signatures deliberately do NOT count. They used to: the assumption was that
+    // signing implies the cheques were collected first. That inference breaks for a
+    // lease signed via the import/blessing path (which is exempt from the PDC gate,
+    // see activateContract) and then demoted back to ISSUED by resetEjariForRedo —
+    // leaving it signed, un-activated, and pdcConfirmed=false. The step then read
+    // "Cheques collected" over a record whose flag was never set, and auto-activation
+    // on Ejari (_autoActivateRenewalOnEjari) silently refused for exactly that reason.
+    // Every case the clause covered correctly is already covered by the statuses
+    // below; it fired alone only on the stuck records, where it hid the problem.
     case 'cheques': return st.pdcConfirmed
-      || (st.tenantSigned && st.landlordSigned)
       || st.status === 'active' || st.status === 'expired' || st.status === 'terminated';
     case 'sign':    return st.tenantSigned && st.landlordSigned;
     case 'ejari':   return st.ejariStatus === 'registered';
@@ -845,11 +853,21 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save'); } finally { setBusy(false); }
   };
 
+  // Cheque paperwork can already be in hand while the collection was never
+  // CONFIRMED — an imported lease, or one demoted back to ISSUED after it ran.
+  // Saying "waiting for the customer" there blames the wrong party and hides the
+  // fact that the only outstanding thing is the RP's own confirmation, so the
+  // panel names the real gap and points at the action that closes it.
+  const evidenceOnFile = chequeDocs.length > 0
+    || rows.some(p => !!p.chequeNumber || p.chequeStatus === 'cleared');
+
   if (!submitted) {
     return (
       <div style={{ display: 'grid', gap: 10 }}>
         <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--saffron-soft, #fff7ed)', color: 'var(--saffron-deep, #c2410c)', fontSize: 13, fontWeight: 600 }}>
-          Waiting for {h.contract.tenant.name || 'the customer'} to upload &amp; submit their cheques. Once they do, record each cheque here and mark them collected to unlock signing.
+          {evidenceOnFile
+            ? <>Cheques for this renewal are already on file, but their collection was never confirmed — so this lease cannot go live. Check them below, then mark them on file to record the collection.</>
+            : <>Waiting for {h.contract.tenant.name || 'the customer'} to upload &amp; submit their cheques. Once they do, record each cheque here and mark them collected to unlock signing.</>}
         </div>
         <button className="ca" style={{ justifySelf: 'start', padding: 0 }} onClick={() => h.openDrawer('payments')}>View the renewal cheque schedule</button>
         {chequeDocs.length > 0 && (
